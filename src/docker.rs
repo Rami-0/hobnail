@@ -985,12 +985,12 @@ mod tests {
     /// Trimmed but otherwise verbatim output of Docker 29.5 on the dev host,
     /// plus a stopped container and an unhealthy one.
     const SAMPLE: &str = r#"[
- {"Id":"1dcb32aee455d50d91c4ddd92278db4eb058654511ae22478f8f957893bcafbd","Names":["/rmli-hotel-portal-mailpit-1"],
+ {"Id":"1dcb32aee455d50d91c4ddd92278db4eb058654511ae22478f8f957893bcafbd","Names":["/example-portal-mailpit-1"],
   "Image":"axllent/mailpit:v1.31.6","ImageID":"sha256:aa","Command":"/mailpit","Created":1794189099,
   "Ports":[{"IP":"","PrivatePort":1110,"Type":"tcp"},{"IP":"100.64.0.10","PrivatePort":8025,"PublicPort":8125,"Type":"tcp"},
            {"IP":"127.0.0.1","PrivatePort":8025,"PublicPort":8125,"Type":"tcp"},{"IP":"","PrivatePort":1025,"Type":"tcp"}],
-  "Labels":{"com.docker.compose.project":"rmli-hotel-portal","com.docker.compose.service":"mailpit","com.docker.compose.oneoff":"False"},
-  "State":"running","Status":"Up 5 days (healthy)","HostConfig":{"NetworkMode":"rmli_default"},
+  "Labels":{"com.docker.compose.project":"example-portal","com.docker.compose.service":"mailpit","com.docker.compose.oneoff":"False"},
+  "State":"running","Status":"Up 5 days (healthy)","HostConfig":{"NetworkMode":"example-portal_default"},
   "Health":{"Status":"healthy","FailingStreak":0},"NetworkSettings":{"Networks":{}},"Mounts":[]},
  {"Id":"00fc7aedfce035c9220da998238c1383336dc37e89b691869432c0dc9a9fccdd","Names":["/homepage"],
   "Image":"ghcr.io/gethomepage/homepage:latest","Created":1793056864,
@@ -1018,8 +1018,8 @@ mod tests {
     fn parses_container_list() {
         let cs = parse_containers(SAMPLE.as_bytes()).unwrap();
         assert_eq!(cs.len(), 6);
-        let m = by_name(&cs, "rmli-hotel-portal-mailpit-1");
-        assert_eq!(m.project.as_deref(), Some("rmli-hotel-portal"));
+        let m = by_name(&cs, "example-portal-mailpit-1");
+        assert_eq!(m.project.as_deref(), Some("example-portal"));
         assert_eq!(m.service.as_deref(), Some("mailpit"));
         assert_eq!(m.health.as_deref(), Some("healthy"));
         assert_eq!(m.exit_code, None);

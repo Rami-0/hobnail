@@ -76,7 +76,7 @@ fn sample() -> Vec<Container> {
         stopped(ctr("webshop-dev-job-1", Some("webshop-dev")), 137),
         ctr("beszel", Some("beszel")),
         ctr("homepage", None),
-        ctr("cafe-pg", None),
+        ctr("demo-pg", None),
     ]
 }
 
@@ -596,7 +596,7 @@ fn stack_and_labels_are_set() {
 fn card_for_finds_hidden_containers() {
     let mut cfg = Config::default();
     cfg.containers.insert(
-        "cafe-pg".into(),
+        "demo-pg".into(),
         ContainerOverride {
             hide: Some(true),
             ..Default::default()
@@ -606,8 +606,8 @@ fn card_for_finds_hidden_containers() {
     assert!(!build_groups(&cfg, &s, &StatsMap::new(), HOST)
         .iter()
         .flat_map(|g| &g.cards)
-        .any(|c| c.name == "cafe-pg"));
-    let c = card_for(&cfg, &s, &StatsMap::new(), HOST, "cafe-pg").unwrap();
+        .any(|c| c.name == "demo-pg"));
+    let c = card_for(&cfg, &s, &StatsMap::new(), HOST, "demo-pg").unwrap();
     assert_eq!(c.stack, "Standalone");
     assert!(card_for(&cfg, &s, &StatsMap::new(), HOST, "nope").is_none());
 }
