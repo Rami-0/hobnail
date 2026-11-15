@@ -12,10 +12,6 @@ container by itself, shows host stats and their history, tails logs, pulls data
 from any JSON API, sends notifications when something breaks and recovers, and
 can be configured from the browser behind a login.
 
-<p align="center">
-  <img src="docs/brand/banner-pulse.png" alt="A quiet metrics line with one spike: postgres restarted and was back in four seconds" width="720">
-</p>
-
 ## Quick start
 
 You need Docker with Compose.
@@ -36,10 +32,6 @@ docker exec -it hobnail /hobnail set-password
 ```
 
 ## Documentation
-
-<p align="center">
-  <img src="docs/brand/banner-plate.png" alt="Anatomy of a hobnail: the head finds every container by itself, the shank is one static binary in a 10 MB image, the point is about 1 MiB of RAM at idle" width="720">
-</p>
 
 | Topic | Read |
 |---|---|
