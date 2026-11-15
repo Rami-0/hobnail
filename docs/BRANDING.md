@@ -23,6 +23,10 @@ At 64 px and below a long thin nail is a sliver, so small sizes use a close-up:
 the head and upper shank fill the tile and the point runs off the corner. The
 favicon and the app icons are that crop.
 
+The nail is straight: the head sits square on the shank. Where the mark is
+tilted, the whole nail is rotated as one piece (49.5° from upright); the head is
+never angled on its own.
+
 Do not add gradients, outlines, shadows or a 3D render, do not change the tilt,
 and do not redraw the head larger: earlier rounds that did read as a pushpin or
 a mallet.

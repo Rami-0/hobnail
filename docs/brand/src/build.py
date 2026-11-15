@@ -38,10 +38,10 @@ def facets():
     return f'<path fill="{T["mid"]}" d="{M["silhouette"]}"/>' + "".join(
         f'<path fill="{T[k]}" d="{M["facets"][k]}"/>' for k in ("hi", "lo", "sh", "glint"))
 
-FULL = "180 224 664 576"      # the whole nail, trimmed
+FULL = "195 207 607 579"      # the whole nail, trimmed
 CLOSE = "371 110 560 560"     # head and upper shank: the point runs off the corner (small sizes)
 TILT = 49.5                   # degrees from upright; rotate(-TILT) stands the nail on its point
-UP = (362, 182, 274, 735)     # bounding box of the upright nail (x, y, w, h)
+UP = (356, 174, 284, 746)     # bounding box of the upright nail (x, y, w, h)
 
 def svg(inner, view, extra=""):
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}"{extra}>{inner}</svg>'
@@ -181,8 +181,8 @@ def plate():
             f'<div class="c c2 mono"><b>b.</b> SHANK<span>one static binary,<br>~10 MB image</span></div>'
             f'<div class="c c3 mono"><b>c.</b> POINT<span>~1 MiB of RAM<br>at idle</span></div>'
             f'<svg class="ln" width="1280" height="640"><g stroke="{P["ink"]}" stroke-width="1.2" fill="none">'
-            f'<path d="M978 190 H1022"/><path d="M868 322 H1022"/><path d="M714 452 H648"/></g>'
-            f'<g fill="{P["ink"]}"><circle cx="978" cy="190" r="3"/><circle cx="868" cy="322" r="3"/><circle cx="714" cy="452" r="3"/></g></svg>')
+            f'<path d="M964 190 H1022"/><path d="M868 322 H1022"/><path d="M714 452 H648"/></g>'
+            f'<g fill="{P["ink"]}"><circle cx="964" cy="190" r="3"/><circle cx="868" cy="322" r="3"/><circle cx="714" cy="452" r="3"/></g></svg>')
     css = (f'body{{color:{P["ink"]}}}.frame{{position:absolute;inset:28px;border:1.5px solid {P["ink"]};outline:1px solid {P["ink"]};outline-offset:5px}}'
            f'.t,.b{{position:absolute;left:0;right:0;text-align:center;font-size:13px;letter-spacing:.3em}}.t{{top:58px}}.b{{bottom:58px}}'
            f'h1{{position:absolute;left:96px;top:150px;font:900 168px/1 Fraunces,serif;font-variation-settings:"SOFT" 100,"WONK" 1,"opsz" 144;letter-spacing:-.035em}}'

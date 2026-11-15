@@ -6,18 +6,30 @@
 Both PNGs are 1024x1024 RGBA with the same outer silhouette. The glyph is one colour with two cut-outs;
 the faceted cut uses the five brand tones. Needs: numpy, pillow, potracer.
 """
-import json, sys
+import json, math, sys
 import numpy as np
 import potrace
 from PIL import Image
 
 TONES = {"mid": "#F77848", "hi": "#FF956B", "lo": "#AC3712", "sh": "#7A2A12", "glint": "#FFF0E5"}
 
+# The drawing has the head about 20 degrees off square to the shank. Stand the nail upright, shear the
+# head level about the point, and lay it back at the brand angle, so the nail is one rigid, straight
+# shape at any rotation.
+TILT, LEVEL, POINT_X = math.radians(49.5), 0.366, 1.6
+
+def straight(p):
+    c, s = math.cos(TILT), math.sin(TILT)
+    x, y = p.x - 512, p.y - 512
+    ux, uy = x * c + y * s, -x * s + y * c
+    uy += LEVEL * (ux - POINT_X)
+    return f"{ux * c - uy * s + 512:.1f} {ux * s + uy * c + 512:.1f}".replace(".0", "")
+
 def path(mask, tol=0.6):
     bm = potrace.Bitmap(~mask)  # potracer treats False as ink
     pl = bm.trace(turdsize=12, alphamax=1.0, opttolerance=tol)
     out = []
-    f = lambda p: f"{p.x:.0f} {p.y:.0f}"
+    f = straight
     for c in pl:
         out.append("M" + f(c.start_point))
         for s in c.segments:
