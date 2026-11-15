@@ -26,15 +26,23 @@ use crate::state::{AppState, ViewerGuard};
 
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
+/// Inlined into every page: tokens, themes and shell (`app.css`), then the
+/// component layer (`components.css`), then the page parts.
 pub const APP_CSS: &str = concat!(
     include_str!("../../static/app.css"),
+    include_str!("../../static/components.css"),
     include_str!("../../static/cards.css"),
     include_str!("../../static/widgets.css"),
     include_str!("../../static/alerts.css"),
     include_str!("../../static/detail.css"),
     include_str!("../../static/host.css"),
 );
-const APP_JS: &str = include_str!("../../static/app.js");
+/// `/static/app.js`: the component layer (`ui.js`, `window.HB`) and the app
+/// script, one cached request.
+pub const APP_JS: &str = concat!(
+    include_str!("../../static/ui.js"),
+    include_str!("../../static/app.js"),
+);
 /// Loaded only by the settings pages (kept out of every other page).
 pub const SETTINGS_CSS: &str = include_str!("../../static/settings.css");
 pub const SETTINGS_JS: &str = include_str!("../../static/settings.js");
@@ -353,5 +361,102 @@ mod tests {
     fn sse_multiline() {
         let b = sse_event("frag", "a\nb");
         assert_eq!(&b[..], b"event: frag\ndata: a\ndata: b\n\n");
+    }
+
+    /// GET `path` from a server on a real socket: (status, head, body).
+    async fn get(path: &str) -> (u16, String, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(serve_listener(st, l));
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let r = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+        s.write_all(r.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        s.read_to_end(&mut out).await.unwrap();
+        let text = String::from_utf8_lossy(&out).into_owned();
+        let (head, body) = text.split_once("\r\n\r\n").unwrap();
+        let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, head.to_ascii_lowercase(), body.to_string())
+    }
+
+    /// The component script is the first part of `/static/app.js` (one
+    /// cached request, no new one), before the app script.
+    #[tokio::test]
+    async fn app_js_serves_the_component_layer_then_the_app() {
+        let (status, head, body) = get("/static/app.js?v=x").await;
+        assert_eq!(status, 200);
+        assert!(head.contains("content-type: text/javascript"), "{head}");
+        assert!(head.contains("immutable"), "{head}");
+        assert!(body.contains(APP_JS), "the whole bundle, unchunked");
+        let hb = body
+            .find("const HB = (window.HB = {});")
+            .expect("window.HB");
+        let app = body
+            .find("// hobnail client: theme, sidebar")
+            .expect("app.js");
+        assert!(hb < app, "ui.js comes first so app.js can use HB");
+        for api in [
+            "HB.open = ",
+            "HB.close = ",
+            "HB.validate = ",
+            "HB.toast = ",
+            "HB.confirm = ",
+            "HB.flash = ",
+            "HB.remove = ",
+        ] {
+            assert!(body.contains(api), "{api}");
+        }
+        // Not built (owner decision Y13): no reorder dialog code is shipped.
+        assert!(!body.contains("data-move"), "reorder script shipped");
+    }
+
+    /// The component CSS is inlined after the tokens, in every page and in
+    /// `/static/app.css`; a page costs no extra request for it.
+    #[tokio::test]
+    async fn every_page_inlines_tokens_and_components() {
+        let (status, _, css) = get("/static/app.css?v=x").await;
+        assert_eq!(status, 200);
+        assert_eq!(css, APP_CSS);
+        let tokens = css.find("\n:root,[data-theme=dark]{").expect("dark tokens");
+        let comp = css.find("dialog.dlg{").expect("dialog");
+        let cards = css.find(".tbl{").expect("cards.css");
+        assert!(tokens < comp && comp < cards, "tokens, components, pages");
+        for sel in [
+            ".btn.primary{",
+            ".fld-err{",
+            ".in{",
+            ".note{",
+            "dialog.dlg::backdrop{",
+            ".toasts{",
+            ".toast{",
+            ".menu{",
+            ".mi{",
+            ".tab{",
+            ".empty-ic{",
+            ".navbar{",
+            ".sw{",
+            ".choice{",
+        ] {
+            assert!(css.contains(sel), "{sel}");
+        }
+        assert!(
+            !css.contains(".reorder"),
+            "reorder CSS shipped (Y13: not built)"
+        );
+        let (status, _, html) = get("/").await;
+        assert_eq!(status, 200);
+        assert!(html.contains(APP_CSS), "inlined whole");
+        assert_eq!(html.matches("<style>").count(), 1, "one style element");
+        assert_eq!(
+            html.matches("<script src=").count(),
+            1,
+            "one script request"
+        );
+        assert!(
+            !html.contains("rel=\"stylesheet\""),
+            "no stylesheet request"
+        );
     }
 }

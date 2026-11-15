@@ -90,8 +90,8 @@ pub fn manifest(name: &str) -> String {
         "start_url": "/",
         "scope": "/",
         "display": "standalone",
-        "background_color": "#0b0e13",
-        "theme_color": "#0b0e13",
+        "background_color": "#1D1210",
+        "theme_color": "#1D1210",
         "icons": [
             { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
             { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },

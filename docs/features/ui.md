@@ -24,7 +24,11 @@ OS, the ◐ button overrides it per browser.
 - **Keyboard:** `g` then `o c h l a s` jumps to a page, `j/k` moves in lists,
   `l` opens a container's logs, `?` shows all shortcuts.
 - **Themes:** Dark, Light, Ember, High contrast (◐ button or Settings →
-  Appearance).
+  Appearance), all on the brand palette (`docs/BRANDING.md`). Auto follows
+  the OS between Dark and Light. Ember is a deeper, redder dark with the
+  lighter brand orange as its accent. Every theme is checked for WCAG
+  contrast by a test, including a 3:1 control border (`--ctl-border`) on
+  every surface.
 - **Install:** "Add to Home Screen" from the browser menu; the tab title shows
   the number of problems.
 - **Live:** one SSE stream per visible page; numbers update in place. Updates
@@ -35,8 +39,29 @@ OS, the ◐ button overrides it per browser.
   return. A new build reloads open pages.
 - **Charts:** inline SVG drawn on the server from the history database; hover
   for values; gaps stay gaps.
-- **Theming:** every color is a CSS variable; `data/custom.css` loads last
-  (editable in Settings → Appearance).
+- **Theming:** every color is a CSS variable (the token list is in
+  DESIGN.md §11.2); `data/custom.css` loads last (editable in Settings →
+  Appearance). Moving onto the brand tokens renamed or re-pointed a few
+  tokens; for an existing `custom.css`:
+  - `--ctl`, `--border-2`, `--accent-bg`, `--glow`, `--pop` and `--fs-label`
+    still **read** correctly (they alias `--ctl-border`, `--ctl-border`,
+    `--accent`, `transparent`, `--shadow-2` and `--fs-micro`), but **setting**
+    one of them no longer recolours anything: set the new name instead.
+  - `--border` used to be every hairline. Panel outlines, table rows and
+    dividers now use `--line`; `--border` is the stronger outline of dialogs,
+    menus, the palette and the primary panel. A `custom.css` that set
+    `--border` to recolour panels should set `--line` as well.
+  - `--fs-micro` is now 11 px (uppercase labels; same as the old
+    `--fs-label`); the old 12 px size is `--fs-xs`.
+  - A warning in Settings › Appearance when the saved `custom.css` sets one of
+    the retired names (DESIGN.md §11.2) comes with the Appearance form in the
+    forms wave; it is not built yet.
+- **Components:** buttons, form fields, dialog, toast, menu, tabs, empty
+  states and skeletons are one shared layer (`static/components.css` inlined
+  in every page, `static/ui.js` as the first part of `/static/app.js`,
+  `window.HB`). DESIGN.md §11.4 to §11.9. Until each form moves onto the
+  dialog, the field styles (inputs, checkboxes, switches) apply only inside a
+  dialog, and the Settings pages keep their own fields and toasts.
 
 `page.columns` and per-group `columns` from v1 no longer have an effect (there is
 no card grid); `layout = "list"` makes the flat table the default view.

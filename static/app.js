@@ -57,7 +57,7 @@
     const t = root.dataset.theme || "auto";
     // The browser UI (phone status bar, installed app title bar) follows the page.
     const m = doc.querySelector('meta[name="theme-color"]');
-    if (m) m.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#0b0e13";
+    if (m) m.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#1D1210";
     if (!themeBtn) return;
     themeBtn.setAttribute("aria-label", `Theme: ${THEME_NAME[t] || t}. Click to change`);
     themeBtn.title = `Theme: ${THEME_NAME[t] || t}`;

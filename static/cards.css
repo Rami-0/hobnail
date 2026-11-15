@@ -1,8 +1,8 @@
 /* Containers: the dense table (/containers), the details page and shared
    table styles. Rows are 36 px; names, images and ports are mono. */
 .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.tbl th{height:32px;padding:0 10px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--border);white-space:nowrap}
-.tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl th{height:32px;padding:0 10px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
 .tbl tbody tr:last-child td{border-bottom-color:transparent}
 .tbl .num,.tbl td.num,.tbl th.num{text-align:right}
 .tbl.small td{height:32px}
@@ -12,13 +12,13 @@
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .search-in{position:relative;flex:1 1 240px;max-width:360px}
 .search-in svg{position:absolute;left:10px;top:9px;color:var(--text-3);width:14px;height:14px}
-.search-in input,.bar select{width:100%;height:32px;padding:0 10px 0 30px;border:1px solid var(--ctl);border-radius:var(--r-sm);background:var(--surface);font-size:13px}
+.search-in input,.bar select{width:100%;height:32px;padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:13px}
 .bar select{width:auto;padding:0 8px;max-width:200px;color:var(--text-2)}
 .search-in input:focus,.bar select:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 1px var(--accent)}
 
-.tablewrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);min-width:0}
+.tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
 .tablewrap>.banner{margin:10px}
-.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)}
+.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--line)}
 .ctbl caption b{color:var(--text);font-weight:600}
 .ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
 .ctbl th a{display:inline-flex;align-items:center;gap:3px;color:inherit}
@@ -52,7 +52,7 @@
 .c-num .num{font:12.5px var(--mono);display:inline-block;min-width:62px}
 .c-num .spark{display:inline-block;width:40px;height:14px;margin-left:8px;vertical-align:-2px}
 .c-ports{white-space:nowrap}
-.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--border-2);border-radius:4px;font:12px/18px var(--mono);color:var(--accent-fg)}
+.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:12px/18px var(--mono);color:var(--accent-fg)}
 .port:hover{border-color:var(--accent);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
 .port.local small{font-size:10px;font-family:var(--font)}
@@ -63,8 +63,8 @@
 .row:hover .c-act .icon-btn{color:var(--text-2)}
 .row.stopped .nm{color:var(--text-2)}
 .row.stopped .c-image .img{color:var(--text-3)}
-.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;position:static}
-tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--border)}
+.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
+tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
 .grp-t{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 6px;border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:12.5px;font-weight:600;text-align:left}
 .grp-t svg.i{width:14px;height:14px;color:var(--text-3);transition:transform var(--t)}
 .grp.closed .grp-t svg.i{transform:rotate(-90deg)}
@@ -82,7 +82,7 @@ tbody.none td{height:80px;text-align:center;color:var(--text-3)}
  .ctbl,.ctbl tbody{display:block}
  .ctbl thead{display:none}
  .ctbl caption{display:block}
- .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--border)}
+ .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--line)}
  .ctbl tr.row td{display:block;height:auto;padding:0;border:0;width:auto;max-width:none;background:none!important}
  .ctbl tr.row td.c-name{flex:1 1 60%;min-width:0;padding:0!important}
  .ctbl tr.row td.c-act{order:2}
@@ -113,7 +113,7 @@ tbody.none td{height:80px;text-align:center;color:var(--text-3)}
 .kv dt{color:var(--text-3);overflow-wrap:anywhere}
 .kv dd{margin:0;color:var(--text-2);overflow-wrap:anywhere}
 .rows{list-style:none;margin:0;padding:0}
-.rows li{display:flex;align-items:center;gap:10px;min-height:34px;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px}
+.rows li{display:flex;align-items:center;gap:10px;min-height:34px;padding:4px 0;border-bottom:1px solid var(--line);font-size:13px}
 .rows li:last-child{border-bottom:0}
 .rows .nm{font-family:var(--mono);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:45%}
 .rows .why{color:var(--text-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

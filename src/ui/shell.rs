@@ -140,7 +140,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="dark light";
-                meta name="theme-color" content="#0b0e13";
+                meta name="theme-color" content="#1D1210";
                 link rel="manifest" href="/manifest.webmanifest";
                 link rel="apple-touch-icon" href="/apple-touch-icon.png";
                 @if let Some(t) = &ctx.csrf { meta name="rh-csrf" content=(t); }
@@ -310,7 +310,7 @@ pub fn nav_alerts(firing: usize) -> Markup {
 
 fn account(ctx: &Ctx) -> Markup {
     html! {
-        div.menu #account {
+        div.acct #account {
             button.icon-btn.menu-btn-acct type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
                 aria-label={"Account" @if let Some(u) = &ctx.user { ": " (u) }}
                 title=(ctx.user.as_deref().unwrap_or("Account")) {
@@ -639,24 +639,47 @@ mod tests {
         );
     }
 
-    /// Theme token sets parsed from `static/app.css`: `name -> var -> rgb`.
-    fn themes() -> Vec<(String, std::collections::HashMap<String, [f64; 3]>)> {
-        let css = include_str!("../../static/app.css");
+    const APP_CSS_SRC: &str = include_str!("../../static/app.css");
+
+    /// The theme blocks of `static/app.css` (DESIGN.md §11.2), by name. The
+    /// bare `[data-theme=x]` selectors let a preview show another theme
+    /// inside a page; "auto-light" is the OS-light block.
+    const THEME_BLOCKS: &[(&str, &str)] = &[
+        ("\n:root,[data-theme=dark]{", "dark"),
+        ("\n[data-theme=light]{", "light"),
+        ("\n[data-theme=ember]{", "ember"),
+        ("\n[data-theme=contrast]{", "contrast"),
+        (
+            "@media (prefers-color-scheme:light){:root:not([data-theme]),[data-theme=auto]{",
+            "auto-light",
+        ),
+    ];
+
+    /// The six surfaces text and controls sit on.
+    const SURFACES: &[&str] = &[
+        "--bg",
+        "--bg-side",
+        "--surface",
+        "--surface-2",
+        "--raised",
+        "--field",
+    ];
+
+    type Tokens = std::collections::HashMap<String, [f64; 3]>;
+
+    /// The body of the block that starts with `sel`, up to its first `}`.
+    fn block<'c>(css: &'c str, sel: &str) -> &'c str {
+        let start = css.find(sel).unwrap_or_else(|| panic!("no block {sel}")) + sel.len();
+        &css[start..start + css[start..].find('}').unwrap()]
+    }
+
+    /// Theme token sets parsed from `static/app.css`: `name -> var -> rgb`
+    /// (only the plain hex values; the test needs every colour token as hex).
+    fn themes() -> Vec<(String, Tokens)> {
         let mut out = Vec::new();
-        for (sel, name) in [
-            (":root,:root[data-theme=dark]{", "dark"),
-            (":root[data-theme=light]{", "light"),
-            (":root[data-theme=ember]{", "ember"),
-            (":root[data-theme=contrast]{", "contrast"),
-            (
-                ":root[data-theme=auto],:root:not([data-theme]){",
-                "auto-light",
-            ),
-        ] {
-            let start = css.find(sel).unwrap_or_else(|| panic!("no block {sel}")) + sel.len();
-            let body = &css[start..start + css[start..].find('}').unwrap()];
-            let mut vars = std::collections::HashMap::new();
-            for decl in body.split(';') {
+        for (sel, name) in THEME_BLOCKS {
+            let mut vars = Tokens::new();
+            for decl in block(APP_CSS_SRC, sel).split(';') {
                 let Some((k, v)) = decl.trim().split_once(':') else {
                     continue;
                 };
@@ -687,54 +710,260 @@ mod tests {
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
     }
 
-    /// WCAG contrast for every theme: body text 4.5:1 (7:1 in high
-    /// contrast), status text and links 4.5:1, UI parts (status dots, input
-    /// borders, chart lines) 3:1. Run with `--nocapture` to print the table.
+    /// WCAG contrast for every theme (DESIGN.md §11.2) on all six surfaces:
+    /// body, secondary and muted text 4.5:1 (7:1 in high contrast); links and
+    /// status text 4.5:1; UI parts (accent, focus ring, status dots, the
+    /// stopped dot, chart series) 3:1; `--ctl-border` (inputs, selects,
+    /// checkboxes, outlined buttons, switches) 3:1; text on the accent and on
+    /// a danger fill 4.5:1. The OS-light block must equal Light. Run with
+    /// `--nocapture` to print the worst value per pair.
     #[test]
     fn theme_contrast() {
         let ts = themes();
+        assert_eq!(
+            ts.iter().map(|t| t.0.as_str()).collect::<Vec<_>>(),
+            ["dark", "light", "ember", "contrast", "auto-light"]
+        );
         let light = &ts.iter().find(|t| t.0 == "light").unwrap().1;
         let auto = &ts.iter().find(|t| t.0 == "auto-light").unwrap().1;
         assert_eq!(light, auto, "the OS-light block must equal the light theme");
         for (name, v) in &ts {
-            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no {k}"));
-            let body_min = if name == "contrast" { 7.0 } else { 4.5 };
-            let mut worst = f64::INFINITY;
-            for bg in ["--bg", "--bg-side", "--surface", "--surface-2", "--raised"] {
-                for fg in ["--text", "--text-2", "--text-3"] {
-                    let r = contrast(get(fg), get(bg));
-                    worst = worst.min(r);
-                    assert!(
-                        r >= body_min,
-                        "{name}: {fg} on {bg} is {r:.2}:1, needs {body_min}"
-                    );
-                }
-                for fg in ["--accent-fg", "--ok-fg", "--warn-fg", "--bad-fg"] {
-                    if bg == "--surface-2" {
-                        continue; // status text never sits on hover surfaces alone
-                    }
-                    let r = contrast(get(fg), get(bg));
-                    assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1");
-                }
-                for ui in [
-                    "--ok", "--warn", "--bad", "--accent", "--ctl", "--ch-cpu", "--ch-mem",
-                ] {
-                    if bg == "--surface-2" {
-                        continue;
-                    }
-                    let r = contrast(get(ui), get(bg));
-                    assert!(r >= 3.0, "{name}: {ui} on {bg} is {r:.2}:1 (UI needs 3)");
+            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no hex {k}"));
+            let worst = |fg: &str| {
+                SURFACES
+                    .iter()
+                    .map(|bg| (contrast(get(fg), get(bg)), *bg))
+                    .fold((f64::INFINITY, ""), |a, b| if b.0 < a.0 { b } else { a })
+            };
+            let text_min = if name == "contrast" { 7.0 } else { 4.5 };
+            let mut line = Vec::new();
+            for (fgs, need) in [
+                (&["--text", "--text-2", "--text-3"][..], text_min),
+                (
+                    &["--accent-fg", "--ok-fg", "--warn-fg", "--bad-fg"][..],
+                    4.5,
+                ),
+                (
+                    &[
+                        "--accent",
+                        "--focus",
+                        "--ok",
+                        "--warn",
+                        "--bad",
+                        "--off",
+                        "--ctl-border",
+                        "--ch-cpu",
+                        "--ch-mem",
+                        "--ch-rx",
+                        "--ch-tx",
+                        "--ch-temp",
+                        "--ch-load",
+                        "--ch-swap",
+                        "--ch-disk",
+                    ][..],
+                    3.0,
+                ),
+            ] {
+                for fg in fgs {
+                    let (r, bg) = worst(fg);
+                    assert!(r >= need, "{name}: {fg} on {bg} is {r:.2}:1, needs {need}");
+                    line.push(format!("{fg} {r:.2}"));
                 }
             }
-            let on = contrast(get("--on-accent"), get("--accent-bg"));
-            assert!(on >= 4.5, "{name}: button text {on:.2}:1");
-            println!(
-                "{name:>10}: text {:.1}, text-2 {:.1}, text-3 {:.1} on surface; worst body {worst:.2}; button {on:.1}",
-                contrast(get("--text"), get("--surface")),
-                contrast(get("--text-2"), get("--surface")),
-                contrast(get("--text-3"), get("--surface")),
-            );
+            for (fg, bg) in [
+                ("--on-accent", "--accent"),
+                ("--on-accent", "--accent-hover"),
+                ("--on-bad", "--bad"),
+            ] {
+                let r = contrast(get(fg), get(bg));
+                assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5");
+                line.push(format!("{fg}/{bg} {r:.2}"));
+            }
+            println!("{name:>10}: {}", line.join(", "));
         }
+    }
+
+    /// `--ctl-border` is the boundary of every control: 3:1 against each
+    /// surface a control can sit on, in every theme (A11Y-12, A11Y-17). The
+    /// brand `--border` is decorative only and is allowed to be lower.
+    #[test]
+    fn control_border_is_3_to_1_on_every_surface() {
+        for (name, v) in themes() {
+            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no hex {k}"));
+            let worst = SURFACES
+                .iter()
+                .map(|bg| contrast(get("--ctl-border"), get(bg)))
+                .fold(f64::INFINITY, f64::min);
+            assert!(worst >= 3.0, "{name}: --ctl-border worst {worst:.2}:1");
+            println!("{name:>10}: --ctl-border worst {worst:.2}");
+        }
+    }
+
+    /// Every theme sets the same colour tokens, so switching theme never
+    /// leaves a value from the previous one behind.
+    #[test]
+    fn every_theme_sets_the_same_tokens() {
+        let ts = themes();
+        let keys = |t: &Tokens| {
+            let mut k: Vec<String> = t.keys().cloned().collect();
+            k.sort();
+            k
+        };
+        let dark = keys(&ts[0].1);
+        assert_eq!(dark.len(), 33, "{dark:?}");
+        for (name, t) in &ts {
+            assert_eq!(keys(t), dark, "{name}");
+        }
+        // Non-hex tokens are per theme too.
+        for (sel, name) in THEME_BLOCKS {
+            let b = block(APP_CSS_SRC, sel);
+            for k in [
+                "--tint:",
+                "--tint-2:",
+                "--scrim:",
+                "--shadow-1:",
+                "--shadow-2:",
+                "--shadow-3:",
+                "color-scheme:",
+            ] {
+                assert!(b.contains(k), "{name}: no {k}");
+            }
+        }
+    }
+
+    /// The retired names stay readable from a user's custom.css (§11.2,
+    /// Y20): each is an alias of its new token, declared on every theme
+    /// root, and no theme block sets the old name itself.
+    #[test]
+    fn old_token_names_are_aliases() {
+        assert!(block(APP_CSS_SRC, "\n:root{").contains("--fs-label:var(--fs-micro)"));
+        let aliases = block(APP_CSS_SRC, "\n:root,[data-theme]{");
+        for (old, new) in [
+            ("--ctl", "var(--ctl-border)"),
+            ("--border-2", "var(--ctl-border)"),
+            ("--accent-bg", "var(--accent)"),
+            ("--glow", "transparent"),
+            ("--pop", "var(--shadow-2)"),
+        ] {
+            assert!(
+                aliases.split(';').any(|d| d == format!("{old}:{new}")),
+                "{old} -> {new} in {aliases}"
+            );
+            for (sel, name) in THEME_BLOCKS {
+                assert!(
+                    !block(APP_CSS_SRC, sel).contains(&format!("{old}:")),
+                    "{name} sets {old}"
+                );
+            }
+        }
+        // The app's own CSS uses only the new names.
+        for (file, css) in [
+            ("app.css", APP_CSS_SRC),
+            (
+                "components.css",
+                include_str!("../../static/components.css"),
+            ),
+            ("settings.css", include_str!("../../static/settings.css")),
+            ("logs.css", include_str!("../../static/logs.css")),
+            ("page css", crate::http::server::APP_CSS),
+        ] {
+            for old in ["--ctl)", "--border-2)", "--accent-bg)", "--glow)", "--pop)"] {
+                assert!(
+                    !css.contains(&format!("var({old}")),
+                    "{file} reads var({old}"
+                );
+            }
+        }
+    }
+
+    /// Every selector of a CSS file, flattened out of `@media` and
+    /// `@supports` blocks (keyframes and `@starting-style` bodies included,
+    /// which is harmless for the checks below).
+    fn selectors(css: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = css;
+        while let Some(i) = rest.find('{') {
+            let head = rest[..i].trim();
+            let head = head.rsplit_once("*/").map_or(head, |(_, h)| h);
+            let head = head.trim_start_matches(|c: char| c == '}' || c.is_whitespace());
+            let head = head.trim();
+            rest = &rest[i + 1..];
+            if head.starts_with('@') {
+                continue; // descend: the next '{' opens the first inner rule
+            }
+            let end = rest.find('}').unwrap_or(rest.len());
+            rest = &rest[(end + 1).min(rest.len())..];
+            // Split on top-level commas only (not inside `:is(...)`).
+            let (mut depth, mut from) = (0i32, 0);
+            for (i, c) in head.char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    ',' if depth == 0 => {
+                        out.push(head[from..i].trim().to_string());
+                        from = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            out.push(head[from..].trim().to_string());
+        }
+        out
+    }
+
+    /// Wave 1 rule: the component layer does not restyle existing pages.
+    /// Field controls are scoped to the dialog (Settings keeps settings.css
+    /// until wave 2) and the toast rules to HB's own region (Settings keeps
+    /// `#toasts`). Fails if a selector naming one of those classes or a
+    /// checkbox escapes its scope.
+    #[test]
+    fn component_fields_and_toasts_stay_scoped() {
+        let css = include_str!("../../static/components.css");
+        let sels = selectors(css);
+        assert!(sels.len() > 150, "{}", sels.len());
+        let scoped = [
+            ".fld", ".in", ".sw", ".cb", ".choice", ".hint", ".fld-err", ".req", ".grid-2",
+            "checkbox", "radio",
+        ];
+        let (mut fields, mut toasts) = (0, 0);
+        for s in &sels {
+            let names = |tok: &str| {
+                s.match_indices(tok).any(|(i, _)| {
+                    let next = s[i + tok.len()..].chars().next();
+                    !matches!(next, Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                })
+            };
+            if scoped.iter().any(|t| names(t)) {
+                assert!(s.starts_with(":is(.dlg,.dlg-page) "), "unscoped: {s}");
+                fields += 1;
+            }
+            if names(".toast") || names(".toasts") {
+                assert!(s.starts_with("body>.toasts"), "unscoped toast: {s}");
+                toasts += 1;
+            }
+        }
+        assert!(
+            fields >= 30 && toasts >= 10,
+            "parser saw {fields} / {toasts}"
+        );
+        // Motion is wave 4: no cross-document view transition yet.
+        assert!(!APP_CSS_SRC.contains("@view-transition"));
+        assert!(!css.contains("@view-transition"));
+    }
+
+    /// The account menu is not a `.menu`: that class is the popover menu of
+    /// the component layer (fixed, hidden until open).
+    #[test]
+    fn account_menu_does_not_use_the_popover_class() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/", "", &h);
+        let html = account(&ctx).into_string();
+        assert!(
+            html.starts_with(r#"<div class="acct" id="account">"#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"class="menu""#), "{html}");
     }
 
     #[test]

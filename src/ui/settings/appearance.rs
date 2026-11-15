@@ -7,7 +7,7 @@ use maud::{html, Markup};
 use super::form::{foot, Form};
 use crate::ui::ic;
 
-const CSS_PLACEHOLDER: &str = "/* Any token can be overridden, e.g. */\n:root {\n  --accent: #f59e0b;\n  --accent-bg: #d97706;\n}\n";
+const CSS_PLACEHOLDER: &str = "/* Any token can be overridden, e.g. */\n:root {\n  --accent: #f59e0b;\n  --accent-hover: #d97706;\n}\n";
 
 pub fn body() -> Markup {
     let f = Form("ap");
