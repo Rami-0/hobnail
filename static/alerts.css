@@ -1,0 +1,55 @@
+/* Alerts page (summary bar, firing list, rules and channels), history
+   (range picker, restarts heat table), login and the settings list. */
+#al-live{display:grid;gap:16px}
+.alerts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+.alerts.bad{box-shadow:inset 3px 0 0 var(--bad)}
+.alerts-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;width:100%}
+.alerts .tile-title{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.alerts-sum{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.alerts-counts{font-family:var(--mono);font-size:12px}
+.alerts-chans{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--border-2);border-radius:999px;font-size:12px;color:var(--text-2);white-space:nowrap}
+.badge.ok{color:var(--ok-fg)}.badge.warn{color:var(--warn-fg)}.badge.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+.chan{font-family:var(--mono)}
+.chan-state{font-family:var(--font);font-size:11px}
+.incidents{list-style:none;margin:0;padding:0;width:100%}
+.incident{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);font-size:13px}
+.inc-subject{font-family:var(--mono)}
+.inc-state{color:var(--text-2)}
+.inc-since{margin-left:auto;font-family:var(--mono);font-size:12px}
+.alerts-err,.err-line{font-size:12px;color:var(--bad-fg)}
+td .k,.k{font-size:11px}
+.chip-s{display:inline-block;padding:0 6px;border-radius:4px;background:var(--surface-2);font:12px/20px var(--mono);color:var(--text-2)}
+.panel .tbl th:first-child,.panel .tbl td:first-child{padding-left:0}
+.panel .tbl .nm{font-family:var(--mono);color:var(--text)}
+.panel .tbl td.wrap{max-width:320px}
+.panel .tbl tr.stopped td{color:var(--text-3)}
+.panel .tbl td{padding-top:6px;padding-bottom:6px;line-height:1.35}
+
+/* history */
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.heat td.hot{background:color-mix(in srgb,var(--warn) calc(var(--h)*45%),transparent);color:var(--text);font-family:var(--mono)}
+.heat th[scope=row]{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:500}
+.heat th[scope=row] a{font-family:var(--mono)}
+.heat td,.heat th{white-space:nowrap}
+
+/* login */
+.login{display:grid;gap:12px;padding:22px 24px;max-width:440px;margin:6vh auto 0;width:100%}
+.login-h{display:flex;align-items:center;gap:10px}
+.login-h svg{width:20px;height:20px;color:var(--accent-fg)}
+.login-h h2{font-size:18px}
+.login form{display:grid;gap:8px;margin-top:4px}
+.login label{font-size:12px;font-weight:600;color:var(--text-2)}
+.login input[type=password]{height:38px;padding:0 12px;border:1px solid var(--ctl);border-radius:var(--r-sm);background:var(--bg);font-size:14px}
+.login input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 1px var(--accent)}
+.login .btn{justify-self:start;height:36px}
+.form-msg{min-height:18px;font-size:12.5px;color:var(--bad-fg)}
+.form-msg.ok{color:var(--ok-fg)}
+
+/* settings placeholder */
+/* v3: the firing list is the page's primary panel */
+.alerts{border-radius:12px;background:var(--raised);padding:14px 20px}
+.alerts.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--border-2));box-shadow:inset 3px 0 0 var(--bad),0 8px 24px -18px var(--bad);background:linear-gradient(180deg,color-mix(in srgb,var(--bad) 7%,transparent),transparent 120px),var(--raised)}
+.incident{min-height:36px}
+.ghost .events{border-top:1px solid var(--border)}
+.panel.primary.login{padding:24px 26px}

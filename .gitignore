@@ -1,0 +1,15 @@
+/target
+.env
+/data
+/.claude/
+/.tmp-data
+/docs/brand/explore/
+/docs/brand/src/fonts/
+__pycache__/
+# Local working notes and deployment overrides (not part of the project)
+/PROMPT.md
+/PROGRESS.md
+/docs/V2-PLAN.md
+/docs/V3-PLAN.md
+/docs/design-review/
+/deploy/compose.local.yaml

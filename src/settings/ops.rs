@@ -1,0 +1,1252 @@
+//! Per-tab operations: validate the request shape (serde, unknown fields
+//! refused), patch the document losslessly, return a [`Draft`] for the save
+//! pipeline. Nothing here touches the disk.
+//!
+//! Semantics:
+//! - Singleton sections (`[page]`, `[history]`): a **patch**. A key that is
+//!   present sets the value, `null` removes the key (the default applies),
+//!   an absent key is left alone.
+//! - Entities (a group, bookmark, widget, channel, rule) are sent **whole**:
+//!   a managed field that is missing or `null` is removed from the file.
+//!   Keys the form does not know are left untouched.
+
+use serde::Deserialize;
+use serde_json::{Map, Value as J};
+use std::collections::BTreeMap;
+use toml_edit::{DocumentMut, Item, Key, Table, Value};
+
+use super::doc::{self, Style};
+use super::guard;
+use super::store::{ApiError, Current, Draft};
+
+pub const PAGE_KEYS: &[&str] = &[
+    "title",
+    "greeting",
+    "columns",
+    "layout",
+    "theme",
+    "search_url",
+    "show_stopped",
+    "show_stats",
+];
+pub const GROUP_KEYS: &[&str] = &[
+    "name",
+    "title",
+    "columns",
+    "layout",
+    "collapsed",
+    "icon",
+    "hide",
+];
+pub const OVERRIDE_KEYS: &[&str] = &[
+    "name",
+    "group",
+    "icon",
+    "url",
+    "description",
+    "hide",
+    "order",
+    "size",
+];
+pub const BOOKMARK_KEYS: &[&str] = &["name", "url", "group", "icon", "description"];
+pub const WIDGET_KEYS: &[&str] = &[
+    "id",
+    "type",
+    "title",
+    "icon",
+    "link",
+    "url",
+    "method",
+    "body",
+    "headers",
+    "headers_env",
+    "headers_file",
+    "refresh",
+    "timeout",
+    "enabled",
+    "output",
+    "template",
+    "status",
+    "fields",
+    "rows",
+];
+pub const CHANNEL_KEYS: &[&str] = &[
+    "type",
+    "url",
+    "url_env",
+    "url_file",
+    "webhook_url_env",
+    "webhook_url_file",
+    "token_env",
+    "token_file",
+    "chat_id",
+    "chat_id_env",
+    "api_base",
+    "headers",
+    "headers_env",
+    "body",
+    "timeout",
+];
+/// Channel form fields (the name is the table key, not a field in it).
+pub const CHANNEL_FIELDS: &[&str] = &[
+    "name",
+    "type",
+    "url",
+    "url_env",
+    "url_file",
+    "webhook_url_env",
+    "webhook_url_file",
+    "token_env",
+    "token_file",
+    "chat_id",
+    "chat_id_env",
+    "api_base",
+    "headers",
+    "headers_env",
+    "body",
+    "timeout",
+];
+pub const RULE_KEYS: &[&str] = &[
+    "name",
+    "type",
+    "containers",
+    "exclude",
+    "on",
+    "restarts",
+    "window",
+    "url",
+    "interval",
+    "timeout",
+    "expect_status",
+    "contains",
+    "failures",
+    "pattern",
+    "stack",
+    "count",
+    "metric",
+    "disk",
+    "widget",
+    "field",
+    "above",
+    "below",
+    "equals",
+    "not_equals",
+    "on_error",
+    "for",
+    "cooldown",
+    "channels",
+    "message",
+    "recovery",
+    "enabled",
+];
+pub const DOCKER_FIELDS: &[&str] = &["exclude"];
+pub const SYSTEM_FIELDS: &[&str] = &["enabled"];
+pub const RAW_FIELDS: &[&str] = &[];
+
+// ------------------------------------------------------------ shapes
+
+fn shape<T: serde::de::DeserializeOwned>(v: &J, what: &str) -> Result<T, ApiError> {
+    serde_json::from_value(v.clone()).map_err(|e| ApiError::bad_request(format!("{what}: {e}")))
+}
+
+fn object<'a>(v: &'a J, what: &str) -> Result<&'a Map<String, J>, ApiError> {
+    v.as_object()
+        .ok_or_else(|| ApiError::bad_request(format!("{what} must be a JSON object")))
+}
+
+/// `"30s"` or a number of seconds (checked by the config validator).
+#[derive(Deserialize)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum DurJ {
+    N(u64),
+    S(String),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum LayoutJ {
+    Grid,
+    List,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ThemeJ {
+    Auto,
+    Dark,
+    Light,
+    Ember,
+    Contrast,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct PageShape {
+    title: Option<String>,
+    greeting: Option<String>,
+    columns: Option<u8>,
+    layout: Option<LayoutJ>,
+    theme: Option<ThemeJ>,
+    search_url: Option<String>,
+    show_stopped: Option<bool>,
+    show_stats: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct GroupShape {
+    name: String,
+    title: Option<String>,
+    columns: Option<u8>,
+    layout: Option<LayoutJ>,
+    collapsed: Option<bool>,
+    icon: Option<String>,
+    hide: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SizeJ {
+    Small,
+    Normal,
+    Wide,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct OverrideShape {
+    name: Option<String>,
+    group: Option<String>,
+    icon: Option<String>,
+    url: Option<String>,
+    description: Option<String>,
+    hide: Option<bool>,
+    order: Option<i32>,
+    size: Option<SizeJ>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct BookmarkShape {
+    name: String,
+    url: String,
+    group: Option<String>,
+    icon: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum OutputJ {
+    Json,
+    Text,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct RowShape {
+    label: String,
+    value: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct StatusShape {
+    field: String,
+    ok: Option<Vec<J>>,
+}
+
+/// The `custom-api` widget form. There are deliberately no `command` or
+/// `env` fields.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct WidgetShape {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    title: Option<String>,
+    icon: Option<String>,
+    link: Option<String>,
+    url: String,
+    method: Option<String>,
+    body: Option<String>,
+    headers: Option<BTreeMap<String, String>>,
+    headers_env: Option<BTreeMap<String, String>>,
+    headers_file: Option<BTreeMap<String, String>>,
+    refresh: Option<DurJ>,
+    timeout: Option<DurJ>,
+    enabled: Option<bool>,
+    output: Option<OutputJ>,
+    template: Option<String>,
+    status: Option<StatusShape>,
+    fields: Option<BTreeMap<String, String>>,
+    rows: Option<Vec<RowShape>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ChannelKindJ {
+    Webhook,
+    Slack,
+    Telegram,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct ChannelShape {
+    name: String,
+    #[serde(rename = "type")]
+    kind: ChannelKindJ,
+    url: Option<String>,
+    url_env: Option<String>,
+    url_file: Option<String>,
+    webhook_url_env: Option<String>,
+    webhook_url_file: Option<String>,
+    token_env: Option<String>,
+    token_file: Option<String>,
+    chat_id: Option<J>,
+    chat_id_env: Option<String>,
+    api_base: Option<String>,
+    headers: Option<BTreeMap<String, String>>,
+    headers_env: Option<BTreeMap<String, String>>,
+    body: Option<String>,
+    timeout: Option<DurJ>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RuleKindJ {
+    Container,
+    Http,
+    Host,
+    Widget,
+    #[serde(rename = "log_match")]
+    LogMatch,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum MetricJ {
+    Disk,
+    Memory,
+    Temp,
+    Cpu,
+}
+
+/// Every field of `alerts::RuleConfig`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct RuleShape {
+    name: String,
+    #[serde(rename = "type")]
+    kind: RuleKindJ,
+    channels: Option<Vec<String>>,
+    enabled: Option<bool>,
+    #[serde(rename = "for")]
+    for_: Option<DurJ>,
+    cooldown: Option<DurJ>,
+    message: Option<String>,
+    recovery: Option<String>,
+    containers: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    on: Option<Vec<String>>,
+    restarts: Option<u32>,
+    window: Option<DurJ>,
+    url: Option<String>,
+    interval: Option<DurJ>,
+    timeout: Option<DurJ>,
+    expect_status: Option<u16>,
+    contains: Option<String>,
+    failures: Option<u32>,
+    pattern: Option<String>,
+    stack: Option<String>,
+    count: Option<u32>,
+    metric: Option<MetricJ>,
+    disk: Option<String>,
+    above: Option<f64>,
+    below: Option<f64>,
+    widget: Option<String>,
+    field: Option<String>,
+    equals: Option<J>,
+    not_equals: Option<J>,
+    on_error: Option<bool>,
+}
+
+// ------------------------------------------------------------ requests
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchReq {
+    pub base_hash: String,
+    #[serde(alias = "page", alias = "history")]
+    pub values: J,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExcludeReq {
+    pub base_hash: String,
+    pub exclude: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupsReq {
+    pub base_hash: String,
+    pub groups: Vec<J>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverrideReq {
+    pub base_hash: String,
+    pub names: Vec<String>,
+    #[serde(default)]
+    pub set: Option<J>,
+    #[serde(default)]
+    pub clear: Vec<String>,
+    /// Delete the whole `[containers."<name>"]` table.
+    #[serde(default)]
+    pub remove: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    Add,
+    Edit,
+    Delete,
+    Reorder,
+}
+
+/// One request shape for every list: `{base_hash, action, id?, item?, order?}`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionReq {
+    pub base_hash: String,
+    pub action: Action,
+    /// The entry to edit or delete: a widget id, rule or channel name, or a
+    /// bookmark's 0-based index.
+    #[serde(default)]
+    pub id: Option<J>,
+    #[serde(default)]
+    pub item: Option<J>,
+    /// For `reorder`: every id (or index) in the new order.
+    #[serde(default)]
+    pub order: Option<Vec<J>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemReq {
+    pub base_hash: String,
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawReq {
+    pub base_hash: String,
+    pub text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextReq {
+    pub text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BaseReq {
+    pub base_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewReq {
+    pub item: J,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NameReq {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CssReq {
+    pub base_hash: String,
+    pub css: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasswordReq {
+    pub current: String,
+    pub new: String,
+}
+
+// ------------------------------------------------------------ helpers
+
+pub fn parse_doc(cur: &Current) -> Result<DocumentMut, ApiError> {
+    doc::parse(&cur.text).map_err(|(msg, pos)| {
+        let mut e = ApiError::invalid(
+            &format!("the config file has a syntax error ({msg}); fix it in the Config file tab"),
+            None,
+            pos,
+        );
+        e.body["file_invalid"] = J::Bool(true);
+        e
+    })
+}
+
+fn engine(e: String) -> ApiError {
+    ApiError::bad_request(e)
+}
+
+fn draft(doc: &DocumentMut, note: String, fields: &'static [&'static str]) -> Draft {
+    Draft {
+        text: doc.to_string(),
+        note,
+        kind: "config.saved",
+        fields,
+        warnings: Vec::new(),
+    }
+}
+
+/// Docker container names: `[A-Za-z0-9][A-Za-z0-9_.-]*`, at most 128.
+pub fn valid_container_name(s: &str) -> bool {
+    let mut c = s.chars();
+    matches!(c.next(), Some(f) if f.is_ascii_alphanumeric())
+        && c.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
+        && s.len() <= 128
+}
+
+/// Channel names (TOML keys, also shown in messages).
+fn valid_channel_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Drop `null` members (they mean "not set").
+fn strip_nulls(m: &Map<String, J>) -> Map<String, J> {
+    m.iter()
+        .filter(|(_, v)| !v.is_null())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// The widget JSON could run a program (see `guard::is_command_capable`).
+pub fn is_command_json(w: &J) -> bool {
+    w.get("type").and_then(J::as_str) != Some("custom-api")
+        || w.get("command").is_some()
+        || w.get("env").is_some()
+}
+
+// ------------------------------------------------------------ general
+
+pub fn general(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
+    let _: PageShape = shape(&req.values, "page")?;
+    let patch = object(&req.values, "page")?;
+    let mut doc = parse_doc(cur)?;
+    let root = doc.as_table_mut();
+    let existed = root.contains_key("page");
+    let t = doc::table_mut(root, "page", false).map_err(engine)?;
+    for (k, v) in patch {
+        doc::set_json(t, k, Some(v), Style::Inline).map_err(engine)?;
+    }
+    if !existed && t.is_empty() {
+        root.remove("page");
+    }
+    Ok(draft(&doc, "general".into(), PAGE_KEYS))
+}
+
+/// `[history]`: a patch of scalar keys. Which keys exist is decided by the
+/// config validator (unknown keys are a 422).
+pub fn history(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
+    let patch = object(&req.values, "history")?;
+    for (k, v) in patch {
+        let key_ok = k.len() <= 64
+            && k.starts_with(|c: char| c.is_ascii_lowercase())
+            && k.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !key_ok {
+            return Err(ApiError::bad_request(format!("history: bad key {k:?}")));
+        }
+        if v.is_array() || v.is_object() {
+            return Err(ApiError::bad_request(format!(
+                "history.{k}: only strings, numbers, booleans or null"
+            )));
+        }
+    }
+    let mut doc = parse_doc(cur)?;
+    let root = doc.as_table_mut();
+    let existed = root.contains_key("history");
+    let t = doc::table_mut(root, "history", false).map_err(engine)?;
+    for (k, v) in patch {
+        doc::set_json(t, k, Some(v), Style::Inline).map_err(engine)?;
+    }
+    if !existed && t.is_empty() {
+        root.remove("history");
+    }
+    Ok(draft(&doc, "history".into(), &[]))
+}
+
+// ------------------------------------------------------------ containers
+
+pub fn docker_exclude(cur: &Current, req: &ExcludeReq) -> Result<Draft, ApiError> {
+    if req.exclude.len() > 500 {
+        return Err(ApiError::bad_request("exclude: at most 500 patterns"));
+    }
+    if req
+        .exclude
+        .iter()
+        .any(|p| p.trim().is_empty() || p.len() > 256)
+    {
+        return Err(ApiError::bad_request(
+            "exclude: patterns must be 1-256 characters",
+        ));
+    }
+    let mut doc = parse_doc(cur)?;
+    let t = doc::table_mut(doc.as_table_mut(), "docker", false).map_err(engine)?;
+    let v = (!req.exclude.is_empty()).then(|| J::from(req.exclude.clone()));
+    doc::set_json(t, "exclude", v.as_ref(), Style::Inline).map_err(engine)?;
+    if t.is_empty() {
+        doc.as_table_mut().remove("docker");
+    }
+    Ok(draft(&doc, "containers: exclude".into(), DOCKER_FIELDS))
+}
+
+fn str_field<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
+    t.get(k).and_then(Item::as_str)
+}
+
+fn names_of(aot: &toml_edit::ArrayOfTables, key: &str) -> Vec<String> {
+    aot.iter()
+        .map(|t| str_field(t, key).unwrap_or("").to_string())
+        .collect()
+}
+
+/// Note for a whole-list replace: what was added, removed, changed, moved.
+fn list_note(label: &str, old: &[String], new: &[String], edited: bool) -> String {
+    let added: Vec<&String> = new.iter().filter(|n| !old.contains(n)).collect();
+    let removed: Vec<&String> = old.iter().filter(|n| !new.contains(n)).collect();
+    let mut parts = Vec::new();
+    if !added.is_empty() {
+        parts.push(format!(
+            "added {}",
+            added
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !removed.is_empty() {
+        parts.push(format!(
+            "removed {}",
+            removed
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let kept_old: Vec<&String> = old.iter().filter(|n| new.contains(n)).collect();
+    let kept_new: Vec<&String> = new.iter().filter(|n| old.contains(n)).collect();
+    if kept_old != kept_new {
+        parts.push("reordered".into());
+    }
+    if parts.is_empty() || edited {
+        parts.push("edited".into());
+    }
+    format!("{label}: {}", parts.join(", "))
+}
+
+pub fn groups(cur: &Current, req: &GroupsReq) -> Result<Draft, ApiError> {
+    let mut want = Vec::new();
+    for (i, g) in req.groups.iter().enumerate() {
+        let _: GroupShape = shape(g, &format!("groups[{i}]"))?;
+        let m = object(g, "group")?;
+        let name = m.get("name").and_then(J::as_str).unwrap_or("").to_string();
+        if name.trim().is_empty() {
+            return Err(ApiError::bad_request(format!("groups[{i}]: name is empty")));
+        }
+        if want.iter().any(|(n, _): &(String, _)| *n == name) {
+            return Err(ApiError::bad_request(format!(
+                "group {name:?} is listed twice"
+            )));
+        }
+        want.push((name, m));
+    }
+    let mut doc = parse_doc(cur)?;
+    let aot = doc::aot_mut(&mut doc, "groups").map_err(engine)?;
+    let old = names_of(aot, "name");
+    let mut used = vec![false; old.len()];
+    let plan: Vec<Option<usize>> = want
+        .iter()
+        .map(|(n, _)| {
+            let i = old.iter().enumerate().position(|(i, o)| o == n && !used[i]);
+            if let Some(i) = i {
+                used[i] = true;
+            }
+            i
+        })
+        .collect();
+    let before: Vec<J> = aot.iter().map(|t| doc::table_json(t)).collect();
+    let orphan = doc::rebuild_aot(aot, &plan);
+    let mut edited = false;
+    for (i, (_, m)) in want.iter().enumerate() {
+        let t = aot.get_mut(i).expect("rebuilt slot");
+        doc::patch_managed(t, m, GROUP_KEYS, Style::Inline).map_err(engine)?;
+        if let Some(Some(o)) = plan.get(i) {
+            edited |= before[*o] != doc::table_json(t);
+        }
+    }
+    let empty = aot.is_empty();
+    if empty {
+        doc.as_table_mut().remove("groups");
+        doc::keep_orphan_comment(&mut doc, orphan);
+    }
+    let new: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+    Ok(draft(
+        &doc,
+        list_note("groups", &old, &new, edited),
+        GROUP_KEYS,
+    ))
+}
+
+pub fn container_override(cur: &Current, req: &OverrideReq) -> Result<Draft, ApiError> {
+    if req.names.is_empty() || req.names.len() > 500 {
+        return Err(ApiError::bad_request("names: 1 to 500 container names"));
+    }
+    if let Some(n) = req.names.iter().find(|n| !valid_container_name(n)) {
+        return Err(ApiError::bad_request(format!(
+            "{n:?} is not a valid container name"
+        )));
+    }
+    let empty = Map::new();
+    let set = match &req.set {
+        Some(v) => {
+            let _: OverrideShape = shape(v, "set")?;
+            object(v, "set")?
+        }
+        None => &empty,
+    };
+    if let Some(k) = req
+        .clear
+        .iter()
+        .find(|k| !OVERRIDE_KEYS.contains(&k.as_str()))
+    {
+        return Err(ApiError::bad_request(format!("clear: unknown field {k:?}")));
+    }
+    if let Some(k) = req.clear.iter().find(|k| set.contains_key(k.as_str())) {
+        return Err(ApiError::bad_request(format!(
+            "{k:?} is both set and cleared"
+        )));
+    }
+    let mut doc = parse_doc(cur)?;
+    let root = doc.as_table_mut();
+    let ctrs = doc::table_mut(root, "containers", true).map_err(engine)?;
+    for name in &req.names {
+        if req.remove {
+            ctrs.remove(name);
+            continue;
+        }
+        let t = doc::table_mut(ctrs, name, false).map_err(engine)?;
+        for (k, v) in set {
+            doc::set_json(t, k, Some(v), Style::Inline).map_err(engine)?;
+        }
+        for k in &req.clear {
+            t.remove(k);
+        }
+        if t.is_empty() {
+            ctrs.remove(name);
+        }
+    }
+    if ctrs.is_empty() && ctrs.is_implicit() {
+        root.remove("containers");
+    }
+    let note = match req.names.as_slice() {
+        [one] => format!("containers: {one}"),
+        many => format!("containers: {} overrides", many.len()),
+    };
+    Ok(draft(&doc, note, OVERRIDE_KEYS))
+}
+
+// ------------------------------------------------------------ lists
+
+/// How one `[[array]]` is edited.
+pub struct ListSpec {
+    pub key: &'static str,
+    /// Note prefix ("widgets", "bookmarks", "alerts").
+    pub label: &'static str,
+    pub keys: &'static [&'static str],
+    pub style: Style,
+    /// The field that identifies an entry; `None`: the 0-based index.
+    pub id_field: Option<&'static str>,
+    /// The field shown in notes.
+    pub name_field: &'static str,
+}
+
+pub const BOOKMARKS: ListSpec = ListSpec {
+    key: "bookmarks",
+    label: "bookmarks",
+    keys: BOOKMARK_KEYS,
+    style: Style::Inline,
+    id_field: None,
+    name_field: "name",
+};
+pub const WIDGETS: ListSpec = ListSpec {
+    key: "widgets",
+    label: "widgets",
+    keys: WIDGET_KEYS,
+    style: Style::Tables,
+    id_field: Some("id"),
+    name_field: "id",
+};
+pub const ALERTS: ListSpec = ListSpec {
+    key: "alerts",
+    label: "alerts",
+    keys: RULE_KEYS,
+    style: Style::Inline,
+    id_field: Some("name"),
+    name_field: "name",
+};
+
+fn find_entry(aot: &toml_edit::ArrayOfTables, spec: &ListSpec, id: &J) -> Result<usize, ApiError> {
+    match spec.id_field {
+        None => {
+            let i = id
+                .as_u64()
+                .ok_or_else(|| ApiError::bad_request("id must be the entry's index"))?
+                as usize;
+            if i < aot.len() {
+                Ok(i)
+            } else {
+                Err(ApiError::not_found(format!("no {} entry #{i}", spec.label)))
+            }
+        }
+        Some(f) => {
+            let s = id
+                .as_str()
+                .ok_or_else(|| ApiError::bad_request(format!("id must be the entry's {f}")))?;
+            aot.iter()
+                .position(|t| str_field(t, f) == Some(s))
+                .ok_or_else(|| ApiError::not_found(format!("no {} entry {s:?}", spec.label)))
+        }
+    }
+}
+
+fn check_widget_item(item: &J) -> Result<Vec<String>, ApiError> {
+    let m = object(item, "item")?;
+    if m.contains_key("command") || m.contains_key("env") {
+        return Err(ApiError::denied(guard::Denied(guard::COMMAND_RULE.into())));
+    }
+    if let Some(t) = m.get("type").and_then(J::as_str) {
+        if t != "custom-api" {
+            return Err(ApiError::denied(guard::Denied(format!(
+                "only type = \"custom-api\" widgets can be edited here; {}",
+                guard::COMMAND_RULE
+            ))));
+        }
+    }
+    let _: WidgetShape = shape(item, "widget")?;
+    let mut warn = Vec::new();
+    secret_refs_ok(m, &mut warn)?;
+    Ok(warn)
+}
+
+/// Shape check for one list entry (per list). Returns warnings.
+fn check_item(spec: &ListSpec, item: &J) -> Result<Vec<String>, ApiError> {
+    match spec.key {
+        "bookmarks" => {
+            let _: BookmarkShape = shape(item, "bookmark")?;
+        }
+        "widgets" => return check_widget_item(item),
+        "alerts" => {
+            let _: RuleShape = shape(item, "rule")?;
+        }
+        _ => {}
+    }
+    Ok(Vec::new())
+}
+
+fn locked_entry(spec: &ListSpec, t: &Table) -> bool {
+    spec.key == "widgets" && is_command_json(&doc::table_json(t))
+}
+
+fn locked_err(t: &Table) -> ApiError {
+    let id = str_field(t, "id").unwrap_or("?");
+    ApiError::denied(guard::Denied(format!(
+        "widget {id:?} is a command widget (locked); {}",
+        guard::COMMAND_RULE
+    )))
+}
+
+pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Result<Draft, ApiError> {
+    let mut doc = parse_doc(cur)?;
+    let aot = doc::aot_mut(&mut doc, spec.key).map_err(engine)?;
+    let entry_name = |t: &Table| str_field(t, spec.name_field).unwrap_or("?").to_string();
+    let item_id = |item: &J| {
+        spec.id_field
+            .and_then(|f| item.get(f))
+            .and_then(J::as_str)
+            .map(str::to_string)
+    };
+    let mut warnings = Vec::new();
+    let note = match req.action {
+        Action::Add => {
+            let item = req
+                .item
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("add needs item"))?;
+            warnings.extend(check_item(spec, item)?);
+            if let (Some(id), Some(f)) = (item_id(item), spec.id_field) {
+                if let Some(t) = aot.iter().find(|t| str_field(t, f) == Some(id.as_str())) {
+                    if locked_entry(spec, t) {
+                        return Err(locked_err(t));
+                    }
+                    return Err(ApiError::invalid(
+                        &format!("{} {f} {id:?} already exists", spec.label),
+                        Some(f),
+                        None,
+                    ));
+                }
+            }
+            let mut t = Table::new();
+            doc::patch_managed(&mut t, object(item, "item")?, spec.keys, spec.style)
+                .map_err(engine)?;
+            let name = entry_name(&t);
+            aot.push(t);
+            format!("{}: added {name}", spec.label)
+        }
+        Action::Edit => {
+            let id = req
+                .id
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("edit needs id"))?;
+            let item = req
+                .item
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("edit needs item"))?;
+            let i = find_entry(aot, spec, id)?;
+            if locked_entry(spec, aot.get(i).unwrap()) {
+                return Err(locked_err(aot.get(i).unwrap()));
+            }
+            warnings.extend(check_item(spec, item)?);
+            if let (Some(new_id), Some(f)) = (item_id(item), spec.id_field) {
+                if let Some(t) = aot
+                    .iter()
+                    .enumerate()
+                    .find(|(j, t)| *j != i && str_field(t, f) == Some(new_id.as_str()))
+                {
+                    if locked_entry(spec, t.1) {
+                        return Err(locked_err(t.1));
+                    }
+                }
+            }
+            let t = aot.get_mut(i).unwrap();
+            let old = entry_name(t);
+            doc::patch_managed(t, object(item, "item")?, spec.keys, spec.style).map_err(engine)?;
+            let new = entry_name(t);
+            if old == new {
+                format!("{}: edited {new}", spec.label)
+            } else {
+                format!("{}: renamed {old} to {new}", spec.label)
+            }
+        }
+        Action::Delete => {
+            let id = req
+                .id
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("delete needs id"))?;
+            let i = find_entry(aot, spec, id)?;
+            let t = aot.get(i).unwrap();
+            if locked_entry(spec, t) {
+                // The guard would allow removing it (that only reduces
+                // capability), but locked entries are file-only in the form.
+                return Err(locked_err(t));
+            }
+            let name = entry_name(t);
+            let plan: Vec<Option<usize>> = (0..aot.len()).filter(|j| *j != i).map(Some).collect();
+            let orphan = doc::rebuild_aot(aot, &plan);
+            if aot.is_empty() {
+                doc.as_table_mut().remove(spec.key);
+                doc::keep_orphan_comment(&mut doc, orphan);
+            }
+            format!("{}: deleted {name}", spec.label)
+        }
+        Action::Reorder => {
+            let order = req
+                .order
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("reorder needs order"))?;
+            let mut plan = Vec::with_capacity(order.len());
+            for id in order {
+                let i = find_entry(aot, spec, id)?;
+                if plan.contains(&Some(i)) {
+                    return Err(ApiError::bad_request("order lists an entry twice"));
+                }
+                plan.push(Some(i));
+            }
+            if plan.len() != aot.len() {
+                return Err(ApiError::bad_request(format!(
+                    "order must list all {} entries",
+                    aot.len()
+                )));
+            }
+            doc::rebuild_aot(aot, &plan);
+            format!("{}: reordered", spec.label)
+        }
+    };
+    let mut d = draft(&doc, note, spec.keys);
+    d.warnings = warnings;
+    Ok(d)
+}
+
+pub fn system(cur: &Current, req: &SystemReq) -> Result<Draft, ApiError> {
+    let mut doc = parse_doc(cur)?;
+    let t = doc::table_mut(doc.as_table_mut(), "system", false).map_err(engine)?;
+    doc::set_json(t, "enabled", Some(&J::Bool(req.enabled)), Style::Inline).map_err(engine)?;
+    let note = format!(
+        "widgets: system tiles {}",
+        if req.enabled { "on" } else { "off" }
+    );
+    Ok(draft(&doc, note, SYSTEM_FIELDS))
+}
+
+// ------------------------------------------------------------ channels
+
+/// `*_env` must be variable NAMES, `*_file` safe paths; never secret values.
+fn secret_refs_ok(m: &Map<String, J>, warnings: &mut Vec<String>) -> Result<(), ApiError> {
+    for (k, v) in m {
+        if k.ends_with("_env") && k != "headers_env" {
+            if let Some(s) = v.as_str() {
+                if !guard::valid_env_name(s) {
+                    return Err(ApiError::invalid(
+                        &format!(
+                            "{k} must be the NAME of an environment variable (A-Z, 0-9, _), \
+                             not the secret itself"
+                        ),
+                        Some(k),
+                        None,
+                    ));
+                }
+            }
+        }
+        if k == "headers_env" {
+            for (h, n) in v.as_object().into_iter().flatten() {
+                if !n.as_str().is_some_and(guard::valid_env_name) {
+                    return Err(ApiError::invalid(
+                        &format!(
+                            "headers_env.{h} must be the NAME of an environment variable \
+                             (A-Z, 0-9, _), not the secret itself"
+                        ),
+                        Some("headers_env"),
+                        None,
+                    ));
+                }
+            }
+        }
+        if k.ends_with("_file") && k != "headers_file" {
+            if let Some(p) = v.as_str() {
+                guard::check_secret_path(p).map_err(|e| ApiError::invalid(&e, Some(k), None))?;
+            }
+        }
+        if k == "headers_file" {
+            for p in v
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(_, p)| p.as_str())
+            {
+                guard::check_secret_path(p)
+                    .map_err(|e| ApiError::invalid(&e, Some("headers_file"), None))?;
+            }
+        }
+        if k == "headers" {
+            for h in v.as_object().into_iter().flatten().map(|(h, _)| h) {
+                let l = h.to_ascii_lowercase();
+                if ["authorization", "token", "key", "secret", "cookie"]
+                    .iter()
+                    .any(|s| l.contains(s))
+                {
+                    warnings.push(format!(
+                        "header {h} is stored in the config file as plain text; if it is a \
+                         secret, use headers_env (an environment variable name) instead"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A checked channel form: name, table fields (no name), warnings.
+type CheckedChannel = (String, Map<String, J>, Vec<String>);
+
+fn check_channel(item: &J) -> Result<CheckedChannel, ApiError> {
+    let _: ChannelShape = shape(item, "channel")?;
+    let m = object(item, "channel")?;
+    let name = m.get("name").and_then(J::as_str).unwrap_or("").to_string();
+    if !valid_channel_name(&name) {
+        return Err(ApiError::invalid(
+            "channel name: 1-64 characters of A-Z, a-z, 0-9, '-', '_'",
+            Some("name"),
+            None,
+        ));
+    }
+    let mut warnings = Vec::new();
+    secret_refs_ok(m, &mut warnings)?;
+    if m.get("url").is_some_and(|u| !u.is_null()) {
+        warnings.push(
+            "url is stored in the config file as plain text (and in its revisions); if the URL \
+             contains a token, use url_env instead"
+                .into(),
+        );
+    }
+    let mut fields = strip_nulls(m);
+    fields.remove("name");
+    Ok((name, fields, warnings))
+}
+
+pub fn channel_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiError> {
+    let mut doc = parse_doc(cur)?;
+    let root = doc.as_table_mut();
+    let existed = root.contains_key("channels");
+    let chans = doc::table_mut(root, "channels", true).map_err(engine)?;
+    let id = || -> Result<String, ApiError> {
+        req.id
+            .as_ref()
+            .and_then(J::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ApiError::bad_request("id must be the channel name"))
+    };
+    let mut warnings = Vec::new();
+    let note = match req.action {
+        Action::Add => {
+            let item = req
+                .item
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("add needs item"))?;
+            let (name, fields, w) = check_channel(item)?;
+            warnings = w;
+            if chans.contains_key(&name) {
+                return Err(ApiError::invalid(
+                    &format!("channel {name:?} already exists"),
+                    Some("name"),
+                    None,
+                ));
+            }
+            let mut t = Table::new();
+            doc::patch_managed(&mut t, &fields, CHANNEL_KEYS, Style::Inline).map_err(engine)?;
+            chans.insert(&name, Item::Table(t));
+            format!("notifications: added channel {name}")
+        }
+        Action::Edit => {
+            let old = id()?;
+            let item = req
+                .item
+                .as_ref()
+                .ok_or_else(|| ApiError::bad_request("edit needs item"))?;
+            let (name, fields, w) = check_channel(item)?;
+            warnings = w;
+            if !chans.contains_key(&old) {
+                return Err(ApiError::not_found(format!("no channel {old:?}")));
+            }
+            if name != old && chans.contains_key(&name) {
+                return Err(ApiError::invalid(
+                    &format!("channel {name:?} already exists"),
+                    Some("name"),
+                    None,
+                ));
+            }
+            let t = doc::table_mut(chans, &old, false).map_err(engine)?;
+            doc::patch_managed(t, &fields, CHANNEL_KEYS, Style::Inline).map_err(engine)?;
+            if name != old {
+                // Move the table (decor and position go with it) and keep
+                // the rules that send to it pointing at it.
+                let (_, item) = chans.remove_entry(&old).unwrap();
+                chans.insert_formatted(&Key::new(name.as_str()), item);
+                rename_channel_refs(&mut doc, &old, &name);
+                format!("notifications: renamed channel {old} to {name}")
+            } else {
+                format!("notifications: edited channel {name}")
+            }
+        }
+        Action::Delete => {
+            let name = id()?;
+            if chans.remove(&name).is_none() {
+                return Err(ApiError::not_found(format!("no channel {name:?}")));
+            }
+            format!("notifications: deleted channel {name}")
+        }
+        Action::Reorder => {
+            return Err(ApiError::bad_request("channels have no order"));
+        }
+    };
+    let root = doc.as_table_mut();
+    if let Some(Item::Table(c)) = root.get("channels") {
+        if c.is_empty() && (c.is_implicit() || !existed) {
+            root.remove("channels");
+        }
+    }
+    let mut d = draft(&doc, note, CHANNEL_FIELDS);
+    d.warnings = warnings;
+    Ok(d)
+}
+
+/// `channels = [...]` in every rule: `old` becomes `new` (formatting kept).
+fn rename_channel_refs(doc: &mut DocumentMut, old: &str, new: &str) {
+    let Some(Item::ArrayOfTables(rules)) = doc.as_table_mut().get_mut("alerts") else {
+        return;
+    };
+    for r in rules.iter_mut() {
+        if let Some(arr) = r.get_mut("channels").and_then(Item::as_array_mut) {
+            for i in 0..arr.len() {
+                if arr.get(i).and_then(Value::as_str) == Some(old) {
+                    let decor = arr.get(i).unwrap().decor().clone();
+                    let mut v = Value::from(new);
+                    *v.decor_mut() = decor;
+                    arr.replace_formatted(i, v);
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------ preview
+
+/// The (unsaved) widget form as a `WidgetConfig`, for "Fetch now".
+pub fn preview_widget(item: &J) -> Result<crate::widgets::WidgetConfig, ApiError> {
+    check_widget_item(item)?;
+    let m = strip_nulls(object(item, "item")?);
+    let mut w: crate::widgets::WidgetConfig = serde_json::from_value(J::Object(m))
+        .map_err(|e| ApiError::invalid(&format!("widget: {e}"), None, None))?;
+    crate::widgets::validate(std::slice::from_ref(&w)).map_err(|e| {
+        let field = super::store::field_in(&e, WIDGET_KEYS);
+        ApiError::invalid(&e, field.as_deref(), None)
+    })?;
+    // Preview even a disabled widget, and never wait long.
+    w.enabled = None;
+    let cap = std::time::Duration::from_secs(15);
+    if w.timeout.0 > cap {
+        w.timeout = crate::util::Dur(cap);
+    }
+    Ok(w)
+}

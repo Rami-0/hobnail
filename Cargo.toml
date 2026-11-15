@@ -1,0 +1,36 @@
+[package]
+name = "hobnail"
+version = "0.0.1"
+edition = "2021"
+description = "Hobnail: a tiny home for your homelab"
+publish = false
+
+[dependencies]
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", default-features = false, features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+libc = "0.2.191"
+maud = "0.27.0"
+ring = "0.17"
+rusqlite = { version = "0.42.0", default-features = false, features = ["bundled"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", default-features = false, features = ["rt", "net", "time", "macros", "sync", "io-util", "signal", "process"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
+toml_edit = { version = "0.25.19", default-features = false, features = ["parse", "display"] }
+webpki-roots = "1.0.12"
+
+# Size/RAM focused release profile. Revisit after the first measurements.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# PBKDF2 (600k iterations) is ~5 s per login unoptimized; keep dev builds usable.
+[profile.dev.package.ring]
+opt-level = 3

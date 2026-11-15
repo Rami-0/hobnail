@@ -1,0 +1,72 @@
+# Hobnail: a tiny home for your homelab.
+# Read-only Docker socket; the app only ever sends GET requests.
+# Build and (re)deploy with scripts/deploy.sh. Machine-specific settings
+# (extra published addresses, host name) belong in deploy/compose.local.yaml,
+# which is not tracked: see the README, "Run and redeploy".
+services:
+  hobnail:
+    image: hobnail:latest
+    container_name: hobnail
+    restart: unless-stopped
+    user: "1000:1000"
+    group_add:
+      - "${DOCKER_GID:-982}"   # host "docker" group id (getent group docker), needed to read the socket
+    ports:
+      # Loopback only. Add your LAN or VPN address to open it to your network.
+      - 127.0.0.1:3200:3200
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # config.toml, custom.css, icons/, alert state, scripts/ live here.
+      - ./data:/data
+      # Host stats (CPU, memory, network, temperature, per-container cgroups).
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    environment:
+      # Inside the container's own network namespace only; the host publishes
+      # it solely on the addresses above. The binary's default is 127.0.0.1.
+      RH_LISTEN: 0.0.0.0:3200
+      # Name shown on the page (default: the container's host name).
+      # RH_HOSTNAME: homelab
+      # Host names (globs) the page may be opened by, besides IPs and localhost.
+      # Guards against DNS rebinding.
+      # RH_ALLOWED_HOSTS: homelab.*.ts.net
+    # Channel secrets (Slack webhook URL, Telegram bot token, ...). Optional.
+    env_file:
+      - path: ./secrets.env
+        required: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/hobnail", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+  # Local fake webhook/Slack/Telegram endpoint for testing notifications
+  # without contacting real services. Not started by default:
+  #   docker compose --profile test up -d mock
+  # Inspect what it received: curl -s http://127.0.0.1:3299/_received
+  mock:
+    image: hobnail:latest
+    container_name: hobnail-mock
+    profiles: ["test"]
+    command: ["mock-receiver", "0.0.0.0:9999"]
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - 127.0.0.1:3299:9999

@@ -1,0 +1,117 @@
+# hobnail config: overrides and additions only. Everything else is
+# auto-discovered. Hot-reloaded on save. Reference: README.md in the repo.
+
+[page]
+title = "homelab"
+
+# Fetch dashboard-icons by name once from the CDN, then serve them from
+# data/icons/di/ (works offline afterwards). Remove to stay fully offline.
+[icons]
+remote = true
+
+# ---- Custom widgets (M3) -------------------------------------------------
+
+[[widgets]]
+id = "beszel"
+type = "custom-api"
+title = "Beszel"
+link = "http://100.64.0.10:8090"
+url = "http://100.64.0.10:8090/api/health"
+template = "{{message}}"
+status = { field = "code", ok = [200] }
+[widgets.fields]
+message = "message"
+code = "code"
+
+[[widgets]]
+id = "mailpit"
+type = "custom-api"
+title = "Mailpit (webshop-dev)"
+link = "http://100.64.0.10:8025"
+url = "http://100.64.0.10:8025/api/v1/info"
+refresh = "60s"
+[widgets.fields]
+unread = "Unread"
+messages = "Messages"
+size = "DatabaseSize"
+uptime = "RuntimeStats.Uptime"
+version = "Version"
+[[widgets.rows]]
+label = "Unread"
+value = "{{unread | number}} / {{messages | number}}"
+[[widgets.rows]]
+label = "Database"
+value = "{{size | bytes}}"
+[[widgets.rows]]
+label = "Up"
+value = "{{uptime | duration}} · {{version}}"
+
+[[widgets]]
+id = "odoo20"
+type = "custom-api"
+title = "Odoo 20 (dev)"
+link = "http://100.64.0.10:8070"
+url = "http://100.64.0.10:8070/web/health"
+template = "{{status | upper}}"
+status = { field = "status", ok = ["pass"] }
+[widgets.fields]
+status = "status"
+
+[[widgets]]
+id = "procs"
+type = "command"
+title = "Host processes"
+enabled = true
+refresh = "15s"
+timeout = "2s"
+# Shell builtins only: the image ships busybox sh and nothing else.
+command = ["sh", "-c", 'set -- /host/proc/[0-9]*; printf "{\"procs\": %d}" "$#"']
+template = "{{procs | number}}"
+[widgets.fields]
+procs = "procs"
+
+# Deliberately broken (nothing listens on :9) to show one failing widget
+# does not break the page. Delete it any time.
+[[widgets]]
+id = "broken-demo"
+type = "custom-api"
+title = "Broken on purpose"
+url = "http://100.64.0.10:9/nope"
+timeout = "2s"
+template = "{{x}}"
+[widgets.fields]
+x = "x"
+
+# ---- Notifications (M4) --------------------------------------------------
+# Nothing is sent anywhere until you add a channel AND name it in a rule.
+# Put real secrets in /opt/stacks/hobnail/secrets.env (see README,
+# "Where to put real tokens"), then uncomment:
+#
+# [channels.slack]
+# type = "slack"
+# webhook_url_env = "RH_SLACK_WEBHOOK_URL"
+#
+# [channels.telegram]
+# type = "telegram"
+# token_env = "RH_TELEGRAM_TOKEN"
+# chat_id = "your-chat-id"
+#
+# [channels.webhook]
+# type = "webhook"
+# url_env = "RH_WEBHOOK_URL"       # e.g. an ntfy topic URL
+
+# Shown on the page only (channels = []) until channels are configured.
+[[alerts]]
+name = "container-problems"
+type = "container"
+containers = ["*"]
+on = ["unhealthy", "restarting", "exit_nonzero"]
+channels = []                    # e.g. ["slack", "telegram"]
+
+[[alerts]]
+name = "disk-full"
+type = "host"
+metric = "disk"
+above = 90
+for = "5m"
+channels = []

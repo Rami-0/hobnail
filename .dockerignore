@@ -1,0 +1,8 @@
+target
+.git
+data
+docs
+deploy
+scripts
+*.md
+.claude
