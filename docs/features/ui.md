@@ -18,6 +18,15 @@ OS, the ◐ button overrides it per browser.
   (dense table: filter, sort, group by stack or flat, remembered; phones get
   stacked rows), container detail (charts, timeline, ports and links, labels,
   matching alert rules), History, Alerts, Settings, Login.
+- **Container detail** tabs: Overview, Logs, Metrics (network, block I/O, PIDs,
+  throttling, OOM), Inspect (env values, commands and health-check output only
+  when signed in), Processes (signed in), Events.
+- **Keyboard:** `g` then `o c h l a s` jumps to a page, `j/k` moves in lists,
+  `l` opens a container's logs, `?` shows all shortcuts.
+- **Themes:** Dark, Light, Ember, High contrast (◐ button or Settings →
+  Appearance).
+- **Install:** "Add to Home Screen" from the browser menu; the tab title shows
+  the number of problems.
 - **Live:** one SSE stream per visible page; numbers update in place. Updates
   never move what you are reading: each one is scroll-anchored by hand (Safari
   on iOS has no CSS scroll anchoring), and updates that arrive while you touch

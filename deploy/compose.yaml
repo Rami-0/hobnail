@@ -2,7 +2,7 @@
 # Read-only Docker socket; the app only ever sends GET requests.
 # Build and (re)deploy with scripts/deploy.sh. Machine-specific settings
 # (extra published addresses, host name) belong in deploy/compose.local.yaml,
-# which is not tracked: see the README, "Run and redeploy".
+# which is not tracked: see docs/install.md.
 services:
   hobnail:
     image: hobnail:latest

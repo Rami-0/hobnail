@@ -103,5 +103,5 @@ should not need regenerating; edit the paths directly for small corrections.
 ## The old name
 
 The old name appears only in compatibility handling, migration guidance,
-actual checkout paths and historical records. See the README for upgrading.
+actual checkout paths and historical records.
 Licensing and domain registration are separate decisions.

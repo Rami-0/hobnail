@@ -4,7 +4,7 @@ Hobnail remembers. A small SQLite file records host and per-container
 CPU and memory every 15 s, plus an event log, so the page can answer "what
 happened last night?".
 
-- **File:** `data/hobnail.db` (plus `-wal`/`-shm`). Override with `RH_DB`. Existing `rust-homepage.db` files are reused in place.
+- **File:** `data/hobnail.db` (plus `-wal`/`-shm`). Override with `RH_DB`.
   If it cannot be opened the dashboard keeps working without history.
 - **Sampler:** every `[history] sample_interval` (default `15s`, 5 s to 5 min),
   with or without a viewer. It keeps its own CPU/network counters, so the live

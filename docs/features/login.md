@@ -1,7 +1,8 @@
 # Login and security
 
-**Viewing is open** to anyone who can reach the port (it is published only on
-the LAN and Tailscale addresses). **Every change needs a login.**
+**Viewing is open** to anyone who can reach the port (publish it only on
+addresses you trust: see [install.md](../install.md)). **Every change needs a
+login**, and until a password exists the app is read-only.
 
 Why: once the browser can write `config.toml`, anyone on the network could add
 a `command` widget, which runs shell commands inside a container that has the
@@ -38,6 +39,6 @@ before you. Setting a password signs out every session. Minimum 8 characters.
   (see [settings.md](settings.md)).
 - Login history (with IPs of failed attempts) is visible only when signed in.
 
-**Not covered:** the cookie cannot be `Secure` over plain HTTP; on the tailnet
-the traffic is already encrypted by WireGuard. On the LAN address it is not —
-prefer the Tailscale URL for signing in. Single user (`admin`); no roles.
+**Not covered:** the cookie cannot be `Secure` over plain HTTP. Sign in over an
+encrypted path (a VPN such as Tailscale, or a TLS reverse proxy), not over a
+plain LAN address. Single user (`admin`); no roles.
