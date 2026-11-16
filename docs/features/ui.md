@@ -47,6 +47,12 @@ OS, the ◐ button overrides it per browser.
   "Add", which opens the Settings dialog on the page. The memory treemap folds tiles too small for a
   name on a phone into "+N others", a link to the table sorted by memory; a
   tile big enough (64 × 40 px, 88 × 56 px on touch) carries its logs icon.
+  "Needs attention" shows at most eight rows, then "N more on the
+  Containers page"; a name that repeats across stacks carries its stack.
+  The health strip's "problems" is the same count as the table's
+  "Problems" filter. Top CPU lists eight rows; a full bar is one whole core.
+  "Last 24 h" on a young instance says how much history it has ("running
+  100% of 30m with data").
 - **Alerts:** firing incidents and the alert log link to their subject (the
   container, the Host page, the widget, the URL), name the rule and show a
   clock time ("since …" in one right-aligned column); rows about a container
@@ -67,14 +73,30 @@ OS, the ◐ button overrides it per browser.
   `no-store`.
 - **Pages:** Overview (health strip, host vitals with 1 h charts, needs
   attention, widgets, top consumers, recent events, bookmarks), Containers
-  (dense table: filter, sort, group by stack or flat, remembered; phones get
-  stacked rows), container detail (charts, timeline, ports and links, labels,
+  (dense table: filter, sort, group by stack or flat; sort and grouping are
+  remembered, filters are not; phones get stacked rows and a "Sort" select
+  with a direction button in the toolbar, which also works without the
+  script through "Apply"; grouped and sorted by CPU or memory, the stacks
+  follow their top row; states read "healthy 6 d" and are never cut; long
+  stack names ellipsise with the full name on hover; the count says how
+  many rows are in collapsed stacks), container detail (charts, timeline,
+  ports and links, labels with Compose and image bookkeeping folded,
   matching alert rules), History, Alerts, Settings, Login.
 - **Container detail** tabs: Overview, Logs (the log viewer itself, at
   `/containers/<name>/logs`, under the same header and tabs), Metrics
   (network, block I/O, PIDs, throttling, OOM), Inspect (env values, commands
   and health-check output only when signed in), Processes (signed in), Events.
-  The header has "Open" (when the service has a link) and, signed in, "Edit".
+  The header has "Open" (when the service has a link) and, signed in, "Edit";
+  its sub-line is `name · image · stack · id` (the name only when a display
+  name differs). Every tab link keeps the range, and a tab or range click
+  keeps the scroll position. On a phone the tab strip scrolls with the
+  current tab in view and a fade on the edge that has more; tables (ports,
+  networks, mounts, processes) become label / value blocks, so nothing
+  scrolls sideways. Tiles: State, CPU, Memory, Restarts (1 h) and, with a
+  health check, Health. A range that is mostly empty says how much history
+  there is and links the shortest range that holds it; Metrics charts that
+  stayed at zero are one line of text. Signed out, every hidden Inspect
+  value is a "Sign in to view" link.
   "Why is this red?" sits on top of every tab: for a failing health check,
   since when and how many in a row, "Logs around HH:MM" and, signed in, the
   probe's first line and Docker's last five checks (folded on a phone);

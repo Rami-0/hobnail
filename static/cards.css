@@ -28,7 +28,9 @@
 .ctbl th[aria-sort=ascending] .sort-i,.ctbl th[aria-sort=descending] .sort-i,.ctbl th a:hover .sort-i{opacity:1}
 .ctbl .row:hover td{background:var(--surface-2)}
 .ctbl .row td:first-child{padding-left:14px}
-.c-name{width:26%}
+/* the whole row opens the container: text that is not a control lets the click through to the row link (OV-23) */
+.ctbl tr.rl>td>:is(.dot,.icon,.pill,.st-l,.st-t,.exit,.img,.num,.spark,.muted){pointer-events:none}
+.c-name{width:34%}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
 .c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:9px}
 .c-name>.icon.glyph svg{width:12px;height:12px}
@@ -42,7 +44,8 @@
 .grouped .c-stack{display:none}
 .c-image{width:20%;max-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-image .img{font-size:12px}
-.c-state{width:17%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+/* state is never cut (short ages, OV-21); name and image take the rest */
+.c-state{width:1%;white-space:nowrap}
 .st-l{font-size:12.5px;color:var(--text-2)}
 .st-l.warn{color:var(--warn-fg)}.st-l.bad{color:var(--bad-fg);font-weight:600}.st-l.off{color:var(--text-3)}
 .st-t{font-size:12px;color:var(--text-3)}
@@ -51,7 +54,7 @@
 .ctbl th.c-num{text-align:right}
 .c-num .num{font:12.5px var(--mono);display:inline-block;min-width:62px}
 .c-num .spark{display:inline-block;width:40px;height:14px;margin-left:8px;vertical-align:-2px}
-.c-ports{white-space:nowrap}
+.c-ports{width:1%;white-space:nowrap}
 .port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:12px/18px var(--mono);color:var(--accent-fg)}
 .port:hover{border-color:var(--accent);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
@@ -59,6 +62,7 @@
 .port.plain{color:var(--text-2)}
 .port.more{color:var(--text-3)}
 .c-act{width:112px;text-align:right;white-space:nowrap}
+.ctbl .c-hist{width:100px}.ctbl .c-hist .hstrip{width:92px}
 .row.stopped .nm{color:var(--text-2)}
 .row.stopped .c-image .img{color:var(--text-3)}
 .grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
@@ -67,17 +71,25 @@ tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
 .grp-t svg.i{width:14px;height:14px;color:var(--text-3);transition:transform var(--t)}
 .grp.closed .grp-t svg.i{transform:rotate(-90deg)}
 .grp.closed .row{display:none}
-.grp-n{font-family:var(--mono)}
+/* a long stack name ellipsises, never widens the table (ROB-07) */
+.grp-t{contain:inline-size}
+.grp-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp-t>svg,.grp-t .cnt{flex:none}
 .grp-t .cnt{font:500 11px var(--mono);color:var(--text-3)}
 tbody.none td{padding:0}
 tbody.none:not([data-why=stopped]) .why-stopped,tbody.none:not([data-why=problem]) .why-problem,tbody.none:is([data-why=stopped],[data-why=problem]) .why-filter{display:none}
-@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:32%}}
+@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
+/* "Sort by" for phones, where the header is hidden (OV-19) */
+.sortctl{display:none;gap:4px}
 @media (max-width:900px){.c-num .spark{display:none}.c-num{width:80px}.ctbl .c-ports{display:none}}
 
 /* phones: each row becomes a stacked block */
 @media (max-width:699px){
  .bar .seg{overflow-x:auto;max-width:100%}
  .search-in{max-width:none;flex-basis:100%}
+ .sortctl{display:flex}
+ #cbar{min-width:0}
+ .bar select{height:var(--ctl-h)}
  .ctbl,.ctbl tbody{display:block}
  .ctbl thead{display:none}
  .ctbl caption{display:block}

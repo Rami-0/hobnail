@@ -56,11 +56,16 @@ pub fn summary(s: &Strip, st: &Strips) -> String {
         n
     };
     let (bad, warn) = (runs(Cell::Bad), runs(Cell::Warn));
-    let mut out = format!(
-        "running {}% of the last {}",
-        (up * 100 + known / 2) / known,
-        window_label(st)
-    );
+    let p = (up * 100 + known / 2) / known;
+    // Mostly no data yet (a new instance): the percentage is of the time
+    // with data, and says so (OV-03).
+    let n = s.cells.len().max(1);
+    let mut out = if known * 2 < n {
+        let secs = (st.to - st.from).max(0) as u64 * known as u64 / n as u64;
+        format!("running {p}% of {} with data", human_duration(secs))
+    } else {
+        format!("running {p}% of the last {}", window_label(st))
+    };
     if bad > 0 {
         out.push_str(&format!(
             " · {bad} problem{}",
@@ -165,6 +170,19 @@ mod tests {
         );
         let cells = health_strip(&s, &st, "x", StripStyle::Cells).into_string();
         assert_eq!(cells.matches("<rect").count(), 96);
+    }
+
+    /// OV-03: two cells of data in 96 is "of 30m with data", not "of 24 h".
+    #[test]
+    fn mostly_empty_history_says_how_much() {
+        let st = strips(96);
+        let mut s = Strip {
+            cells: vec![Cell::Unknown; 96],
+            why: BTreeMap::new(),
+        };
+        s.cells[94] = Cell::Ok;
+        s.cells[95] = Cell::Ok;
+        assert_eq!(summary(&s, &st), "running 100% of 30m with data");
     }
 
     #[test]
