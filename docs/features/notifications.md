@@ -57,7 +57,13 @@ routes and guards); `/alerts?add=channel`, `?edit=rule:<name>` and so on open
 the dialog, or show the form without JavaScript. Signed out the page shows
 only what it always did: rule and channel names, kinds, what a rule watches
 and delivery state, never env-variable names, URLs of channels or form
-values.
+values. The read-only rules table states thresholds with their unit
+("memory above 90%") and the timing ("fires after 30 s · repeats after
+15 min"). Delivery counts are notifications, not attempts: "Undelivered" is
+what waits for a retry ("1 queued") or was given up, with the failed
+attempts behind it on a second line; the summary reads "3 sent · 1
+undelivered (29 failed attempts)". The alert log does not repeat a value the
+state already says ("47.4% > 1%", not "47.4% > 1% (47.4)").
 
 ## Where to put real tokens
 

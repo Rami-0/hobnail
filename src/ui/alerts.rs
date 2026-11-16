@@ -71,6 +71,10 @@ pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>, signed
     };
     let sent: u64 = status.channels.values().map(|c| c.sent).sum();
     let failed: u64 = status.channels.values().map(|c| c.failed).sum();
+    // Notifications not delivered (waiting for a retry or given up), not
+    // attempts (LG-59).
+    let undelivered: u64 =
+        status.pending as u64 + status.channels.values().map(|c| c.dropped).sum::<u64>();
     html! {
         section #alerts class=(cls) aria-label="Alerts" {
             div.alerts-head {
@@ -81,10 +85,10 @@ pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>, signed
                     } @else {
                         span.badge.ok { "all clear" }
                     }
-                    span.muted.alerts-counts title="rules · notifications sent · failed attempts" {
+                    span.muted.alerts-counts title="rules · notifications sent · notifications not delivered (failed attempts)" {
                         (status.rules) @if status.rules == 1 { " rule · " } @else { " rules · " } (sent) " sent"
-                        @if failed > 0 { " · " (failed) " failed" }
-                        @if status.pending > 0 { " · " (status.pending) " queued" }
+                        @if undelivered > 0 { " · " (undelivered) " undelivered" }
+                        @if failed > 0 { " (" (failed) @if failed == 1 { " failed attempt)" } @else { " failed attempts)" } }
                     }
                 }
                 @if !status.channels.is_empty() {
@@ -156,7 +160,7 @@ pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>, signed
 /// Hover text for a channel badge: health, counts, last success, error.
 fn chan_title(name: &str, c: &ChannelStatus, label: &str) -> String {
     let mut t = format!(
-        "{} channel {name}: {label} · {} sent · {} failed",
+        "{} channel {name}: {label} · {} sent · {} failed attempts",
         c.kind.as_str(),
         c.sent,
         c.failed
