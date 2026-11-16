@@ -43,6 +43,8 @@ points) and `{"events":[{id,ts,kind,level,subject,detail}]}` newest first.
 Login events (`auth.*`, which include client IPs of failed attempts) are only
 returned to a signed-in session.
 
-**Settings → History and data** shows the database size and row counts, can
-export a snapshot and clear the history (samples and events; revisions and the
-password stay).
+**Settings → History and data** turns recording on or off (saves when
+switched), sets the sample interval (a duration such as `30s`; 5 s to 5 min),
+shows the database size and row counts, can export a snapshot and clear the
+history (samples and events; revisions and the password stay) after the
+phrase "clear history" is typed in the confirm dialog.

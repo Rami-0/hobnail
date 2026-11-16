@@ -34,8 +34,16 @@
 //!    Nothing adopts a newer hash for it, so a moved file is always a 409;
 //!    after a 409 an edit is only retargeted to an entry found again with all
 //!    its original values, otherwise it cannot be saved.
-//! 6. Flip the form's [`needs_js`] to `Values::Shown` once its values are
-//!    rendered by the server.
+//! 6. Show [`needs_js`] with `Values::Shown` (the values are on the page).
+//!
+//! A setting with several fields that stays on the page (General, Sample
+//! interval, custom.css, the raw editor) is a page-section form with
+//! `data-hb` and `data-hash` (the file version its values came from), a
+//! `.dlg-note` and a body marked `data-hb-body`; `pageForm(...)` in
+//! settings.js gives it the same submit path, errors, busy state, 409
+//! handling and "No changes" as a dialog. A single control (a switch, the
+//! default theme) saves when changed, based on the `data-hash` around it
+//! at the moment it is changed.
 //!
 //! Without JavaScript nothing can be saved: the guards need the `X-RH-CSRF`
 //! header, which a plain form cannot send. So every form is `method="post"`
@@ -140,14 +148,13 @@ pub struct Spec {
     pub wide: bool,
 }
 
-/// What a form shows when the script did not run (for [`needs_js`]). The
-/// next forms switch from `LoadWithJs` to `Shown` as they are converted.
+/// What a form shows when the script did not run (for [`needs_js`]).
+/// Every Settings form is rendered with its values now; nothing loads them
+/// after the page.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Values {
-    /// The server rendered the values (converted forms).
+    /// The server rendered the values.
     Shown,
-    /// The values load with the script (forms not converted yet).
-    LoadWithJs,
     /// There is nothing to show (Change password).
     None,
 }
@@ -337,7 +344,6 @@ pub fn checks(
 pub fn needs_js(v: Values) -> Markup {
     let rest = match v {
         Values::Shown => " You can read the values here.",
-        Values::LoadWithJs => " The current values load with the script too.",
         Values::None => "",
     };
     html! {

@@ -112,7 +112,7 @@ pub fn body(ctx: &Ctx) -> Markup {
         @match landed {
             Some(Ok(p)) => (p),
             Some(Err(())) => p.note.warn { (ic("alert")) span { "That bookmark does not exist (any more). The list below is the current file." } },
-            None => {},
+            None => (dlg::needs_js(dlg::Values::Shown)),
         }
         section.panel #bm-sec aria-label="Bookmarks" {
             (list_markup(&disk))

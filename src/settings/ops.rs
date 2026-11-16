@@ -475,6 +475,13 @@ struct GroupShape {
     hide: Option<bool>,
 }
 
+/// One `[docker] exclude` pattern as the Hidden containers dialog sends it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PatternShape {
+    pattern: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum SizeJ {
@@ -836,9 +843,46 @@ pub fn is_command_json(w: &J) -> bool {
 
 // ------------------------------------------------------------ general
 
+/// An `http://` or `https://` link with a host and no spaces (SET-24,
+/// SET-35, SET-40).
+fn web_link(url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    let host = u
+        .strip_prefix("http://")
+        .or_else(|| u.strip_prefix("https://"))
+        .unwrap_or("");
+    !host.is_empty() && !host.starts_with('/') && !u.contains(char::is_whitespace)
+}
+
+/// A text the form limits (`maxlength`): checked again here, in the words
+/// the browser uses.
+fn at_most(m: &Map<String, J>, key: &str, max: usize) -> Result<(), ApiError> {
+    match m.get(key).and_then(J::as_str) {
+        Some(s) if s.chars().count() > max => Err(ApiError::invalid(
+            &format!("At most {max} characters."),
+            Some(key),
+            None,
+        )),
+        _ => Ok(()),
+    }
+}
+
 pub fn general(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
     let _: PageShape = shape(&req.values, "page")?;
     let patch = object(&req.values, "page")?;
+    // Only what the form sends is checked: a hand-written value left as it
+    // is in the file stays (the patch does not touch it).
+    at_most(patch, "title", 80)?;
+    at_most(patch, "greeting", 200)?;
+    if let Some(u) = patch.get("search_url").and_then(J::as_str) {
+        if !web_link(u) || !u.contains("{q}") {
+            return Err(ApiError::invalid(
+                "Use an http:// or https:// link with {q} where the search words go.",
+                Some("search_url"),
+                None,
+            ));
+        }
+    }
     let mut doc = parse_doc(cur)?;
     let root = doc.as_table_mut();
     let existed = root.contains_key("page");
@@ -850,6 +894,57 @@ pub fn general(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
         root.remove("page");
     }
     Ok(draft(&doc, "general".into(), PAGE_KEYS))
+}
+
+/// Retired theme token names that a `custom.css` sets (DESIGN.md §11.2,
+/// `docs/features/ui.md`), one sentence each naming the token to set
+/// instead. Reading an old name still works (they are aliases); setting one
+/// no longer recolours anything. Comments are ignored.
+pub fn css_token_warnings(css: &str) -> Vec<String> {
+    let mut text = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(i) = rest.find("/*") {
+        text.push_str(&rest[..i]);
+        rest = rest[i + 2..]
+            .find("*/")
+            .map_or("", |j| &rest[i + 2 + j + 2..]);
+    }
+    text.push_str(rest);
+    // `--name:` as a declaration, not a longer name (`--ctl-border:`) and
+    // not a read (`var(--ctl)`).
+    let sets = |name: &str| {
+        text.match_indices(name).any(|(i, _)| {
+            let before = text[..i].chars().next_back();
+            let after = text[i + name.len()..].trim_start();
+            !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                && after.starts_with(':')
+        })
+    };
+    let mut out = Vec::new();
+    for (old, new) in [
+        ("--ctl", "--ctl-border"),
+        ("--border-2", "--ctl-border"),
+        ("--accent-bg", "--accent"),
+        ("--pop", "--shadow-2"),
+        ("--fs-label", "--fs-micro"),
+    ] {
+        if sets(old) {
+            out.push(format!(
+                "custom.css sets {old}, which no longer changes anything: set {new} instead."
+            ));
+        }
+    }
+    if sets("--glow") {
+        out.push("custom.css sets --glow, which is no longer used: remove it.".into());
+    }
+    if sets("--border") && !sets("--line") {
+        out.push(
+            "custom.css sets --border, which now only outlines dialogs, menus and the main panel: \
+             set --line as well to recolour panel outlines, table rows and dividers."
+                .into(),
+        );
+    }
+    out
 }
 
 /// `[history]`: a patch of scalar keys. Which keys exist is decided by the
@@ -910,6 +1005,114 @@ pub fn docker_exclude(cur: &Current, req: &ExcludeReq) -> Result<Draft, ApiError
         doc.as_table_mut().remove("docker");
     }
     Ok(draft(&doc, "containers: exclude".into(), DOCKER_FIELDS))
+}
+
+/// One pattern of `[docker] exclude` added, changed or removed (the Hidden
+/// containers list: `{action, id: index, item: {pattern}}`). The array is
+/// edited in place, so the other patterns keep their formatting.
+pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiError> {
+    let pattern = || -> Result<String, ApiError> {
+        let item = req
+            .item
+            .as_ref()
+            .ok_or_else(|| ApiError::bad_request("needs item"))?;
+        let p: PatternShape = shape(item, "pattern")?;
+        let p = p.pattern.trim().to_string();
+        if p.is_empty() {
+            return Err(ApiError::invalid("Required.", Some("pattern"), None));
+        }
+        if p.chars().count() > 256 {
+            return Err(ApiError::invalid(
+                "At most 256 characters.",
+                Some("pattern"),
+                None,
+            ));
+        }
+        Ok(p)
+    };
+    let mut doc = parse_doc(cur)?;
+    let t = doc::table_mut(doc.as_table_mut(), "docker", false).map_err(engine)?;
+    let not_list = || {
+        ApiError::bad_request(
+            "`exclude` is not written as a list of patterns in the file; edit it in the Config file tab",
+        )
+    };
+    let list: Vec<String> = match t.get("exclude") {
+        None => Vec::new(),
+        Some(it) => it
+            .as_array()
+            .ok_or_else(not_list)?
+            .iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or_else(not_list))
+            .collect::<Result<_, _>>()?,
+    };
+    let index = || -> Result<usize, ApiError> {
+        req.id
+            .as_ref()
+            .and_then(J::as_u64)
+            .map(|i| i as usize)
+            .filter(|i| *i < list.len())
+            .ok_or_else(|| ApiError::not_found("no such pattern (any more)"))
+    };
+    let dup = || {
+        ApiError::invalid(
+            "This pattern is already in the list.",
+            Some("pattern"),
+            None,
+        )
+    };
+    let note = match req.action {
+        Action::Add => {
+            let p = pattern()?;
+            if list.contains(&p) {
+                return Err(dup());
+            }
+            match t.get_mut("exclude").and_then(Item::as_array_mut) {
+                Some(a) => a.push(p.as_str()),
+                None => doc::set_json(t, "exclude", Some(&J::from(vec![p.clone()])), Style::Inline)
+                    .map_err(engine)?,
+            }
+            format!("containers: hide {p}")
+        }
+        Action::Edit => {
+            let (i, p) = (index()?, pattern()?);
+            if list.iter().enumerate().any(|(j, x)| j != i && *x == p) {
+                return Err(dup());
+            }
+            if list[i] != p {
+                let a = t
+                    .get_mut("exclude")
+                    .and_then(Item::as_array_mut)
+                    .ok_or_else(not_list)?;
+                a.replace(i, p.as_str());
+            }
+            format!("containers: hide {p} (was {})", list[i])
+        }
+        Action::Delete => {
+            let i = index()?;
+            let a = t
+                .get_mut("exclude")
+                .and_then(Item::as_array_mut)
+                .ok_or_else(not_list)?;
+            a.remove(i);
+            // `["a", "b"]` without "a" is `["b"]`, not `[ "b"]`.
+            if let Some(first) = a.get_mut(0) {
+                if first.decor().prefix().and_then(|p| p.as_str()) == Some(" ") {
+                    first.decor_mut().set_prefix("");
+                }
+            }
+            if a.is_empty() {
+                t.remove("exclude");
+            }
+            format!("containers: show {} again", list[i])
+        }
+        Action::Reorder => return Err(ApiError::bad_request("patterns have no order")),
+    };
+    // As `docker_exclude`: a `[docker]` left empty goes.
+    if t.is_empty() {
+        doc.as_table_mut().remove("docker");
+    }
+    Ok(draft(&doc, note, &["pattern"]))
 }
 
 fn str_field<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
@@ -1028,6 +1231,21 @@ pub fn container_override(cur: &Current, req: &OverrideReq) -> Result<Draft, Api
         }
         None => &empty,
     };
+    // Checked when the form sends them (only changed fields are sent, so a
+    // hand-written value left alone stays editable).
+    if set
+        .get("url")
+        .and_then(J::as_str)
+        .is_some_and(|u| !web_link(u))
+    {
+        return Err(ApiError::invalid(
+            "Use a link that starts with http:// or https://.",
+            Some("url"),
+            None,
+        ));
+    }
+    at_most(set, "name", 80)?;
+    at_most(set, "description", 200)?;
     if let Some(k) = req
         .clear
         .iter()
@@ -1100,6 +1318,17 @@ pub const WIDGETS: ListSpec = ListSpec {
     id_field: Some("id"),
     name_field: "id",
 };
+/// `[[groups]]` one entry at a time (the Groups list on Containers and
+/// groups). An edit is a patch, so `columns` and `layout`, which the form
+/// no longer shows, stay as they are in the file.
+pub const GROUPS: ListSpec = ListSpec {
+    key: "groups",
+    label: "groups",
+    keys: GROUP_KEYS,
+    style: Style::Inline,
+    id_field: Some("name"),
+    name_field: "name",
+};
 pub const ALERTS: ListSpec = ListSpec {
     key: "alerts",
     label: "alerts",
@@ -1165,6 +1394,13 @@ fn check_item(spec: &ListSpec, item: &J) -> Result<Vec<String>, ApiError> {
         "alerts" => {
             let _: RuleShape = shape(item, "rule")?;
         }
+        "groups" => {
+            let g: GroupShape = shape(item, "group")?;
+            if g.name.trim().is_empty() {
+                return Err(ApiError::invalid("Required.", Some("name"), None));
+            }
+            at_most(object(item, "group")?, "title", 80)?;
+        }
         _ => {}
     }
     Ok(Vec::new())
@@ -1182,12 +1418,7 @@ fn bookmark_url(spec: &ListSpec, item: &J, old: Option<&str>) -> Result<(), ApiE
     if old == Some(url) {
         return Ok(());
     }
-    let u = url.trim().to_ascii_lowercase();
-    let host = u
-        .strip_prefix("http://")
-        .or_else(|| u.strip_prefix("https://"))
-        .unwrap_or("");
-    if host.is_empty() || host.starts_with('/') || u.contains(char::is_whitespace) {
+    if !web_link(url) {
         return Err(ApiError::invalid(
             "Use a link that starts with http:// or https://.",
             Some("url"),
@@ -1195,6 +1426,18 @@ fn bookmark_url(spec: &ListSpec, item: &J, old: Option<&str>) -> Result<(), ApiE
         ));
     }
     Ok(())
+}
+
+/// "That name is taken", on the field that names the entry.
+fn taken(id: &str, field: &str) -> ApiError {
+    ApiError::invalid(
+        &format!(
+            "“{id}” is already in the list; use another {}.",
+            label_of(field).to_lowercase()
+        ),
+        Some(field),
+        None,
+    )
 }
 
 fn locked_entry(spec: &ListSpec, t: &Table) -> bool {
@@ -1233,11 +1476,7 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                     if locked_entry(spec, t) {
                         return Err(locked_err(t));
                     }
-                    return Err(ApiError::invalid(
-                        &format!("{} {f} {id:?} already exists", spec.label),
-                        Some(f),
-                        None,
-                    ));
+                    return Err(taken(&id, f));
                 }
             }
             let mut t = Table::new();
@@ -1271,6 +1510,8 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                     if locked_entry(spec, t.1) {
                         return Err(locked_err(t.1));
                     }
+                    // A rename onto another entry's name would make two.
+                    return Err(taken(&new_id, f));
                 }
             }
             let t = aot.get_mut(i).unwrap();

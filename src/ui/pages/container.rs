@@ -163,7 +163,7 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
                     a.btn href={(base) "/logs"} { (ic("logs")) "Logs" }
                     @if let Some(u) = &card.metrics_url { a.btn href=(u) target="_blank" rel="noopener noreferrer" title="Open this host in Beszel" { (ic("activity")) "Beszel" } }
                     @if ctx.user.is_some() {
-                        a.btn.primary href={"/settings/containers?name=" (url_encode(name))} { (ic("edit")) "Customize" }
+                        a.btn.primary href={"/settings/containers?edit=override:" (url_encode(name))} { (ic("edit")) "Customize" }
                     }
                 }
             }

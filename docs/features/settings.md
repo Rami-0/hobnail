@@ -25,22 +25,27 @@ atomically (temp file + rename, same mode) → add a revision → record a
   the browser checks required fields, links, numbers and lengths first and
   shows every problem at once.
 
-**Forms** (the ux-pass dialog, DESIGN.md §11.6; Bookmarks, Widgets and
-Notifications so far, the other tabs follow):
+**Forms** (the ux-pass dialog, DESIGN.md §11.6), the same on every tab:
 
 - Add and edit open in a dialog from the row or button you clicked; the URL
   says which (`?add=bookmark`, `?edit=bookmark:2`, `?edit=channel:ops-hook`,
-  `?edit=rule:disk-full`, `?edit=widget:mailpit`), so a reload or a link opens
-  the same dialog. Esc, ×, Cancel or the backdrop close it, and ask first when
+  `?edit=rule:disk-full`, `?edit=widget:mailpit`, `?add=exclude`,
+  `?edit=group:media`, `?edit=override:grafana`), so a reload or a link opens
+  the same dialog. Customize on a container page opens its override dialog
+  (`?name=<container>` still works). Esc, ×, Cancel or the backdrop close it, and ask first when
   something was typed. Enter saves; the button shows progress; the list behind
   updates in place and the changed row flashes.
-- Lists and their values are rendered by the server, for a session only.
-  `GET /settings/<tab>?frag=list` serves the list again for those updates (401
-  without a session). Signed out nothing of it is in the page.
+- Lists and form values are rendered by the server, for a session only.
+  `GET /settings/<tab>?frag=list` serves the lists again for those updates
+  (Bookmarks, Widgets, Notifications, Containers and groups; the database
+  figures on History and data; the revisions on Config file; 401 without a
+  session). Signed out nothing of it is in the page.
+- No staged lists: every add, edit and delete saves when confirmed, also for
+  Hidden containers and Groups (each with Undo where it deletes).
 - Delete asks in one confirm dialog; the message after it has **Undo**, which
   restores the revision from before the delete (refused if the file changed
   since). Up / down arrows (bookmarks, widgets) move an entry one step, one
-  revision per step. A channel or widget that alert rules still use is not
+  revision per step (bookmarks, widgets and groups). A channel or widget that alert rules still use is not
   offered for deleting: the message names the rules.
 - An edit sends only the fields you changed; the server keeps every key the
   request leaves out (`null` removes one). A save therefore never removes
@@ -49,8 +54,15 @@ Notifications so far, the other tabs follow):
 - Channel names and widget ids stay editable. Renaming one that rules refer
   to asks first, naming the rules; saving again renames it and changes those
   rules to match (one revision).
-- A setting that is one switch saves when switched: a rule's on / off in its
-  row, System tiles.
+- A setting that is one control saves when changed: a rule's on / off in its
+  row, System tiles, the default theme, Recording on / off.
+- Settings with several fields that stay on the page (General, Sample
+  interval, custom.css, the raw editor, Change password) use the same submit
+  path: every error at once on its field, a busy Save, only the changed
+  fields sent, "No changes" when nothing changed, and a conflict note in the
+  form with "Reload and keep my input" (which goes on only when nothing the
+  form shows changed in the file; otherwise copy your input and load the
+  current values).
 - Every dialog, confirm and arrow click saves against the file version it
   was started from; nothing is refreshed under an open dialog. If the file
   changed meanwhile the save is refused and the dialog says so, with "Reload
@@ -84,8 +96,32 @@ Notifications so far, the other tabs follow):
 4. Pasted secret-looking values (Slack/Discord webhook URLs, Telegram tokens)
    produce a warning that names the line, never the value.
 
-Appearance writes `data/custom.css` (atomic, 64 KiB max, event recorded, no
-revision). History and data can export a snapshot and clear samples and events.
-Security: change password (signs out every session; all problems shown at
-once, a wrong current password on its field, passwords never trimmed), sign out
-other sessions, recent logins.
+**Tabs:**
+
+- *General:* Title, Greeting, Search URL (an http(s) link with `{q}`), Show
+  stopped containers, Show live CPU and memory. Theme is set under Appearance;
+  Columns and Layout are no longer offered. Existing `columns`, `layout` and
+  `theme` keys in `[page]` (and `columns` / `layout` in `[[groups]]`) stay in
+  the file untouched and are still accepted (see configuration.md for what
+  they still do). A new title shows in the sidebar and tab at once.
+- *Containers and groups:* Hidden containers (one pattern per row, how many
+  containers it hides now, a live "matches" line in the dialog), Groups
+  (Name, Title, Icon, Collapsed, Hidden; one-click up / down), and every
+  container with its override dialog (Display name, Group, Icon, URL,
+  Description, Hide, Order, Card size; "Remove overrides…" asks and offers
+  Undo). Search and "Only with overrides" filter the list; the bulk bar (Set
+  group, Hide, Show, Remove overrides…) stays in view and each action is one
+  revision with Undo.
+- *Appearance:* Default theme (saves when changed) and `data/custom.css`
+  (atomic, 64 KiB max, event recorded, no revision; live preview). When the
+  saved custom.css sets a retired token name (`--ctl`, `--border-2`,
+  `--accent-bg`, `--glow`, `--pop`, `--fs-label`, or `--border` without
+  `--line`) a note names the token to set instead.
+- *History and data:* Recording on / off (saves when switched), Sample
+  interval, the database figures, export, and Clear history, which asks in
+  the confirm dialog with the phrase "clear history" typed.
+- *Config file:* the raw editor (Ctrl+S saves), the latest 25 revisions
+  (`?revs=all` for all), View and Diff in a dialog, Restore after a confirm.
+- *Security:* change password (signs out every session; all problems shown at
+  once, a wrong current password on its field, passwords never trimmed), sign
+  out other sessions (asks first), recent logins.

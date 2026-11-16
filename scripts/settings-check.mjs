@@ -1,9 +1,16 @@
-// Settings dialog check (DESIGN.md §11.6, wave 2): drives the real
-// Bookmarks, Notifications (channels and rules) and Widgets lists and their
-// dialogs on a running test instance, signed in, and the Change password
-// form, with real key and pointer events. It adds, edits, moves and deletes
-// entries named "ui-check-*" and puts the config file back byte for byte at
-// the end, also when a check fails. Signs in once (the login is rate
+// Settings form check (DESIGN.md §11.6, wave 2): drives every Settings form
+// on a running test instance, signed in, with real key and pointer events:
+// the Bookmarks, Notifications and Widgets lists and their dialogs; Hidden
+// containers, Groups, container overrides and the bulk bar; General;
+// Appearance (default theme, custom.css); History and data (Recording,
+// Sample interval, Clear history up to the confirm: that one request is
+// answered by the page, so the instance's history survives); Config file
+// (raw editor, revision viewer, Restore); Change password and Sign out
+// other sessions (up to the confirm). Each form gets a no-change round trip
+// and, where a dialog, confirm, switch or arrow starts a write, an outside
+// write meanwhile (the base-hash rule). It adds, edits, moves and deletes
+// entries named "ui-check-*" and puts the config file and custom.css back
+// byte for byte at the end, also when a check fails. Signs in once (the login is rate
 // limited: never run it in a loop with a wrong password). Channel tests go
 // to a mock receiver only (scripts/mock-receiver): MOCK_RECEIVER is its
 // address from here, MOCK_FROM_APP its address from the instance. With
@@ -52,11 +59,14 @@ const initial = (await bookmarks()).bookmarks.map((b) => b.item.name);
 // The file as it was: put back byte for byte at the end (a raw save of the
 // same text), so the run leaves the config at its starting hash.
 const start = (await api("GET", "config")).data;
+const startCss = (await api("GET", "appearance")).data;
 async function restore() {
   await cleanup();
   const now = (await api("GET", "config")).data;
   if (now.hash !== start.hash) await api("POST", "config", { base_hash: now.hash, text: start.text });
-  return (await api("GET", "config")).data.hash === start.hash;
+  const css = (await api("GET", "appearance")).data;
+  if (css.hash !== startCss.hash) await api("POST", "appearance", { base_hash: css.hash, css: startCss.css });
+  return (await api("GET", "config")).data.hash === start.hash && (await api("GET", "appearance")).data.hash === startCss.hash;
 }
 // Outside writes (another tab, a hand edit), by name: never by position.
 const idOf = (d, name) => d.bookmarks.find((b) => b.item.name === name).id;
@@ -89,7 +99,7 @@ ws.addEventListener("message", (m) => {
   if (d.method === "Page.javascriptDialogOpening") { errors.push(`unexpected ${d.params.type} prompt`); ws.send(JSON.stringify({ id: ++id, method: "Page.handleJavaScriptDialog", params: { accept: true } })); }
 });
 // A run that hangs still puts the config back.
-setTimeout(async () => { console.log("FAIL the run timed out"); await restore().catch(() => {}); ch.kill(); process.exit(1); }, 300000).unref();
+setTimeout(async () => { console.log("FAIL the run timed out"); await restore().catch(() => {}); ch.kill(); process.exit(1); }, 600000).unref();
 const send = (method, params = {}) => new Promise((r) => { const n = ++id; pending.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
 const ev = async (expression) => {
   const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
@@ -268,7 +278,7 @@ try {
   await api("POST", "bookmarks", { base_hash: d.hash, action: "add", item: { name: "ui-check-later", url: "https://ui-check.example/later" } });
   await ev("[...document.querySelectorAll('body>.toasts>.toast')].find((t) => /Deleted “ui-check-ext”/.test(t.textContent)).querySelector('button').click()");
   await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Not undone/.test(t.textContent))");
-  check((await toasts()).some((x) => /^Not undone: the config file changed since the delete/.test(x)), "Undo is refused when the file changed since", await toasts());
+  check((await toasts()).some((x) => /^Not undone: the config file changed since/.test(x)), "Undo is refused when the file changed since", await toasts());
 
   // ---- the base-hash rule: nothing writes to another bookmark ----
   for (const n of ["x1", "x2", "x3"]) await outside("add", null, { name: `ui-check-${n}`, url: `https://ui-check.example/${n}` });
@@ -791,12 +801,318 @@ try {
     }
   }
 
+  {
+  // ======================================================================
+  // Wave 2c: Containers and groups, General, Appearance, History and data,
+  // Config file, Security. Every form: values rendered by the server, all
+  // errors at once, a no-change round trip ("No changes", file hash
+  // unchanged), and the base-hash rule where a dialog, confirm, switch or
+  // arrow starts a write (an outside write meanwhile gives a 409, never a
+  // write onto a moved file).
+  // ======================================================================
+  const fileHash = async () => (await api("GET", "config")).data.hash;
+  const fileText = async () => (await api("GET", "config")).data.text;
+  // An outside change that moves the file but no value (a hand edit).
+  let outsideN = 0;
+  async function outsideTouch() {
+    const c = (await api("GET", "config")).data;
+    const r = await api("POST", "config", { base_hash: c.hash, text: c.text + `\n# ui-check outside ${++outsideN}\n` });
+    if (r.status !== 200) throw new Error(`outside touch: HTTP ${r.status} ${JSON.stringify(r.data)}`);
+  }
+  const hold = (on) => ev(on ? "(() => { if (!window.__held) { const f = window.fetch; window.fetch = (u, o) => (window.__hold && o && o.method === 'POST' ? new Promise((r) => setTimeout(r, 900)).then(() => f(u, o)) : f(u, o)); window.__held = true; } window.__hold = true; })()" : "window.__hold = false");
+  const clearToasts = () => ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  const lastToast = async () => (await toasts()).at(-1) || "";
+  const noteOf = (sel) => ev(`(document.querySelector(${JSON.stringify(sel)} + ' .dlg-note') || {}).textContent || ''`);
+  async function ctrlS() {
+    const b = { key: "s", code: "KeyS", windowsVirtualKeyCode: 83, nativeVirtualKeyCode: 83, modifiers: 2 };
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...b });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", ...b });
+    await sleep(80);
+  }
+  const rowKey = (list, text) => ev(`(() => { const r = [...document.querySelectorAll('#${list} tr[data-key]')].find((r) => r.querySelector('[data-item]').textContent.trim() === ${JSON.stringify(text)}); return r ? r.dataset.key : null; })()`);
+  const openRow = async (list, key) => { await ev(`document.querySelector('#${list} tr[data-key="${key}"] [data-dlg]').click()`); await sleep(250); };
+  const menuDelete = async (list, key, menu) => {
+    await click(`#${list} tr[data-key="${key}"] [data-menu]`); await sleep(150);
+    await click(`#${menu} [data-row-act=delete]`); await sleep(200);
+  };
+  const confirmOpen = () => isOpen("dlg-confirm");
+
+  // ---- Containers and groups ----
+  await load("/settings/containers");
+  check(await ev("document.querySelectorAll('#set-main [type=submit]').length === 0 && !document.querySelector('#f-exclude,#f-groups,#f-override,#ex-new,#grp-new')"), "containers: no staged list, no inline editor, no Save outside a dialog");
+  // Hidden containers: add saves at once, live match line, duplicate on the field.
+  let h0 = await fileHash();
+  await click("#ex-add");
+  check(await isOpen("dlg-exclude") && (await active()) === "ex-pattern" && await ev("location.search === '?add=exclude'"), "pattern: Add opens the dialog on Pattern, ?add=exclude");
+  await key("Enter"); await sleep(100);
+  check(await ev("document.getElementById('ex-pattern-e').textContent") === "Required.", "pattern: empty is Required on the field");
+  await typeText("ui-check-*");
+  check(/Matches no container now/.test(await ev("document.getElementById('ex-match').textContent")), "pattern: a live line says what it matches", await ev("document.getElementById('ex-match').textContent"));
+  await key("Enter");
+  await until("!document.getElementById('dlg-exclude').open"); await sleep(300);
+  check((await fileText()).includes('"ui-check-*"'), "pattern: Add writes at once (no separate Save)");
+  check((await toasts()).some((x) => /^Added “ui-check-\*” · revision #\d+/.test(x)), "pattern: toast says what happened", await toasts());
+  check(await ev("document.activeElement.id") === "ex-add", "pattern: focus back on Add pattern", await active());
+  await click("#ex-add"); await typeText("ui-check-*"); await key("Enter");
+  await until("document.getElementById('ex-pattern-e').textContent !== ''");
+  check(await ev("document.getElementById('ex-pattern-e').textContent") === "This pattern is already in the list.", "pattern: a duplicate is refused on the field");
+  await key("Escape");
+  check(await ev("!document.querySelector('#dlg-exclude .dlg-guard').hidden"), "pattern: Esc with input asks first");
+  await click("#dlg-exclude [data-discard]"); await sleep(200);
+  // No-change round trip and the 409 retarget on an edit.
+  let kk = await rowKey("ex-list", "ui-check-*");
+  h0 = await fileHash(); await clearToasts();
+  await openRow("ex-list", kk); await key("Enter");
+  await until("!document.getElementById('dlg-exclude').open"); await sleep(200);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "pattern: saving unchanged writes nothing and says No changes");
+  await openRow("ex-list", kk);
+  await clear("#ex-pattern"); await typeText("ui-check-x*");
+  await outsideTouch();
+  await key("Enter"); await until(`!document.querySelector('#dlg-exclude .dlg-note').hidden`);
+  check(/changed on disk/.test(await noteOf("#dlg-exclude")), "pattern: an outside write meanwhile is a 409 in the dialog");
+  await click("#dlg-exclude .dlg-note .btn.primary"); await sleep(400);
+  check(/Save again/.test(await noteOf("#dlg-exclude")), "pattern: Reload and keep my input re-finds the same pattern");
+  await key("Enter"); await until("!document.getElementById('dlg-exclude').open"); await sleep(300);
+  check((await fileText()).includes('"ui-check-x*"') && !(await fileText()).includes('"ui-check-*"'), "pattern: the edit lands on the same pattern");
+  // Delete: the one confirm, then Undo; a delete whose file moved is refused.
+  kk = await rowKey("ex-list", "ui-check-x*");
+  await menuDelete("ex-list", kk, "m-ex");
+  check(await confirmOpen() && /ui-check-x\*/.test(await ev("document.getElementById('dlg-cf-t').textContent")), "pattern: delete asks with HB.confirm (no native confirm)");
+  await outsideTouch();
+  await click("#dlg-confirm [data-ok]"); await sleep(500);
+  check((await toasts()).some((x) => /^Not deleted: the config file changed/.test(x)) && (await fileText()).includes('"ui-check-x*"'), "pattern: a confirm based on a moved file deletes nothing", await toasts());
+  await clearToasts();
+  kk = await rowKey("ex-list", "ui-check-x*");
+  await menuDelete("ex-list", kk, "m-ex"); await click("#dlg-confirm [data-ok]"); await sleep(600);
+  check(!(await fileText()).includes('"ui-check-x*"') && (await toasts()).some((x) => /^Removed the pattern/.test(x)), "pattern: delete after the confirm", await toasts());
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].at(-1).querySelector('button.btn.sm.ghost:not(.icon)').click()"); await sleep(700);
+  check((await fileText()).includes('"ui-check-x*"') && !!(await rowKey("ex-list", "ui-check-x*")), "pattern: Undo brings it back", await toasts());
+
+  // Groups: add with a switch, edit, no change, one-click arrows, delete.
+  await click("#grp-add");
+  check(await isOpen("dlg-group") && (await active()) === "gr-name", "group: Add opens the dialog on Name");
+  check(await ev("!document.querySelector('#dlg-group [name=columns], #dlg-group [name=layout]')"), "group: no Columns or Layout (§11.12)");
+  await typeText("ui-check-g"); await click("#gr-title"); await typeText("UI check"); await click("#gr-collapsed"); await key("Enter");
+  await until("!document.getElementById('dlg-group').open"); await sleep(300);
+  let t = await fileText();
+  check(/name = "ui-check-g"\ntitle = "UI check"\ncollapsed = true/.test(t), "group: Add writes name, title and collapsed at once", t.slice(-120));
+  kk = "group:ui-check-g"; h0 = await fileHash(); await clearToasts();
+  await openRow("grp-list", kk); await key("Enter"); await until("!document.getElementById('dlg-group').open"); await sleep(200);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "group: saving unchanged writes nothing and says No changes");
+  await openRow("grp-list", kk); await clear("#gr-title"); await typeText("UI check 2"); await key("Enter");
+  await until("!document.getElementById('dlg-group').open"); await sleep(300);
+  check((await fileText()).includes('title = "UI check 2"') && await ev("document.activeElement.dataset.key") === kk, "group: edit saves in place, focus back on the row");
+  const order = async () => (await fileText()).split("\n").filter((l) => /^name = /.test(l)).join("|");
+  const before = await order();
+  await click(`#grp-list tr[data-key="${kk}"] [data-move=up]`); await sleep(700);
+  check((await order()) !== before && (await toasts()).some((x) => /^Moved “ui-check-g” up/.test(x)), "group: one click on ↑ saves the new order", await toasts());
+  // Arrow: the base is taken at the click; an outside write while it is sent is a 409.
+  const o2 = await order();
+  await hold(true); await click(`#grp-list tr[data-key="${kk}"] [data-move=down]`); await outsideTouch(); await sleep(1300); await hold(false);
+  check((await order()) === o2 && (await toasts()).some((x) => /^Not moved/.test(x)), "group: an arrow based on a moved file moves nothing", await toasts());
+  await menuDelete("grp-list", kk, "m-grp"); await click("#dlg-confirm [data-ok]"); await sleep(600);
+  check(!(await fileText()).includes("ui-check-g"), "group: delete after the confirm");
+
+  // Container overrides: the dialog with all eight fields, errors, save,
+  // Remove overrides with the confirm and Undo; ?name= opens the dialog.
+  const free = await ev("(() => { const r = [...document.querySelectorAll('#ov-list tr[data-key]')].find((r) => !r.dataset.ov); return r ? r.dataset.key : null; })()");
+  const has = await ev("(() => { const r = [...document.querySelectorAll('#ov-list tr[data-key]')].find((r) => r.dataset.ov); return r ? r.dataset.key : null; })()");
+  check(!!free && !!has, "overrides: rows rendered by the server, with and without overrides");
+  const cname = free.slice("override:".length);
+  await openRow("ov-list", free);
+  check(await isOpen("dlg-override") && await ev("[...new Set([...document.querySelectorAll('#dlg-override [name]')].map((c) => c.name))].join()") === "name,group,icon,url,description,hide,order,size", "override: one dialog with today's eight fields");
+  check(await ev("document.querySelector('#dlg-override [data-act=dlg-delete]').hidden"), "override: no Remove for a container without overrides");
+  await typeText("ui-check name"); await click("#ov-url"); await typeText("not a url"); await click("#ov-order"); await typeText("1.5"); await key("Enter"); await sleep(100);
+  const oe = await ev("[...document.querySelectorAll('#dlg-override .fld-err:not([hidden])')].map((e) => e.textContent)");
+  check(oe.length === 2 && oe.some((x) => /^Use a whole number/.test(x)) && oe.includes("Use a link that starts with http:// or https://."), "override: URL and Order errors at once, on their fields", oe);
+  await clear("#ov-url"); await clear("#ov-order"); await typeText("2"); await key("Enter");
+  await until("!document.getElementById('dlg-override').open"); await sleep(300);
+  t = await fileText();
+  check(t.includes(`name = "ui-check name"\norder = 2`), "override: only the changed fields are written", t.slice(-160));
+  h0 = await fileHash(); await clearToasts();
+  await openRow("ov-list", free); await key("Enter"); await until("!document.getElementById('dlg-override').open"); await sleep(200);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "override: saving unchanged writes nothing and says No changes");
+  await openRow("ov-list", has); await key("Enter"); await until("!document.getElementById('dlg-override').open"); await sleep(200);
+  check((await fileHash()) === h0, "override: an override from the file saves unchanged byte for byte");
+  await openRow("ov-list", free);
+  check(await ev("!document.querySelector('#dlg-override [data-act=dlg-delete]').hidden"), "override: Remove overrides… once there are some");
+  await click("#dlg-override [data-act=dlg-delete]"); await sleep(200);
+  check(await confirmOpen(), "override: Remove overrides asks with HB.confirm");
+  await click("#dlg-confirm [data-ok]"); await sleep(700);
+  check(!(await fileText()).includes("ui-check name") && (await toasts()).some((x) => /^Removed the overrides of/.test(x)), "override: removed after the confirm, with a toast", await toasts());
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].at(-1).querySelector('button.btn.sm.ghost:not(.icon)').click()"); await sleep(700);
+  check((await fileText()).includes("ui-check name"), "override: Undo brings them back");
+  await load(`/settings/containers?name=${encodeURIComponent(cname)}`); await sleep(300);
+  check(await isOpen("dlg-override") && await ev("document.getElementById('ov-name').value") === "ui-check name" && await ev("location.search.startsWith('?edit=override')"), "override: the container page's ?name= link opens the dialog");
+  await key("Escape"); await sleep(200);
+  // Bulk bar: in view, Set group with Undo, Remove asks, base taken at the click.
+  await click(`#ov-list tr[data-key="${free}"] [data-sel]`);
+  check(await ev("!document.getElementById('ov-bulk').hidden && document.getElementById('ov-bulk-n').textContent === '1 selected' && getComputedStyle(document.getElementById('ov-bulk')).position === 'sticky'"), "bulk: the bar appears with the count and stays in view");
+  h0 = await fileHash();
+  await click("#ov-bulk-group"); await typeText("ui-check-bulk"); await click("[data-bulk=group]"); await sleep(700);
+  check((await fileText()).includes('group = "ui-check-bulk"') && (await toasts()).some((x) => /^Moved 1 container/.test(x)), "bulk: Set group writes, with a toast", await toasts());
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].at(-1).querySelector('button.btn.sm.ghost:not(.icon)').click()"); await sleep(700);
+  check((await fileHash()) === h0, "bulk: Undo puts the file back as it was");
+  await click("[data-bulk=remove]"); await sleep(200);
+  check(await confirmOpen(), "bulk: Remove overrides asks with HB.confirm");
+  await click("#dlg-confirm [data-cancel]"); await sleep(200);
+  check((await fileHash()) === h0, "bulk: Cancel writes nothing");
+  await hold(true); await click("[data-bulk=hide]"); await outsideTouch(); await sleep(1300); await hold(false);
+  check((await toasts()).some((x) => /^Not changed: the config file changed/.test(x)) && !(await fileText()).includes("hide = true"), "bulk: an action based on a moved file writes nothing", await toasts());
+
+  // ---- General ----
+  await load("/settings/general");
+  const page0 = (await api("GET", "general")).data.page || {};
+  check(await ev("document.getElementById('gen-greeting').value") === (page0.greeting || "") && await ev("!document.querySelector('#f-general [name=columns],#f-general [name=layout],#f-general [name=theme]')"), "general: values from the file; no Theme, Columns or Layout");
+  h0 = await fileHash(); await clearToasts();
+  await click("#f-general [type=submit]"); await sleep(300);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "general: saving unchanged writes nothing and says No changes");
+  await ev("document.getElementById('gen-title').value = 'x'.repeat(81)");
+  await clear("#gen-search-url"); await typeText("https://search.example/?q="); await key("Enter"); await sleep(150);
+  const ge = await ev("[...document.querySelectorAll('#f-general .fld-err:not([hidden])')].map((e) => e.textContent)");
+  check(ge.length === 2 && ge.includes("At most 80 characters.") && ge.includes("Put {q} where the search words go."), "general: errors at once, on their fields", ge);
+  await clear("#gen-title"); await typeText("ui-check-title");
+  await clear("#gen-search-url"); await typeText(page0.search_url || "https://duckduckgo.com/?q={q}");
+  const tBefore = await fileText();
+  await hold(true); await key("Enter");
+  check(await ev("document.querySelector('#f-general [type=submit]').getAttribute('aria-busy')") === "true" && await ev("document.querySelector('#f-general [data-hb-body]').inert"), "general: Save is busy and the form inert while saving");
+  await until("document.querySelector('#f-general [type=submit]').getAttribute('aria-busy') !== 'true'", 3000); await hold(false); await sleep(200);
+  const tAfter = await fileText();
+  const gone = tBefore.split("\n").filter((l) => !tAfter.split("\n").includes(l)), added = tAfter.split("\n").filter((l) => !tBefore.split("\n").includes(l));
+  check(gone.length <= 1 && added.length === 1 && added[0] === 'title = "ui-check-title"', "general: only the changed field is written", { gone, added });
+  check(await ev("document.querySelector('.brand-site').textContent") === "ui-check-title" && await ev("document.title.includes('ui-check-title')"), "general: the sidebar and the tab title follow");
+  await clear("#gen-greeting"); await typeText("ui-check greet");
+  await outsideTouch(); await key("Enter");
+  await until("!document.querySelector('#f-general .dlg-note').hidden");
+  check(/changed on disk/.test(await noteOf("#f-general")), "general: an outside write is a 409 note in the form, input kept");
+  await click("#f-general .dlg-note .btn.primary"); await sleep(500);
+  check(/Save again/.test(await noteOf("#f-general")), "general: Reload and keep my input moves on (nothing it shows changed)");
+  await key("Enter"); await sleep(600);
+  check((await fileText()).includes('greeting = "ui-check greet"'), "general: saved on top of the new file");
+
+  // ---- Appearance ----
+  await load("/settings/appearance");
+  const css0 = (await api("GET", "appearance")).data;
+  check(await ev("document.getElementById('css-text').value") === css0.css, "appearance: custom.css rendered exactly as saved");
+  await ev("(() => { const s = document.getElementById('th-theme'); s.value = 'light'; s.dispatchEvent(new Event('change', { bubbles: true })); })()"); await sleep(600);
+  check((await fileText()).includes('theme = "light"') && (await toasts()).some((x) => /^Default theme: Light/.test(x)), "appearance: the default theme saves when changed", await toasts());
+  await hold(true);
+  await ev("(() => { const s = document.getElementById('th-theme'); s.value = 'dark'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  await outsideTouch(); await sleep(1300); await hold(false); await sleep(300);
+  check(!(await fileText()).includes('theme = "dark"') && (await toasts()).some((x) => /^Not changed/.test(x)) && await ev("document.getElementById('th-theme').value") === "light", "appearance: a theme change based on a moved file writes nothing and goes back", await toasts());
+  await ev("(() => { const s = document.getElementById('th-theme'); s.value = ''; s.dispatchEvent(new Event('change', { bubbles: true })); })()"); await sleep(600);
+  check(!(await fileText()).includes("theme ="), "appearance: Default removes the key");
+  await clearToasts();
+  await click("#f-css [type=submit]"); await sleep(300);
+  check((await toasts()).includes("No changes") && (await api("GET", "appearance")).data.hash === css0.hash, "appearance: custom.css saved unchanged: No changes, nothing written");
+  await click("#css-text"); await ev("(() => { const t = document.getElementById('css-text'); t.setSelectionRange(t.value.length, t.value.length); })()");
+  await typeText("\n:root { --ctl: #8a8a8a }\n"); await click("#f-css [type=submit]"); await sleep(600);
+  check(/--ctl-border/.test(await ev("document.getElementById('css-warn').textContent")) && (await toasts()).some((x) => /^Saved custom\.css/.test(x)), "appearance: a retired token name gets the warning with the new name", await ev("document.getElementById('css-warn').textContent"));
+  await typeText("/* more */");
+  const cnow = (await api("GET", "appearance")).data;
+  await api("POST", "appearance", { base_hash: cnow.hash, css: cnow.css + "/* outside */" });
+  await click("#f-css [type=submit]"); await until("!document.querySelector('#f-css .dlg-note').hidden");
+  await click("#f-css .dlg-note .btn.primary"); await sleep(500);
+  check(await ev("document.querySelector('#f-css [type=submit]').disabled") && /cannot be saved/.test(await noteOf("#f-css")), "appearance: custom.css changed elsewhere: Save stays off, input kept");
+  await click("#f-css .dlg-note .btn.primary"); await sleep(500);
+  check(await ev("!document.querySelector('#f-css [type=submit]').disabled && document.getElementById('css-text').value.endsWith('/* outside */')"), "appearance: Discard loads the current custom.css");
+
+  // ---- History and data ----
+  await load("/settings/history");
+  await click("#hi-enabled"); await sleep(600);
+  check((await fileText()).includes("enabled = false") && (await toasts()).some((x) => /^Recording off/.test(x)), "history: Recording saves when switched", await toasts());
+  await click("#hi-sample-interval"); await ev("document.getElementById('hi-sample-interval').select()"); await typeText("abc"); await key("Enter"); await sleep(150);
+  check(await ev("document.getElementById('hi-sample-interval-e').textContent") === "Use a duration like 30s, 5m or 2h.", "history: a bad interval is caught on the field with the unit hint");
+  await ev("document.getElementById('hi-sample-interval').select()"); await typeText("1s"); await key("Enter");
+  await until("document.getElementById('hi-sample-interval-e').textContent !== ''");
+  check(await ev("document.getElementById('hi-sample-interval-e').textContent") === "Use a value from 5s to 5m.", "history: the server's range error lands on the field");
+  await ev("document.getElementById('hi-sample-interval').select()"); await typeText("20s"); await key("Enter"); await sleep(600);
+  check((await fileText()).includes('sample_interval = "20s"'), "history: the interval saves after the switch wrote (no 409 for the page's own save)");
+  h0 = await fileHash(); await clearToasts();
+  await click("#f-history [type=submit]"); await sleep(300);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "history: saving unchanged writes nothing and says No changes");
+  // Clear history: confirm with the typed phrase; the final request is
+  // answered by the page (mocked), so the dev history survives.
+  const rows0 = (await api("GET", "history")).data.db.event_rows;
+  await ev("(() => { const f = window.fetch; window.fetch = (u, o) => (String(u).endsWith('/history/clear') ? Promise.resolve(new Response('{\"ok\":true}', { status: 200, headers: { 'Content-Type': 'application/json' } })) : f(u, o)); })()");
+  await click("#clr-btn"); await sleep(200);
+  check(await confirmOpen() && await ev("!document.querySelector('#dlg-confirm [data-typed]').hidden && document.querySelector('#dlg-confirm [data-ok]').disabled"), "history: Clear history asks with the typed phrase; OK is off until typed");
+  await typeText("Clear History");
+  check(await ev("!document.querySelector('#dlg-confirm [data-ok]').disabled"), "history: the phrase enables OK");
+  await click("#dlg-confirm [data-ok]"); await sleep(500);
+  check((await toasts()).some((x) => /^History cleared/.test(x)), "history: the (mocked) clear reports in a toast", await toasts());
+  check((await api("GET", "history")).data.db.event_rows >= rows0, "history: the dev history is untouched");
+
+  // ---- Config file ----
+  await load("/settings/config");
+  check(await ev("document.getElementById('raw-text').value") === (await fileText()), "config: the editor holds the file exactly");
+  h0 = await fileHash(); await clearToasts();
+  await click("#raw-text"); await ctrlS(); await sleep(300);
+  check((await toasts()).includes("No changes") && (await fileHash()) === h0, "config: Ctrl+S unchanged: No changes, nothing written");
+  check(await ev("document.activeElement.id") === "raw-text", "config: after Ctrl+S the caret is back in the editor", await active());
+  await ev("(() => { const t = document.getElementById('raw-text'); t.setSelectionRange(t.value.length, t.value.length); })()");
+  await typeText("# ui-check raw\n"); await ctrlS(); await sleep(800);
+  const rawSaved = { end: (await fileText()).slice(-40), toast: (await toasts()).some((x) => /^Saved config\.toml · revision #\d+/.test(x)), status: await ev("document.getElementById('raw-status').textContent") };
+  check(rawSaved.end.endsWith("# ui-check raw\n") && rawSaved.toast && /Valid/.test(rawSaved.status), "config: Ctrl+S saves, the status line stays", rawSaved);
+  check(/raw edit/.test(await ev("document.querySelector('#rev-list tr[data-rev]').textContent")), "config: the new revision is listed at once");
+  await click("#rev-list tr[data-rev] [data-rev-act=view]"); await sleep(500);
+  check(await isOpen("dlg-rev") && /ui-check raw/.test(await ev("document.getElementById('dlg-rev-b').textContent")), "config: View opens the revision in a dialog");
+  await key("Escape"); await sleep(200);
+  check(!(await isOpen("dlg-rev")), "config: Esc closes the revision viewer (SET-03)");
+  await click("#rev-list tr[data-rev]:nth-child(2) [data-rev-act=diff]"); await sleep(500);
+  check(await isOpen("dlg-rev") && /ui-check raw/.test(await ev("document.getElementById('dlg-rev-b').textContent")), "config: Diff opens in the dialog");
+  await key("Escape"); await sleep(200);
+  await click("#rev-list tr[data-rev]:nth-child(2) [data-rev-act=restore]"); await sleep(200);
+  check(await confirmOpen(), "config: Restore asks with HB.confirm");
+  await outsideTouch();
+  await click("#dlg-confirm [data-ok]"); await sleep(600);
+  check((await toasts()).some((x) => /^Not restored/.test(x)), "config: a restore based on a moved file writes nothing", await toasts());
+  await ev("(() => { const t = document.getElementById('raw-text'); t.setSelectionRange(0, 0); })()");
+  await typeText("# ui-check stale\n"); await outsideTouch(); await ctrlS();
+  await until("!document.querySelector('#f-raw .dlg-note').hidden");
+  await click("#f-raw .dlg-note .btn.primary"); await sleep(500);
+  check(await ev("document.querySelector('#f-raw [type=submit]').disabled") && await ev("document.getElementById('raw-text').value.startsWith('# ui-check stale')"), "config: changed elsewhere: Save stays off, the text stays");
+  await click("#f-raw .dlg-note .btn.primary"); await sleep(500);
+  check(await ev("document.getElementById('raw-text').value") === (await fileText()) && await ev("!document.querySelector('#f-raw [type=submit]').disabled"), "config: Discard loads the current file");
+
+  // ---- Security: sign out others asks first ----
+  await load("/settings/security");
+  await click("[data-act=sign-out-others]"); await sleep(200);
+  check(await confirmOpen(), "security: Sign out other sessions asks with HB.confirm");
+  await click("#dlg-confirm [data-cancel]"); await sleep(150);
+
+  // ---- without JavaScript: the converted tabs show their values ----
+  await send("Emulation.setScriptExecutionDisabled", { value: true });
+  for (const [path, expr] of [
+    ["/settings/general", "document.getElementById('gen-title').value === 'ui-check-title' && document.querySelector('#f-general [type=submit]').disabled"],
+    [`/settings/containers?edit=override:${encodeURIComponent(cname)}`, "document.querySelector('.dlg-page [name=name]').value === 'ui-check name' && document.querySelector('.dlg-page [type=submit]').disabled"],
+    ["/settings/history", "document.getElementById('hi-sample-interval').value === '20s' && document.getElementById('hi-enabled').disabled"],
+    ["/settings/config", "document.getElementById('raw-text').value.length > 100 && document.querySelector('#f-raw [type=submit]').disabled"],
+    ["/settings/appearance", "document.getElementById('css-text').value.includes('--ctl') && document.getElementById('th-theme').disabled"],
+  ]) {
+    await load(path);
+    check(await ev(`(${expr}) && /Saving needs JavaScript/.test(document.body.textContent) && getComputedStyle(document.querySelector('.needs-js')).display !== 'none'`).catch(() => false), `no JS: ${path} shows its values, saving off with the reason`);
+  }
+  await send("Emulation.setScriptExecutionDisabled", { value: false });
+
+  // ---- phone: the override dialog is a bottom sheet; 16 px inputs on page forms ----
+  await load("/settings/general", 390, true);
+  const gp = await ev("(() => { const i = document.getElementById('gen-title'); return { fs: Math.round(parseFloat(getComputedStyle(i).fontSize)), h: i.offsetHeight, w: document.documentElement.scrollWidth }; })()");
+  check(gp.fs === 16 && gp.h === 44 && gp.w === 390, "phone: page-form inputs are 16 px and 44 px high, no sideways scroll", gp);
+  await load("/settings/containers", 390, true);
+  await ev(`document.querySelector('#ov-list tr[data-key="${free}"] [data-dlg]').click()`); await sleep(400);
+  const pm = await ev("(() => { const r = document.getElementById('dlg-override').getBoundingClientRect(), s = document.querySelector('#dlg-override [type=submit]').getBoundingClientRect(); return { w: Math.round(r.width), bottom: Math.round(r.bottom), vh: innerHeight, save: Math.round(s.bottom), pw: document.documentElement.scrollWidth }; })()");
+  check(pm.w === 390 && pm.bottom === pm.vh && pm.save <= pm.vh && pm.pw === 390, "phone: the override dialog is a bottom sheet with Save in view", pm);
+  await key("Escape"); await sleep(200);
+  await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  }
+
   check(errors.length === 0, "no script errors on the page", errors);
 } catch (e) {
   check(false, "the run finished", String(e && e.stack || e));
 } finally {
   const back = await restore();
-  check(back, "clean-up: the config file is back at its starting hash");
+  check(back, "clean-up: the config file and custom.css are back at their starting hashes");
   const after = (await bookmarks()).bookmarks.map((b) => b.item.name);
   check(JSON.stringify(after) === JSON.stringify(initial), "clean-up: the bookmarks are as they were", after);
   console.log(fails ? `${fails} check(s) failed` : "all checks passed");

@@ -110,14 +110,19 @@ fn signed_in_tabs_render_editors() {
     for f in [
         "title",
         "greeting",
-        "columns",
-        "layout",
-        "theme",
         "search_url",
         "show_stopped",
         "show_stats",
     ] {
         assert!(html.contains(&format!(r#"name="{f}""#)), "general: {f}");
+    }
+    // Agreed removals (DESIGN.md §11.12): Theme lives in Appearance; Columns
+    // and Layout are gone.
+    for f in ["columns", "layout", "theme"] {
+        assert!(
+            !html.contains(&format!(r#"name="{f}""#)),
+            "general still offers {f}"
+        );
     }
     // Every input, select and textarea has a label (`<label for>`, or an
     // `aria-label` on the control, as the rows of a widget's fields have).
@@ -477,7 +482,7 @@ fn every_settings_form_posts_and_waits_for_the_script() {
             }
         }
     }
-    assert!(forms >= 14, "parser saw {forms} forms");
+    assert!(forms >= 12, "parser saw {forms} forms");
     let (_, html) = get(&st, "/settings/security", &h);
     let f = &html[html.find(r#"id="f-password""#).unwrap()..];
     let f = &f[..f.find("</form>").unwrap()];
@@ -489,9 +494,8 @@ fn every_settings_form_posts_and_waits_for_the_script() {
     );
 }
 
-/// The no-JavaScript note says what is true for each form: values shown
-/// (converted), values that load with the script (not converted yet), or
-/// nothing to show (passwords, the clear-history phrase). Notifications,
+/// The no-JavaScript note says what is true for each form: values shown,
+/// or nothing to show (passwords). Notifications,
 /// whose editors only open with the script, has the note too.
 #[test]
 fn the_no_js_note_tells_the_truth() {
@@ -501,9 +505,19 @@ fn the_no_js_note_tells_the_truth() {
         "this test needs the history database (sessions)"
     );
     let h = signed_in(&st);
-    let (_, html) = get(&st, "/settings/general", &h);
-    assert!(html.contains("The current values load with the script too."));
-    assert!(!html.contains("You can read the values here."));
+    // Every tab is rendered with its values now: nothing says they load
+    // with the script, and each tab with a save says the values are here.
+    for p in paths() {
+        let (_, html) = get(&st, &p, &h);
+        assert!(!html.contains("load with the script"), "{p}");
+        assert!(
+            !html.contains("Loading…"),
+            "{p}: a form that fills after load"
+        );
+        if !matches!(p.as_str(), "/settings" | "/settings/security") {
+            assert!(html.contains("You can read the values here."), "{p}");
+        }
+    }
     let (_, html) = get(&st, "/settings/notifications", &h);
     assert!(html.contains("needs-js") && html.contains("You can read the values here."));
     let (_, html) = get(&st, "/settings/widgets", &h);
@@ -913,4 +927,372 @@ channels = ["tg-env"]
         "no empty required chat id"
     );
     assert!(p.contains("Chat id: read from the variable") && p.contains("RH_TG_CHAT"));
+}
+
+/// A config for the tabs converted in wave 2c, with values easy to look
+/// for. `ctr-mark` has an override but is not running.
+const WAVE2C: &str = r#"# top comment
+[page]
+greeting = "Greet-mark"
+search_url = "https://search.example/mark?q={q}"
+columns = 3
+layout = "list"
+theme = "ember"
+show_stats = false
+
+[docker]
+exclude = ["ex-mark-*", "we?"]
+
+[history]
+sample_interval = "45s"
+enabled = false
+
+[[groups]]
+name = "grp-mark"
+title = "Group-mark"
+collapsed = true
+columns = 2
+
+[containers.ctr-mark]
+name = "Ov-mark"
+group = "grp-mark"
+order = 3
+hide = false
+"#;
+
+fn page_form<'a>(html: &'a str, id: &str) -> &'a str {
+    let f = &html[html
+        .find(&format!(r#"id="{id}""#))
+        .unwrap_or_else(|| panic!("no #{id}"))..];
+    &f[..f.find("</form>").unwrap()]
+}
+
+/// Signed out, the converted tabs carry nothing of the file: no lists, no
+/// form values, no raw text, no revisions, no `data-hash`, no dialog, and
+/// their fragments answer 401 with an empty body.
+#[test]
+fn signed_out_wave2c_tabs_and_fragments_leak_nothing() {
+    let st = state_with(sample(), WAVE2C);
+    std::fs::write(st.env.data_dir.join("custom.css"), "/* css-mark */\n").unwrap();
+    let h = HeaderMap::new();
+    for path in [
+        "/settings/general",
+        "/settings/containers",
+        "/settings/containers?add=exclude",
+        "/settings/containers?edit=exclude:0",
+        "/settings/containers?edit=group:grp-mark",
+        "/settings/containers?edit=override:ctr-mark",
+        "/settings/containers?name=ctr-mark",
+        "/settings/appearance",
+        "/settings/history",
+        "/settings/config",
+        "/settings/security",
+    ] {
+        let (status, html) = get(&st, path, &h);
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(html.contains("set-lock"), "{path}: lock panel");
+        let html: String = html
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    p
+                } else {
+                    &p[p.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect();
+        for leak in [
+            "Greet-mark",
+            "ex-mark-",
+            "grp-mark",
+            "Group-mark",
+            "Ov-mark",
+            "ctr-mark",
+            "45s",
+            "css-mark",
+            "# top comment",
+            "data-hash",
+            "data-item",
+            "data-names",
+            r#"<dialog class="dlg"#,
+            r#"class="dlg-page"#,
+            "f-general",
+            "f-raw",
+            "f-css",
+            "rev-list",
+            "rh-csrf",
+        ] {
+            assert!(!html.contains(leak), "{path}: leaked {leak}");
+        }
+    }
+    for path in [
+        "/settings/containers",
+        "/settings/history",
+        "/settings/config",
+        "/settings/appearance",
+    ] {
+        let (status, body) = frag(&st, path, "frag=list", &h).expect("a fragment request");
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        assert!(body.is_empty(), "{path}: {body}");
+    }
+}
+
+#[test]
+fn containers_and_groups_are_rendered_by_the_server_with_their_dialogs() {
+    let st = state_with(sample(), WAVE2C);
+    assert!(
+        st.db.is_enabled(),
+        "this test needs the history database (sessions)"
+    );
+    let h = signed_in(&st);
+    let sum = crate::settings::read_current(&st).unwrap().hash;
+    let (_, html) = get(&st, "/settings/containers", &h);
+    // No staged list, no inline editor, no Save button outside a dialog.
+    for old in [
+        "f-exclude",
+        "f-groups",
+        "f-override",
+        "ov-edit",
+        "grp-new",
+        "ex-new",
+        "Save groups",
+    ] {
+        assert!(!html.contains(old), "old pattern {old}");
+    }
+    // Hidden containers: one row per pattern, with what it hides now.
+    assert!(html.contains(r#"data-key="exclude:0""#) && html.contains(r#"data-key="exclude:1""#));
+    assert!(
+        html.contains("matches no container now"),
+        "ex-mark-* hides nothing"
+    );
+    assert!(html.contains("hides 1 container now"), "we? hides web");
+    assert!(html.contains(r#"data-item="{&quot;pattern&quot;:&quot;ex-mark-*&quot;}""#));
+    // Groups: the row, its dialog values (no columns / layout), arrows.
+    assert!(html.contains(r#"data-key="group:grp-mark""#));
+    assert!(html.contains(r#"href="?edit=group:grp-mark""#));
+    assert!(html.contains("&quot;collapsed&quot;:true"));
+    assert!(
+        !html.contains("&quot;columns&quot;"),
+        "the group dialog has no columns"
+    );
+    assert!(html.contains(r#"data-move="up""#) && html.contains(r#"data-move="down""#));
+    // Every container: running ones and the override of one that is not.
+    for k in ["override:web", "override:db", "override:ctr-mark"] {
+        assert!(html.contains(&format!(r#"data-key="{k}""#)), "{k}");
+    }
+    assert!(html.contains("not running"));
+    assert!(html.contains("&quot;_c&quot;:&quot;ctr-mark&quot;"));
+    assert!(
+        html.contains("&quot;order&quot;:&quot;3&quot;")
+            && html.contains("&quot;hide&quot;:&quot;false&quot;")
+    );
+    // The three lists carry the file's hash.
+    for id in ["ex-list", "grp-list", "ov-list"] {
+        assert!(
+            html.contains(&format!(r#"id="{id}" data-hash="{sum}""#)),
+            "{id}"
+        );
+    }
+    // The dialogs: the override keeps all eight of today's fields.
+    let d = &html[html.find(r#"id="dlg-override""#).expect("override dialog")..];
+    let d = &d[..d.find("</dialog>").unwrap()];
+    let names: Vec<&str> = d
+        .split(r#" name=""#)
+        .skip(1)
+        .map(|s| &s[..s.find('"').unwrap()])
+        .collect();
+    let mut uniq = names.clone();
+    uniq.dedup();
+    assert_eq!(
+        uniq,
+        [
+            "name",
+            "group",
+            "icon",
+            "url",
+            "description",
+            "hide",
+            "order",
+            "size"
+        ]
+    );
+    assert!(
+        d.contains("Remove overrides…")
+            && d.contains(r#"type="number""#)
+            && d.contains(r#"step="1""#)
+    );
+    let g = &html[html.find(r#"id="dlg-group""#).expect("group dialog")..];
+    let g = &g[..g.find("</dialog>").unwrap()];
+    let names: Vec<&str> = g
+        .split(r#" name=""#)
+        .skip(1)
+        .map(|s| &s[..s.find('"').unwrap()])
+        .collect();
+    assert_eq!(names, ["name", "title", "icon", "collapsed", "hide"]);
+    let x = &html[html.find(r#"id="dlg-exclude""#).expect("pattern dialog")..];
+    assert!(x[..x.find("</dialog>").unwrap()].contains(r#"data-names=""#));
+    // The bulk bar: Remove overrides asks (the script), the rest is there.
+    for b in ["group", "hide", "show", "remove", "none"] {
+        assert!(html.contains(&format!(r#"data-bulk="{b}""#)), "{b}");
+    }
+    assert!(html.contains("You can read the values here."));
+    // The page forms without script, filled.
+    for (q, want) in [
+        ("edit=override:ctr-mark", r#"value="Ov-mark""#),
+        ("name=ctr-mark", r#"value="Ov-mark""#),
+        ("edit=override:web", "Edit “web”"),
+        ("edit=group:grp-mark", r#"value="Group-mark""#),
+        ("edit=exclude:1", r#"value="we?""#),
+        ("add=exclude", "Hide containers"),
+        ("add=group", "Add group"),
+    ] {
+        let (_, html) = get(&st, &format!("/settings/containers?{q}"), &h);
+        let p = &html[html
+            .find(r#"class="dlg-page"#)
+            .unwrap_or_else(|| panic!("{q}: page form"))..];
+        let p = &p[..p.find("</section>").unwrap()];
+        assert!(p.contains(want), "{q}: {p}");
+        assert!(
+            p.contains("Saving needs JavaScript") && p.contains(r#"method="post""#),
+            "{q}"
+        );
+    }
+    let (_, html) = get(&st, "/settings/containers?edit=group:nope", &h);
+    assert!(html.contains("That group does not exist"));
+    // The fragment: the three lists and the group suggestions.
+    let (status, f) = frag(&st, "/settings/containers", "frag=list", &h).unwrap();
+    assert_eq!(status, StatusCode::OK);
+    for id in ["grp-names", "ex-list", "grp-list", "ov-list"] {
+        assert!(f.contains(&format!(r#"id="{id}""#)), "{id}");
+    }
+    assert!(!f.contains("<html"));
+    // The container page links to the override dialog.
+    let (_, page) = get(&st, "/containers/web", &h);
+    assert!(
+        page.contains("/settings/containers?edit=override:web"),
+        "Customize link"
+    );
+}
+
+#[test]
+fn general_appearance_history_config_security_render_their_values() {
+    let st = state_with(sample(), WAVE2C);
+    assert!(
+        st.db.is_enabled(),
+        "this test needs the history database (sessions)"
+    );
+    let css = "\n:root { --ctl: #123; --border: #456 }\n";
+    std::fs::write(st.env.data_dir.join("custom.css"), css).unwrap();
+    let now = crate::util::unix_now() as i64;
+    st.db
+        .record_event(now, "auth.login", "info", "", "login-mark");
+    let h = signed_in(&st);
+    let sum = crate::settings::read_current(&st).unwrap().hash;
+
+    // General: values from the file, the file's hash, the shared submit path.
+    let (_, html) = get(&st, "/settings/general", &h);
+    let f = page_form(&html, "f-general");
+    assert!(
+        f.contains(&format!(r#"data-hash="{sum}""#))
+            && f.contains("data-hb")
+            && f.contains(r#"method="post""#)
+    );
+    assert!(
+        f.contains(r#"value="Greet-mark""#)
+            && f.contains(r#"value="https://search.example/mark?q={q}""#)
+    );
+    assert!(
+        f.contains(r#"placeholder="testhost""#),
+        "the host name as the title's default"
+    );
+    assert!(f.contains(r#"data-v="http""#) && f.contains("Put {q} where the search words go."));
+    assert!(f.contains(r#"maxlength="80""#));
+    let stats = f.find(r#"name="show_stats""#).unwrap();
+    assert!(
+        !f[f[..stats].rfind("<input").unwrap()..stats].contains("checked"),
+        "show_stats = false"
+    );
+    assert!(f.contains("Saving needs JavaScript.") && f.contains("You can read the values here."));
+
+    // Appearance: the theme select saves on change; custom.css as saved.
+    let (_, html) = get(&st, "/settings/appearance", &h);
+    assert!(
+        html.contains(r#"<option value="ember" selected>"#),
+        "theme from the file"
+    );
+    assert!(html.contains(r#"id="th-box" data-hash=""#));
+    let th = &html[html.find(r#"id="th-theme""#).unwrap()..];
+    assert!(th[..th.find('>').unwrap()].contains("disabled data-ready"));
+    let f = page_form(&html, "f-css");
+    assert!(
+        f.contains(&format!(">\n{css}</textarea>")),
+        "the text exactly: {f}"
+    );
+    assert!(f.contains(
+        "custom.css sets --ctl, which no longer changes anything: set --ctl-border instead."
+    ));
+    assert!(f.contains("set --line as well"));
+    std::fs::write(
+        st.env.data_dir.join("custom.css"),
+        ":root { --ctl-border: #123; --line: #1; --border: #2 }",
+    )
+    .unwrap();
+    let (_, html) = get(&st, "/settings/appearance", &h);
+    assert!(
+        !html.contains("Old token names"),
+        "new names only: no warning"
+    );
+
+    // History: the switch and the interval from the file; stats; Clear.
+    let (_, html) = get(&st, "/settings/history", &h);
+    let sw = &html[html.find(r#"id="hi-enabled""#).unwrap()..];
+    assert!(
+        !sw[..sw.find('>').unwrap()].contains("checked"),
+        "enabled = false"
+    );
+    assert!(sw[..sw.find('>').unwrap()].contains("disabled data-ready"));
+    let f = page_form(&html, "f-history");
+    assert!(
+        f.contains(r#"value="45s""#)
+            && f.contains(r#"data-v="duration""#)
+            && f.contains("Use a duration like 30s or 5m")
+    );
+    assert!(html.contains(r#"id="db-stats""#) && html.contains("Size on disk"));
+    assert!(
+        html.contains(r#"id="clr-btn""#)
+            && !html.contains("f-clear")
+            && !html.contains("clr-confirm")
+    );
+
+    // Config file: the file exactly, its hash, the revision dialog.
+    let (_, html) = get(&st, "/settings/config", &h);
+    let f = page_form(&html, "f-raw");
+    assert!(f.contains(&format!(r#"data-hash="{sum}""#)));
+    let ta = &f[f.find("<textarea").unwrap()..];
+    let text = &ta[ta.find('>').unwrap() + 1..ta.find("</textarea>").unwrap()];
+    assert_eq!(
+        text,
+        format!("\n{}", maud::html! { (WAVE2C) }.into_string()),
+        "one newline for the parser, then the file"
+    );
+    assert!(html.contains(r#"id="dlg-rev""#) && html.contains(r#"id="rev-list" data-hash=""#));
+    assert!(!html.contains("rev-view"), "the old panel under the table");
+
+    // Security: recent logins on the server; sign out others asks (script).
+    let (_, html) = get(&st, "/settings/security", &h);
+    assert!(html.contains("login-mark") && html.contains("signed in"));
+    assert!(html.contains("Sign out all other sessions…"));
+
+    // Fragments: the stats and the revisions.
+    let (s1, f1) = frag(&st, "/settings/history", "frag=list", &h).unwrap();
+    assert!(
+        s1 == StatusCode::OK && f1.starts_with(r#"<div id="db-stats">"#),
+        "{f1}"
+    );
+    let (s2, f2) = frag(&st, "/settings/config", "frag=list", &h).unwrap();
+    assert!(
+        s2 == StatusCode::OK && f2.starts_with(r#"<div id="rev-list" data-hash=""#),
+        "{f2}"
+    );
 }

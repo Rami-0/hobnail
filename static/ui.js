@@ -57,10 +57,11 @@
       if (!isFinite(n) || (c.step !== "any" && !Number.isInteger(n))) return `Use a whole number${range}.`;
       if (n < lo || n > hi) return `Use a number${range || (n < lo ? " of " + lo + " or more" : " up to " + hi)}.`;
     }
-    // A value an edit dialog was opened with is left as it is in the file: its
-    // format rule is not applied again (a hand-written `url = "/files"` stays
-    // editable; the server skips its own check for an unchanged value too).
-    if (c._was !== undefined && c.value === c._was && c.closest(".dlg[data-mode=edit]")) return "";
+    // A value an edit dialog (or a page form, `data-hash`) was opened with is
+    // left as it is in the file: its format rule is not applied again (a
+    // hand-written `url = "/files"` stays editable; only changed fields are
+    // sent, so the server never checks it either).
+    if (c._was !== undefined && c.value === c._was && c.closest(".dlg[data-mode=edit],form[data-hash]")) return "";
     const r = RULES[c.dataset.v];
     if (r && !r[0].test(v)) return c.dataset.msg || r[1];
     if (c.pattern && !new RegExp(`^(?:${c.pattern})$`).test(v)) return c.dataset.msg || "Check the format.";
@@ -309,6 +310,7 @@
       const nn = res.note && note(form, res.note[0], res.note[1]);
       if (res.toast) HB.toast(res.toast, { kind: res.kind || "ok" });
       if (nn) nn.focus();
+      else if (res.refocus) res.refocus.focus(); // an editor saved with Ctrl+S
       return;
     }
     if (res.ok) {
@@ -329,6 +331,8 @@
     else if (nn) nn.focus();
   }
   HB.note = (kind, text, a) => cur && note(cur.dlg, kind, text, a);
+  // The note of a page form (its `.dlg-note`); no text hides it.
+  HB.noteIn = (form, kind, text, a) => note(form, kind, text, a);
   // After a save that keeps the dialog open ("Save and send test"): the
   // dialog now edits what was saved. `key` and `base` are that entry and the
   // file version the save itself wrote (never a version written by anyone

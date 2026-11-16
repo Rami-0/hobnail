@@ -126,12 +126,21 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
 
         // ---- containers and groups
         (true, _, ["containers"]) => json(containers_get(state)?),
+        // Both take one entry at a time (`{base_hash, action, id?, item?,
+        // order?}`, as every list), or the whole list as before.
+        (_, true, ["docker"]) if has_action(call) => {
+            let r: CollectionReq = body(call)?;
+            json(store::edit(state, &r.base_hash, user, |c| {
+                ops::exclude_action(c, &r).and_then(ops::precheck)
+            })?)
+        }
         (_, true, ["docker"]) => {
             let r: ops::ExcludeReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
                 ops::docker_exclude(c, &r).and_then(ops::precheck)
             })?)
         }
+        (_, true, ["groups"]) if has_action(call) => json(list_post(state, call, &ops::GROUPS)?),
         (_, true, ["groups"]) => {
             let r: ops::GroupsReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
@@ -274,6 +283,11 @@ fn password_error(e: String) -> ApiError {
         Some(f) => ApiError::invalid(&msg, Some(f), None),
         None => ApiError::bad_request(msg),
     }
+}
+
+/// The body is a one-entry request (`{"action": …}`).
+fn has_action(call: &Call) -> bool {
+    serde_json::from_slice::<J>(&call.body).is_ok_and(|v| v.get("action").is_some())
 }
 
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
@@ -654,6 +668,16 @@ fn css_path(state: &AppState) -> std::path::PathBuf {
     state.env.data_dir.join(CSS_FILE)
 }
 
+/// The saved custom.css and its hash (the `base_hash` of a save), for the
+/// Appearance page.
+pub fn css_current(state: &AppState) -> Result<(String, String), ApiError> {
+    let v = css_get(state)?;
+    Ok((
+        v["css"].as_str().unwrap_or("").to_string(),
+        v["hash"].as_str().unwrap_or("").to_string(),
+    ))
+}
+
 fn css_get(state: &AppState) -> Result<J, ApiError> {
     let css = match std::fs::read(css_path(state)) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),
@@ -691,8 +715,10 @@ fn css_post(state: &AppState, user: &str, r: &ops::CssReq) -> Result<J, ApiError
         return Err(ApiError::stale());
     }
     let hash = doc::sha256_hex(r.css.as_bytes());
+    // Saved or not, the retired token names it sets (shown on the form).
+    let warnings = ops::css_token_warnings(&r.css);
     if cur["css"].as_str() == Some(r.css.as_str()) {
-        return Ok(json!({"ok": true, "unchanged": true, "hash": hash}));
+        return Ok(json!({"ok": true, "unchanged": true, "hash": hash, "warnings": warnings}));
     }
     doc::write_atomic(&css_path(state), r.css.as_bytes(), 0o644).map_err(ApiError::internal)?;
     let now = crate::util::unix_now() as i64;
@@ -701,7 +727,7 @@ fn css_post(state: &AppState, user: &str, r: &ops::CssReq) -> Result<J, ApiError
         .record_event(now, "config.saved", "info", user, "appearance: custom.css");
     crate::info!("custom.css saved from the app", user = user);
     state.changed("reload");
-    Ok(json!({"ok": true, "hash": hash}))
+    Ok(json!({"ok": true, "hash": hash, "warnings": warnings}))
 }
 
 fn stats_json(state: &AppState) -> J {

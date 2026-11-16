@@ -34,9 +34,9 @@ title = "Monitoring"
 [page]
 title = "homelab"           # default: host name
 greeting = "Welcome back"   # default: time-of-day greeting
-columns = 4                 # v1 card grid only: no effect in the v2 table (kept for compatibility)
-layout = "grid"             # "list" makes the flat (ungrouped) table the default view
-theme = "auto"              # auto (follow OS) | dark | light; the ◐ button overrides per browser
+columns = 4                 # v1 card grid only: no effect (accepted, kept; not in Settings any more)
+layout = "grid"             # "list" makes the flat (ungrouped) table the default view (file only)
+theme = "auto"              # auto | dark | light | ember | contrast (Settings › Appearance); the ◐ button overrides per browser
 search_url = "https://duckduckgo.com/?q={q}"
 show_stopped = true
 show_stats = true           # live CPU / memory on container cards
@@ -51,7 +51,7 @@ standalone_group = "Standalone"
 [[groups]]                  # order of [[groups]] = order on the page; others follow A-Z
 name = "media"              # a compose project name, or a group set by an override/label
 title = "Media"
-# columns / layout per group: v1 only, no effect in the v2 table
+# columns / layout per group: v1 only, no effect (accepted and kept; not in Settings)
 collapsed = true
 # hide = true
 

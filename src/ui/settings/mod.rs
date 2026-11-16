@@ -1,15 +1,17 @@
 //! The settings pages: `/settings` (overview of the tabs) and
 //! `/settings/<tab>` (DESIGN.md section 5), in the shell.
 //!
-//! Forms that moved onto the dialog (DESIGN.md §11.6; Bookmarks, Widgets and
-//! Notifications so far, see the recipe in `dlg.rs`) are rendered with their
-//! values by the server, from the file on disk, for a session only; the add
-//! / edit dialog and the
-//! `?add=` / `?edit=` page form come from `dlg.rs`, and `?frag=list` serves
-//! a list again for in-place updates ([`fragment`]). The other tabs still
-//! render their structure only: `static/settings.js` loads their values
-//! from the settings JSON API (`/api/settings/*`, see `crate::settings`).
-//! Every save is a `fetch` with `X-RH-CSRF` and `base_hash`; every form is
+//! Every tab is rendered with its values by the server, from the file on
+//! disk, for a session only (DESIGN.md §11.14, Y18). Lists use the dialog
+//! pattern (the recipe in `dlg.rs`; `bookmarks.rs` is the reference): add /
+//! edit in a dialog opened from the row, the `?add=` / `?edit=` page form
+//! that stands in for it without script, and `?frag=list` serving the
+//! lists again for in-place updates ([`fragment`]). Single settings with
+//! several fields (General, Sample interval, custom.css, the raw editor,
+//! Change password) are page-section forms on the same submit path
+//! (`data-hb`); a single control (a switch, the default theme) saves when
+//! changed. Every save is a `fetch` with `X-RH-CSRF` and the `base_hash` the
+//! form, dialog, confirm or switch started from; every form is
 //! `method="post"` with its submit button disabled until the script runs,
 //! so no value can ever end up in a URL (ROB-15). `static/settings.css`
 //! and `settings.js` are linked from these pages only.
@@ -17,10 +19,6 @@
 //! Signed out, a tab shows only the lock panel (how to set the first
 //! password, or a sign-in link) and no config data at all: no list, no
 //! dialog, no `data-item`, no page form, and `?frag=` answers 401.
-//!
-//! Controls carry `data-t` (how the script converts a value: `list`, `num`,
-//! `json`, `bool`, `tri`, `set`) and sit in `.fld` wrappers; a wrapper with
-//! `data-for="a b"` is only shown (and only sent) for those entity types.
 
 mod appearance;
 mod bookmarks;
@@ -28,7 +26,6 @@ mod config;
 mod containers;
 mod disk;
 mod dlg;
-mod form;
 mod general;
 mod history;
 mod notifications;
@@ -79,8 +76,8 @@ pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
         (None, _) => (index(ctx), none, None),
         (Some(t), false) => (lock_panel(ctx, t.1), none, None),
         (Some(t), true) => match t.1 {
-            "general" => (general::body(), none, None),
-            "containers" => (containers::body(ctx), none, None),
+            "general" => (general::body(ctx), none, None),
+            "containers" => (containers::body(ctx), containers::dialogs(ctx), None),
             "bookmarks" => (
                 bookmarks::body(ctx),
                 bookmarks::dialogs(),
@@ -88,10 +85,10 @@ pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
             ),
             "widgets" => (widgets::body(ctx), widgets::dialogs(), None),
             "notifications" => (notifications::body(ctx), notifications::dialogs(ctx), None),
-            "appearance" => (appearance::body(), none, None),
-            "history" => (history::body(), none, None),
-            "config" => (config::body(), none, None),
-            "security" => (security::body(), none, None),
+            "appearance" => (appearance::body(ctx), none, None),
+            "history" => (history::body(ctx), none, None),
+            "config" => (config::body(ctx), config::dialogs(), None),
+            "security" => (security::body(ctx), none, None),
             _ => return None,
         },
     };
@@ -120,6 +117,9 @@ pub fn fragment(ctx: &Ctx) -> Option<(StatusCode, String)> {
             widgets::list_markup(&disk::Disk::read(ctx.state)).into_string(),
         ),
         ("notifications", "list") => (StatusCode::OK, notifications::fragment(ctx).into_string()),
+        ("containers", "list") => (StatusCode::OK, containers::fragment(ctx).into_string()),
+        ("history", "list") => (StatusCode::OK, history::stats(ctx).into_string()),
+        ("config", "list") => (StatusCode::OK, config::revisions(ctx).into_string()),
         _ => (StatusCode::NOT_FOUND, String::new()),
     })
 }

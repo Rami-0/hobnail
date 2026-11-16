@@ -911,10 +911,11 @@ mod tests {
         out
     }
 
-    /// Wave 1 rule: the component layer does not restyle existing pages.
-    /// Field controls are scoped to the dialog (Settings keeps settings.css
-    /// until wave 2) and the toast rules to HB's own region (Settings keeps
-    /// `#toasts`). Fails if a selector naming one of those classes or a
+    /// The component layer does not restyle pages outside Settings. Field
+    /// controls are scoped to the dialog and to the Settings pages
+    /// (`.set-main`: since wave 2c every Settings form uses the component
+    /// markup, so settings.css no longer styles them) and the toast rules to
+    /// HB's own region. Fails if a selector naming one of those classes or a
     /// checkbox escapes its scope.
     #[test]
     fn component_fields_and_toasts_stay_scoped() {
@@ -934,7 +935,7 @@ mod tests {
                 })
             };
             if scoped.iter().any(|t| names(t)) {
-                assert!(s.starts_with(":is(.dlg,.dlg-page) "), "unscoped: {s}");
+                assert!(s.starts_with(":is(.dlg,.set-main) "), "unscoped: {s}");
                 fields += 1;
             }
             if names(".toast") || names(".toasts") {
@@ -946,6 +947,26 @@ mod tests {
             fields >= 30 && toasts >= 10,
             "parser saw {fields} / {toasts}"
         );
+        // Settings forms are the component markup: settings.css adds layout
+        // only and never a second look for the same controls.
+        for s in selectors(include_str!("../../static/settings.css")) {
+            let base = s.split([':', '[']).next().unwrap_or("");
+            assert!(
+                !matches!(
+                    base,
+                    ".fld"
+                        | ".in"
+                        | "select.in"
+                        | "textarea.in"
+                        | ".hint"
+                        | ".fld-err"
+                        | ".cb"
+                        | ".sw"
+                        | "input"
+                ),
+                "settings.css restyles a field control: {s}"
+            );
+        }
         // Motion is wave 4: no cross-document view transition yet.
         assert!(!APP_CSS_SRC.contains("@view-transition"));
         assert!(!css.contains("@view-transition"));

@@ -2123,3 +2123,392 @@ fn widget_field_errors_land_on_the_fields_list() {
         e.body
     );
 }
+
+// ------------------------------------------------------------ wave 2c
+
+/// A patch that leaves the secret keys out (as an edit dialog does) and
+/// moves the destination: the merge keeps the secret references, so the
+/// guard must refuse the result. `guard.rs` is the judge; these pin that
+/// the patch semantics never hand it something it cannot see.
+#[test]
+fn a_patch_without_the_secret_keys_cannot_move_a_bound_destination() {
+    let refused = |old: &str, d: Result<store::Draft, store::ApiError>| {
+        let d = d.expect("the patch itself applies");
+        assert!(d.text != old, "the destination moved in the merged text");
+        let e = guard::check(old, &d.text, sec()).expect_err("the guard refuses");
+        assert!(e.0.contains(guard::SECRET_BINDING_RULE), "{}", e.0);
+    };
+    // A widget with headers_env: a new URL only.
+    let w_env = "[[widgets]]\nid = \"a\"\ntype = \"custom-api\"\nurl = \"http://svc/api\"\nheaders_env = { Authorization = \"SVC_TOKEN\" }\n";
+    let r = list_req(
+        "edit",
+        Some(json!("a")),
+        Some(json!({"id": "a", "type": "custom-api", "url": "http://evil.example/"})),
+        None,
+    );
+    let d = ops::list_action(&cur(w_env), &ops::WIDGETS, &r);
+    assert!(
+        d.as_ref().unwrap().text.contains("headers_env"),
+        "kept by the patch"
+    );
+    refused(w_env, d);
+    // A widget with headers_file.
+    let w_file = "[[widgets]]\nid = \"b\"\ntype = \"custom-api\"\nurl = \"http://svc/api\"\nheaders_file = { Authorization = \"/data/secrets/svc\" }\n";
+    let r = list_req(
+        "edit",
+        Some(json!("b")),
+        Some(json!({"id": "b", "type": "custom-api", "url": "http://evil.example/"})),
+        None,
+    );
+    refused(w_file, ops::list_action(&cur(w_file), &ops::WIDGETS, &r));
+    // A webhook channel with headers_env: a new plain URL.
+    let wh = "[channels.w]\ntype = \"webhook\"\nurl = \"http://hook/\"\nheaders_env = { Authorization = \"HOOK_AUTH\" }\n";
+    let r = list_req(
+        "edit",
+        Some(json!("w")),
+        Some(json!({"name": "w", "type": "webhook", "url": "http://evil.example/"})),
+        None,
+    );
+    let d = ops::channel_action(&cur(wh), &r);
+    assert!(
+        d.as_ref().unwrap().text.contains("HOOK_AUTH"),
+        "kept by the patch"
+    );
+    refused(wh, d);
+    // A Telegram channel with api_base: another token sent to that host.
+    let tg = "[channels.tg]\ntype = \"telegram\"\ntoken_env = \"RH_TG_TOKEN\"\nchat_id = 1\napi_base = \"http://tg.example\"\n";
+    let r = list_req(
+        "edit",
+        Some(json!("tg")),
+        Some(json!({"name": "tg", "type": "telegram", "token_env": "RH_OTHER_TOKEN"})),
+        None,
+    );
+    let d = ops::channel_action(&cur(tg), &r);
+    assert!(
+        d.as_ref()
+            .unwrap()
+            .text
+            .contains("api_base = \"http://tg.example\""),
+        "kept by the patch"
+    );
+    refused(tg, d);
+}
+
+/// The same four through the API: 403, nothing written.
+#[tokio::test]
+async fn bound_destinations_are_refused_through_the_api_too() {
+    for (cfg, path, body) in [
+        (
+            "[[widgets]]\nid = \"a\"\ntype = \"custom-api\"\nurl = \"http://svc/api\"\nheaders_env = { Authorization = \"SVC_TOKEN\" }\n",
+            "widgets",
+            json!({"action": "edit", "id": "a", "item": {"id": "a", "type": "custom-api", "url": "http://evil.example/"}}),
+        ),
+        (
+            "[channels.tg]\ntype = \"telegram\"\ntoken_env = \"RH_TG_TOKEN\"\nchat_id = 1\napi_base = \"http://tg.example\"\n",
+            "channels",
+            json!({"action": "edit", "id": "tg", "item": {"name": "tg", "type": "telegram", "token_env": "RH_OTHER_TOKEN"}}),
+        ),
+    ] {
+        let (dir, st) = state_with(Some(cfg));
+        let mut b = body;
+        b["base_hash"] = J::String(hash(cfg));
+        let (status, v) = post(&st, path, b).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        assert_eq!(v["locked"], true);
+        assert_eq!(file(&dir), cfg, "nothing written");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn groups_one_at_a_time_keep_what_the_form_does_not_show() {
+    let text = "# groups\n[[groups]]\nname = \"media\"\ntitle = \"Media\"\ncolumns = 3\nlayout = \"list\" # kept\n\n[[groups]]\nname = \"tools\"\n";
+    // Edit: only the changed field; columns, layout and the comment stay.
+    let r = list_req(
+        "edit",
+        Some(json!("media")),
+        Some(json!({"name": "media", "collapsed": true})),
+        None,
+    );
+    let d = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap();
+    assert!(
+        d.text.contains("columns = 3") && d.text.contains("layout = \"list\" # kept"),
+        "{}",
+        d.text
+    );
+    assert!(d.text.contains("collapsed = true") && d.text.contains("title = \"Media\""));
+    assert_eq!(changes(text, &d.text), (1, 0), "one line added");
+    // An unchanged edit is the same text.
+    let r = list_req(
+        "edit",
+        Some(json!("media")),
+        Some(json!({"name": "media"})),
+        None,
+    );
+    assert_eq!(
+        ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap().text,
+        text
+    );
+    // Add, rename onto an existing name, reorder, delete.
+    let r = list_req(
+        "add",
+        None,
+        Some(json!({"name": "new", "title": null, "hide": true})),
+        None,
+    );
+    let d = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap();
+    assert!(
+        d.text
+            .ends_with("[[groups]]\nname = \"new\"\nhide = true\n"),
+        "{}",
+        d.text
+    );
+    parse_ok(&d.text);
+    let r = list_req("add", None, Some(json!({"name": "media"})), None);
+    let e = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap_err();
+    assert_eq!(
+        (e.status, e.body["field"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("name"))
+    );
+    let r = list_req(
+        "edit",
+        Some(json!("tools")),
+        Some(json!({"name": "media"})),
+        None,
+    );
+    let e = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap_err();
+    assert!(
+        e.body["error"]
+            .as_str()
+            .unwrap()
+            .contains("already in the list"),
+        "{}",
+        e.body
+    );
+    let r = list_req("add", None, Some(json!({"name": " "})), None);
+    assert_eq!(
+        ops::list_action(&cur(text), &ops::GROUPS, &r)
+            .unwrap_err()
+            .body["field"],
+        "name"
+    );
+    let r = list_req("reorder", None, None, Some(json!(["tools", "media"])));
+    let d = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap();
+    assert!(
+        d.text.find("tools").unwrap() < d.text.find("media").unwrap()
+            && d.text.contains("layout = \"list\" # kept")
+    );
+    let r = list_req("delete", Some(json!("tools")), None, None);
+    let d = ops::list_action(&cur(text), &ops::GROUPS, &r).unwrap();
+    assert!(!d.text.contains("tools") && d.text.starts_with("# groups\n"));
+}
+
+#[test]
+fn exclude_patterns_one_at_a_time() {
+    let text = "[docker]\nexclude = [\"a-*\", \"b\"] # mine\nsocket = \"/x\"\n";
+    let req = |action: &str, id: Option<J>, p: Option<&str>| {
+        list_req(action, id, p.map(|p| json!({"pattern": p})), None)
+    };
+    let d = ops::exclude_action(&cur(text), &req("add", None, Some(" c? "))).unwrap();
+    assert_eq!(
+        d.text,
+        "[docker]\nexclude = [\"a-*\", \"b\", \"c?\"] # mine\nsocket = \"/x\"\n"
+    );
+    let d = ops::exclude_action(&cur(text), &req("edit", Some(json!(1)), Some("bb"))).unwrap();
+    assert_eq!(
+        d.text,
+        "[docker]\nexclude = [\"a-*\", \"bb\"] # mine\nsocket = \"/x\"\n"
+    );
+    assert_eq!(
+        ops::exclude_action(&cur(text), &req("edit", Some(json!(1)), Some("b")))
+            .unwrap()
+            .text,
+        text,
+        "unchanged"
+    );
+    let d = ops::exclude_action(&cur(text), &req("delete", Some(json!(0)), None)).unwrap();
+    assert_eq!(
+        d.text,
+        "[docker]\nexclude = [\"b\"] # mine\nsocket = \"/x\"\n"
+    );
+    let d = ops::exclude_action(&cur(&d.text), &req("delete", Some(json!(0)), None)).unwrap();
+    assert_eq!(
+        d.text, "[docker]\nsocket = \"/x\"\n",
+        "the last one takes the key"
+    );
+    // Into a file without [docker].
+    let d = ops::exclude_action(
+        &cur("[page]\ntitle = \"x\"\n"),
+        &req("add", None, Some("tmp-*")),
+    )
+    .unwrap();
+    assert!(
+        d.text.contains("[docker]\nexclude = [\"tmp-*\"]"),
+        "{}",
+        d.text
+    );
+    parse_ok(&d.text);
+    // Plain errors on the field.
+    for (r, msg) in [
+        (
+            req("add", None, Some("b")),
+            "This pattern is already in the list.",
+        ),
+        (
+            req("edit", Some(json!(0)), Some("b")),
+            "This pattern is already in the list.",
+        ),
+        (req("add", None, Some("  ")), "Required."),
+    ] {
+        let e = ops::exclude_action(&cur(text), &r).unwrap_err();
+        assert_eq!(
+            (e.body["error"].as_str(), e.body["field"].as_str()),
+            (Some(msg), Some("pattern"))
+        );
+    }
+    assert_eq!(
+        ops::exclude_action(&cur(text), &req("delete", Some(json!(9)), None))
+            .unwrap_err()
+            .status,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn docker_and_groups_routes_take_one_entry_or_the_whole_list() {
+    let cfg = "[docker]\nexclude = [\"a\"]\n\n[[groups]]\nname = \"g\"\ncolumns = 2\n";
+    let (dir, st) = state_with(Some(cfg));
+    let (s, v) = post(
+        &st,
+        "docker",
+        json!({"base_hash": hash(cfg), "action": "add", "item": {"pattern": "b"}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let now = file(&dir);
+    assert!(now.contains("exclude = [\"a\", \"b\"]"));
+    let (s, v) = post(&st, "groups", json!({"base_hash": hash(&now), "action": "edit", "id": "g", "item": {"name": "g", "title": "G"}})).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(file(&dir).contains("columns = 2") && file(&dir).contains("title = \"G\""));
+    // The old whole-list shapes still work.
+    let now = file(&dir);
+    let (s, _) = post(
+        &st,
+        "docker",
+        json!({"base_hash": hash(&now), "exclude": ["a"]}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    // A stale base is a 409 for the one-entry shape too.
+    let (s, _) = post(
+        &st,
+        "groups",
+        json!({"base_hash": hash(cfg), "action": "delete", "id": "g"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn general_and_override_check_links_and_lengths_on_their_fields() {
+    let text = "[page]\nsearch_url = \"not checked while unchanged\"\n";
+    let req = |v: J| ops::PatchReq {
+        base_hash: "x".into(),
+        values: v,
+    };
+    for (v, field) in [
+        (json!({"search_url": "not a url"}), "search_url"),
+        (
+            json!({"search_url": "https://example.com/?q="}),
+            "search_url",
+        ),
+        (json!({"title": "t".repeat(81)}), "title"),
+    ] {
+        let e = ops::general(&cur(text), &req(v)).unwrap_err();
+        assert_eq!(
+            (e.status, e.body["field"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some(field)),
+            "{}",
+            e.body
+        );
+    }
+    let d = ops::general(&cur(text), &req(json!({"greeting": "Hi"}))).unwrap();
+    assert!(
+        d.text.contains("not checked while unchanged"),
+        "a field the form did not send is left alone"
+    );
+    assert!(ops::general(
+        &cur(text),
+        &req(json!({"search_url": "https://example.com/?q={q}"}))
+    )
+    .is_ok());
+    // Columns, layout and theme: still accepted from the API, kept by a
+    // patch that does not name them.
+    let old = "[page]\ncolumns = 3\nlayout = \"list\"\ntheme = \"ember\"\n";
+    let d = ops::general(&cur(old), &req(json!({"show_stats": false}))).unwrap();
+    assert!(d.text.starts_with(old), "{}", d.text);
+    let ov = |set: J| ops::OverrideReq {
+        base_hash: "x".into(),
+        names: vec!["web".into()],
+        set: Some(set),
+        clear: vec![],
+        remove: false,
+    };
+    let e = ops::container_override(&cur(""), &ov(json!({"url": "not a url"}))).unwrap_err();
+    assert_eq!(e.body["field"], "url");
+    let e = ops::container_override(&cur(""), &ov(json!({"order": 1.5}))).unwrap_err();
+    assert_eq!(
+        (e.body["field"].as_str(), e.body["error"].as_str()),
+        (Some("order"), Some("Use a whole number."))
+    );
+    assert!(ops::container_override(&cur(""), &ov(json!({"url": "https://web.example/"}))).is_ok());
+}
+
+#[test]
+fn css_warnings_name_the_new_token() {
+    let w = ops::css_token_warnings(
+        ":root{--ctl:#1;--pop:x}\n/* --glow: 1 */ a{color:var(--accent-bg)}",
+    );
+    assert_eq!(w.len(), 2, "{w:?}");
+    assert!(w[0].contains("--ctl") && w[0].contains("--ctl-border"));
+    assert!(w[1].contains("--pop") && w[1].contains("--shadow-2"));
+    assert!(ops::css_token_warnings(":root{--ctl-border:#1;--fs-micro:1px}").is_empty());
+    assert_eq!(ops::css_token_warnings(":root { --border : red }").len(), 1);
+    assert!(ops::css_token_warnings(":root{--border:red;--line:red}").is_empty());
+    for old in ["--border-2", "--accent-bg", "--glow", "--fs-label"] {
+        assert_eq!(
+            ops::css_token_warnings(&format!("a{{{old}: 1}}")).len(),
+            1,
+            "{old}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn saving_custom_css_reports_old_token_names() {
+    let (dir, st) = state_with(Some(""));
+    let (_, g) = get(&st, "appearance").await;
+    let (s, v) = post(
+        &st,
+        "appearance",
+        json!({"base_hash": g["hash"], "css": ":root{--ctl:red}"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(v["warnings"].as_array().unwrap().len(), 1, "{v}");
+    let (_, v) = post(
+        &st,
+        "appearance",
+        json!({"base_hash": v["hash"], "css": ":root{--ctl:red}"}),
+    )
+    .await;
+    assert_eq!(
+        (
+            v["unchanged"].as_bool(),
+            v["warnings"].as_array().map(Vec::len)
+        ),
+        (Some(true), Some(1))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

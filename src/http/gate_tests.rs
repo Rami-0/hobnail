@@ -598,3 +598,146 @@ async fn channel_rule_widget_lists_need_a_session() {
     .await;
     assert_eq!(r.status, 403);
 }
+
+/// Wave 2c: Containers and groups, General, Appearance, History and Config
+/// file are rendered with their values for a session only. Signed out they
+/// show nothing of the file and their fragments answer 401 with an empty
+/// body; signed in, pages and fragments are `no-store`. The one-entry
+/// requests on the existing `docker` and `groups` routes go through the
+/// unchanged gate: refused without the CSRF header or from another origin,
+/// written with both.
+#[tokio::test]
+async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let cfg = "# raw-mark\n[page]\ngreeting = \"greet-mark\"\n\n[docker]\nexclude = [\"ex-mark\"]\n\n[[groups]]\nname = \"grp-mark\"\n\n[containers.ov-mark]\nname = \"Ov-mark\"\n\n[history]\nsample_interval = \"45s\"\n";
+    std::fs::write(st.config.path(), cfg).unwrap();
+    std::fs::write(st.env.data_dir.join("custom.css"), "/* css-mark */").unwrap();
+    let addr = start(st.clone()).await;
+    let marks = [
+        "raw-mark",
+        "greet-mark",
+        "ex-mark",
+        "grp-mark",
+        "Ov-mark",
+        "45s",
+        "css-mark",
+        "data-hash",
+        "data-item",
+    ];
+    for path in [
+        "/settings/containers?frag=list",
+        "/settings/history?frag=list",
+        "/settings/config?frag=list",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(r.body.is_empty(), "{path}: {}", r.body);
+    }
+    for path in [
+        "/settings/general",
+        "/settings/containers",
+        "/settings/containers?edit=override:ov-mark",
+        "/settings/containers?name=ov-mark",
+        "/settings/containers?edit=group:grp-mark",
+        "/settings/appearance",
+        "/settings/history",
+        "/settings/config",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        let body: String = r
+            .body
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    p
+                } else {
+                    &p[p.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect();
+        for m in marks {
+            assert!(!body.contains(m), "{path}: leaked {m}");
+        }
+    }
+    let (cookie, csrf) = login(addr).await;
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    for (path, mark) in [
+        ("/settings/containers?frag=list", "ex-mark"),
+        ("/settings/containers", "Ov-mark"),
+        ("/settings/containers?edit=override:ov-mark", "Ov-mark"),
+        ("/settings/general", "greet-mark"),
+        ("/settings/appearance", "css-mark"),
+        ("/settings/history", "45s"),
+        ("/settings/history?frag=list", "db-stats"),
+        ("/settings/config", "raw-mark"),
+        ("/settings/config?frag=list", "rev-list"),
+    ] {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        assert!(r.body.contains(mark), "{path}");
+        assert!(no_store(&r.head), "{path}: {}", r.head);
+    }
+    let origin = format!("http://{addr}");
+    let hash = crate::settings::read_current(&st).unwrap().hash;
+    let add = format!(r#"{{"base_hash":"{hash}","action":"add","item":{{"pattern":"new-*"}}}}"#);
+    for (headers, want) in [
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", origin.as_str()),
+                ("Cookie", cookie.as_str()),
+            ],
+            403,
+        ),
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", "http://evil.example"),
+                ("Cookie", cookie.as_str()),
+                ("X-RH-CSRF", csrf.as_str()),
+            ],
+            403,
+        ),
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", origin.as_str()),
+                ("X-RH-CSRF", csrf.as_str()),
+            ],
+            401,
+        ),
+    ] {
+        for path in ["/api/settings/docker", "/api/settings/groups"] {
+            let r = req(addr, "POST", path, &headers, &add).await;
+            assert_eq!(r.status, want, "{path} {headers:?}: {}", r.body);
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(st.config.path()).unwrap(),
+        cfg,
+        "nothing written"
+    );
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/docker",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+            ("X-RH-CSRF", &csrf),
+        ],
+        &add,
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(std::fs::read_to_string(st.config.path())
+        .unwrap()
+        .contains(r#"exclude = ["ex-mark", "new-*"]"#));
+}

@@ -102,12 +102,12 @@ pub const SETTINGS: &[(&str, &str, &str)] = &[
     (
         "General",
         "general",
-        "Title, greeting, layout, theme, search",
+        "Title, greeting, search, what the overview shows",
     ),
     (
         "Containers and groups",
         "containers",
-        "Excludes, groups, per-container overrides",
+        "Hidden containers, groups, per-container overrides",
     ),
     ("Bookmarks", "bookmarks", "Extra links"),
     ("Widgets", "widgets", "Custom API widgets, system tiles"),
@@ -116,7 +116,7 @@ pub const SETTINGS: &[(&str, &str, &str)] = &[
     (
         "History and data",
         "history",
-        "Retention, sample interval, database",
+        "Recording, sample interval, database",
     ),
     ("Config file", "config", "Raw TOML editor and revisions"),
     ("Security", "security", "Password and sessions"),

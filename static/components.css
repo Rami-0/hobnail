@@ -58,65 +58,65 @@ tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)
 @keyframes row-new{from{background-color:color-mix(in srgb,var(--accent) 20%,transparent)}}
 
 /* ---- form field: label, control, error, hint ----
-   Scoped to the dialog (and its no-JS page form) for now: the Settings forms
-   keep settings.css until wave 2 moves each one onto the dialog, which then
-   drops the scope. */
-:is(.dlg,.dlg-page) .fld{display:grid;gap:6px;align-content:start;min-width:0}
-:is(.dlg,.dlg-page) .fld.wide{grid-column:1/-1}
-:is(.dlg,.dlg-page) .fld>label:not(.cb),:is(.dlg,.dlg-page) .fld>.fld-l,:is(.dlg,.dlg-page) fieldset.fld>legend{display:flex;align-items:baseline;gap:6px;padding:0;font:600 var(--fs-sm)/1.3 var(--font);color:var(--text)}
-:is(.dlg,.dlg-page) .req{color:var(--text-3);font-weight:500;text-decoration:none}
-:is(.dlg,.dlg-page) .hint{font-size:var(--fs-xs);line-height:1.4;color:var(--text-3)}
-:is(.dlg,.dlg-page) .fld-err{display:flex;align-items:flex-start;gap:6px;font:500 var(--fs-xs)/1.4 var(--font);color:var(--bad-fg)}
-:is(.dlg,.dlg-page) .fld-err::before{content:"!";display:inline-grid;place-items:center;flex:none;width:14px;height:14px;margin-top:1px;border-radius:50%;background:var(--bad);color:var(--on-bad);font:700 10px/1 var(--font)}
-:is(.dlg,.dlg-page) .fld-err:not([hidden]){animation:err-in var(--dur-2) var(--ease-out)}
+   Scoped to the dialog and to the Settings pages (every Settings form uses
+   this markup): other pages keep their own controls. */
+:is(.dlg,.set-main) .fld{display:grid;gap:6px;align-content:start;min-width:0}
+:is(.dlg,.set-main) .fld.wide{grid-column:1/-1}
+:is(.dlg,.set-main) .fld>label:not(.cb),:is(.dlg,.set-main) .fld>.fld-l,:is(.dlg,.set-main) fieldset.fld>legend{display:flex;align-items:baseline;gap:6px;padding:0;font:600 var(--fs-sm)/1.3 var(--font);color:var(--text)}
+:is(.dlg,.set-main) .req{color:var(--text-3);font-weight:500;text-decoration:none}
+:is(.dlg,.set-main) .hint{font-size:var(--fs-xs);line-height:1.4;color:var(--text-3)}
+:is(.dlg,.set-main) .fld-err{display:flex;align-items:flex-start;gap:6px;font:500 var(--fs-xs)/1.4 var(--font);color:var(--bad-fg)}
+:is(.dlg,.set-main) .fld-err::before{content:"!";display:inline-grid;place-items:center;flex:none;width:14px;height:14px;margin-top:1px;border-radius:50%;background:var(--bad);color:var(--on-bad);font:700 10px/1 var(--font)}
+:is(.dlg,.set-main) .fld-err:not([hidden]){animation:err-in var(--dur-2) var(--ease-out)}
 @keyframes err-in{from{opacity:0;transform:translateY(-3px)}}
-:is(.dlg,.dlg-page) .in{display:block;width:100%;min-width:0;height:var(--ctl-h);padding:0 10px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field);color:var(--text);font:400 var(--fs-input)/1.2 var(--font);
+:is(.dlg,.set-main) .in{display:block;width:100%;min-width:0;height:var(--ctl-h);padding:0 10px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field);color:var(--text);font:400 var(--fs-input)/1.2 var(--font);
  transition:border-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out)}
-:is(.dlg,.dlg-page) .in.mono{font-family:var(--mono);font-size:calc(var(--fs-input) - .5px)}
-:is(.dlg,.dlg-page) .in:hover{border-color:var(--text-3)}
-:is(.dlg,.dlg-page) .in:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
-:is(.dlg,.dlg-page) .in[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
-:is(.dlg,.dlg-page) .in:disabled,:is(.dlg,.dlg-page) .in[readonly]{background:var(--surface-2);color:var(--text-2);border-style:dashed;cursor:not-allowed}
-:is(.dlg,.dlg-page) textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:vertical}
-:is(.dlg,.dlg-page) select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--text-2) 50%),linear-gradient(135deg,var(--text-2) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat}
-:is(.dlg,.dlg-page) input[type=checkbox],:is(.dlg,.dlg-page) input[type=radio]{accent-color:var(--accent);width:16px;height:16px;margin:0;flex:none}
-:is(.dlg,.dlg-page) input[type=checkbox]:not(.sw){appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;border:1px solid var(--ctl-border);border-radius:var(--r-xs);background:var(--field);cursor:pointer}
-:is(.dlg,.dlg-page) input[type=checkbox]:not(.sw):checked{background:var(--accent);border-color:var(--accent)}
-:is(.dlg,.dlg-page) input[type=checkbox]:not(.sw):checked::after{content:"";width:8px;height:4px;margin-top:-2px;border:2px solid var(--on-accent);border-top:0;border-right:0;transform:rotate(-45deg)}
-:is(.dlg,.dlg-page) input[type=checkbox]:not(.sw):indeterminate{background:var(--accent);border-color:var(--accent)}
-:is(.dlg,.dlg-page) input[type=checkbox]:not(.sw):indeterminate::after{content:"";width:8px;height:0;margin:0;border:0;border-top:2px solid var(--on-accent);transform:none}
-:is(.dlg,.dlg-page) .cb{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:var(--fs-sm);color:var(--text);cursor:pointer}
-:is(.dlg,.dlg-page) .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4) var(--s-5)}
-@media (max-width:699px){:is(.dlg,.dlg-page) .grid-2{grid-template-columns:minmax(0,1fr)}}
+:is(.dlg,.set-main) .in.mono{font-family:var(--mono);font-size:calc(var(--fs-input) - .5px)}
+:is(.dlg,.set-main) .in::placeholder{color:var(--text-3);opacity:1}
+:is(.dlg,.set-main) .in:hover{border-color:var(--text-3)}
+:is(.dlg,.set-main) .in:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+:is(.dlg,.set-main) .in[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
+:is(.dlg,.set-main) .in:disabled,:is(.dlg,.set-main) .in[readonly]{background:var(--surface-2);color:var(--text-2);border-style:dashed;cursor:not-allowed}
+:is(.dlg,.set-main) textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:vertical}
+:is(.dlg,.set-main) select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--text-2) 50%),linear-gradient(135deg,var(--text-2) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+:is(.dlg,.set-main) input[type=checkbox],:is(.dlg,.set-main) input[type=radio]{accent-color:var(--accent);width:16px;height:16px;margin:0;flex:none}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw){appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;border:1px solid var(--ctl-border);border-radius:var(--r-xs);background:var(--field);cursor:pointer}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):checked{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):checked::after{content:"";width:8px;height:4px;margin-top:-2px;border:2px solid var(--on-accent);border-top:0;border-right:0;transform:rotate(-45deg)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):indeterminate{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):indeterminate::after{content:"";width:8px;height:0;margin:0;border:0;border-top:2px solid var(--on-accent);transform:none}
+:is(.dlg,.set-main) .cb{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:var(--fs-sm);color:var(--text);cursor:pointer}
+:is(.dlg,.set-main) .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4) var(--s-5)}
+@media (max-width:699px){:is(.dlg,.set-main) .grid-2{grid-template-columns:minmax(0,1fr)}}
 /* switch: a checkbox with role=switch */
-:is(.dlg,.dlg-page) .sw{appearance:none;-webkit-appearance:none;position:relative;width:36px!important;height:20px!important;border-radius:var(--r-pill);border:1px solid var(--ctl-border);background:var(--field);cursor:pointer;transition:background-color var(--dur-2) var(--ease-out)}
-:is(.dlg,.dlg-page) .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
-:is(.dlg,.dlg-page) .sw:checked{background:var(--accent);border-color:var(--accent)}
-:is(.dlg,.dlg-page) .sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
+:is(.dlg,.set-main) .sw{appearance:none;-webkit-appearance:none;position:relative;width:36px!important;height:20px!important;border-radius:var(--r-pill);border:1px solid var(--ctl-border);background:var(--field);cursor:pointer;transition:background-color var(--dur-2) var(--ease-out)}
+:is(.dlg,.set-main) .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
+:is(.dlg,.set-main) .sw:checked{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) .sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
 /* choice: a radio group drawn as a segmented control (few options, all visible) */
-:is(.dlg,.dlg-page) .choice{justify-self:start;display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
-:is(.dlg,.dlg-page) .choice label{position:relative;display:inline-flex;align-items:center;gap:6px;height:calc(var(--ctl-h) - 6px);padding:0 var(--s-3);border-radius:var(--r-xs);color:var(--text-2);font:500 var(--fs-sm)/1 var(--font);cursor:pointer;white-space:nowrap}
-:is(.dlg,.dlg-page) .choice label:hover{color:var(--text);background:var(--tint)}
-:is(.dlg,.dlg-page) .choice input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
-:is(.dlg,.dlg-page) .choice label:has(input:checked){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
-:is(.dlg,.dlg-page) .choice label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
+:is(.dlg,.set-main) .choice{justify-self:start;display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+:is(.dlg,.set-main) .choice label{position:relative;display:inline-flex;align-items:center;gap:6px;height:calc(var(--ctl-h) - 6px);padding:0 var(--s-3);border-radius:var(--r-xs);color:var(--text-2);font:500 var(--fs-sm)/1 var(--font);cursor:pointer;white-space:nowrap}
+:is(.dlg,.set-main) .choice label:hover{color:var(--text);background:var(--tint)}
+:is(.dlg,.set-main) .choice input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+:is(.dlg,.set-main) .choice label:has(input:checked){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
+:is(.dlg,.set-main) .choice label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
 
 /* a wrapper of fields that belong to one choice, laid out as if it were not there */
 .fc{display:contents}
-:is(.dlg,.dlg-page) .fld.ro-off{display:none}
+:is(.dlg,.set-main) .fld.ro-off{display:none}
 /* "More options" and the like: a <details> in a form */
-:is(.dlg,.dlg-page) details>summary{display:flex;align-items:center;gap:6px;min-height:var(--hit);color:var(--text-2);font:500 var(--fs-sm)/1.3 var(--font);cursor:pointer;list-style:none}
-:is(.dlg,.dlg-page) details>summary::-webkit-details-marker{display:none}
-:is(.dlg,.dlg-page) details>summary::before{content:"";width:6px;height:6px;margin:0 3px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform var(--dur-1) var(--ease-out)}
-:is(.dlg,.dlg-page) details[open]>summary::before{transform:rotate(45deg)}
-:is(.dlg,.dlg-page) details>summary:hover{color:var(--text)}
-:is(.dlg,.dlg-page) details[open]>summary{margin-bottom:var(--s-3)}
-:is(.dlg,.dlg-page) .cset-opts{display:flex;flex-wrap:wrap;gap:0 var(--s-4)}
-:is(.dlg,.dlg-page) .cset-opts .mono{font-family:var(--mono);font-size:var(--fs-xs)}
+:is(.dlg,.set-main) details>summary{display:flex;align-items:center;gap:6px;min-height:var(--hit);color:var(--text-2);font:500 var(--fs-sm)/1.3 var(--font);cursor:pointer;list-style:none}
+:is(.dlg,.set-main) details>summary::-webkit-details-marker{display:none}
+:is(.dlg,.set-main) details>summary::before{content:"";width:6px;height:6px;margin:0 3px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform var(--dur-1) var(--ease-out)}
+:is(.dlg,.set-main) details[open]>summary::before{transform:rotate(45deg)}
+:is(.dlg,.set-main) details>summary:hover{color:var(--text)}
+:is(.dlg,.set-main) details[open]>summary{margin-bottom:var(--s-3)}
+:is(.dlg,.set-main) .cset-opts{display:flex;flex-wrap:wrap;gap:0 var(--s-4)}
+:is(.dlg,.set-main) .cset-opts .mono{font-family:var(--mono);font-size:var(--fs-xs)}
 /* in-page tabs inside a dialog: stay in view while the panel scrolls */
 .tabs.dlg-tabs{min-height:41px;position:sticky;top:calc(-1*var(--s-1));z-index:2;margin:0 calc(-1*var(--s-5));padding:0 var(--s-4);background:var(--raised)}
 .tabpanel{display:grid;gap:var(--s-4);align-content:start}
-:is(.dlg,.dlg-page) :is(.tabpanel,.dlg-sec,.fld)>.btn.sm{justify-self:start}
+:is(.dlg,.set-main) :is(.tabpanel,.dlg-sec,.fld)>.btn.sm{justify-self:start}
 .dlg-page.wide{max-width:860px}
 
 /* ---- notes: a message inside a panel or dialog that is not tied to one field ---- */

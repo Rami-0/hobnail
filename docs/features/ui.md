@@ -53,9 +53,9 @@ OS, the ◐ button overrides it per browser.
     `--border` to recolour panels should set `--line` as well.
   - `--fs-micro` is now 11 px (uppercase labels; same as the old
     `--fs-label`); the old 12 px size is `--fs-xs`.
-  - A warning in Settings › Appearance when the saved `custom.css` sets one of
-    the retired names (DESIGN.md §11.2) comes with the Appearance form in the
-    forms wave; it is not built yet.
+  - Settings › Appearance warns when the saved `custom.css` sets one of the
+    retired names (or `--border` without `--line`) and names the token to set
+    instead.
 - **Components:** buttons, form fields, dialog, toast, menu, tabs, empty
   states and skeletons are one shared layer (`static/components.css` inlined
   in every page, `static/ui.js` as the first part of `/static/app.js`,
