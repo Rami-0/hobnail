@@ -141,11 +141,17 @@ svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
 .stack .cnt{font:11px var(--mono);color:var(--text-3)}
 .stack .cnt:not(.all-up){color:var(--text-2)}
 .stack ul{list-style:none;margin:0 0 4px;padding:0}
-.ctr a{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px 0 24px;border-radius:var(--r-sm);color:var(--text-2);font:12.5px var(--mono)}
-.ctr a:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
-.ctr a[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
+.ctr{display:flex;align-items:center;gap:2px}
+.ctr>a:first-child{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:26px;padding:0 8px 0 24px;border-radius:var(--r-sm);color:var(--text-2);font:12.5px var(--mono)}
+.ctr>a:first-child:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
+.ctr>a[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
 .ctr .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ctr.stopped a{color:var(--text-3)}
+.ctr.stopped>a:first-child{color:var(--text-3)}
+/* The logs action of a tree item and of a stack: visible at rest (NAV-07). */
+.tree .ia.logs{width:26px;height:26px}
+.tree .ia.logs svg{width:14px;height:14px}
+.stack summary .ia.logs{width:24px;height:24px;margin:0 -2px}
+@media (pointer:coarse){.ctr>a:first-child,.stack>summary{height:44px}.stack summary .ia.logs{margin:0}}
 .side-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--text-3);flex:none}
 .side-foot code{font-size:11px;color:var(--text-3)}
 .live{display:flex;align-items:center;gap:6px}
@@ -399,8 +405,5 @@ dialog.keys::backdrop{background:var(--scrim)}
 }
 
 /* ---- v3: motion ---- */
-.nav-item,.ctr a,.icon-btn,.seg a,.chip,.mark,.hs-cell,.tm{transition:background-color var(--t) var(--ease),color var(--t) var(--ease),border-color var(--t) var(--ease)}
+.nav-item,.ctr>a:first-child,.icon-btn,.seg a,.chip,.mark,.hs-cell,.tm{transition:background-color var(--t) var(--ease),color var(--t) var(--ease),border-color var(--t) var(--ease)}
 
-.stack summary .stack-logs{width:22px;height:22px;opacity:0;transition:opacity .16s}
-.stack summary:hover .stack-logs,.stack summary .stack-logs:focus-visible{opacity:1}
-@media (hover:none){.stack summary .stack-logs{opacity:.75}}

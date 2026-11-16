@@ -429,49 +429,6 @@ fn main_link_precedence() {
 }
 
 #[test]
-fn dozzle_and_beszel_autodetect() {
-    let mut dozzle = ctr("dozzle", Some("dozzle"));
-    dozzle.image = "amir20/dozzle:latest".into();
-    dozzle.ports = vec![
-        port("100.64.0.10", 8888, 8080),
-        port("192.168.1.10", 8888, 8080),
-    ];
-    let mut beszel = ctr("beszel", Some("beszel"));
-    beszel.image = "henrygd/beszel:latest".into();
-    beszel.ports = vec![
-        port("100.64.0.10", 8090, 8090),
-        port("127.0.0.1", 8090, 8090),
-    ];
-    let mut agent = ctr("beszel-agent", Some("beszel"));
-    agent.image = "henrygd/beszel-agent:latest".into();
-    let app = ctr("app", None);
-    let id12: String = app.id.chars().take(12).collect();
-    let s = snap(vec![dozzle, beszel, agent, app]);
-    let gs = build_groups(&Config::default(), &s, &StatsMap::new(), "192.168.1.10");
-    let a = card(&gs, "app");
-    assert_eq!(
-        a.logs_url.clone().unwrap(),
-        format!("http://192.168.1.10:8888/container/{id12}")
-    );
-    assert_eq!(a.metrics_url.as_deref(), Some("http://100.64.0.10:8090/"));
-
-    // A stopped Dozzle is not used.
-    let mut s2 = s.clone();
-    s2.containers[0].state = "exited".into();
-    let gs = build_groups(&Config::default(), &s2, &StatsMap::new(), HOST);
-    assert_eq!(card(&gs, "app").logs_url, None);
-
-    // Config templates win.
-    let mut cfg = Config::default();
-    cfg.docker.logs_url = Some("http://{host}:9999/l/{name}".into());
-    cfg.docker.metrics_url = Some("http://m/{id}".into());
-    let gs = build_groups(&cfg, &s, &StatsMap::new(), "homelab");
-    let a = card(&gs, "app");
-    assert_eq!(a.logs_url.as_deref(), Some("http://homelab:9999/l/app"));
-    assert_eq!(a.metrics_url.clone().unwrap(), format!("http://m/{id12}"));
-}
-
-#[test]
 fn stats_line() {
     let c = ctr("a", None);
     let mut stats = StatsMap::new();

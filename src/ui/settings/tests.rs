@@ -1082,6 +1082,19 @@ fn containers_and_groups_are_rendered_by_the_server_with_their_dialogs() {
         assert!(html.contains(&format!(r#"data-key="{k}""#)), "{k}");
     }
     assert!(html.contains("not running"));
+    // Each container's row: one click to its logs, before Edit. None for an
+    // override of a container that is not there, nor for one the owner hid
+    // (`we?` hides web: its logs cannot be read).
+    let row = &html[html.find(r#"data-key="override:db""#).unwrap()..];
+    let row = &row[..row.find("</tr>").unwrap()];
+    let logs = row.find(
+        r#"<a class="ia logs" href="/containers/db/logs" title="Logs" aria-label="Logs of db">"#,
+    );
+    assert!(
+        logs.is_some_and(|i| i < row.find("aria-label=\"Edit db\"").unwrap()),
+        "{row}"
+    );
+    assert!(!html.contains("/containers/ctr-mark/logs") && !html.contains("/containers/web/logs"));
     assert!(html.contains("&quot;_c&quot;:&quot;ctr-mark&quot;"));
     assert!(
         html.contains("&quot;order&quot;:&quot;3&quot;")

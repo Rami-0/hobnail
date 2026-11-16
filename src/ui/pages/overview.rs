@@ -171,6 +171,13 @@ pub fn health(v: &Live) -> Markup {
 
 // ---------------------------------------------------------------- attention
 
+/// The logs action at the end of a row that names a container (§11.9).
+pub fn logs_ia(c: &CardView) -> Markup {
+    html! {
+        a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
+    }
+}
+
 pub fn attention(now: u64, v: &Live) -> Markup {
     // One row per subject, ranked by severity: a container with a firing
     // alert is one red row ("unhealthy · alert firing 5m"), not two.
@@ -213,6 +220,7 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                     } @else {
                         span.when { (c.state_text.as_deref().unwrap_or("")) }
                     }
+                    (logs_ia(c))
                 },
             )),
             None if !c.running => clean_stopped += 1,
@@ -242,6 +250,7 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                         a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
                         span.why { "recovered after: " (why) }
                         span.when { "last hour" }
+                        (logs_ia(c))
                     },
                 ));
             }
@@ -304,6 +313,7 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
                             li {
                                 a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
                                 span.val { (fmt(x)) }
+                                (logs_ia(c))
                                 span.meter { span style={"width:" (format!("{:.1}", (x / max * 100.0).clamp(0.0, 100.0))) "%"} {} }
                             }
                         }
@@ -669,6 +679,7 @@ fn recent_events(ctx: &Ctx) -> Markup {
         }
         .for_viewer(ctx.user.is_some()),
     );
+    let names = crate::logs::tailable(ctx.state);
     html! {
         section.panel aria-label="Recent events" {
             (panel_head("Recent events", Some(("/history#events", "Timeline"))))
@@ -679,15 +690,23 @@ fn recent_events(ctx: &Ctx) -> Markup {
                 }
             } @else {
                 ul.events {
-                    @for e in &evs { (event_row(ctx.now, e, true)) }
+                    @for e in &evs { (event_row(ctx.now, e, true, Some(&names))) }
                 }
             }
         }
     }
 }
 
-/// One timeline row. `link` makes a container subject a link.
-pub fn event_row(now: u64, e: &crate::db::Event, link: bool) -> Markup {
+/// One timeline row. `link` makes a container subject a link; `logs` (the
+/// containers whose logs may be read) adds a logs icon that opens the logs
+/// at the moment of the event when the subject is one of them.
+pub fn event_row(
+    now: u64,
+    e: &crate::db::Event,
+    link: bool,
+    logs: Option<&std::collections::HashSet<String>>,
+) -> Markup {
+    let logs = logs.filter(|n| n.contains(&e.subject));
     let kind = match e.level.as_str() {
         "error" => "bad",
         "warn" => "warn",
@@ -705,6 +724,10 @@ pub fn event_row(now: u64, e: &crate::db::Event, link: bool) -> Markup {
                 }
             }
             @if !e.detail.is_empty() { span.muted.detail { (e.detail) } }
+            @if logs.is_some() {
+                a.ia.logs href=(crate::logs::logs_at(&e.subject, e.ts)) title="Logs at that moment"
+                    aria-label={"Logs of " (e.subject)} { (ic("logs")) }
+            }
         }
     }
 }
@@ -878,6 +901,9 @@ mod tests {
         assert!(html.contains("1 container is stopped cleanly"));
         // Bad rows sort before warnings.
         assert!(html.find("sick").unwrap() < html.find("crashed").unwrap());
+        // Every container row ends with its logs action (one click, §11.9).
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/sick/logs" title="Logs" aria-label="Logs of sick">"#), "{html}");
+        assert!(html.contains(r#"href="/containers/crashed/logs""#));
         let html = attention(100, &live(vec![fine], None)).into_string();
         assert!(html.contains("All clear"));
     }
@@ -897,6 +923,10 @@ mod tests {
         );
         assert!(html.contains("width:100.0%"));
         assert!(!html.contains("<i>a</i>"));
+        assert!(
+            html.contains(r#"href="/containers/b/logs""#),
+            "Top CPU rows carry logs"
+        );
         assert!(top(&live(vec![a], None), false)
             .into_string()
             .contains("show_stats"));
@@ -950,11 +980,28 @@ mod tests {
             subject: "web<1>".into(),
             detail: "exit 137 & more".into(),
         };
-        let html = event_row(1_794_660_400, &e, true).into_string();
+        let html = event_row(1_794_660_400, &e, true, None).into_string();
         assert!(html.contains("pill bad") && html.contains(">die<"));
         assert!(html.contains("href=\"/containers/web%3C1%3E\""), "{html}");
         assert!(html.contains("exit 137 &amp; more") && html.contains("web&lt;1&gt;"));
-        let plain = event_row(1_794_660_400, &e, false).into_string();
+        assert!(!html.contains("/logs"), "no logs link without the names");
+        let plain = event_row(1_794_660_400, &e, false, None).into_string();
         assert!(!plain.contains("href="));
+        // A container whose logs may be read: one click to its logs at that
+        // moment (unix ms), a sibling of the name link, never inside it.
+        let names: std::collections::HashSet<String> = ["web<1>".to_string()].into();
+        let html = event_row(1_794_660_400, &e, true, Some(&names)).into_string();
+        assert!(
+            html.contains(
+                "<a class=\"ia logs\" href=\"/containers/web%3C1%3E/logs#t=1794660300000\""
+            ),
+            "{html}"
+        );
+        assert!(html.contains("aria-label=\"Logs of web&lt;1&gt;\""));
+        assert!(!html.contains("<a class=\"nm\" href=\"/containers/web%3C1%3E\">web&lt;1&gt;<a"));
+        let other: std::collections::HashSet<String> = ["db".to_string()].into();
+        assert!(!event_row(1, &e, true, Some(&other))
+            .into_string()
+            .contains("/logs"));
     }
 }

@@ -2,6 +2,7 @@
 //! firing now, and the alert log from the history database.
 
 use maud::{html, Markup};
+use std::collections::HashSet;
 
 use crate::alerts::{ChannelStatus, Health, RuleConfig, RuleKind, Status};
 use crate::config::Config;
@@ -21,6 +22,7 @@ pub fn page(ctx: &Ctx) -> String {
         }
         .for_viewer(ctx.user.is_some()),
     );
+    let names = crate::logs::tailable(ctx.state);
     let body = html! {
         div.page {
             (page_sub(html! { "Rules, notification channels and what has fired" }))
@@ -33,7 +35,7 @@ pub fn page(ctx: &Ctx) -> String {
                         @else { "Fired, resolved and failed notifications are logged here once history is recording." }
                     }
                 } @else {
-                    ul.events { @for e in &log { (event_row(ctx.now, e, false)) } }
+                    ul.events { @for e in &log { (event_row(ctx.now, e, false, Some(&names))) } }
                 }
             }
         }
@@ -50,10 +52,15 @@ pub fn page(ctx: &Ctx) -> String {
 /// The live part: firing list, rules and channels.
 pub fn fragment(ctx: &Ctx) -> Markup {
     let status = ctx.state.alerts.lock().unwrap().clone();
-    live(&ctx.cfg, &status, ctx.now)
+    live(
+        &ctx.cfg,
+        &status,
+        ctx.now,
+        &crate::logs::tailable(ctx.state),
+    )
 }
 
-fn live(cfg: &Config, status: &Status, now: u64) -> Markup {
+fn live(cfg: &Config, status: &Status, now: u64, names: &HashSet<String>) -> Markup {
     html! {
         div #al-live {
             @if cfg.alerts.is_empty() && cfg.channels.is_empty() {
@@ -62,7 +69,7 @@ fn live(cfg: &Config, status: &Status, now: u64) -> Markup {
                     code { "[channels.*]" } " to the config to get notified."
                 }))
             } @else {
-                (crate::ui::alerts::render(cfg, status))
+                (crate::ui::alerts::render_with(cfg, status, names))
                 @if let Some(e) = &status.error { p.bad.wrap { "alert state: " (e) } }
                 section.panel aria-label="Rules" {
                     (panel_head("Rules", None))
@@ -224,7 +231,8 @@ expect_status = 200
     #[test]
     fn page_part_states() {
         let now = crate::util::unix_now();
-        let empty = live(&Config::default(), &Status::default(), now).into_string();
+        let none = HashSet::new();
+        let empty = live(&Config::default(), &Status::default(), now, &none).into_string();
         assert!(empty.starts_with(r#"<div id="al-live">"#), "{empty}");
         assert!(empty.contains("No alert rules"));
         let c = cfg(r#"
@@ -259,8 +267,16 @@ channels = ["hook"]
                 pending: 1,
             },
         );
-        let html = live(&c, &st, now).into_string();
+        let html = live(&c, &st, now, &none).into_string();
         assert!(html.contains("1 firing") && html.contains("2m"), "{html}");
+        assert!(
+            !html.contains("/logs"),
+            "no logs link for an unknown subject"
+        );
+        // An incident about a container: one click to its logs.
+        let names: HashSet<String> = ["web".to_string()].into();
+        let html = live(&c, &st, now, &names).into_string();
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/web/logs" title="Logs" aria-label="Logs of web">"#), "{html}");
         assert!(html.contains("&lt;r&gt;") && !html.contains("<r>"));
         assert!(html.contains("failing") && html.contains("HTTP 500 &lt;b&gt;"));
         assert!(html.contains("cooldown"));

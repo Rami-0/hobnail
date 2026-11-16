@@ -96,7 +96,7 @@
 
   // ---- stack tree: remembered open/closed stacks, filter, current container ----
   const TREE = "rh-tree";
-  const here = decodeURIComponent((body.dataset.path || "").replace(/^\/containers\//, ""));
+  const here = decodeURIComponent((body.dataset.path || "").replace(/^\/containers\//, "").replace(/\/logs$/, ""));
   function treeApply() {
     const closed = store.get(TREE, {});
     const href = "/containers/" + encodeURIComponent(here);
@@ -469,7 +469,7 @@
   // ---- command palette ----
   const pal = $("palette"), palQ = $("pal-q"), palList = $("pal-list");
   let palData = null, palAt = 0, palItems = [], palSel = 0, palReturn = null;
-  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", z: "Dozzle", w: "Search" };
+  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", w: "Search" };
   async function palLoad() {
     if (palData && Date.now() - palAt < 30000) return;
     try {
@@ -508,9 +508,8 @@
       list = base.filter((x) => x.t !== "s").sort((a, b) => order[a.t] - order[b.t]);
     } else {
       const ctrs = (palData || []).filter((x) => x.t === "c" && x.d);
-      const logs = ctrs.map((x) => ({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs", k: x.k }))
-        .concat(ctrs.filter((x) => x.l).map((x) => ({ t: "z", n: "Open in Dozzle: " + x.n, s: x.s, u: x.l, k: x.k, ext: true })));
-      list = base.concat(logs).map((x) => [score(x, q) - (x.t === "l" || x.t === "z" ? 1 : 0), x]).filter((x) => x[0] > 0)
+      const logs = ctrs.map((x) => ({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs", k: x.k }));
+      list = base.concat(logs).map((x) => [score(x, q) - (x.t === "l" ? 1 : 0), x]).filter((x) => x[0] > 0)
         .sort((a, b) => b[0] - a[0]).map((x) => x[1]);
       list.push({ t: "w", n: palQ.value.trim(), s: "search the web", web: true });
     }
@@ -519,7 +518,7 @@
     palList.replaceChildren();
     palItems.forEach((it, i) => {
       const li = el("li"); li.id = "pal-" + i; li.setAttribute("role", "option");
-      const pt = el("span", "pt" + (it.t === "c" || it.t === "l" || it.t === "z" ? " mono" : ""));
+      const pt = el("span", "pt" + (it.t === "c" || it.t === "l" ? " mono" : ""));
       const n = it.n, at = q ? n.toLowerCase().indexOf(q) : -1;
       if (at >= 0 && it.t !== "w") pt.append(n.slice(0, at), el("b", "", n.slice(at, at + q.length)), n.slice(at + q.length)); else pt.textContent = n;
       li.append(el("span", "pk", KIND[it.t]), pt);
@@ -550,7 +549,7 @@
       return open((body.dataset.searchUrl || "https://duckduckgo.com/?q={q}").replace("{q}", encodeURIComponent(v)), true);
     }
     if (it.t === "c") return alt || !it.u ? open(it.d) : open(it.u, true);
-    open(it.u, it.t === "b" || it.ext);
+    open(it.u, it.t === "b");
   }
   async function palOpen() {
     if (!pal || !pal.hidden) return;
@@ -628,7 +627,7 @@
     if (k === "g") { gAt = Date.now(); return; }
     if (k === "/") {
       e.preventDefault();
-      const f = [$("cq"), $("tree-filter")].find((x) => x && shown(x));
+      const f = [$("cq"), $("lpq"), $("tree-filter")].find((x) => x && shown(x));
       f ? (f.focus(), f.select && f.select()) : palOpen();
     } else if (k === "?") { e.preventDefault(); keysOpen(); }
     else if (k === "j" || k === "k") { e.preventDefault(); kmove(k === "j" ? 1 : -1); }
@@ -852,6 +851,8 @@
   // HTTP/1.1 connections (6 per host), which stalled later navigations, and
   // a background tab would keep the server's refresh loop running.
   let es = null, hiddenAt = 0, hideTimer = null;
+  // Every logs page: a viewer (#lv) or the /logs list (#lpick).
+  const logsPage = !!($("lv") || $("lpick"));
   function connect() {
     if (!window.EventSource) { setLive(false, "no live updates"); return; }
     if (es) return;
@@ -865,7 +866,9 @@
       lastLive = Date.now();
       if (i > 0) queue(e.data.slice(i + 1));
     });
-    es.addEventListener("reload", () => location.reload());
+    // A config change reloads the page, but never a log viewer: it would lose
+    // its search, filters, pause, range and scroll (owner decision Y12, LG-03).
+    es.addEventListener("reload", () => { if (!logsPage) location.reload(); });
     es.onerror = () => setLive(false, "reconnecting");
     es.onopen = () => setLive(true, "live");
   }
@@ -874,7 +877,7 @@
     clearTimeout(hideTimer);
     // Paused for over a minute: reload for fresh data (widgets refresh slowly),
     // but never over an open dialog or unsaved input (owner decision Y12).
-    if (!es && hiddenAt && Date.now() - hiddenAt > 60000 && !(window.HB && HB.unsaved && HB.unsaved())) { location.reload(); return; }
+    if (!es && hiddenAt && Date.now() - hiddenAt > 60000 && !logsPage && !(window.HB && HB.unsaved && HB.unsaved())) { location.reload(); return; }
     hiddenAt = 0;
     connect();
   }

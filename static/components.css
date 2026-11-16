@@ -36,6 +36,10 @@
 @keyframes spin{to{transform:rotate(360deg)}}
 /* small visual size, 44 px hit area on touch */
 @media (pointer:coarse){.linkbtn{position:relative}.ia::after,.btn.sm::after,.linkbtn::after{content:"";position:absolute;inset:min(0px,calc((100% - 44px)/2))}}
+/* In dense rows a grown hit area would reach into the next row or onto the
+   row's own link: there the action itself is 44 px and the row grows to it. */
+@media (pointer:coarse){.tree .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
+ td .linkbtn::after{inset:-6px -13px -21px}}
 
 /* ---- icon action: compact row/list action (logs, open, more) ---- */
 .ia{position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--ia);height:var(--ia);flex:none;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-3);cursor:pointer;
@@ -52,6 +56,12 @@
 .row-link::before{content:"";position:absolute;inset:0;z-index:0}
 tr.rl,li.rl,.tm{position:relative}
 .ra,.ra *{position:relative;z-index:1}
+/* What a stretched row shows sits above its link: text selects, titles show,
+   other links work; a click on empty row space still opens the row. */
+tr.rl>td>:not(.row-link),li.rl>:not(.row-link){position:relative;z-index:1}
+/* A name link with its logs action beside it (tables on Host, History). */
+.nm-l{display:inline-flex;align-items:center;gap:var(--s-1);max-width:100%;vertical-align:middle}
+.nm-l>a:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .linkbtn{padding:0;border:0;background:none;color:var(--text);font:600 var(--fs-sm)/1.3 var(--font);text-align:left;cursor:pointer;overflow-wrap:anywhere}
 .linkbtn:hover{color:var(--accent-fg);text-decoration:underline}
 tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)}

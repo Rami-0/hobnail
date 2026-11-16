@@ -130,7 +130,11 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
     crate::ui::view::seed_cpu(ctx.state, &mut sys, ctx.now as i64);
     let strips = crate::ui::view::strips(ctx.state, ctx.now as i64);
     let refresh = ctx.cfg.system.refresh.0.as_secs().max(1);
-    let active_ctr = ctx.path.strip_prefix("/containers/").map(url_decode);
+    // A container's pages, its logs (the Logs tab) included, mark it in the tree.
+    let active_ctr = ctx
+        .path
+        .strip_prefix("/containers/")
+        .map(|p| url_decode(p.strip_suffix("/logs").unwrap_or(p)));
     let firing = ctx.state.alerts.lock().unwrap().incidents.len();
     let now = ctx.now as i64;
     let markup = html! {
@@ -506,6 +510,9 @@ fn tree_inner(
                 @let ctrs: Vec<&CardView> = g.cards.iter().filter(|c| c.container).collect();
                 @let has_active = active.is_some_and(|a| ctrs.iter().any(|c| c.name == a));
                 @let trouble = ctrs.iter().any(|c| matches!(c.label, "unhealthy" | "restarting" | "dead"));
+                // Stack logs only where a compose project of that name exists
+                // (a config group has no `/stacks/<x>/logs`, LG-09).
+                @let project = crate::logs::is_project(cfg, snap, &g.name);
                 details.stack data-k=(g.name) open {
                     summary.cur[has_active] {
                         (ic("chev-r"))
@@ -514,8 +521,10 @@ fn tree_inner(
                         span.cnt.num.all-up[g.running == ctrs.len()] title={(g.running) " of " (ctrs.len()) " running"} {
                             (g.running) "/" (ctrs.len())
                         }
-                        a.icon-btn.sm.stack-logs href=(crate::logs::stack_logs_url(&g.name))
-                            title={"Logs of " (g.title)} aria-label={"Logs of " (g.title)} { (ic("logs")) }
+                        @if project {
+                            a.ia.logs href=(crate::logs::stack_logs_url(&g.name))
+                                title="Logs of the whole stack" aria-label={"Logs of the stack " (g.title)} { (ic("logs")) }
+                        }
                         @if let Some(st) = strips.filter(|st| !st.by_name.is_empty()) {
                             (health_strip(&stack_strip(st, g), st, &g.title, StripStyle::Runs))
                         }
@@ -529,6 +538,8 @@ fn tree_inner(
                                     span.nm { (c.title) }
                                     @if !c.running { span.sr { " (" (c.label) ")" } }
                                 }
+                                a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs"
+                                    aria-label={"Logs of " (c.title)} { (ic("logs")) }
                             }
                         }
                     }
@@ -596,6 +607,34 @@ mod tests {
         assert!(!html.contains("<b>x</b>"));
         assert!(html.contains("&lt;b&gt;x&lt;/b&gt;"));
         assert!(html.contains("/containers/%3Cb%3Ex%3C%2Fb%3E"), "{html}");
+        // Every item: one click to its logs, a sibling of the item's link,
+        // visible at rest (NAV-05, NAV-07).
+        assert!(html.contains(r#"</a><a class="ia logs" href="/containers/web/logs" title="Logs" aria-label="Logs of web">"#), "{html}");
+        assert!(html.contains(r#"href="/containers/%3Cb%3Ex%3C%2Fb%3E/logs""#));
+        assert!(html.contains(r#"<a class="ia logs" href="/stacks/shop/logs""#));
+    }
+
+    /// Stack logs only for a compose project; a config group gets none (LG-09).
+    #[test]
+    fn stack_logs_only_for_compose_projects() {
+        let snap = Snapshot {
+            containers: vec![c("web", "shop", "running"), c("mon", "x", "running")],
+            fetched_at: 1,
+            error: None,
+        };
+        let cfg = crate::config::parse(
+            "[[groups]]\nname = \"tools\"\n[containers.mon]\ngroup = \"tools\"\n",
+            "c.toml",
+        )
+        .unwrap();
+        let groups = build_groups(&cfg, &snap, &StatsMap::new(), "h");
+        let html = tree_inner(&cfg, &snap, &groups, None, None).into_string();
+        assert!(html.contains("/stacks/shop/logs"));
+        assert!(!html.contains("/stacks/tools/logs"), "{html}");
+        assert!(
+            html.contains("/containers/mon/logs"),
+            "its container still has logs"
+        );
     }
 
     #[test]

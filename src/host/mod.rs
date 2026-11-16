@@ -61,10 +61,12 @@ pub fn page(ctx: &Ctx) -> (StatusCode, String) {
         .iter()
         .map(|c| (c.id.clone(), c.name.clone()))
         .collect();
+    let logs = crate::logs::tailable(ctx.state);
     let lv = view::LiveView {
         h: &host,
         p: &procs,
         names: &names,
+        logs: &logs,
         signed_in: ctx.user.is_some(),
     };
     if frag {

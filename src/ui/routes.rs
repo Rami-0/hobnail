@@ -122,9 +122,10 @@ pub const SETTINGS: &[(&str, &str, &str)] = &[
     ("Security", "security", "Password and sessions"),
 ];
 
-/// Items are `{t, n, s?, u?, d?, l?, k?, r?}`: type (`p` page, `s` settings,
-/// `c` container, `b` bookmark), name, secondary text, URL, details URL, logs
-/// URL, extra search keywords, running.
+/// Items are `{t, n, s?, u?, d?, k?, r?}`: type (`p` page, `s` settings,
+/// `c` container, `b` bookmark), name, secondary text, URL, details URL,
+/// extra search keywords, running. The script adds "Logs: X" (the details
+/// URL + `/logs`) for each container.
 pub fn palette_json(state: &AppState, host: &str) -> Value {
     let cfg = state.config.current();
     let snap = state.snapshot();
@@ -142,7 +143,7 @@ pub fn palette_json(state: &AppState, host: &str) -> Value {
                 let details = format!("/containers/{}", url_encode(&c.name));
                 items.push(json!({
                     "t": "c", "n": c.title, "s": g.title, "d": details, "u": c.url,
-                    "l": c.logs_url, "k": c.search, "r": c.running,
+                    "k": c.search, "r": c.running,
                 }));
             } else if let Some(u) = &c.url {
                 items.push(json!({"t": "b", "n": c.title, "s": g.title, "u": u, "k": c.search}));
@@ -181,5 +182,14 @@ mod tests {
             .iter()
             .any(|i| i["t"] == "c" && i["d"] == "/containers/web%3C1%3E"));
         assert!(items.iter().any(|i| i["t"] == "b" && i["n"] == "GitHub"));
+        // No outside log viewer: "Open in Dozzle: X" is gone (NAV-53).
+        assert!(items.iter().all(|i| i.get("l").is_none()));
+    }
+
+    #[test]
+    fn palette_script_has_no_dozzle_rows() {
+        let js = crate::http::server::APP_JS;
+        assert!(!js.contains("Dozzle"), "NAV-53");
+        assert!(js.contains("\"Logs: \" + x.n"), "Logs: X stays");
     }
 }

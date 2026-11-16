@@ -11,16 +11,20 @@ OS, the ◐ button overrides it per browser.
 - **Top bar:** breadcrumb, search, CPU / MEM / DISK chips with sparklines,
   theme, account (Sign in / Sign out).
 - **Command palette:** `Ctrl/⌘ K` or `/`. Containers, pages, bookmarks,
-  settings sections, actions ("Logs: X" via Dozzle, toggle theme). Enter on no
-  match searches the web (`page.search_url`).
+  settings sections, actions ("Logs: X" opens the container's logs in the
+  app, toggle theme). Enter on no match searches the web (`page.search_url`).
 - **Pages:** Overview (health strip, host vitals with 1 h charts, needs
   attention, widgets, top consumers, recent events, bookmarks), Containers
   (dense table: filter, sort, group by stack or flat, remembered; phones get
   stacked rows), container detail (charts, timeline, ports and links, labels,
   matching alert rules), History, Alerts, Settings, Login.
-- **Container detail** tabs: Overview, Logs, Metrics (network, block I/O, PIDs,
-  throttling, OOM), Inspect (env values, commands and health-check output only
-  when signed in), Processes (signed in), Events.
+- **Container detail** tabs: Overview, Logs (the log viewer itself, at
+  `/containers/<name>/logs`, under the same header and tabs), Metrics
+  (network, block I/O, PIDs, throttling, OOM), Inspect (env values, commands
+  and health-check output only when signed in), Processes (signed in), Events.
+  The header has "Open" (when the service has a link) and, signed in, "Edit".
+- **Logs** one click from everywhere a container is named (see
+  `docs/features/logs.md`); the Logs nav item is current on every logs page.
 - **Keyboard:** `g` then `o c h l a s` jumps to a page, `j/k` moves in lists,
   `l` opens a container's logs, `?` shows all shortcuts.
 - **Themes:** Dark, Light, Ember, High contrast (◐ button or Settings →
@@ -75,5 +79,5 @@ legend toggles; memory treemap; ranked "Needs attention" and "since you last
 looked" on Overview. Themes: Dark, Light, Ember, High contrast (contrast-tested).
 Keyboard: `Ctrl/⌘ K` or `/` palette, `g` then `o c h l a s` for pages, `j/k` rows,
 `?` cheat sheet, `l` logs of the current container. The tab title and favicon
-show the number of problems. Installable as an app (manifest, icons, offline
-page; no data caching); a bottom bar on phones. Decisions: DESIGN.md §10.
+show the number of problems. Installable as an app (manifest and icons; no
+service worker, no offline page, no data caching); a bottom bar on phones. Decisions: DESIGN.md §10.

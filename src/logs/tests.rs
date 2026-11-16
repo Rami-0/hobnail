@@ -75,8 +75,119 @@ fn stack_and_split_pages() {
     assert_eq!(html.matches("class=\"lpane\"").count(), 1, "{html}");
     let (s, html) = page(&st, "/logs", "");
     assert_eq!(s, 200);
-    assert!(html.contains("Logs side by side"));
-    assert!(html.contains(r#"name="c" value="web""#));
+    assert!(
+        html.contains(r#"name="c" value="web""#),
+        "side by side still offered"
+    );
+    // The nav item is current on every logs page (LG-01).
+    for (p, q) in [
+        ("/logs", ""),
+        ("/logs", "c=web,solo"),
+        ("/stacks/shop/logs", ""),
+        ("/containers/web/logs", ""),
+    ] {
+        let (_, html) = page(&st, p, q);
+        assert!(
+            html.contains(r#"<a class="nav-item" href="/logs" title="Logs" aria-current="page">"#),
+            "{p}?{q}"
+        );
+        assert!(
+            html.contains(r#"<a class="bb-i" href="/logs" aria-current="page">"#),
+            "{p}?{q}"
+        );
+    }
+}
+
+/// `/logs` is a list grouped by stack (LG-04): every container one click
+/// from its logs, a filter that also works without the script, stack logs
+/// only for compose projects (LG-09).
+#[test]
+fn logs_list_groups_by_stack_and_filters() {
+    let st = state_with(sample(), OPEN);
+    let (s, html) = page(&st, "/logs", "");
+    assert_eq!(s, 200);
+    let list = &html[html.find(r#"id="lpick""#).expect("the list")..];
+    for n in ["web", "db", "solo"] {
+        assert!(
+            list.contains(&format!(
+                r#"<a class="row-link" href="/containers/{n}/logs""#
+            )),
+            "{n}: {list}"
+        );
+    }
+    assert!(list.contains(r#"data-k="shop""#) && list.contains(r#"data-k="Standalone""#));
+    assert!(
+        list.contains(r#"href="/stacks/shop/logs""#),
+        "a compose project has stack logs"
+    );
+    assert!(
+        !list.contains("/stacks/Standalone/logs"),
+        "a group that is not a project has none"
+    );
+    assert!(list.contains(r#"<input id="lpq" type="search" name="q""#));
+    assert!(list.contains("3 containers"));
+    // `q` filters on the server: no script needed.
+    let (_, html) = page(&st, "/logs", "q=SOL");
+    let list = &html[html.find(r#"id="lpick""#).unwrap()..];
+    assert!(list.contains("1 of 3 containers"));
+    assert!(
+        list.contains(r#"<section class="lpick-g" data-k="shop" hidden>"#),
+        "{list}"
+    );
+    assert!(list.contains(r#"value="SOL""#) || list.contains(r#"value="sol""#));
+    let (_, html) = page(&st, "/logs", "q=nothing-matches");
+    assert!(
+        html.contains(r#"<p class="lpick-none muted" id="lpick-none">"#),
+        "no-match state shown"
+    );
+}
+
+/// The container's Logs tab is the viewer (owner decision Y2): header and
+/// tabs above it, the Logs tab current, no second "Logs" control, and the
+/// error/warning chart that the old tab carried.
+#[test]
+fn container_logs_page_is_the_logs_tab() {
+    let st = state_with(sample(), OPEN);
+    let (s, html) = page(&st, "/containers/web/logs", "");
+    assert_eq!(s, 200);
+    assert!(
+        html.contains(r#"<header class="ctr-head">"#),
+        "container header"
+    );
+    assert!(html.contains(r#"<nav class="cd-tabs" aria-label="Container sections">"#));
+    assert!(
+        html.contains(r#"<a href="/containers/web/logs?range=6h" aria-current="page">Logs</a>"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"href="/containers/web?tab=metrics"#));
+    assert!(html.matches(">Logs</a>").count() == 1, "one Logs control");
+    assert!(html.contains("lvl-chart"), "level chart kept");
+    assert!(html.contains(r#"id="lv""#));
+    // The tree marks the container on its logs page too.
+    let tree = &html[html.find(r#"id="tree""#).unwrap()..];
+    assert!(
+        tree.contains(r#"<a href="/containers/web" title="web" aria-current="page">"#),
+        "{tree}"
+    );
+    // Old `?tab=logs` links land on the viewer.
+    let (s, html) = page(&st, "/containers/web", "tab=logs");
+    assert_eq!(s, 200);
+    assert!(html.contains(r#"data-q="c=web""#));
+}
+
+/// Signed out with logs behind a sign-in: the header and tabs (public on the
+/// detail page) and the sign-in state; no log viewer, no stream.
+#[test]
+fn container_logs_signed_out_keeps_the_frame() {
+    let st = state_with(sample(), "");
+    let (s, html) = page(&st, "/containers/web/logs", "");
+    assert_eq!(s, 401);
+    assert!(html.contains(r#"<header class="ctr-head">"#));
+    assert!(html.contains(r#"aria-current="page">Logs</a>"#));
+    assert!(html.contains("Sign in to read logs"));
+    assert!(
+        !html.contains("logs.js") && !html.contains(r#"id="lv""#) && !html.contains("lvl-chart")
+    );
 }
 
 #[test]
@@ -146,6 +257,166 @@ fn script_never_uses_inner_html() {
     );
     assert!(!js.contains("insertAdjacentHTML"));
     assert!(!js.contains("outerHTML"));
+}
+
+/// LG-12: lines have their real height (no `content-visibility` placeholder,
+/// so the bottom is the true bottom) and a ResizeObserver keeps a following
+/// pane on its newest line. The browser behaviour is checked by
+/// `scripts/logs-check.mjs`.
+#[test]
+fn following_uses_real_heights() {
+    let css = crate::http::server::LOGS_CSS;
+    let rules: String = css
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("/*"))
+        .collect();
+    assert!(!rules.contains("content-visibility:auto"), "LG-12");
+    // No scroll anchoring: following, the script sets the bottom; scrolled
+    // up, it puts the reader's line back (`restore`).
+    assert!(css.contains("overflow-anchor:none"));
+    let js = crate::http::server::LOGS_JS;
+    assert!(js.contains("new ResizeObserver"));
+    assert!(
+        !js.contains("autoscrolling"),
+        "following is decided by position, not a flag"
+    );
+}
+
+/// A config change reloads other pages but never a logs page (owner
+/// decision Y12, LG-03), nor does coming back to a hidden logs tab. The
+/// script decides by the ids it looks for (`const logsPage = …`): every
+/// logs page shape must carry one of them, and other pages none. The browser
+/// behaviour is checked by `scripts/logs-check.mjs`.
+#[test]
+fn config_change_never_reloads_a_logs_page() {
+    let js = crate::http::server::APP_JS;
+    let line = js
+        .lines()
+        .find(|l| l.trim_start().starts_with("const logsPage = "))
+        .expect("app.js decides which pages are logs pages");
+    let ids: Vec<&str> = line
+        .split("$(\"")
+        .skip(1)
+        .filter_map(|p| p.split('"').next())
+        .collect();
+    assert!(!ids.is_empty(), "{line}");
+    assert!(js.contains("if (!logsPage) location.reload();"));
+    assert!(js.contains("> 60000 && !logsPage &&"));
+    let st = state_with(sample(), OPEN);
+    let marked = |html: &str| ids.iter().any(|i| html.contains(&format!("id=\"{i}\"")));
+    for (p, q) in [
+        ("/logs", ""),
+        ("/logs", "q=web"),
+        ("/logs", "c=web,solo"),
+        ("/logs", "c=web"),
+        ("/stacks/shop/logs", ""),
+        ("/containers/web/logs", ""),
+        ("/containers/db/logs", ""),
+        ("/containers/web", "tab=logs"),
+    ] {
+        let (s, html) = page(&st, p, q);
+        assert_eq!(s, 200, "{p}?{q}");
+        assert!(
+            marked(&html),
+            "{p}?{q} is not seen as a logs page by {ids:?}"
+        );
+    }
+    for p in ["/", "/containers", "/containers/web"] {
+        let (_, html) = page(&st, p, "");
+        assert!(!marked(&html), "{p} would never reload");
+    }
+}
+
+/// A container the owner excluded is in no logs list or link: not on
+/// `/logs`, not as a logs icon in the sidebar tree, not in `tailable`, and
+/// its logs pages say "not found".
+#[test]
+fn excluded_container_is_nowhere_in_logs() {
+    let st = state_with(
+        sample(),
+        "[logs]\nrequire_login = false\n[docker]\nexclude = [\"solo\"]\n",
+    );
+    assert!(st.config.snapshot().error.is_none());
+    let names = super::tailable(&st);
+    assert!(names.contains("web") && names.contains("db"), "{names:?}");
+    assert!(!names.contains("solo"), "{names:?}");
+    assert!(!super::may_tail(&st, "solo"));
+    let (_, html) = page(&st, "/logs", "");
+    let list = &html[html.find(r#"id="lpick""#).expect("the list")..];
+    assert!(list.contains(r#"value="web""#), "{list}");
+    assert!(!list.contains("solo"), "{list}");
+    let tree = &html[html.find(r#"id="tree""#).expect("the tree")..];
+    let tree = &tree[..tree.find("side-foot").expect("tree end")];
+    assert!(tree.contains(r#"href="/containers/web/logs""#), "{tree}");
+    assert!(!tree.contains("solo"), "{tree}");
+    let (s, _) = page(&st, "/containers/solo/logs", "");
+    assert_eq!(s, 404);
+    let (_, html) = page(&st, "/logs", "c=solo,web");
+    assert_eq!(html.matches("class=\"lpane\"").count(), 1);
+    assert!(!html.contains(r#"data-q="c=solo""#));
+}
+
+/// `/logs` lists stopped containers even when the dashboard hides them
+/// (`[page] show_stopped = false`): their logs are what one comes for.
+#[test]
+fn logs_list_keeps_stopped_containers() {
+    let st = state_with(
+        sample(),
+        "[logs]\nrequire_login = false\n[page]\nshow_stopped = false\n",
+    );
+    assert!(st.config.snapshot().error.is_none());
+    let (_, html) = page(&st, "/logs", "");
+    let list = &html[html.find(r#"id="lpick""#).expect("the list")..];
+    assert!(list.contains(r#"href="/containers/db/logs""#), "{list}");
+    assert!(list.contains("3 containers"), "{list}");
+    // The dashboard itself still hides it.
+    let tree = &html[html.find(r#"id="tree""#).unwrap()..];
+    let tree = &tree[..tree.find("side-foot").expect("tree end")];
+    assert!(!tree.contains("/containers/db\""), "{tree}");
+}
+
+/// Without the script, Enter in the filter submits only `q` (it filters),
+/// and "Side by side" submits only the ticks: two forms.
+#[test]
+fn logs_list_filter_and_ticks_are_separate_forms() {
+    let st = state_with(sample(), OPEN);
+    let (_, html) = page(&st, "/logs", "");
+    let list = &html[html.find(r#"id="lpick""#).unwrap()..];
+    let f = &list[list.find(r#"<form class="lpick-f""#).expect("filter form")..];
+    let f = &f[..f.find("</form>").unwrap()];
+    assert!(
+        f.contains(r#"name="q""#) && !f.contains(r#"name="c""#),
+        "{f}"
+    );
+    let c = &list[list
+        .find(r#"<form class="lpick" id="lpick-c""#)
+        .expect("ticks form")..];
+    let c = &c[..c.find("</form>").unwrap()];
+    assert!(
+        c.contains(r#"name="c""#) && !c.contains(r#"name="q""#),
+        "{c}"
+    );
+    assert!(
+        list.contains(r#"id="lpick-go" type="submit" form="lpick-c""#),
+        "{list}"
+    );
+}
+
+/// The Logs tab keeps the chosen range: its chart and the other tabs use it.
+#[test]
+fn logs_tab_keeps_the_range() {
+    let st = state_with(sample(), OPEN);
+    let (_, html) = page(&st, "/containers/web", "tab=metrics&range=7d");
+    assert!(
+        html.contains(r#"href="/containers/web/logs?range=7d""#),
+        "{html}"
+    );
+    let (_, html) = page(&st, "/containers/web/logs", "range=7d");
+    assert!(html.contains("Errors and warnings, last 7d"), "{html}");
+    assert!(
+        html.contains(r#"href="/containers/web?tab=metrics&amp;range=7d""#),
+        "{html}"
+    );
 }
 
 // ---------------------------------------------------------------- fake docker

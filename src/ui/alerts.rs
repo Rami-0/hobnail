@@ -3,6 +3,7 @@
 //! scrubbed before they reach `Status`.
 
 use maud::{html, Markup};
+use std::collections::HashSet;
 
 use crate::alerts::{ChannelStatus, Health, Status};
 use crate::config::Config;
@@ -10,7 +11,14 @@ use crate::util::{fmt_utc, human_duration, unix_now};
 
 /// Must return the element `<section id="alerts">…</section>` (may be empty
 /// when no channels or rules are configured).
+#[cfg(test)]
 pub fn render(cfg: &Config, status: &Status) -> Markup {
+    render_with(cfg, status, &HashSet::new())
+}
+
+/// As `render`; an incident whose subject is one of `logs` (containers whose
+/// logs may be read) ends with a link to that container's logs.
+pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>) -> Markup {
     if cfg.channels.is_empty() && cfg.alerts.is_empty() {
         return html! { section #alerts {} };
     }
@@ -70,6 +78,10 @@ pub fn render(cfg: &Config, status: &Status) -> Markup {
                             span.muted.inc-since { (human_duration(now.saturating_sub(i.since))) }
                             @if !i.notified {
                                 span.badge.warn title="suppressed by the cooldown; will be sent if it is still open when the cooldown ends" { "cooldown" }
+                            }
+                            @if logs.contains(&i.subject) {
+                                a.ia.logs href=(crate::logs::logs_url(&i.subject)) title="Logs"
+                                    aria-label={"Logs of " (i.subject)} { (crate::ui::ic("logs")) }
                             }
                         }
                     }

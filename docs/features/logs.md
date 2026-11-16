@@ -7,9 +7,41 @@ Code: `src/logs/`, `src/db/logcounts.rs`,
 
 | Route | What |
 |---|---|
-| `/containers/<name>/logs` | One container. Stopped containers show their last lines under a "stopped" banner. |
-| `/stacks/<project>/logs` | Every container of a compose project, merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). |
-| `/logs?c=a,b` | Split view, 2 to 4 containers side by side (stacked on phones). `/logs` alone shows a picker. |
+| `/containers/<name>/logs` | One container: the container's **Logs tab** (its header and tabs above the viewer; `?tab=logs` on the detail page lands here too). Stopped containers show their last lines under a "stopped" banner. Under the viewer: error and warning counts (collapsed) over the range the detail page had (`?range=`; the tabs keep it). |
+| `/stacks/<project>/logs` | Every container of a compose project, merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). Only compose projects have one (a config group has no stack logs). |
+| `/logs` | Every container the dashboard lists, stopped ones too even with `[page] show_stopped = false` (hidden and excluded ones never), grouped by stack, each name one click from its logs; a filter box (`?q=` on the server, as-you-type with the script; Enter opens the first match), "Whole stack" for compose projects, and ticks for side by side. The filter and the ticks are separate forms: without the script Enter in the filter only filters. Coming back to the page recounts the ticks. |
+| `/logs?c=a,b` | Split view, 2 to 4 containers side by side (stacked on phones). |
+
+The Logs nav item is current on every logs page. Logs are one click from
+every place a container is named: "Logs" in the Containers table, a logs icon
+on sidebar items (and stacks that are compose projects), Overview ("Needs
+attention", "Top CPU", "Recent events": at that moment), Host, History,
+Alerts and Settings › Containers and groups; only for containers whose logs
+may be read (`logs::tailable`: an excluded container gets no logs link
+anywhere, the public Host page included). Access is unchanged: all of these
+pages and `/api/logs/*` need a session unless `require_login = false`. On
+touch screens these icons are 44 px and their rows grow to fit, so no hit
+area reaches into another row or onto the row's own link.
+
+**Following** means the newest line is in view: after the first load, after
+every batch, after "Jump to latest" and after anything that changes heights
+(Wrap, Time, filters, a resize), measured after layout. Lines have their real
+height (no `content-visibility` placeholder) and a `ResizeObserver` per pane
+re-asserts the bottom while following. Any move up stops it, however small or
+slow (a wheel of a few pixels, a slow finger drag); the script's own moves and
+a clamp after the content shrank do not count. Only a move down into the
+bottom 24 px, "Jump to latest" or End starts it again; the pill counts new
+lines meanwhile. Scrolled up, the reader stays on the same line when heights
+change (Wrap, Time, a filter, a resize): the pane remembers the first line in
+view on each scroll and puts it back after layout, and scroll anchoring is on
+except while following. `scripts/logs-check.mjs` checks all of this in a real
+browser (1440 and 390 px, Wrap on and off, single, stack and side by side;
+slow wheels and real touch drags) and reports the page's CPU while following,
+with the default tail and with a full ring.
+
+A config change reloads other open pages, but never a logs page, the `/logs` list included (it keeps its
+search, filters, pause, range and scroll), nor does coming back to a logs tab
+that was hidden for a while.
 
 Features: live tail (SSE), pause on scroll-up with a "Jump to latest" pill and a
 new-line count, Pause button, line counter, ANSI colors (SGR: 16/256/truecolor fg and

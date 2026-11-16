@@ -90,6 +90,7 @@ pub fn page(ctx: &Ctx) -> String {
         .filter(|e| all_events || e.level != "info")
         .take(60)
         .collect();
+    let names = crate::logs::tailable(ctx.state);
     let body = html! {
         div.page {
             (page_sub(html! { "Host metrics and incidents from the local history database" }))
@@ -128,7 +129,7 @@ pub fn page(ctx: &Ctx) -> String {
             }
             section.panel.sec aria-label="Restarts per day" {
                 (panel_head("Container starts per day", None))
-                (restarts_table(ctx.now, &per_day, en))
+                (restarts_table(ctx.now, &per_day, en, &names))
             }
             section.panel.sec #events aria-label="Incident timeline" {
                 div.panel-h {
@@ -144,7 +145,7 @@ pub fn page(ctx: &Ctx) -> String {
                         @else { "The timeline fills in once history is recording." }
                     }
                 } @else {
-                    ul.events { @for e in &events { (event_row(ctx.now, e, true)) } }
+                    ul.events { @for e in &events { (event_row(ctx.now, e, true, Some(&names))) } }
                 }
             }
         }
@@ -227,7 +228,12 @@ pub fn restarts_per_day(cum: Vec<Vec<(String, u32)>>) -> BTreeMap<String, [u32; 
     out
 }
 
-fn restarts_table(now: u64, rows: &BTreeMap<String, [u32; DAYS]>, db: bool) -> Markup {
+fn restarts_table(
+    now: u64,
+    rows: &BTreeMap<String, [u32; DAYS]>,
+    db: bool,
+    logs: &std::collections::HashSet<String>,
+) -> Markup {
     if rows.is_empty() {
         return html! {
             p.muted {
@@ -266,7 +272,14 @@ fn restarts_table(now: u64, rows: &BTreeMap<String, [u32; DAYS]>, db: bool) -> M
                 tbody {
                     @for (name, d) in v {
                         tr {
-                            th scope="row" { a href={"/containers/" (url_encode(name))} { (name) } }
+                            th scope="row" {
+                                span.nm-l {
+                                    a href={"/containers/" (url_encode(name))} { (name) }
+                                    @if logs.contains(name.as_str()) {
+                                        a.ia.logs href=(crate::logs::logs_url(name)) title="Logs" aria-label={"Logs of " (name)} { (ic("logs")) }
+                                    }
+                                }
+                            }
                             @for i in (0..DAYS).rev() {
                                 @let n = d[i];
                                 td.num.hot[n > 0] style={"--h:" (format!("{:.2}", n as f64 / max as f64))} { @if n > 0 { (n) } @else { span.muted { "·" } } }
@@ -344,12 +357,21 @@ mod tests {
 
     #[test]
     fn table_states() {
-        let empty = restarts_table(1_800_000_000, &BTreeMap::new(), false).into_string();
+        let none = std::collections::HashSet::new();
+        let empty = restarts_table(1_800_000_000, &BTreeMap::new(), false, &none).into_string();
         assert!(empty.contains("once history is recording"));
         let mut m = BTreeMap::new();
         m.insert("<x>".to_string(), [1, 0, 0, 0, 0, 0, 2]);
-        let html = restarts_table(1_800_000_000, &m, true).into_string();
+        m.insert("gone".to_string(), [1, 0, 0, 0, 0, 0, 0]);
+        let names = ["<x>".to_string()].into();
+        let html = restarts_table(1_800_000_000, &m, true, &names).into_string();
         assert!(html.contains("&lt;x&gt;") && !html.contains("<x>"));
         assert!(html.contains("<b>3</b>"));
+        // One click to the logs of a container that still exists.
+        assert!(
+            html.contains(r#"<a class="ia logs" href="/containers/%3Cx%3E/logs""#),
+            "{html}"
+        );
+        assert!(!html.contains("/containers/gone/logs"), "no dead logs link");
     }
 }

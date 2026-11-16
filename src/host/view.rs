@@ -2,7 +2,7 @@
 //! for the 3 s poll; history charts sit below it and only change with the
 //! range picker.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use maud::{html, Markup, PreEscaped};
 
@@ -20,6 +20,9 @@ pub struct LiveView<'a> {
     pub p: &'a ProcReport,
     /// Container id -> name.
     pub names: &'a HashMap<String, String>,
+    /// Names whose logs may be read (`logs::tailable`): only these get a
+    /// logs icon (an excluded container gets none).
+    pub logs: &'a HashSet<String>,
     /// Full command lines (they can hold secrets) only for a signed-in user.
     pub signed_in: bool,
 }
@@ -300,11 +303,24 @@ fn sensors(h: &Host) -> Markup {
     }
 }
 
-fn ctr_link(cid: &Option<String>, names: &HashMap<String, String>) -> Markup {
+fn ctr_link(
+    cid: &Option<String>,
+    names: &HashMap<String, String>,
+    logs: &HashSet<String>,
+) -> Markup {
     match cid {
         None => html! { span.muted { "host" } },
         Some(id) => match names.get(id) {
-            Some(n) => html! { a href={"/containers/" (url_encode(n))} { (n) } },
+            // The name opens the container; the icon, a sibling, its logs
+            // (only when they may be read).
+            Some(n) => html! {
+                span.nm-l {
+                    a href={"/containers/" (url_encode(n))} { (n) }
+                    @if logs.contains(n) {
+                        a.ia.logs href=(crate::logs::logs_url(n)) title="Logs" aria-label={"Logs of " (n)} { (ic("logs")) }
+                    }
+                }
+            },
             None => html! { span.muted title=(id) { (id.get(..12).unwrap_or(id)) } },
         },
     }
@@ -340,7 +356,7 @@ fn procs(lv: &LiveView) -> Markup {
                             tbody {
                                 @for (cid, cpu, rss, n) in p.groups.iter().take(10) {
                                     tr {
-                                        th scope="row" { (ctr_link(cid, lv.names)) }
+                                        th scope="row" { (ctr_link(cid, lv.names, lv.logs)) }
                                         td.num.(lvl(Some(*cpu), 80.0, 200.0)) { (pct(*cpu)) }
                                         td.num { (human_bytes(*rss)) }
                                         td.num.hx-o.muted { (n) }
@@ -365,7 +381,7 @@ fn procs(lv: &LiveView) -> Markup {
                                         td.hx-o.muted { (user(r.uid)) }
                                         td.num.(lvl(Some(r.cpu), 80.0, 100.0)) { (pct(r.cpu)) }
                                         td.num { (human_bytes(r.rss)) }
-                                        td { (ctr_link(&r.cid, lv.names)) }
+                                        td { (ctr_link(&r.cid, lv.names, lv.logs)) }
                                     }
                                 }
                             }
@@ -713,5 +729,36 @@ fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    /// A process row that belongs to a container: the name opens it and a
+    /// sibling icon opens its logs (one click, never a link in a link).
+    #[test]
+    fn container_cells_link_the_container_and_its_logs() {
+        let names: HashMap<String, String> = [
+            ("abc".to_string(), "web<1>".to_string()),
+            ("def".to_string(), "secret-db".to_string()),
+        ]
+        .into();
+        let logs: HashSet<String> = ["web<1>".to_string()].into();
+        let html = ctr_link(&Some("abc".into()), &names, &logs).into_string();
+        assert!(
+            html.contains(r#"<a href="/containers/web%3C1%3E">web&lt;1&gt;</a>"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/web%3C1%3E/logs" title="Logs" aria-label="Logs of web&lt;1&gt;">"#), "{html}");
+        let host = ctr_link(&None, &names, &logs).into_string();
+        assert!(!host.contains("href"), "host processes have no logs");
+        let unknown = ctr_link(&Some("ffffffffffffff".into()), &names, &logs).into_string();
+        assert!(!unknown.contains("href"));
+        // An excluded (or otherwise untailable) container: its name, no logs link.
+        let excluded = ctr_link(&Some("def".into()), &names, &logs).into_string();
+        assert!(excluded.contains("secret-db"), "{excluded}");
+        assert!(!excluded.contains("/logs"), "{excluded}");
     }
 }

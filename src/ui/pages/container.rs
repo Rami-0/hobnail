@@ -103,34 +103,16 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
     let tab = query_get(&q, "tab")
         .and_then(Tab::parse)
         .unwrap_or(Tab::Overview);
+    // The Logs tab is the log viewer (owner decision Y2); old `?tab=logs`
+    // links still land on it.
+    if tab == Tab::Logs {
+        return crate::logs::container_page(ctx, name);
+    }
     let range = query_get(&q, "range")
         .and_then(Range::parse)
         .unwrap_or(Range::H6);
-    let socket = &ctx.state.env.docker_socket;
-    // One inspect per page view (a few ms on the socket); the page renders
-    // on the blocking pool.
-    let ins = crate::docker::inspect_blocking(socket, &c.id).map(|i| {
-        if ctx.user.is_some() {
-            i
-        } else {
-            redact_for_anonymous(i)
-        }
-    });
-    let now = ctx.now as i64;
-    let starts_10m = ctx
-        .state
-        .db
-        .events(&EventFilter {
-            subject: Some(name.to_string()),
-            kind_prefix: Some("container.start".into()),
-            limit: 50,
-            ..Default::default()
-        })
-        .iter()
-        .filter(|e| e.ts >= now - 600)
-        .count() as u32;
-    let unhealthy_since = last_unhealthy_event(ctx, name);
-    let why = why_red(c, ins.as_ref().ok(), starts_10m, unhealthy_since, now);
+    let ins = inspect_for(ctx, c);
+    let why = why_for(ctx, c, ins.as_ref().ok());
     let base = format!("/containers/{}", url_encode(name));
     let heading = html! {
         nav.crumb aria-label="Breadcrumb" {
@@ -140,51 +122,22 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
         }
     };
     let body_tab = match tab {
-        Tab::Overview => overview_tab(ctx, &card, c, range, &base),
-        Tab::Logs => logs_tab(ctx, c, range, &base),
+        Tab::Overview | Tab::Logs => overview_tab(ctx, &card, c, range, &base),
         Tab::Metrics => metrics_tab(ctx, c, ins.as_ref().ok(), range, &base),
         Tab::Inspect => inspect_tab(ctx, c, &ins),
         Tab::Processes => processes_tab(ctx, c, &q, &base),
         Tab::Events => events_tab(ctx, c, &q, &base),
     };
+    let docker_note = html! {
+        @if let Some(err) = &snap.error {
+            p.cd-why.warn role="status" {
+                (ic("alert")) span { "Docker is not reachable (" (err) "). Showing the last known state." }
+            }
+        }
+    };
     let body = html! {
         div.page.cd {
-            header.ctr-head {
-                (crate::ui::icon(card.icon.as_deref(), &card.title))
-                div.ctr-id {
-                    h2 { (status_dot(&card)) (card.title) }
-                    p.mono.muted {
-                        (c.name) " · " (c.image)
-                        @if card.stack != c.name { " · stack " a href={"/containers?stack=" (url_encode(&card.stack))} { (card.stack) } }
-                    }
-                }
-                div.ctr-actions {
-                    @if let Some(u) = &card.url { a.btn href=(u) target="_blank" rel="noopener noreferrer" { (ic("external")) "Open" } }
-                    a.btn href={(base) "/logs"} { (ic("logs")) "Logs" }
-                    @if let Some(u) = &card.metrics_url { a.btn href=(u) target="_blank" rel="noopener noreferrer" title="Open this host in Beszel" { (ic("activity")) "Beszel" } }
-                    @if ctx.user.is_some() {
-                        a.btn.primary href={"/settings/containers?edit=override:" (url_encode(name))} { (ic("edit")) "Customize" }
-                    }
-                }
-            }
-            @if let Some(err) = &snap.error {
-                p.cd-why.warn role="status" {
-                    (ic("alert")) span { "Docker is not reachable (" (err) "). Showing the last known state." }
-                }
-            }
-            @if let Some(w) = &why {
-                p.cd-why.bad role="status" {
-                    (ic("alert"))
-                    span { strong { "Why is this red? " } (w.text) }
-                    a href={(base) "/logs" (w.ts.map(|t| format!("#t={t}")).unwrap_or_default())} { "Logs around then" }
-                }
-            }
-            nav.cd-tabs aria-label="Container sections" {
-                @for t in Tab::ALL {
-                    a href={(base) "?tab=" (t.slug()) @if matches!(t, Tab::Overview | Tab::Metrics | Tab::Logs) { "&range=" (range.as_str()) }}
-                        aria-current=[(t == tab).then_some("page")] { (t.label()) }
-                }
-            }
+            (head(ctx, c, &card, why.as_ref(), tab, range, docker_note))
             (body_tab)
         }
     };
@@ -192,6 +145,100 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
         StatusCode::OK,
         layout(ctx, Nav::Containers, &card.title, heading, body),
     )
+}
+
+/// One `docker inspect` (a few ms on the socket), redacted for a visitor.
+fn inspect_for(ctx: &Ctx, c: &Container) -> Result<Inspect, String> {
+    crate::docker::inspect_blocking(&ctx.state.env.docker_socket, &c.id).map(|i| {
+        if ctx.user.is_some() {
+            i
+        } else {
+            redact_for_anonymous(i)
+        }
+    })
+}
+
+/// The one-line "why is this red?" for `c`, if something is wrong.
+fn why_for(ctx: &Ctx, c: &Container, ins: Option<&Inspect>) -> Option<Why> {
+    let now = ctx.now as i64;
+    let starts_10m = ctx
+        .state
+        .db
+        .events(&EventFilter {
+            subject: Some(c.name.clone()),
+            kind_prefix: Some("container.start".into()),
+            limit: 50,
+            ..Default::default()
+        })
+        .iter()
+        .filter(|e| e.ts >= now - 600)
+        .count() as u32;
+    let unhealthy_since = last_unhealthy_event(ctx, &c.name);
+    why_red(c, ins, starts_10m, unhealthy_since, now)
+}
+
+/// The container header, "why is this red?" and the tabs, for the logs
+/// viewer (the Logs tab, `/containers/<name>/logs`). `None` when the
+/// container is not in the snapshot or the lists may not show it.
+pub fn logs_head(ctx: &Ctx, name: &str, range: Range, note: Markup) -> Option<Markup> {
+    let snap = ctx.state.snapshot();
+    let c = snap.containers.iter().find(|c| c.name == name)?;
+    let stats = crate::ui::view::stats_with_history(ctx.state, &snap);
+    let card = card_for(&ctx.cfg, &snap, &stats, ctx.host, name)?;
+    let ins = inspect_for(ctx, c);
+    let why = why_for(ctx, c, ins.as_ref().ok());
+    Some(head(ctx, c, &card, why.as_ref(), Tab::Logs, range, note))
+}
+
+/// Header (icon, status, name, image, stack; "Open" and, signed in, "Edit"),
+/// `note`, the "why is this red?" line and the tab strip. The Logs tab is
+/// the viewer page; the other tabs are `?tab=` on the detail page.
+fn head(
+    ctx: &Ctx,
+    c: &Container,
+    card: &CardView,
+    why: Option<&Why>,
+    tab: Tab,
+    range: Range,
+    note: Markup,
+) -> Markup {
+    let base = format!("/containers/{}", url_encode(&c.name));
+    let logs = crate::logs::logs_url(&c.name);
+    html! {
+        header.ctr-head {
+            (crate::ui::icon(card.icon.as_deref(), &card.title))
+            div.ctr-id {
+                h2 { (status_dot(card)) (card.title) }
+                p.mono.muted {
+                    (c.name) " · " (c.image)
+                    @if card.stack != c.name { " · stack " a href={"/containers?stack=" (url_encode(&card.stack))} { (card.stack) } }
+                }
+            }
+            div.ctr-actions {
+                @if let Some(u) = &card.url { a.btn href=(u) target="_blank" rel="noopener noreferrer" { (ic("external")) "Open" } }
+                @if ctx.user.is_some() {
+                    a.btn.ghost href={"/settings/containers?edit=override:" (url_encode(&c.name))} title="Display name, group, icon, link" { (ic("edit")) "Edit" }
+                }
+            }
+        }
+        (note)
+        @if let Some(w) = why {
+            p.cd-why.bad role="status" {
+                (ic("alert"))
+                span { strong { "Why is this red? " } (w.text) }
+                a href={(logs) (w.ts.map(|t| format!("#t={}", t.max(0) * 1000)).unwrap_or_default())} { "Logs around then" }
+            }
+        }
+        nav.cd-tabs aria-label="Container sections" {
+            @for t in Tab::ALL {
+                // Every tab keeps the chosen range (the Logs tab's chart uses it).
+                @let href = if t == Tab::Logs { format!("{logs}?range={}", range.as_str()) } else {
+                    format!("{base}?tab={}{}", t.slug(), if matches!(t, Tab::Overview | Tab::Metrics) { format!("&range={}", range.as_str()) } else { String::new() })
+                };
+                a href=(href) aria-current=[(t == tab).then_some("page")] { (t.label()) }
+            }
+        }
+    }
 }
 
 fn range_picker(base: &str, tab: Tab, range: Range) -> Markup {
@@ -260,7 +307,7 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
                         @else { "Starts, stops and health changes appear here once history is recording." }
                     }
                 } @else {
-                    ul.events { @for e in &events { (event_row(ctx.now, e, false)) } }
+                    ul.events { @for e in &events { (event_row(ctx.now, e, false, None)) } }
                 }
             }
             section.panel aria-label="Ports and links" {
@@ -271,20 +318,6 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
         div.cols {
             (rules_panel(ctx, c))
             (labels_panel(c))
-        }
-    }
-}
-
-fn logs_tab(ctx: &Ctx, c: &Container, range: Range, base: &str) -> Markup {
-    let _ = (ctx, range);
-    html! {
-        section.panel aria-label="Logs" {
-            (panel_head("Logs", None))
-            p {
-                "Live tail, search and download are on the logs page. "
-                a.btn.primary href={(base) "/logs"} { (ic("logs")) "Open logs of " span.mono { (c.name) } }
-            }
-            (crate::logs::level_chart(ctx.state, &c.name, range))
         }
     }
 }
@@ -888,7 +921,7 @@ fn events_tab(ctx: &Ctx, c: &Container, q: &[(String, String)], base: &str) -> M
                     @else { "No " (kind.1.to_lowercase()) " events recorded for this container." }
                 }
             } @else {
-                ul.events { @for e in &events { (event_row(ctx.now, e, false)) } }
+                ul.events { @for e in &events { (event_row(ctx.now, e, false, None)) } }
                 @if events.len() == PAGE {
                     @if let Some(last) = events.last() {
                         p { a.btn.sm href={(base) "?tab=events&kind=" (kind.0) "&before=" (last.id)} { "Older" } }
@@ -1114,16 +1147,7 @@ fn live_data(groups: &[GroupView]) -> (String, serde_json::Map<String, serde_jso
     for g in groups {
         g.name.hash(&mut h);
         for c in g.cards.iter().filter(|c| c.container) {
-            (
-                &c.name,
-                &c.title,
-                c.label,
-                &c.state_text,
-                &c.image,
-                &c.url,
-                &c.logs_url,
-            )
-                .hash(&mut h);
+            (&c.name, &c.title, c.label, &c.state_text, &c.image, &c.url).hash(&mut h);
             (c.restarts, c.exit_code, c.cpu.is_some()).hash(&mut h);
             for p in &c.ports {
                 (&p.label, &p.url, p.local).hash(&mut h);
@@ -1757,7 +1781,13 @@ above = 90
                 let q = format!("tab={}&range=7d", tab.slug());
                 let ctx = ctx_for(&st, &q, false);
                 let (s, html) = page(&ctx, name);
-                assert_eq!(s, StatusCode::OK, "{name} {tab:?}");
+                if tab == Tab::Logs {
+                    // The Logs tab is the viewer, which needs a sign-in by default.
+                    assert_eq!(s, StatusCode::UNAUTHORIZED, "{name} {tab:?}");
+                    assert!(html.contains("Sign in to read logs"));
+                } else {
+                    assert_eq!(s, StatusCode::OK, "{name} {tab:?}");
+                }
                 assert!(!html.contains(evil), "unescaped name on {tab:?}");
                 assert!(html.contains("aria-current=\"page\""));
                 if tab == Tab::Events && name == evil {

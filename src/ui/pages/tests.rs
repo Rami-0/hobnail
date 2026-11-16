@@ -129,7 +129,24 @@ fn detail_page_has_header_charts_and_rules() {
         "empty chart state"
     );
     assert!(html.contains(">ctr<"), "matching rule listed");
-    assert!(!html.contains("Customize"), "only when signed in");
+    assert!(
+        !html.contains("Customize") && !html.contains(">Edit<"),
+        "only when signed in"
+    );
+    // One view of logs: the Logs tab is the viewer; no header "Logs" button,
+    // no Beszel button (OV-33, OV-34, OV-35).
+    assert!(
+        html.contains(r#"<a href="/containers/web/logs?range=6h">Logs</a>"#),
+        "Logs tab (keeps the range)"
+    );
+    assert!(!html.contains("tab=logs"));
+    assert!(!html.contains("Beszel") && !html.contains("Open logs of"));
+    let head = &html[html.find("class=\"ctr-actions\"").unwrap()..];
+    let head = &head[..head.find("</header>").unwrap()];
+    assert!(
+        !head.contains("/logs") && !head.contains("btn primary"),
+        "{head}"
+    );
     assert!(
         html.contains("http://100.1.2.3:8080"),
         "port link uses page host"
@@ -204,5 +221,5 @@ fn stopped_containers_and_filters() {
     // The running one is kept in the hidden pool for the script.
     let pool = html.split("<tbody class=\"pool\" hidden>").nth(1).unwrap();
     assert!(pool.contains(r#"data-n="a""#), "running row pooled");
-    assert!(html.contains(r#"<tr class="row stopped""#));
+    assert!(html.contains(r#"<tr class="row rl stopped""#));
 }

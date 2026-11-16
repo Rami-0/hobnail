@@ -1,11 +1,11 @@
-//! Installable app: `/manifest.webmanifest`, the icons (`/icon.svg`,
-//! `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`) and `/offline`.
+//! Installable app: `/manifest.webmanifest` and the icons (`/icon.svg`,
+//! `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`).
 //!
 //! There is deliberately **no service worker**: a monitor that shows cached
 //! numbers while the server is unreachable would be lying (V3-PLAN §4). Chrome
-//! and Safari install a site with a manifest and icons without one. `/offline`
-//! is a plain page a user (or a future worker) can open; it explains that the
-//! server is unreachable and offers a retry.
+//! and Safari install a site with a manifest and icons without one. With the
+//! network gone the browser shows its own error page (the old `/offline`
+//! page could never be reached without a worker, so it was removed, NAV-70).
 //!
 //! Every icon is built by `docs/brand/src/build.py` from the traced mark: the
 //! SVG tile is the one-colour glyph, the PNGs are the faceted cut on a full-bleed
@@ -55,16 +55,6 @@ pub fn route(state: &AppState, path: &str) -> Option<Response<Body>> {
             set(&mut r, hyper::header::CACHE_CONTROL, "no-store");
             r
         }
-        "/offline" => {
-            let mut r = full(StatusCode::OK, OFFLINE.as_bytes().to_vec());
-            set(
-                &mut r,
-                hyper::header::CONTENT_TYPE,
-                "text/html; charset=utf-8",
-            );
-            set(&mut r, hyper::header::CACHE_CONTROL, "no-cache");
-            r
-        }
         _ => return None,
     })
 }
@@ -106,8 +96,6 @@ pub fn manifest(name: &str) -> String {
     .to_string()
 }
 
-const OFFLINE: &str = r##"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><title>Offline · Hobnail</title><link rel="icon" href="/icon.svg"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0e13;color:#e8edf4;font:15px/1.5 ui-sans-serif,system-ui,sans-serif}@media (prefers-color-scheme:light){body{background:#f4f5f7;color:#121720}}main{max-width:34ch;padding:24px;text-align:center}h1{font-size:22px;margin:16px 0 6px}p{margin:0 0 18px;opacity:.8}a{display:inline-block;padding:8px 16px;border-radius:8px;background:#0f766e;color:#fff;text-decoration:none;font-weight:600}</style></head><body><main><img src="/icon.svg" width="48" height="48" alt="Hobnail"><h1>Can't reach the server</h1><p>Hobnail shows only live data, so there is nothing to show offline. Check the connection (Tailscale?) and try again.</p><a href="/">Try again</a></main></body></html>"##;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,6 +132,5 @@ mod tests {
         // Compiled into the binary: keep them small (docs/BRANDING.md).
         assert!(ICON_192.len() <= 8 * 1024 && ICON_APPLE.len() <= 8 * 1024);
         assert!(ICON_512.len() <= 24 * 1024);
-        assert!(OFFLINE.contains("Try again") && !OFFLINE.contains("serviceWorker"));
     }
 }

@@ -44,9 +44,8 @@ show_stats = true           # live CPU / memory on container cards
 [docker]
 exclude = ["ci-test-*"]     # hide containers by name (globs)
 standalone_group = "Standalone"
-# logs_url / metrics_url default to the Dozzle / Beszel containers found on this host.
-# Placeholders: {host} {id} {name}
-# logs_url = "http://{host}:8888/container/{id}"
+# logs_url / metrics_url (links to Dozzle / Beszel) are retired: logs and metrics
+# are in the app. A file that still has them loads; the values are ignored.
 
 [[groups]]                  # order of [[groups]] = order on the page; others follow A-Z
 name = "media"              # a compose project name, or a group set by an override/label

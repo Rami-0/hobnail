@@ -51,5 +51,6 @@ td .k,.k{font-size:11px}
 .alerts{border-radius:12px;background:var(--raised);padding:14px 20px}
 .alerts.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));box-shadow:inset 3px 0 0 var(--bad),0 8px 24px -18px var(--bad);background:linear-gradient(180deg,color-mix(in srgb,var(--bad) 7%,transparent),transparent 120px),var(--raised)}
 .incident{min-height:36px}
+.incident .ia.logs{margin-left:auto}
 .ghost .events{border-top:1px solid var(--line)}
 .panel.primary.login{padding:24px 26px}

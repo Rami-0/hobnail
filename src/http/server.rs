@@ -412,6 +412,24 @@ mod tests {
         assert!(!body.contains("data-move"), "reorder script shipped");
     }
 
+    /// The offline page is gone (NAV-70): no route, no worker, and nothing
+    /// (manifest, page head) points at it.
+    #[tokio::test]
+    async fn no_offline_page_and_no_service_worker() {
+        let (status, _, body) = get("/offline").await;
+        assert_eq!(status, 404);
+        assert!(body.contains("Page not found"), "the shell's 404");
+        let (status, head, manifest) = get("/manifest.webmanifest").await;
+        assert_eq!(status, 200);
+        assert!(head.contains("application/manifest+json"), "{head}");
+        assert!(!manifest.contains("offline"), "{manifest}");
+        assert!(!manifest.contains("serviceworker"));
+        let (_, _, page) = get("/").await;
+        assert!(page.contains("rel=\"manifest\""));
+        assert!(!page.contains("/offline") && !page.contains("serviceWorker"));
+        assert!(!APP_JS.contains("serviceWorker"));
+    }
+
     /// The component CSS is inlined after the tokens, in every page and in
     /// `/static/app.css`; a page costs no extra request for it.
     #[tokio::test]

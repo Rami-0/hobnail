@@ -16,7 +16,9 @@ visible; history comes from the database (1 h … 30 d).
   container `veth` links hidden.
 - **Sensors:** every hwmon temperature and fan with high/critical limits.
 - **Who is using the host:** CPU and RAM by container and top processes mapped
-  to their container. Process command lines need a sign-in.
+  to their container. Process command lines need a sign-in. A container's name
+  opens it; a logs icon beside it opens its logs, only for containers whose
+  logs may be read (never for an excluded one).
 
 Not available without privileges (deliberately not added): S.M.A.R.T., GPU busy
 %, systemd failed units.

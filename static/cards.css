@@ -58,9 +58,7 @@
 .port.local small{font-size:10px;font-family:var(--font)}
 .port.plain{color:var(--text-2)}
 .port.more{color:var(--text-3)}
-.c-act{width:96px;text-align:right;white-space:nowrap}
-.c-act .icon-btn{color:var(--text-3)}
-.row:hover .c-act .icon-btn{color:var(--text-2)}
+.c-act{width:112px;text-align:right;white-space:nowrap}
 .row.stopped .nm{color:var(--text-2)}
 .row.stopped .c-image .img{color:var(--text-3)}
 .grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}

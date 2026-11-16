@@ -397,7 +397,13 @@ fn ov_list(ctx: &Ctx, disk: &Disk) -> Markup {
                                 th.act scope="col" { span.sr { "Actions" } }
                             }
                         }
-                        tbody { @for r in &rows { (ov_row(r, standalone)) } }
+                        tbody {
+                            @for r in &rows {
+                                // Logs only for a container whose logs may be read.
+                                @let logs = r.known.is_some_and(|c| !crate::ui::view::is_excluded(&ctx.cfg, c));
+                                (ov_row(r, standalone, logs))
+                            }
+                        }
                     }
                 },
             }
@@ -405,7 +411,7 @@ fn ov_list(ctx: &Ctx, disk: &Disk) -> Markup {
     }
 }
 
-fn ov_row(r: &Row, standalone: &str) -> Markup {
+fn ov_row(r: &Row, standalone: &str, logs: bool) -> Markup {
     let key = format!("override:{}", r.name);
     let href = dlg::edit_link("override", &r.name);
     let data = J::Object(ov_item(&r.name, r.ov)).to_string();
@@ -466,6 +472,9 @@ fn ov_row(r: &Row, standalone: &str) -> Markup {
             }
             td.act {
                 div.ra {
+                    @if logs {
+                        a.ia.logs href=(crate::logs::logs_url(&r.name)) title="Logs" aria-label={"Logs of " (r.name)} { (ic("logs")) }
+                    }
                     a.btn.sm href=(href) data-dlg=(OV_SPEC.id) data-key=(key) data-item=(data) aria-label={"Edit " (r.name)} { (ic("edit")) "Edit" }
                 }
             }

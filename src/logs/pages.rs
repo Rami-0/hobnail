@@ -12,6 +12,7 @@ use crate::model::Container;
 use crate::state::AppState;
 use crate::ui::fmt::{parse_query, url_encode};
 use crate::ui::shell::{layout, Ctx, Nav};
+use crate::ui::view::{CardView, GroupView};
 use crate::ui::{empty_state, ic};
 
 /// Stable hue (0..360) for a container name (FNV-1a, so names that only
@@ -52,13 +53,25 @@ fn assets(ctx: &Ctx) -> Markup {
 }
 
 fn login_needed(ctx: &Ctx, title: &str) -> (StatusCode, String) {
+    login_needed_in(ctx, title, crate::ui::pages::crumb_title(title), None)
+}
+
+/// The sign-in state, under `head` (a container's header and tabs: what its
+/// public detail page shows anyway) when there is one.
+fn login_needed_in(
+    ctx: &Ctx,
+    title: &str,
+    heading: Markup,
+    head: Option<Markup>,
+) -> (StatusCode, String) {
     let next = url_encode(&if ctx.query.is_empty() {
         ctx.path.to_string()
     } else {
         format!("{}?{}", ctx.path, ctx.query)
     });
     let body = html! {
-        div.page {
+        div.page.cd {
+            @if let Some(h) = head { (h) }
             (empty_state("lock", "Sign in to read logs", html! {
                 "Container logs often contain secrets, so they are shown only after signing in ("
                 code { "[logs] require_login" } ", on by default). "
@@ -75,13 +88,7 @@ fn login_needed(ctx: &Ctx, title: &str) -> (StatusCode, String) {
     };
     (
         StatusCode::UNAUTHORIZED,
-        layout(
-            ctx,
-            Nav::Containers,
-            title,
-            crate::ui::pages::crumb_title(title),
-            body,
-        ),
+        layout(ctx, Nav::Logs, title, heading, body),
     )
 }
 
@@ -117,24 +124,10 @@ fn find<'a>(snap: &'a crate::model::Snapshot, name: &str) -> Option<&'a Containe
     snap.containers.iter().find(|c| c.name == name)
 }
 
-/// `/containers/<name>/logs`.
+/// `/containers/<name>/logs`: the container's Logs tab is the viewer
+/// (owner decision Y2): its header and tabs above the live tail.
 pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
     let title = format!("Logs · {name}");
-    if ctx.cfg.logs.require_login && ctx.user.is_none() {
-        return login_needed(ctx, &title);
-    }
-    let snap = ctx.state.snapshot();
-    let shown: Vec<crate::model::Container> = snap
-        .containers
-        .iter()
-        .filter(|c| !crate::ui::view::is_excluded(&ctx.cfg, c))
-        .cloned()
-        .collect();
-    let c = find(&snap, name).filter(|c| !crate::ui::view::is_excluded(&ctx.cfg, c));
-    let hidden = find(&snap, name).is_some() && c.is_none();
-    if hidden || c.is_none() && snap.error.is_none() && snap.fetched_at != 0 || !valid_name(name) {
-        return not_found(ctx, name, &shown);
-    }
     let heading = html! {
         nav.crumb aria-label="Breadcrumb" {
             a href="/containers" { "Containers" }
@@ -144,6 +137,30 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
             h1.title { "Logs" }
         }
     };
+    let range = parse_query(ctx.query)
+        .iter()
+        .find(|(k, _)| k == "range")
+        .and_then(|(_, v)| Range::parse(v))
+        .unwrap_or(Range::H6);
+    let snap = ctx.state.snapshot();
+    let c = find(&snap, name).filter(|c| !crate::ui::view::is_excluded(&ctx.cfg, c));
+    if ctx.cfg.logs.require_login && ctx.user.is_none() {
+        let head =
+            c.and_then(|_| crate::ui::pages::container::logs_head(ctx, name, range, html! {}));
+        return login_needed_in(ctx, &title, heading, head);
+    }
+    let shown: Vec<crate::model::Container> = snap
+        .containers
+        .iter()
+        .filter(|c| !crate::ui::view::is_excluded(&ctx.cfg, c))
+        .cloned()
+        .collect();
+    let hidden = find(&snap, name).is_some() && c.is_none();
+    if hidden || c.is_none() && snap.error.is_none() && snap.fetched_at != 0 || !valid_name(name) {
+        return not_found(ctx, name, &shown);
+    }
+    let head = c
+        .and_then(|_| crate::ui::pages::container::logs_head(ctx, name, range, docker_banner(ctx)));
     let stopped = c.filter(|c| !c.is_running());
     let pane = Pane {
         query: format!("c={}", url_encode(name)),
@@ -152,10 +169,19 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
         stack: None,
         href: Some(format!("/containers/{}", url_encode(name))),
     };
+    let chart = html! {
+        details.lvl-chart {
+            summary { "Errors and warnings, last " (range.as_str()) }
+            (level_chart(ctx.state, name, range))
+        }
+    };
     let body = html! {
         (assets(ctx))
-        div.page.lpage {
-            (docker_banner(ctx))
+        div.page.cd.lpage {
+            @match head {
+                Some(h) => (h),
+                None => (docker_banner(ctx)),
+            }
             @if let Some(c) = stopped {
                 div.banner.warn.lstopped {
                     (ic("alert"))
@@ -166,12 +192,12 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
                 }
             }
             (watch_banner())
-            (viewer(ctx, &[pane], false))
+            (viewer(ctx, &[pane], false, Some(chart)))
         }
     };
     (
         StatusCode::OK,
-        layout(ctx, Nav::Containers, &title, heading, body),
+        layout(ctx, Nav::Logs, &title, heading, body),
     )
 }
 
@@ -196,7 +222,7 @@ pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
             StatusCode::NOT_FOUND,
             layout(
                 ctx,
-                Nav::Containers,
+                Nav::Logs,
                 &title,
                 crate::ui::pages::crumb_title("Logs"),
                 body,
@@ -222,12 +248,12 @@ pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
         div.page.lpage {
             (docker_banner(ctx))
             (watch_banner())
-            (viewer(ctx, &[pane], true))
+            (viewer(ctx, &[pane], true, None))
         }
     };
     (
         StatusCode::OK,
-        layout(ctx, Nav::Containers, &title, heading, body),
+        layout(ctx, Nav::Logs, &title, heading, body),
     )
 }
 
@@ -280,45 +306,98 @@ pub fn split(ctx: &Ctx) -> (StatusCode, String) {
                     }
                 }
                 (watch_banner())
-                (viewer(ctx, &panes, false))
+                (viewer(ctx, &panes, false, None))
             }
         }
     };
-    (
-        StatusCode::OK,
-        layout(ctx, Nav::Containers, title, heading, body),
-    )
+    (StatusCode::OK, layout(ctx, Nav::Logs, title, heading, body))
 }
 
-/// The split view with nothing chosen: pick up to four containers.
+/// `/logs` without a choice: every container the dashboard lists, stopped
+/// ones too whatever `[page] show_stopped` says (a stopped container's logs
+/// are what one comes for), grouped by stack, one click from its logs
+/// (LG-04). Hidden and excluded containers are not listed. `q` filters on
+/// the server (so it works without JavaScript; the script filters as you
+/// type); ticking two to four opens them side by side. The filter and the
+/// ticks are two forms, so Enter in the filter only filters. Stack logs only
+/// for compose projects (LG-09).
 fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
-    let mut cs: Vec<&Container> = snap.containers.iter().collect();
-    cs.sort_by(|a, b| (!a.is_running(), &a.name).cmp(&(!b.is_running(), &b.name)));
+    let mut cfg = (*ctx.cfg).clone();
+    cfg.page.show_stopped = true;
+    let groups = crate::ui::view::build_groups(&cfg, snap, &Default::default(), ctx.host);
+    let q = parse_query(ctx.query)
+        .into_iter()
+        .find(|(k, _)| k == "q")
+        .map(|(_, v)| v.trim().to_lowercase())
+        .unwrap_or_default();
+    let hit = |c: &CardView, g: &GroupView| {
+        let s = format!("{} {} {}", c.search, c.title, g.title).to_lowercase();
+        q.split_whitespace().all(|t| s.contains(t))
+    };
+    let stacks: Vec<(&GroupView, Vec<&CardView>, bool)> = groups
+        .iter()
+        .map(|g| {
+            let cs: Vec<&CardView> = g.cards.iter().filter(|c| c.container).collect();
+            (g, cs, super::is_project(&cfg, snap, &g.name))
+        })
+        .filter(|(_, cs, _)| !cs.is_empty())
+        .collect();
+    let total: usize = stacks.iter().map(|(_, cs, _)| cs.len()).sum();
+    let shown: usize = stacks
+        .iter()
+        .map(|(g, cs, _)| cs.iter().filter(|c| hit(c, g)).count())
+        .sum();
     html! {
         (assets(ctx))
         div.page.lpage {
             (docker_banner(ctx))
-            section.panel.lpick {
-                div.panel-h { h2 { "Logs side by side" } }
-                p.muted { "Choose up to four containers. On a phone they stack." }
-                @if cs.is_empty() {
-                    (empty_state("box", "No containers", html! { "Nothing to show yet." }))
-                } @else {
-                    form method="get" action="/logs" {
-                        ul.lpick-list {
-                            @for c in &cs {
-                                li {
-                                    label {
-                                        input type="checkbox" name="c" value=(c.name);
-                                        span.dot.(if c.is_running() { "ok" } else { "off" }) {}
-                                        span.mono { (c.name) }
-                                        @if !c.is_running() { span.muted { " (stopped)" } }
+            @if total == 0 {
+                (empty_state("box", "No containers", html! { "Logs appear here once Docker lists a container." }))
+            } @else {
+                div.lpick #lpick {
+                    div.lpick-bar {
+                        form.lpick-f method="get" action="/logs" role="search" {
+                            div.search-in {
+                                (ic("search"))
+                                input #lpq type="search" name="q" value=(q) placeholder="Filter by name, stack or image"
+                                    autocomplete="off" spellcheck="false" aria-label="Filter containers";
+                            }
+                            button.btn.nojs type="submit" { "Filter" }
+                        }
+                        span.lpick-n.muted #lpick-n aria-live="polite" {
+                            @if shown == total { (total) " containers" } @else { (shown) " of " (total) " containers" }
+                        }
+                        button.btn.primary #lpick-go type="submit" form="lpick-c" title="Tick two to four containers" { (ic("logs")) "Side by side" }
+                    }
+                    p.muted.lpick-hint { "A name opens its logs. Tick two to four to see them side by side (on a phone they stack)." }
+                    form.lpick #lpick-c method="get" action="/logs" {
+                        @for (g, cs, project) in &stacks {
+                            @let any = cs.iter().any(|c| hit(c, g));
+                            section.lpick-g data-k=(g.name) hidden[!any] {
+                                h2.lpick-h {
+                                    span.lpick-t title=(g.title) { (g.title) }
+                                    span.cnt.num { (g.running) "/" (cs.len()) }
+                                    @if *project {
+                                        a.btn.sm href=(stack_logs_url(&g.name)) aria-label={"Logs of the whole stack " (g.title)} { (ic("layers")) "Whole stack" }
+                                    }
+                                }
+                                ul.lpick-list {
+                                    @for c in cs {
+                                        li.rl.stopped[!c.running] data-c=(c.name) data-s=(format!("{} {} {}", c.search, c.title, g.title).to_lowercase()) hidden[!hit(c, g)] {
+                                            input type="checkbox" name="c" value=(c.name) aria-label={"Side by side: " (c.title)};
+                                            (crate::ui::status_dot(c))
+                                            a.row-link href=(logs_url(&c.name)) title={"Logs of " (c.name)} {
+                                                span.lpick-nm { (c.title) }
+                                                @if c.title != c.name { " " span.sub.mono { (c.name) } }
+                                            }
+                                            @if !c.running { span.muted.lpick-st { (c.label) } }
+                                        }
                                     }
                                 }
                             }
                         }
-                        button.btn.primary type="submit" { (ic("logs")) "Show logs" }
                     }
+                    p.lpick-none.muted #lpick-none hidden[shown > 0] { "No container matches. " a href="/logs" { "Show all" } }
                 }
             }
         }
@@ -357,7 +436,7 @@ fn not_found(ctx: &Ctx, name: &str, all: &[Container]) -> (StatusCode, String) {
         StatusCode::NOT_FOUND,
         layout(
             ctx,
-            Nav::Containers,
+            Nav::Logs,
             "Not found",
             crate::ui::pages::crumb_title("Not found"),
             body,
@@ -384,7 +463,7 @@ fn toggle(id: &str, label: &str, icon: Option<&str>, pressed: bool, title: &str)
     }
 }
 
-fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool) -> Markup {
+fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool, foot: Option<Markup>) -> Markup {
     let cfg = &ctx.cfg.logs;
     let first = panes.first().map(|p| p.query.as_str()).unwrap_or("");
     let multi = panes.len() > 1;
@@ -469,12 +548,15 @@ fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool) -> Markup {
             @if !multi && !merged {
                 @if let Some(p) = panes.first() {
                     @if let Some(n) = p.names.first() {
-                        p.lfoot.muted {
-                            "Open side by side: "
-                            a href=(split_url(&[n.as_str()])) { "split view" }
-                            @if let Some(stack) = ctx.state.snapshot().containers.iter().find(|c| &c.name == n).and_then(|c| c.project.clone()) {
-                                " · " a href=(stack_logs_url(&stack)) { "whole stack " span.mono { (stack) } }
+                        div.lfoot {
+                            p.muted {
+                                "Open side by side: "
+                                a href=(split_url(&[n.as_str()])) { "split view" }
+                                @if let Some(stack) = ctx.state.snapshot().containers.iter().find(|c| &c.name == n).and_then(|c| c.project.clone()) {
+                                    " · " a href=(stack_logs_url(&stack)) { "whole stack " span.mono { (stack) } }
+                                }
                             }
+                            @if let Some(f) = foot { (f) }
                         }
                     }
                 }
@@ -484,9 +566,8 @@ fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool) -> Markup {
 }
 
 /// Error and warning lines per bucket for one container, as a small inline
-/// SVG bar chart (no external CSS needed, so any page can embed it). For the
-/// container detail page and the design pass to embed.
-#[allow(dead_code)]
+/// SVG bar chart (no external CSS needed, so any page can embed it). Shown
+/// under the container's log viewer.
 pub fn level_chart(state: &AppState, name: &str, range: Range) -> Markup {
     let now = crate::util::unix_now() as i64;
     let s = state.db.log_level_series(name, range, now);
@@ -544,7 +625,6 @@ pub fn level_chart(state: &AppState, name: &str, range: Range) -> Markup {
                 span { span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--bad);margin-right:4px" {} b.num { (errs) } " errors" }
                 span { span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warn);margin-right:4px" {} b.num { (warns) } " warnings" }
                 span { "per " (crate::util::human_duration(step as u64)) }
-                a href=(logs_url(name)) style="margin-left:auto" { "Open logs" }
             }
         }
     }

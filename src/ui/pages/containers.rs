@@ -462,7 +462,7 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
     let href = format!("/containers/{}", url_encode(&c.name));
     let stats = show_stats && c.running;
     html! {
-        tr.row.stopped[!c.running] data-c=(c.name) data-n=(c.title.to_lowercase()) data-s=(c.search.to_lowercase())
+        tr.row.rl.stopped[!c.running] data-c=(c.name) data-n=(c.title.to_lowercase()) data-s=(c.search.to_lowercase())
             data-gi=(gi) data-k=(g.name) data-kt=(g.title) data-gc[g.collapsed]
             data-img=(c.image.to_lowercase()) data-st=(status_rank(c)) data-run=(u8::from(c.running))
             data-prob=(u8::from(c.attention().is_some()))
@@ -471,7 +471,7 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
             td.c-name {
                 (status_dot(c))
                 (crate::ui::icon(c.icon.as_deref(), &c.title))
-                a.nm href=(href) title=(c.name) {
+                a.nm.row-link href=(href) title=(c.name) {
                     span.nm-t { (c.title) }
                     @if c.title != c.name { span.sub.mono { (c.name) } }
                 }
@@ -514,15 +514,17 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
                 }
                 @if c.ports.len() > 3 { a.port.more href=(href) title="More ports on the details page" { "+" (c.ports.len() - 3) } }
             }
+            // "Logs" first, then "Open" when the service has a link (an empty
+            // slot keeps the columns aligned); the name opens the detail page.
             td.c-act {
-                @if let Some(u) = &c.url {
-                    a.icon-btn.sm href=(u) target="_blank" rel="noopener noreferrer" title="Open service" aria-label={"Open " (c.title)} { (ic("external")) }
+                div.ra {
+                    a.btn.sm href=(crate::logs::logs_url(&c.name)) title="Logs (l)" aria-label={"Logs of " (c.title)} { (ic("logs")) "Logs" }
+                    @if let Some(u) = &c.url {
+                        a.ia href=(u) target="_blank" rel="noopener noreferrer" title="Open service" aria-label={"Open " (c.title)} { (ic("external")) }
+                    } @else {
+                        span.ia aria-hidden="true" {}
+                    }
                 }
-                a.icon-btn.sm href={(href) "/logs"} title="Logs (l)" aria-label={"Logs of " (c.title)} { (ic("logs")) }
-                @if let Some(u) = &c.logs_url {
-                    a.icon-btn.sm.dz href=(u) target="_blank" rel="noopener noreferrer" title="Open in Dozzle" aria-label={"Open " (c.title) " in Dozzle"} { (ic("terminal")) }
-                }
-                a.icon-btn.sm href=(href) title="Details" aria-label={"Details of " (c.title)} { (ic("chev-r")) }
             }
         }
     }
@@ -600,6 +602,39 @@ mod tests {
         rows.iter()
             .flat_map(|(_, v)| v.iter().map(|c| c.name.clone()))
             .collect()
+    }
+
+    /// Row actions (DESIGN §11.9): a labelled "Logs" first, "Open" only
+    /// with a link (else an empty slot), no Dozzle and no Details (OV-20);
+    /// the name is the stretched row link, never a link inside a link.
+    #[test]
+    fn row_actions_are_logs_then_open() {
+        let gs = groups();
+        let st = Strips::default();
+        let (g, c) = (&gs[0], &gs[0].cards[0]);
+        let html = row(c, 0, g, true, &st).into_string();
+        assert!(html.contains("class=\"row rl"), "{html}");
+        assert!(html.contains("class=\"nm row-link\""), "{html}");
+        let acts = &html[html.find("class=\"c-act\"").unwrap()..];
+        let logs = acts
+            .find(&format!("href=\"/containers/{}/logs\"", c.name))
+            .expect("logs");
+        assert!(acts.contains(&format!("aria-label=\"Logs of {}\"", c.title)));
+        assert!(acts[logs..].contains(">Logs</a>"), "labelled: {acts}");
+        assert!(
+            acts.contains("<span class=\"ia\" aria-hidden=\"true\"></span>"),
+            "no link: empty slot"
+        );
+        assert_eq!(acts.matches("<a ").count(), 1, "{acts}");
+        assert!(!html.contains("Dozzle") && !html.contains("Details of"));
+        let mut c2 = c.clone();
+        c2.url = Some("http://h:8080/".into());
+        let html = row(&c2, 0, g, true, &st).into_string();
+        let acts = &html[html.find("class=\"c-act\"").unwrap()..];
+        assert!(
+            acts.find(">Logs</a>").unwrap() < acts.find("aria-label=\"Open ").unwrap(),
+            "Logs first"
+        );
     }
 
     #[test]

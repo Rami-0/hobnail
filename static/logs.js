@@ -4,6 +4,46 @@
 // textContent / createTextNode: never as HTML.
 "use strict";
 (function () {
+  // ---------------------------------------------------------------- /logs list
+  // Filter as you type (the server filters `?q=` without the script), Enter
+  // opens the first match, "Side by side" for two to four ticked.
+  var pick = document.getElementById("lpick");
+  if (pick) {
+    var pq = document.getElementById("lpq"), go = document.getElementById("lpick-go");
+    var rows = [].slice.call(pick.querySelectorAll("li[data-s]"));
+    var groups = [].slice.call(pick.querySelectorAll(".lpick-g"));
+    var filt = function () {
+      var v = pq.value.trim(), terms = v.toLowerCase().split(/\s+/).filter(Boolean), n = 0;
+      rows.forEach(function (li) {
+        var on = terms.every(function (t) { return li.dataset.s.indexOf(t) >= 0; });
+        li.hidden = !on;
+        if (on) n++;
+      });
+      groups.forEach(function (g) { g.hidden = !g.querySelector("li[data-s]:not([hidden])"); });
+      document.getElementById("lpick-n").textContent = (n === rows.length ? rows.length : n + " of " + rows.length) + " containers";
+      document.getElementById("lpick-none").hidden = n > 0;
+      try { history.replaceState(history.state, "", v ? "?q=" + encodeURIComponent(v) : location.pathname); } catch (e) {}
+    };
+    var ticks = function () {
+      var n = pick.querySelectorAll("input[name=c]:checked").length;
+      go.disabled = n < 2;
+      go.title = n < 2 ? "Tick two to four containers" : "Show " + n + " side by side";
+      [].forEach.call(pick.querySelectorAll("input[name=c]:not(:checked)"), function (b) { b.disabled = n >= 4; });
+    };
+    pq.addEventListener("input", filt);
+    pq.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      var a = pick.querySelector("li[data-s]:not([hidden]) a.row-link");
+      if (a) location.href = a.href;
+    });
+    pick.addEventListener("change", ticks);
+    ticks();
+    // Back to this page: the browser restores the ticks and the filter text
+    // after the script ran (or keeps the whole page); recount both.
+    window.addEventListener("pageshow", function () { filt(); ticks(); });
+    return;
+  }
   var root = document.getElementById("lv");
   if (!root) return;
   var RING = +root.dataset.ring || 5000;
@@ -178,31 +218,100 @@
     this.lastMatch = -1e9;
     this.es = null;
     this.raf = 0;
+    this.lastTop = 0;
     var self = this;
+    // Following = the newest line is in view. Any move up stops it, however
+    // small or slow (growth below never moves scrollTop; the script's own
+    // moves set lastTop first, so they never count). Only a move down into
+    // the bottom band, "Jump to latest" or End starts it again. A clamp after
+    // the content shrank (scrollTop falls, but the view is at the very
+    // bottom) is not a move up.
+    // Scrolled up, the reader's line is kept (`at`, `restore`): scroll
+    // anchoring is off (`overflow-anchor:none`), the script does it.
     this.body.addEventListener("scroll", function () {
-      var bottom = self.body.scrollHeight - self.body.scrollTop - self.body.clientHeight < 24;
-      if (bottom && !self.follow) { self.follow = true; self.unseen = 0; }
-      else if (!bottom && self.follow && !self.autoscrolling) self.follow = false;
-      self.autoscrolling = false;
+      var b = self.body;
+      // The heights changed and the view moved with them (a clamp) before
+      // the observer saw it: not the reader's move. Put the line back.
+      var kept = !self.follow && self.at && b.scrollHeight !== self.atH && self.restore(self.at);
+      if (!kept) {
+        var top = b.scrollTop, dist = b.scrollHeight - top - b.clientHeight;
+        if (top < self.lastTop - 1 && dist > 1) self.follow = false;
+        else if (dist <= 24 && top > self.lastTop && !self.follow) { self.follow = true; self.unseen = 0; }
+        self.lastTop = top;
+        self.at = self.mark();
+        self.atH = b.scrollHeight;
+      }
       self.pill();
       if (HL && S.q && !self.hlPending) {
         self.hlPending = true;
         requestAnimationFrame(function () { self.hlPending = false; highlightAll(); });
       }
     }, { passive: true });
-    this.jump.addEventListener("click", function () { self.toBottom(); self.body.focus(); });
+    this.jump.addEventListener("click", function () { self.toBottom(); self.body.focus({ preventScroll: true }); });
+    // Whatever changes the height (a batch, Wrap, Time, a filter, a resize,
+    // a JSON line opened) is answered after layout and before paint:
+    // following, the bottom is set again; scrolled up, the reader's line is
+    // put back where it was. One observer per pane; it fires only on a change.
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { if (self.follow) self.stick(); else self.restore(self.at); });
+      ro.observe(this.box);
+      ro.observe(this.body);
+    }
   }
+
+  Pane.prototype.stick = function () {
+    this.body.scrollTop = this.body.scrollHeight;
+    this.lastTop = this.body.scrollTop;
+  };
 
   Pane.prototype.pill = function () {
     this.jump.hidden = this.follow;
     this.jn.textContent = this.unseen ? " · " + this.unseen + " new" : "";
   };
 
+  // Scrolled up: the reader's line (the first one that starts in view, or
+  // the one line filling it) and its offset, taken on each scroll, so a
+  // change of heights can put it back. Following: nothing to keep.
+  Pane.prototype.mark = function () {
+    if (this.follow) return null;
+    var top = this.body.scrollTop, L = this.lines, lo = 0, hi = L.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1, j = mid;
+      while (j < hi && L[j].e.hidden) j++;
+      if (j === hi) hi = mid;
+      else if (L[j].e.offsetTop < top) lo = j + 1;
+      else hi = mid;
+    }
+    while (lo < L.length && L[lo].e.hidden) lo++;
+    var cut = lo - 1;
+    while (cut >= 0 && L[cut].e.hidden) cut--;
+    var r = lo < L.length && L[lo].e.offsetTop < top + this.body.clientHeight ? L[lo] : cut >= 0 ? L[cut] : null;
+    return r ? { e: r.e, off: r.e.offsetTop - top, h: r.e.offsetHeight || 1 } : null;
+  };
+  // The script moved the view itself (a seek, the trim): not a move by the
+  // reader, and the new place is the one to keep.
+  Pane.prototype.moved = function () {
+    this.lastTop = this.body.scrollTop;
+    this.at = this.mark();
+    this.atH = this.body.scrollHeight;
+  };
+  // (A line cut by the top edge keeps the same share of it above the edge.)
+  Pane.prototype.restore = function (m) {
+    if (this.follow) return false;
+    // The line is gone (trimmed) or filtered out: keep the place as it is now.
+    if (!m || !m.e.isConnected || m.e.hidden) { this.moved(); return false; }
+    var off = m.off < 0 ? m.off * m.e.offsetHeight / m.h : m.off;
+    this.body.scrollTop = m.e.offsetTop - off;
+    this.lastTop = this.body.scrollTop;
+    this.atH = this.body.scrollHeight;
+    return true;
+  };
+
+
   Pane.prototype.toBottom = function () {
     this.follow = true;
     this.unseen = 0;
-    this.autoscrolling = true;
-    this.body.scrollTop = this.body.scrollHeight;
+    this.stick();
     this.pill();
   };
 
@@ -337,24 +446,30 @@
     if (!this.follow) this.unseen += batch.length;
     this.trim();
     if (HL && S.q) highlightAll();
-    if (this.follow) { this.autoscrolling = true; this.body.scrollTop = this.body.scrollHeight; }
+    if (this.follow) this.stick();
     this.pill();
     if (S.target) this.seek();
-    else if (this.pin && Date.now() < this.pinUntil && this.pin.isConnected) this.pin.scrollIntoView({ block: "center" });
+    else if (this.pin && Date.now() < this.pinUntil && this.pin.isConnected) { this.pin.scrollIntoView({ block: "center" }); this.moved(); }
     counter();
   };
 
   Pane.prototype.trim = function () {
     var over = this.lines.length - RING;
     if (over <= 0) return;
-    var keep = this.lines[over].e, before = keep.offsetTop;
+    // Scrolled up: keep the lines in view where they are (set absolutely, so
+    // it holds whether or not scroll anchoring already moved the view).
+    // Following: no measuring (it would force a layout per batch); the
+    // bottom is re-set.
+    var j = over;
+    while (!this.follow && j < this.lines.length - 1 && this.lines[j].e.hidden) j++;
+    var keep = this.lines[j].e, rel = this.follow ? 0 : keep.offsetTop - this.body.scrollTop;
     for (var k = 0; k < over; k++) {
       var r = this.lines[k];
       this.counts[r.l]--;
       if (r.e.parentNode) r.e.parentNode.removeChild(r.e);
     }
     this.lines.splice(0, over);
-    if (!this.follow) this.body.scrollTop -= before - keep.offsetTop;
+    if (!this.follow) { this.body.scrollTop = keep.offsetTop - rel; this.moved(); }
   };
 
   Pane.prototype.render = function (r) {
@@ -450,6 +565,7 @@
         r.e.classList.add("lhl");
         this.follow = false;
         r.e.scrollIntoView({ block: "center" });
+        this.moved();
         // Lines still arriving move it: keep it in view for a moment.
         this.pin = r.e;
         this.pinUntil = Date.now() + 4000;
@@ -670,10 +786,20 @@
     });
   }
   window.addEventListener("resize", fit);
+  var lvl = root.querySelector(".lvl-chart");
+  if (lvl) lvl.addEventListener("toggle", fit);
 
   // ---------------------------------------------------------------- start
   var h = /^#t=([0-9.]+)/.exec(location.hash);
   if (h) S.target = +h[1];
+  // A link to a moment on this same page ("Logs around then" above the
+  // Logs tab) reloads the panes around it instead of doing nothing.
+  window.addEventListener("hashchange", function () {
+    var m = /^#t=([0-9.]+)/.exec(location.hash);
+    if (!m) return;
+    S.target = +m[1];
+    panes.forEach(function (p) { p.reset(); });
+  });
   applyView();
   fit();
   compile();
