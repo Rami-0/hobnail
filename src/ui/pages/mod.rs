@@ -132,6 +132,30 @@ pub fn kind_label(kind: &str) -> &str {
     kind.rsplit('.').next().unwrap_or(kind)
 }
 
+/// An event kind in plain words for timelines (OV-05): "container.die" ->
+/// "exited", "app.start" -> "Hobnail started". Unknown kinds fall back to
+/// their last part.
+pub fn event_label(kind: &str) -> &str {
+    match kind {
+        "app.start" => "Hobnail started",
+        "container.start" => "started",
+        "container.die" => "exited",
+        "container.stop" => "stopped",
+        "container.health" => "health",
+        "container.oom" => "out of memory",
+        "alert.fired" => "alert fired",
+        "alert.resolved" => "alert resolved",
+        "alert.delivery_failed" => "delivery failed",
+        "alert.test" => "test sent",
+        "auth.login" => "signed in",
+        "auth.login_failed" => "sign-in failed",
+        "auth.password" | "auth.password_changed" => "password changed",
+        "config.saved" => "config saved",
+        "config.restored" => "config restored",
+        k => kind_label(k),
+    }
+}
+
 /// Said once per page when the history database is off (the charts then
 /// only say "History is off").
 pub fn history_off_banner() -> Markup {

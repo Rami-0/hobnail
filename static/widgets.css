@@ -194,3 +194,9 @@
 .tm .tm-logs{display:none;position:absolute;top:2px;right:2px}
 @container (min-width:64px) and (min-height:40px){.tm .tm-logs{display:inline-flex}.tm:has(.tm-logs) .tm-a{padding-right:26px}}
 @media (pointer:coarse){@container (max-width:87.98px),(max-height:55.98px){.tm .tm-logs{display:none}.tm:has(.tm-logs) .tm-a{padding-right:0}}}
+/* stack titles in the UI sans, as in the sidebar (OV-18); a repeated name carries its stack (ROB-06) */
+.strips .sl-n{font-family:var(--font)}
+.attn .stk{color:var(--text-3);font:12px var(--font)}
+/* Overview "Recent events": long details wrap on a phone instead of being cut to ten letters (OV-06) */
+@media (max-width:699px){.events.recent .ev{flex-wrap:wrap;row-gap:0}.events.recent .ev .detail{flex-basis:100%;white-space:normal;overflow-wrap:anywhere;padding-left:94px}}
+.ev-n{font-size:11.5px}
