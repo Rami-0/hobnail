@@ -639,11 +639,14 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                     }
                     @if !marks.is_empty() {
                         div.evm {
+                            // No `title`: the read-out names the marker under the
+                            // crosshair (OV-17, touch too) and a click opens its
+                            // row; the label is sent once, not twice per chart.
                             @for (left, m) in &marks {
                                 @if let Some(h) = &m.href {
-                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} data-t=(m.ts) title=(m.label) aria-label=(m.label) {}
+                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} data-t=(m.ts) aria-label=(m.label) {}
                                 } @else {
-                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} data-t=(m.ts) title=(m.label) aria-label=(m.label) {}
+                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} data-t=(m.ts) aria-label=(m.label) {}
                                 }
                             }
                         }
