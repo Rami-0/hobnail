@@ -1184,6 +1184,49 @@ mod tests {
         assert!(!all.contains("transition:width"), "no width transition");
     }
 
+    /// A11Y-18: on touch and phones every control is a 44 px target by its
+    /// own size (the tokens), not by a hit area grown over its neighbours.
+    #[test]
+    fn touch_targets_are_44_by_size() {
+        let coarse = block(
+            APP_CSS_SRC,
+            "@media (pointer:coarse),(max-width:699px){:root{",
+        );
+        for t in [
+            "--ctl-h:44px",
+            "--ctl-h-sm:44px",
+            "--ia:44px",
+            "--hit:44px",
+        ] {
+            assert!(coarse.contains(t), "{t} in {coarse}");
+        }
+        let css = include_str!("../../static/components.css");
+        let touch = &css[css
+            .find("/* 44 px targets on touch and phones (A11Y-18)")
+            .expect("the touch block")..];
+        for sel in [".icon-btn", ".crumb>a", ".seg a", ".tab", ".nav-item", ".linkbtn"] {
+            assert!(touch.contains(sel), "{sel} is sized on touch");
+        }
+        // No hit area that reaches over a neighbour.
+        for s in selectors(css) {
+            assert!(
+                !(s.ends_with("::after") && (s.contains(".linkbtn") || s.contains(".btn.sm"))),
+                "a grown hit area: {s}"
+            );
+        }
+        assert!(!css.contains("inset:-6px -13px -21px"));
+    }
+
+    /// ROB-03: the stack tree is the containing block of the visually
+    /// hidden text inside it, so items far down the scrolled tree never
+    /// stretch the page.
+    #[test]
+    fn tree_contains_its_hidden_text() {
+        let tree = block(APP_CSS_SRC, "\n.tree{");
+        assert!(tree.starts_with("position:relative;"), "{tree}");
+        assert!(tree.contains("overflow-y:auto"));
+    }
+
     /// The account menu is not a `.menu`: that class is the popover menu of
     /// the component layer (fixed, hidden until open).
     #[test]

@@ -34,13 +34,6 @@
 .btn[aria-busy=true]::before{content:"";width:13px;height:13px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
 .btn[aria-busy=true]>svg{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* small visual size, 44 px hit area on touch */
-@media (pointer:coarse){.linkbtn{position:relative}.ia::after,.btn.sm::after,.linkbtn::after{content:"";position:absolute;inset:min(0px,calc((100% - 44px)/2))}}
-/* In dense rows a grown hit area would reach into the next row or onto the
-   row's own link: there the action itself is 44 px and the row grows to it. */
-@media (pointer:coarse){.tree .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia,.more-stack .ia{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
- td .linkbtn::after{inset:-6px -13px -21px}}
-
 /* ---- icon action: compact row/list action (logs, open, more) ---- */
 .ia{position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--ia);height:var(--ia);flex:none;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-3);cursor:pointer;
  transition:color var(--dur-1) var(--ease-out),background-color var(--dur-1) var(--ease-out),opacity var(--dur-1) var(--ease-out)}
@@ -108,6 +101,12 @@ tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)
 :is(.dlg,.set-main) .sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
 /* not live (no script yet, locked, or saving): looks it */
 :is(.dlg,.set-main) input:is(.sw,[type=checkbox],[type=search]):disabled{opacity:.5;cursor:not-allowed}
+@media (pointer:coarse),(max-width:699px){
+ /* a switch and a lone checkbox keep their look inside a 44 px box (transparent border) */
+ :is(.dlg,.set-main) .sw{width:52px!important;height:44px!important;border:13px solid transparent!important;border-width:13px 9px!important;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
+ :is(.dlg,.set-main) td input[type=checkbox]:not(.sw){width:44px;height:44px;border:14px solid transparent!important;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
+ :is(.dlg,.set-main) :is(.sw,td input[type=checkbox]):checked{box-shadow:none}
+}
 /* choice: a radio group drawn as a segmented control (few options, all visible) */
 :is(.dlg,.set-main) .choice{justify-self:start;display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
 :is(.dlg,.set-main) .choice label{position:relative;display:inline-flex;align-items:center;gap:6px;height:calc(var(--ctl-h) - 6px);padding:0 var(--s-3);border-radius:var(--r-xs);color:var(--text-2);font:500 var(--fs-sm)/1 var(--font);cursor:pointer;white-space:nowrap}
@@ -328,3 +327,18 @@ tr.moved>td{animation:row-new var(--dur-4) var(--ease-out)}
    Chromium sends every click to the root, so links were dead for its
    duration, even with ::view-transition{pointer-events:none}. Feedback on
    navigation is the 2 px line and the pending tab instead (ROB-12). */
+
+/* 44 px targets on touch and phones (A11Y-18): the control itself is 44 px
+   (the tokens --ctl-h, --ctl-h-sm, --ia and --hit are 44 there) and its row
+   grows to it; never a hit area that reaches over a neighbour. */
+@media (pointer:coarse),(max-width:699px){
+ .tree .ia.logs,.stack summary .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia,.more-stack .ia,.icon-btn,.icon-btn.sm{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
+ .panel-h .more,.sec-h .more,.linkbtn,.brand,.stack-name,.cd-tabs a{display:inline-flex;align-items:center;min-height:44px}
+ .crumb>a,.nm-l>a:first-child{min-height:44px;display:inline-flex;align-items:center}
+ .panel-h .more,.sec-h .more,.linkbtn{min-width:44px}.panel-h .more,.sec-h .more{justify-content:flex-end}
+ .seg a,.tab,.cd-tabs a,.lg,.tgl,.nav-item,.menu-item,.pal-list li,.tree-filter input{height:44px;min-width:44px;justify-content:center}
+ .nav-item{justify-content:flex-start}.tree-filter svg{top:15px}
+ .strip-list .sl-n{display:flex;align-items:center;min-height:44px}
+ .ctr>a:first-child,.stack>summary{height:44px}
+ .panel.login input[type=password],.panel.login .btn{height:44px}
+}

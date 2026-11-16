@@ -25,7 +25,7 @@
  .set-nav{position:static;margin:0 -12px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}
  .set-nav::-webkit-scrollbar{display:none}
  .set-nav ul{display:flex;gap:2px;padding:0 12px 8px;width:max-content}
- .set-nav a{height:30px;padding:0 10px;font-size:12.5px}
+ .set-nav a{height:max(30px,var(--ctl-h-sm));padding:0 10px;font-size:12.5px}
  .set-nav a[aria-current=page]{box-shadow:inset 0 -2px 0 var(--accent)}
  /* SET-23: the edge with more tabs behind it fades (set by the script) */
  .set-nav.more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent)}
@@ -141,6 +141,7 @@ body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
 .bulk-n{font-size:12.5px;font-weight:600;margin-right:4px}
 .bulk .in{width:180px;height:var(--ctl-h-sm)}
 @media (max-width:699px){.bulk{top:calc(var(--top-h) + 4px)}.bulk .in{flex:1 1 100%;width:auto}}
+.set-main .search-in input{height:var(--ctl-h)}
 .ex-match{min-height:1.4em;font-size:12.5px}
 
 /* read-only lines in a dialog (set in the file on the host) */
