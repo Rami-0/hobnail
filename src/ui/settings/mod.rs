@@ -1,5 +1,7 @@
-//! The settings pages: `/settings` (overview of the tabs) and
-//! `/settings/<tab>` (DESIGN.md section 5), in the shell.
+//! The settings pages: `/settings/<tab>` (DESIGN.md section 5), in the
+//! shell. `/settings` has no page of its own (SET-22): it is the General
+//! tab, and the script points the Settings links at the tab this browser
+//! used last (Y17, `rh-set-tab`).
 //!
 //! Every tab is rendered with its values by the server, from the file on
 //! disk, for a session only (DESIGN.md §11.14, Y18). Lists use the dialog
@@ -17,8 +19,9 @@
 //! and `settings.js` are linked from these pages only.
 //!
 //! Signed out, a tab shows only the lock panel (how to set the first
-//! password, or a sign-in link) and no config data at all: no list, no
-//! dialog, no `data-item`, no page form, and `?frag=` answers 401.
+//! password, or a sign-in link) and no config data at all: no tab strip
+//! (Y11, SET-21), no list, no dialog, no `data-item`, no page form, and
+//! `?frag=` answers 401.
 
 mod appearance;
 mod bookmarks;
@@ -63,19 +66,19 @@ fn tab_icon(slug: &str) -> &'static str {
 /// One settings tab: (name, slug, description).
 pub type Tab = (&'static str, &'static str, &'static str);
 
-/// The page for `/settings` (`tab = None`) or `/settings/<slug>`; `None`
-/// when there is no such tab (the caller answers 404).
+/// The page for `/settings` (`slug = None`: the General tab) or
+/// `/settings/<slug>`; `None` when there is no such tab (the caller answers
+/// 404).
 pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
-    let tab: Option<&Tab> = match slug {
-        None | Some("") => None,
-        Some(s) => Some(SETTINGS.iter().find(|t| t.1 == s)?),
+    let t: &Tab = match slug {
+        None | Some("") => &SETTINGS[0],
+        Some(s) => SETTINGS.iter().find(|t| t.1 == s)?,
     };
     let signed = ctx.user.is_some();
     let none = html! {};
-    let (content, dialogs, acts) = match (tab, signed) {
-        (None, _) => (index(ctx), none, None),
-        (Some(t), false) => (lock_panel(ctx, t.1), none, None),
-        (Some(t), true) => match t.1 {
+    let (content, dialogs, acts) = match signed {
+        false => (lock_panel(ctx, slug.filter(|s| !s.is_empty())), none, None),
+        true => match t.1 {
             "general" => (general::body(ctx), none, None),
             "containers" => (containers::body(ctx), containers::dialogs(ctx), None),
             "bookmarks" => (
@@ -92,7 +95,71 @@ pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
             _ => return None,
         },
     };
-    Some(shell(ctx, tab, content, dialogs, acts))
+    Some(shell(ctx, t, content, dialogs, acts))
+}
+
+/// A Settings tab's lists and dialogs carried by another page (the Alerts
+/// page: owner decision Y15), **for a session only** (the caller checks
+/// `ctx.user` first; signed out nothing of this is rendered). The markup,
+/// the `?add=` / `?edit=` page forms, the dialogs and the script are the
+/// tab's own: `settings.js` runs on the page as on the tab (`data-tab`),
+/// reads the lists from the tab's `?frag=list` (`data-frag`) and saves
+/// through the same routes with the same base-hash and patch rules.
+pub struct Embed {
+    /// `<link>` to settings.css (the lists' and forms' layout).
+    pub head: Markup,
+    /// The tab's body inside `#set-main` (with its banners region).
+    pub body: Markup,
+    /// The confirm, the tab's dialogs and settings.js (outside `#set-main`).
+    pub tail: Markup,
+    /// The config file's version the page was rendered from: a dialog
+    /// opened from a trigger inside `[data-hash]` saves on this base.
+    pub hash: String,
+}
+
+/// [`Embed`] of a tab: "notifications" (channels and rules), or a list of
+/// dialog-only tabs ("bookmarks widgets": their dialogs, no list).
+pub fn embed(ctx: &Ctx, tabs: &str) -> Option<Embed> {
+    ctx.user.as_ref()?;
+    let sha = ctx.state.build.sha;
+    let first = tabs.split(' ').next().unwrap_or("");
+    let frag = format!("/settings/{first}");
+    let hash = disk::Disk::read(ctx.state).hash;
+    let (body, dialogs) = match tabs {
+        "notifications" => (notifications::body(ctx), notifications::dialogs(ctx)),
+        "bookmarks widgets" => (
+            html! {},
+            html! { (bookmarks::dialogs()) (widgets::dialogs()) },
+        ),
+        _ => return None,
+    };
+    Some(Embed {
+        head: html! { link rel="stylesheet" href={"/static/settings.css?v=" (sha)}; },
+        body: html! {
+            div.set-main.set-embed.bare[body.0.is_empty()] #set-main data-tab=(tabs) data-signed="1" data-frag=(frag) {
+                div.set-banners #set-banners aria-live="assertive" {}
+                (body)
+            }
+        },
+        tail: html! {
+            (dlg::confirm())
+            (dialogs)
+            script src={"/static/settings.js?v=" (sha)} defer {}
+        },
+        hash,
+    })
+}
+
+/// `?edit=channel:<name>`: the link that opens a channel's dialog on a page
+/// that carries it (the Notifications tab, or the Alerts page signed in).
+pub fn channel_edit_link(name: &str) -> String {
+    dlg::edit_link("channel", name)
+}
+
+/// `?edit=rule:<name>`: the link that opens a rule's dialog (the
+/// Notifications tab, or the Alerts page signed in).
+pub fn rule_edit_link(name: &str) -> String {
+    dlg::edit_link("rule", name)
 }
 
 /// `GET /settings/<tab>?frag=<name>`: one part of a tab, for the script to
@@ -124,42 +191,41 @@ pub fn fragment(ctx: &Ctx) -> Option<(StatusCode, String)> {
     })
 }
 
-fn shell(
-    ctx: &Ctx,
-    tab: Option<&Tab>,
-    content: Markup,
-    dialogs: Markup,
-    acts: Option<Markup>,
-) -> String {
+fn shell(ctx: &Ctx, tab: &Tab, content: Markup, dialogs: Markup, acts: Option<Markup>) -> String {
     let sha = ctx.state.build.sha;
-    let heading = match tab {
-        None => html! { h1.title { "Settings" } },
-        Some((name, _, _)) => html! {
+    let (name, slug, desc) = *tab;
+    let signed = ctx.user.is_some();
+    // Signed out every tab is the same lock panel: no tab strip of links
+    // that all lead to it (Y11), and the top bar just says "Settings".
+    let heading = if signed {
+        html! {
             nav.crumb aria-label="Breadcrumb" {
                 a href="/settings" { "Settings" }
                 (ic("chev-r"))
                 h1.title { (name) }
             }
-        },
+        }
+    } else {
+        html! { h1.title { "Settings" } }
     };
-    let slug = tab.map(|t| t.1).unwrap_or("");
-    let signed = ctx.user.is_some();
     let body = html! {
         link rel="stylesheet" href={"/static/settings.css?v=" (sha)};
-        div.page.set {
-            nav.set-nav aria-label="Settings sections" {
-                ul {
-                    @for (name, s, _) in SETTINGS {
-                        li {
-                            a href={"/settings/" (s)} aria-current=[(*s == slug).then_some("page")] {
-                                (ic(tab_icon(s))) span { (name) }
+        div.page.set.locked[!signed] {
+            @if signed {
+                nav.set-nav #set-nav aria-label="Settings sections" {
+                    ul {
+                        @for (name, s, _) in SETTINGS {
+                            li {
+                                a href={"/settings/" (s)} aria-current=[(*s == slug).then_some("page")] {
+                                    (ic(tab_icon(s))) span { (name) }
+                                }
                             }
                         }
                     }
                 }
             }
             div.set-main #set-main data-tab=(slug) data-signed=(if signed { "1" } else { "0" }) {
-                @if let Some((name, _, desc)) = tab {
+                @if signed {
                     div.set-head {
                         div.set-head-t {
                             h2 { (name) }
@@ -180,40 +246,17 @@ fn shell(
         }
         script src={"/static/settings.js?v=" (sha)} defer {}
     };
-    let title = tab.map(|t| t.0).unwrap_or("Settings");
+    let title = if signed { name } else { "Settings" };
     layout(ctx, Nav::Settings, title, heading, body)
 }
 
-/// `/settings`: the tabs as cards, and the lock panel when signed out.
-fn index(ctx: &Ctx) -> Markup {
-    html! {
-        div.set-head {
-            div.set-head-t {
-            h2 { "Settings" }
-            p.page-sub { "Change the config from the browser. Every save is validated, keeps the file's comments and is kept as a revision." }
-            }
-        }
-        @if ctx.user.is_none() { (lock_panel(ctx, "")) }
-        ul.set-cards {
-            @for (name, s, desc) in SETTINGS {
-                li {
-                    a.set-card href={"/settings/" (s)} {
-                        span.set-card-ic { (ic(tab_icon(s))) }
-                        span.set-card-t { (name) }
-                        span.set-card-d { (desc) }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Signed out: how to unlock. Never shows any config data.
-fn lock_panel(ctx: &Ctx, slug: &str) -> Markup {
-    let next = if slug.is_empty() {
-        "/settings".to_string()
-    } else {
-        format!("/settings/{slug}")
+/// `slug`: the tab asked for (`None` for `/settings`), where signing in
+/// returns to.
+fn lock_panel(ctx: &Ctx, slug: Option<&str>) -> Markup {
+    let next = match slug {
+        None => "/settings".to_string(),
+        Some(s) => format!("/settings/{s}"),
     };
     let why = "Changing settings needs a login because a config that can be edited \
                from a browser could run commands in a container that has the Docker socket.";

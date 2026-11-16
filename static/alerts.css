@@ -51,6 +51,23 @@ td .k,.k{font-size:11px}
 .alerts{border-radius:12px;background:var(--raised);padding:14px 20px}
 .alerts.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--border));box-shadow:inset 3px 0 0 var(--bad),0 8px 24px -18px var(--bad);background:linear-gradient(180deg,color-mix(in srgb,var(--bad) 7%,transparent),transparent 120px),var(--raised)}
 .incident{min-height:36px}
-.incident .ia.logs{margin-left:auto}
+.incident .ia.logs{margin-left:0}
 .ghost .events{border-top:1px solid var(--line)}
 .panel.primary.login{padding:24px 26px}
+/* the firing list and the alert log: rows open their subject (LG-55) and
+   name the rule (LG-56); on a phone they wrap instead of widening the page */
+.inc-rule,.ev-rule{color:var(--text-2);font-size:12px;white-space:nowrap}
+.inc-rule b,.ev-rule b{font:500 12px var(--mono);color:var(--text)}
+.incident{flex-wrap:wrap;row-gap:2px}
+.incident.rl:hover,.al-log .ev.rl:hover{background:var(--tint)}
+.al-log .ev .when{flex-basis:auto;min-width:96px}
+@media (max-width:699px){.al-log .ev{flex-wrap:wrap;row-gap:0;padding-block:4px}.al-log .ev .detail{white-space:normal;flex-basis:100%}}
+/* the live parts never widen the page at 390 (their tables scroll inside) */
+#al-live,#al-pub{min-width:0}
+.ev .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;flex-shrink:1}
+/* "since …" is one right-aligned column, wrapped rows included: the logs
+   icon follows it, and a row without one keeps its slot */
+.incident .inc-since{margin-left:auto;text-align:right;white-space:nowrap}
+.incident:not(:has(.ia.logs))::after{content:"";flex:none;width:var(--ia)}
+@media (pointer:coarse){.incident:not(:has(.ia.logs))::after{width:44px}}
+.incident .inc-rule a{pointer-events:auto;font:500 12px var(--mono)}

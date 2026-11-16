@@ -38,7 +38,7 @@
 @media (pointer:coarse){.linkbtn{position:relative}.ia::after,.btn.sm::after,.linkbtn::after{content:"";position:absolute;inset:min(0px,calc((100% - 44px)/2))}}
 /* In dense rows a grown hit area would reach into the next row or onto the
    row's own link: there the action itself is 44 px and the row grows to it. */
-@media (pointer:coarse){.tree .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
+@media (pointer:coarse){.tree .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia,.more-stack .ia{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
  td .linkbtn::after{inset:-6px -13px -21px}}
 
 /* ---- icon action: compact row/list action (logs, open, more) ---- */
@@ -59,6 +59,9 @@ tr.rl,li.rl,.tm{position:relative}
 /* What a stretched row shows sits above its link: text selects, titles show,
    other links work; a click on empty row space still opens the row. */
 tr.rl>td>:not(.row-link),li.rl>:not(.row-link){position:relative;z-index:1}
+/* Compact rows whose text is only a label (attention, firing list, alert
+   log): a click on the text opens the row too. */
+:is(.attn .rows,.incidents,.al-log) li.rl>:is(.dot,.why,.inc-state,.inc-rule,.inc-since,.detail,.ev-rule,.when:not(:has(a)),.pill){pointer-events:none}
 /* A name link with its logs action beside it (tables on Host, History). */
 .nm-l{display:inline-flex;align-items:center;gap:var(--s-1);max-width:100%;vertical-align:middle}
 .nm-l>a:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}

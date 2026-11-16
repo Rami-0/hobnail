@@ -26,6 +26,7 @@ pub fn render(ctx: &Ctx) -> (StatusCode, String) {
         "/login" => ok(login::page(ctx)),
         "/host" => crate::host::page(ctx),
         "/logs" => crate::logs::split_page(ctx),
+        "/more" => ok(crate::ui::shell::more_page(ctx)),
         "/settings" | "/settings/" => ok(crate::ui::settings::page(ctx, None).unwrap_or_default()),
         p => {
             if let Some(slug) = p.strip_prefix("/settings/") {
@@ -91,11 +92,11 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
     use crate::ui::shell;
     Some(match event {
         "groups" => {
-            let v = overview::Live::new(ctx);
+            let v = overview::Live::new(ctx).with_since(ctx);
             html! {
                 (shell::tree(&ctx.cfg, &v.snap, &v.groups))
                 (overview::health(&v))
-                (overview::attention(ctx.now, &v))
+                (overview::attention(&ctx.cfg, ctx.now, &v))
                 (overview::top(&v, ctx.cfg.page.show_stats))
                 (container::live_json(&v.groups))
             }
@@ -108,11 +109,11 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
             }
         }
         "alerts" => {
-            let v = overview::Live::new(ctx);
+            let v = overview::Live::new(ctx).with_since(ctx);
             html! {
                 (shell::nav_alerts(v.status.incidents.len()))
                 (overview::health(&v))
-                (overview::attention(ctx.now, &v))
+                (overview::attention(&ctx.cfg, ctx.now, &v))
                 (alerts::fragment(ctx))
             }
         }

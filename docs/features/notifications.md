@@ -44,6 +44,21 @@ or webhook secret headers can only be set in the file (bound to their
 destination). Fired / resolved / failed deliveries are in the history database
 and on the Alerts page.
 
+**On the Alerts page.** Firing incidents and the alert log link to their
+subject (a container's page, the Host page, the widget on the Overview, or
+the checked URL), name the rule that fired and show a clock time; rows about
+a container have its logs from that moment. Signed in, the page also carries
+the Notifications tab's channel and rule lists with their dialogs: "Add
+channel", "Add rule", "Send test" per channel, the rule on/off switches,
+edit and delete; a firing incident's rule name opens that rule's dialog.
+They are the same lists, dialogs and script as in Settings
+(read from `/settings/notifications?frag=list`, saved through the same
+routes and guards); `/alerts?add=channel`, `?edit=rule:<name>` and so on open
+the dialog, or show the form without JavaScript. Signed out the page shows
+only what it always did: rule and channel names, kinds, what a rule watches
+and delivery state, never env-variable names, URLs of channels or form
+values.
+
 ## Where to put real tokens
 
 Secrets never go in `config.toml`. Put them in **`secrets.env`** next to the

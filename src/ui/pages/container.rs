@@ -20,7 +20,7 @@ use crate::db::{Agg, CtrMetric, EventFilter, Range, Series};
 use crate::docker::{HealthLog, Inspect, Top};
 use crate::model::Container;
 use crate::ui::chart::{line_chart, ChartSpec, Unit};
-use crate::ui::fmt::{parse_query, pct, query_get, short_utc, time_tag, url_decode, url_encode};
+use crate::ui::fmt::{clock_tag, parse_query, pct, query_get, time_tag, url_decode, url_encode};
 use crate::ui::pages::overview::{event_row, live_spark};
 use crate::ui::shell::{layout, Ctx, Nav};
 use crate::ui::view::{binding_link, card_for, CardView, GroupView};
@@ -173,8 +173,9 @@ fn why_for(ctx: &Ctx, c: &Container, ins: Option<&Inspect>) -> Option<Why> {
         .iter()
         .filter(|e| e.ts >= now - 600)
         .count() as u32;
-    let unhealthy_since = last_unhealthy_event(ctx, &c.name);
-    why_red(c, ins, starts_10m, unhealthy_since, now)
+    let started = ins.and_then(|i| crate::docker::parse_rfc3339(&i.state.started_at));
+    let since = unhealthy_since(&ctx.state.db, c, started);
+    why_red(c, ins, starts_10m, since, now)
 }
 
 /// The container header, "why is this red?" and the tabs, for the logs
@@ -222,13 +223,7 @@ fn head(
             }
         }
         (note)
-        @if let Some(w) = why {
-            p.cd-why.bad role="status" {
-                (ic("alert"))
-                span { strong { "Why is this red? " } (w.text) }
-                a href={(logs) (w.ts.map(|t| format!("#t={}", t.max(0) * 1000)).unwrap_or_default())} { "Logs around then" }
-            }
-        }
+        @if let Some(w) = why { (why_note(ctx, c, w, &logs)) }
         nav.cd-tabs aria-label="Container sections" {
             @for t in Tab::ALL {
                 // Every tab keeps the chosen range (the Logs tab's chart uses it).
@@ -236,6 +231,70 @@ fn head(
                     format!("{base}?tab={}{}", t.slug(), if matches!(t, Tab::Overview | Tab::Metrics) { format!("&range={}", range.as_str()) } else { String::new() })
                 };
                 a href=(href) aria-current=[(t == tab).then_some("page")] { (t.label()) }
+            }
+        }
+    }
+}
+
+/// "Why is this red?" on top of a container's pages (NAV-11). A failing
+/// health check says since when and how many in a row; signed in, with the
+/// probe's first line and Docker's last five checks; signed out, with a
+/// sign-in link instead and **no probe output anywhere in the page**.
+/// "Logs around HH:MM" opens the logs at the moment it started.
+fn why_note(ctx: &Ctx, c: &Container, w: &Why, logs: &str) -> Markup {
+    let signed = ctx.user.is_some();
+    let first_line = |o: &str| {
+        o.trim()
+            .lines()
+            .next()
+            .map(|l| truncate(l.trim(), 120))
+            .filter(|l| !l.is_empty())
+    };
+    let next = format!("/containers/{}", url_encode(&c.name));
+    html! {
+        div.cd-why.bad role="status" {
+            (ic("alert"))
+            div.cd-why-b {
+                p {
+                    strong { "Why is this red? " }
+                    @if let Some(h) = &w.health {
+                        "Health check failing"
+                        @if let Some(s) = h.since { " since " (clock_tag(s.max(0) as u64)) " (" (human_duration((ctx.now as i64 - s).max(0) as u64)) " ago)" }
+                        @if h.streak > 0 { ", " (h.streak) " in a row" }
+                        @if signed {
+                            @match h.probes.iter().find(|p| p.1 != 0).and_then(|p| first_line(&p.2)) {
+                                Some(l) => { ": " code.probe { (l) } }
+                                None => ".",
+                            }
+                        } @else {
+                            ". " a href={"/login?next=" (url_encode(&next))} { "Sign in to see the check's output." }
+                        }
+                        @if !w.text.is_empty() { " · " }
+                    }
+                    (w.text)
+                    @if let Some(t) = w.ts {
+                        " " a.cd-why-logs href={(logs) "#t=" (t.max(0) * 1000)} { "Logs around " (clock_tag(t.max(0) as u64)) }
+                    } @else {
+                        " " a.cd-why-logs href=(logs) { "Logs" }
+                    }
+                }
+                @if let Some(h) = w.health.as_ref().filter(|h| signed && !h.probes.is_empty()) {
+                    details.cd-probes open {
+                        summary { "Last " (h.probes.len()) " checks" }
+                        ol.cd-hlog {
+                            @for (t, code, out) in &h.probes {
+                                li {
+                                    div.cd-hl-h {
+                                        (pill(if *code == 0 { "ok" } else { "bad" }, &format!("exit {code}")))
+                                        @if let Some(t) = t { " " (clock_tag((*t).max(0) as u64)) }
+                                    }
+                                    @let out = truncate(out.trim(), HEALTH_OUTPUT_MAX);
+                                    @if out.is_empty() { p.muted.small { "(no output)" } } @else { pre.cd-out { (out) } }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -956,24 +1015,65 @@ pub fn exit_meaning(code: i64) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Why {
+    /// What is wrong apart from a failing health check ("" when that is all).
     pub text: String,
     /// When it happened (unix s), for the logs link.
     pub ts: Option<i64>,
+    /// A failing health check: since when, how many in a row, the probes.
+    pub health: Option<HealthWhy>,
 }
 
-/// The newest `container.health` event for `name` if it says unhealthy.
-fn last_unhealthy_event(ctx: &Ctx, name: &str) -> Option<i64> {
-    ctx.state
-        .db
-        .events(&EventFilter {
-            subject: Some(name.to_string()),
-            kind_prefix: Some("container.health".into()),
-            limit: 1,
-            ..Default::default()
-        })
-        .first()
-        .filter(|e| e.detail == "unhealthy")
+/// A failing health check (NAV-11). `probes` carry Docker's last checks,
+/// newest first, **output included only when the viewer is signed in**
+/// (the anonymous `Inspect` is redacted, and the page renders no output
+/// without a session either).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HealthWhy {
+    pub since: Option<i64>,
+    pub streak: i64,
+    /// (start, exit code, output), newest first, at most five.
+    pub probes: Vec<(Option<i64>, i64, String)>,
+}
+
+/// The first line of the newest failing health probe's output (cut to 120
+/// characters), if the last probe failed and said something. Probe output
+/// can carry secrets: **for a session only** (an anonymous `Inspect` has it
+/// redacted already, and callers check the session as well).
+pub fn probe_line(i: &Inspect) -> Option<String> {
+    let logs = i.state.health.as_ref()?.log.as_deref()?;
+    let last = logs.last().filter(|l| l.exit_code != 0)?;
+    let line = last.output.trim().lines().next()?.trim();
+    (!line.is_empty()).then(|| truncate(line, 120))
+}
+
+/// Since when `c` has been unhealthy, from the event log, or `None` when
+/// the newest stored health event does not say "unhealthy". Never earlier
+/// than this run of the container: the recorder stores a health event only
+/// when it differs from the last one stored for the name, so a container
+/// recreated (or restarted) under the same name that turns unhealthy again
+/// finds the previous one's "unhealthy" event. The answer is clamped to
+/// the container's start (`started`, from an inspect, or else its creation
+/// time) and to any `container.start` event newer than that health event.
+/// One query; the Overview and the container page both use it.
+pub fn unhealthy_since(db: &crate::db::Db, c: &Container, started: Option<i64>) -> Option<i64> {
+    let evs = db.events(&EventFilter {
+        subject: Some(c.name.clone()),
+        kind_prefix: Some("container.".into()),
+        limit: 20,
+        ..Default::default()
+    });
+    let at = evs.iter().position(|e| e.kind == "container.health")?;
+    let h = &evs[at];
+    if h.detail != "unhealthy" {
+        return None;
+    }
+    let restarted = evs[..at]
+        .iter()
+        .filter(|e| e.kind == "container.start")
         .map(|e| e.ts)
+        .max()
+        .unwrap_or(0);
+    Some(h.ts.max(restarted).max(started.unwrap_or(0)).max(c.created))
 }
 
 /// One line on what is wrong, or `None` when nothing is. `unhealthy_since`
@@ -987,6 +1087,7 @@ pub fn why_red(
 ) -> Option<Why> {
     let mut parts: Vec<String> = Vec::new();
     let mut ts = None;
+    let mut hw = None;
     let st = ins.map(|i| &i.state);
     let running = c.is_running();
     if st.is_some_and(|s| s.oom_killed) && !running {
@@ -1014,28 +1115,31 @@ pub fn why_red(
         let first = run
             .last()
             .and_then(|l| crate::docker::parse_rfc3339(&l.start));
-        let since = unhealthy_since.or(first);
-        let streak = health.map_or(0, |h| h.failing_streak);
-        let mut t = String::from("Health check failing");
-        if let Some(s) = since {
-            t.push_str(&format!(
-                " since {} ({} ago)",
-                short_utc(s.max(0) as u64),
-                human_duration((now - s).max(0) as u64)
-            ));
-        }
-        if streak > 0 {
-            t.push_str(&format!(", {streak} in a row"));
-        }
-        if let Some(out) = run
-            .first()
-            .map(|l| l.output.trim())
-            .filter(|o| !o.is_empty())
-        {
-            let line = out.lines().next().unwrap_or("");
-            t.push_str(&format!(": {}", truncate(line, 120)));
-        }
-        parts.push(t);
+        // Never before this run of the container (a failing run in the
+        // log can predate a restart by a probe).
+        let start = st
+            .and_then(|s| crate::docker::parse_rfc3339(&s.started_at))
+            .unwrap_or(0)
+            .max(c.created);
+        let since = unhealthy_since.or(first).map(|s| s.max(start));
+        let streak = health.map_or(0, |h| h.failing_streak as i64);
+        let probes = logs
+            .iter()
+            .rev()
+            .take(HEALTH_LOGS)
+            .map(|l| {
+                (
+                    crate::docker::parse_rfc3339(&l.start),
+                    l.exit_code,
+                    l.output.clone(),
+                )
+            })
+            .collect();
+        hw = Some(HealthWhy {
+            since,
+            streak,
+            probes,
+        });
         ts = ts.or(since);
     }
     if starts_10m >= 3
@@ -1054,12 +1158,13 @@ pub fn why_red(
         parts.push(format!("Restart loop: {n} restarts in 10 min"));
         ts = ts.or_else(|| c.die_times.iter().max().map(|t| *t as i64));
     }
-    if parts.is_empty() {
+    if parts.is_empty() && hw.is_none() {
         return None;
     }
     Some(Why {
         text: parts.join(" · "),
         ts,
+        health: hw,
     })
 }
 
@@ -1693,6 +1798,129 @@ above = 90
             .contains("boom"));
     }
 
+    /// "Why is this red?": signed in, the probe's first line and the last
+    /// checks; signed out, since when and how many, a sign-in link, and no
+    /// probe output anywhere (NAV-11).
+    #[test]
+    fn why_note_shows_probe_output_to_a_session_only() {
+        let st = state_with(sample(), "");
+        let c = sample()[0].clone();
+        let w = Why {
+            text: String::new(),
+            ts: Some(1_794_646_800),
+            health: Some(HealthWhy {
+                since: Some(1_794_646_800),
+                streak: 6,
+                probes: vec![
+                    (
+                        Some(1_794_646_900),
+                        1,
+                        "Sekrit-probe: <refused>\nmore".into(),
+                    ),
+                    (Some(1_794_646_870), 0, "ok".into()),
+                ],
+            }),
+        };
+        let mut ctx = Ctx::live(&st, "h");
+        ctx.now = 1_794_646_800 + 2460;
+        let out = why_note(&ctx, &c, &w, "/containers/x/logs").into_string();
+        assert!(out.contains("Health check failing since <time"), "{out}");
+        assert!(out.contains("(41m ago), 6 in a row. "), "{out}");
+        assert!(
+            out.contains("Sign in to see the check&#39;s output.")
+                || out.contains("Sign in to see the check's output."),
+            "{out}"
+        );
+        assert!(
+            !out.contains("Sekrit") && !out.contains("refused") && !out.contains("cd-probes"),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"href="/containers/x/logs#t=1794646800000""#)
+                && out.contains("Logs around <time"),
+            "{out}"
+        );
+        ctx.user = Some("admin".into());
+        let out = why_note(&ctx, &c, &w, "/containers/x/logs").into_string();
+        assert!(
+            out.contains(r#": <code class="probe">Sekrit-probe: &lt;refused&gt;</code>"#),
+            "{out}"
+        );
+        assert!(
+            out.contains("Last 2 checks") && out.contains("exit 1") && !out.contains("Sign in"),
+            "{out}"
+        );
+    }
+
+    /// A container recreated under the same name that turns unhealthy again
+    /// gets no new "unhealthy" event (the recorder stores a health event
+    /// only when it differs from the last one for the name): the since-time
+    /// never predates the new container's start, on the Overview or here.
+    #[test]
+    fn unhealthy_since_never_predates_a_recreated_container() {
+        let st = state_with(sample(), "");
+        let ev = |action: &str, time: u64, detail: Option<&str>| crate::docker::Event {
+            action: action.into(),
+            name: Some("web".into()),
+            time,
+            detail: detail.map(Into::into),
+        };
+        let t0: u64 = 1_794_600_000;
+        let mut c = sample()[0].clone();
+        c.health = Some("unhealthy".into());
+        c.created = t0 as i64 - 10;
+        crate::db::record_docker_event(&st.db, &ev("start", t0, None));
+        crate::db::record_docker_event(&st.db, &ev("health_status", t0 + 60, Some("unhealthy")));
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(t0 as i64 + 60));
+        // Two hours later it is removed and created again, and fails again.
+        let t1 = t0 + 7200;
+        crate::db::record_docker_event(&st.db, &ev("die", t1 - 20, Some("137")));
+        crate::db::record_docker_event(&st.db, &ev("start", t1, None));
+        crate::db::record_docker_event(&st.db, &ev("health_status", t1 + 30, Some("unhealthy")));
+        let health: Vec<i64> = st
+            .db
+            .events(&EventFilter {
+                subject: Some("web".into()),
+                kind_prefix: Some("container.health".into()),
+                ..Default::default()
+            })
+            .iter()
+            .map(|e| e.ts)
+            .collect();
+        assert_eq!(
+            health,
+            vec![t0 as i64 + 60],
+            "the recorder skipped the second one"
+        );
+        c.created = t1 as i64 - 5;
+        let now = t1 as i64 + 180;
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(t1 as i64));
+        // Without the start event (missed), the creation time still bounds it.
+        let st2 = state_with(sample(), "");
+        crate::db::record_docker_event(&st2.db, &ev("health_status", t0 + 60, Some("unhealthy")));
+        assert_eq!(unhealthy_since(&st2.db, &c, None), Some(c.created));
+        // And an inspect's StartedAt, when there is one.
+        assert_eq!(
+            unhealthy_since(&st2.db, &c, Some(t1 as i64 + 2)),
+            Some(t1 as i64 + 2)
+        );
+        // The Overview row: "unhealthy for 3m", not "for 2h 3m".
+        let ctx = {
+            let mut x = Ctx::live(&st, "h");
+            x.now = now as u64;
+            x
+        };
+        let mut v = crate::ui::pages::overview::Live::new(&ctx);
+        let mut snap = (*v.snap).clone();
+        snap.containers = vec![c.clone()];
+        v.snap = Arc::new(snap);
+        let v = v.with_since(&ctx);
+        assert_eq!(v.unhealthy_since.get("web"), Some(&(t1 as i64)));
+        // The container page: since the new container's start, not 2h ago.
+        let w = why_red(&c, None, 0, unhealthy_since(&st.db, &c, None), now).unwrap();
+        assert_eq!(w.health.unwrap().since, Some(t1 as i64));
+    }
+
     #[test]
     fn why_is_this_red() {
         let now = 1_794_650_000;
@@ -1702,17 +1930,25 @@ above = 90
         // Unhealthy: since when, streak, last output.
         c.health = Some("unhealthy".into());
         let w = why_red(&c, Some(&ins()), 0, None, now).unwrap();
+        let h = w.health.as_ref().expect("a failing health check");
+        assert_eq!(w.text, "", "nothing else is wrong");
+        assert_eq!(h.streak, 4);
+        assert_eq!(h.since, Some(1_794_646_800));
         assert!(
-            w.text.starts_with("Health check failing since"),
-            "{}",
-            w.text
+            h.probes.len() <= 5 && h.probes[0].2.contains("<b>connection refused</b> on :8080"),
+            "{h:?}"
         );
-        assert!(w.text.contains("4 in a row"));
-        assert!(w.text.contains("<b>connection refused</b> on :8080"));
         assert_eq!(w.ts, Some(1_794_646_800)); // 10:00 +01:00, start of the failing run
                                                // The database event wins when there is one.
+        let w = why_red(&c, Some(&ins()), 0, Some(now - 600), now).unwrap();
+        assert_eq!(w.ts, Some(now - 600));
+        // ... but never one from before this run of the container.
         let w = why_red(&c, Some(&ins()), 0, Some(now - 7200), now).unwrap();
-        assert_eq!(w.ts, Some(now - 7200));
+        assert_eq!(
+            w.health.unwrap().since,
+            Some(1_794_646_800),
+            "clamped to StartedAt"
+        );
         // Exited 137 with OOMKilled.
         let mut i = ins();
         i.state.running = false;

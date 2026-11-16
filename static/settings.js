@@ -50,17 +50,34 @@
     setTimeout(() => { t.textContent = "Copy"; }, 2000);
   });
 
-  // Phones: the tab strip scrolls; show the current tab.
-  const cur = doc.querySelector(".set-nav a[aria-current]");
-  if (cur && cur.parentElement.parentElement.scrollWidth > cur.closest("nav").clientWidth) cur.scrollIntoView({ inline: "center", block: "nearest" });
+  // Phones: the tab strip scrolls; show the current tab, and fade the edge
+  // that has more tabs behind it (SET-23).
+  const nav = $("set-nav"), cur = nav && nav.querySelector("a[aria-current]");
+  if (nav) {
+    const edges = () => {
+      const more = nav.scrollWidth - nav.clientWidth;
+      nav.classList.toggle("more-l", more > 1 && nav.scrollLeft > 1);
+      nav.classList.toggle("more-r", more > 1 && nav.scrollLeft < more - 1);
+    };
+    if (cur && nav.scrollWidth > nav.clientWidth) cur.scrollIntoView({ inline: "center", block: "nearest" });
+    nav.addEventListener("scroll", edges, { passive: true });
+    window.addEventListener("resize", edges, { passive: true });
+    edges();
+  }
 
   const main = $("set-main"), meta = doc.querySelector('meta[name="rh-csrf"]');
   if (!main || main.dataset.signed !== "1" || !meta) return;
   // /static/app.js (window.HB) did not load: stay the no-JavaScript page.
   // Its "Saving needs JavaScript" notes are still shown (no html.hb-ready).
   if (!window.HB) { onReload = () => {}; return; }
-  const TAB = main.dataset.tab;
-  const S = { hash: null, saving: 0, recheck: false };
+  // The tab, or on another page that carries a tab's lists and dialogs (the
+  // Alerts page; ui::settings::embed) that tab, read from its own `?frag=`.
+  const TAB = main.dataset.tab, FRAG = main.dataset.frag || location.pathname;
+  const S = { hash: null, saving: 0, recheck: false, refused: 0 };
+  const EMBED = main.classList.contains("set-embed");
+  // `/settings` opens the tab used last in this browser (Y17; app.js
+  // points the Settings links at it).
+  if (location.pathname.startsWith("/settings")) try { localStorage.setItem("rh-set-tab", TAB); } catch {}
 
   // A config change checks the file hash instead of reloading (see the top).
   onReload = () => checkChanged();
@@ -141,13 +158,21 @@
   }, true);
   async function checkChanged() {
     if (S.saving) { S.recheck = true; return; }
-    if (!S.hash || !TABS[TAB] || !TABS[TAB].load) return;
+    const T = TABS[TAB];
+    if (!S.hash || !T || !T.load) return;
     if (doc.querySelector("dialog.dlg[open]")) { S.later = true; return; }
     const r = await call("GET", "meta");
     if (r.status !== 200 || r.data.hash === S.hash) return;
     if (doc.querySelector("dialog.dlg[open]")) { S.later = true; return; }
     if (dirty()) banner("changed");
-    else if (await TABS[TAB].load()) toast("Reloaded: the config file changed", "info");
+    // A page that only carries a tab's dialogs (the Overview, the Alerts
+    // page) reloads like any other page (owner decision Y12): its greeting,
+    // title, strips and tables follow the file too. Not over a dialog or
+    // input (above), and not right after one of its own writes was refused
+    // for this very change: that write's message stays, and its list was
+    // refreshed already.
+    else if (EMBED) { if (Date.now() - S.refused < 5000) await T.load(); else { S.leaving = true; location.reload(); } }
+    else if (await T.load()) toast("Reloaded: the config file changed", "info");
   }
 
   // ---- values ----
@@ -174,9 +199,10 @@
   // flashes once. Any other element (a form's choice list) is replaced.
   async function refreshList(ids, flash) {
     ids = [].concat(ids);
+    if (!ids.some((id) => $(id))) return false; // none of them on this page (the Overview)
     let r;
     const all = new URLSearchParams(location.search).get("revs") === "all" ? "&revs=all" : ""; // Config file: every revision
-    try { r = await fetch(location.pathname + "?frag=list" + all, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
+    try { r = await fetch(FRAG + "?frag=list" + all, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
     if (r.status === 401) banner("expired");
     if (!r.ok) return false;
     const t = doc.createElement("template");
@@ -241,6 +267,7 @@
       S.hash = r.data.hash;
     }
     if (r.status === 401) banner("expired");
+    if (r.status === 409) S.refused = Date.now();
     if (S.recheck && !S.saving) { S.recheck = false; setTimeout(checkChanged, 0); }
     return r;
   }
@@ -254,7 +281,7 @@
   }
   const itemOfEl = (x) => { try { return JSON.parse((x && x.dataset && x.dataset.item) || "{}"); } catch { return {}; } };
   const rowItem = (tr) => itemOfEl(tr.querySelector("[data-item]"));
-  const rowOf = (o, key) => $(o.list).querySelector(`tr[data-key="${CSS.escape(key)}"]`);
+  const rowOf = (o, key) => { const b = $(o.list); return b && b.querySelector(`tr[data-key="${CSS.escape(key)}"]`); };
   const keyId = (key) => key.slice(key.indexOf(":") + 1);
   const revNo = (d) => (d.revision != null ? ` · revision #${d.revision}` : "");
   const quoted = (names) => names.map((n) => `“${n}”`).join(", ");
@@ -263,6 +290,17 @@
   // what it saved): what an edit is re-found by after a 409.
   const openedWith = (c) => c.was || itemOfEl(c.trigger);
 
+  // After a 409: the page shows the file as it is now, and this is its
+  // hash. A tab (and the Alerts page) refreshes the dialog's list and takes
+  // that list's hash; a page that carries the dialog without its list (the
+  // Overview) swaps in its own parts (`TABS[TAB].load`) and takes the hash
+  // they carry. Never a list that is not on the page.
+  async function freshBase(o) {
+    if ($(o.list)) return (await refreshList(lists(o))) && $(o.list).dataset.hash;
+    const T = TABS[TAB];
+    if (!T || !T.load || !(await T.load())) return null;
+    return S.hash;
+  }
   // A list's add / edit dialog. `o`: {list, also, path, kind, noun,
   // item(values, was) → the API item, keep(item, was, base) → the item with
   // the keys the form does not show (async), id(key) → the API id,
@@ -305,14 +343,18 @@
         // follow it. Otherwise Save (and Delete…) stay disabled and only
         // Discard is offered: the input can be copied from the fields, but it
         // can never be saved onto another entry.
+        // The new base is the hash of what the page now shows for this
+        // dialog: its list, or on a page without one (the Overview's "Add")
+        // the page parts that carry it, swapped in first (`freshBase`).
         reload: async () => {
-          await refreshList(lists(o));
+          const base = await freshBase(o);
           const cc = HB.current(), box = $(o.list);
           if (!cc || cc.dlg !== dlg) return;
-          if (!edit) { cc.base = box.dataset.hash; HB.note("ok", "Reloaded the current file. Save again to add it."); ctx.form.querySelector("[type=submit]").focus(); return; }
-          const same = $$("tr[data-key]", box).filter((tr) => JSON.stringify(rowItem(tr)) === JSON.stringify(was));
+          if (!base) { HB.note("bad", "Could not load the current file. Your input is still here; try again."); return; }
+          if (!edit) { cc.base = base; HB.note("ok", "Reloaded the current file. Save again to add it."); ctx.form.querySelector("[type=submit]").focus(); return; }
+          const same = box ? $$("tr[data-key]", box).filter((tr) => JSON.stringify(rowItem(tr)) === JSON.stringify(was)) : [];
           if (same.length === 1) {
-            cc.key = same[0].dataset.key; cc.base = box.dataset.hash;
+            cc.key = same[0].dataset.key; cc.base = base;
             HB.note("ok", "Reloaded the current file. Save again to apply your input on top of it.");
             ctx.form.querySelector("[type=submit]").focus();
           } else {
@@ -325,6 +367,7 @@
       if (!r.ok) return o.fields ? o.fields(r) : r;
       const key = o.savedKey(v, edit && c.key, before), d = r.data;
       await refreshList(lists(o), d.unchanged ? null : key);
+      if (S.saved && !d.unchanged) await S.saved(); // a page that carries the dialog (Overview)
       $$('#set-banners [data-b="changed"], #set-banners [data-b="stale"]').forEach((b) => b.remove());
       const warn = (d.warnings || []).join(" ");
       if (ctx.action !== "save" && o.test) {
@@ -660,6 +703,15 @@
         toast(ok ? `Test sent to “${name}”` : `Test to “${name}” failed: ${msg}`, ok ? "ok" : "bad");
         if (r.status === 401) banner("expired");
       });
+      // The Alerts page: a firing rule's name opens that rule's dialog here,
+      // as its row's Edit does (its link reloads the page with ?edit= when
+      // the rule is not in the list).
+      doc.addEventListener("click", (e) => {
+        const a = e.target.closest && e.target.closest("a[data-rule]");
+        if (!a || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        const t = $("ru-list").querySelector(`[data-dlg][data-key="rule:${CSS.escape(a.dataset.rule)}"]`);
+        if (t) { e.preventDefault(); t.click(); }
+      });
       // A rule's on / off switch saves on change (owner decision Y21), based
       // on the list's version at the click (the base-hash rule).
       $("ru-list").addEventListener("change", async (e) => {
@@ -843,7 +895,7 @@
       // System tiles: a single switch that saves on change (owner decision
       // Y21), based on the version of the list on screen at the click.
       const sys = $("sys-tiles");
-      sys.addEventListener("change", async () => {
+      if (sys) sys.addEventListener("change", async () => {
         const on = sys.checked, base = $("w-list").dataset.hash;
         sys.disabled = true;
         const r = HB.result(await post("system", { base_hash: base, enabled: on }));
@@ -1366,10 +1418,21 @@
       });
     },
     // The file as it is now, into the editor (after "load the current values").
-    async reload(form) {
+    // `clean`: an outside change, applied only to an editor without input.
+    // Input typed while the file is fetched wins: the editor keeps it and
+    // the banner says the file changed (its save then meets the 409).
+    async reload(form, clean) {
+      const before = $("raw-text").value;
       const r = await call("GET", "config");
       if (r.status !== 200) return false;
-      $("raw-text").value = r.data.text; form.dataset.hash = r.data.hash; form._init(); S.hash = r.data.hash;
+      if (clean && ($("raw-text").value !== before || form._dirty())) { banner("changed"); return false; }
+      // The caret and the scroll stay where they were (setting the value
+      // would put the caret at the end, so typing then lands there).
+      const ta = $("raw-text"), s0 = ta.selectionStart, s1 = ta.selectionEnd, top = ta.scrollTop;
+      ta.value = r.data.text;
+      const n = ta.value.length;
+      ta.setSelectionRange(Math.min(s0, n), Math.min(s1, n));
+      ta.scrollTop = top; form.dataset.hash = r.data.hash; form._init(); S.hash = r.data.hash;
       this.gutter(); this.validate();
       return true;
     },
@@ -1459,7 +1522,10 @@
       const x = HB.result(res);
       if (!x.ok) {
         toast(moved(x) ? `Not restored: the config file changed since this list was loaded. Nothing was written; the list now shows the current file.` : why(x), "bad");
-        refreshList("rev-list");
+        await refreshList("rev-list");
+        // Focus stays on that revision's Restore when the refresh replaced its row.
+        const nb = b && !b.isConnected && $("rev-list").querySelector(`tr[data-rev="${r.id}"] [data-rev-act=restore]`);
+        if (nb) nb.focus();
         return;
       }
       if (f) await this.reload(f);
@@ -1470,7 +1536,7 @@
     // An outside change: the revisions follow; the editor only without edits.
     async load() {
       const f = $("f-raw");
-      if (f && !f._dirty()) await this.reload(f);
+      if (f && !f._dirty() && !(await this.reload(f, true))) { await refreshList("rev-list"); return false; }
       return refreshList("rev-list");
     },
   };
@@ -1500,6 +1566,40 @@
         toast(r.ok ? "Every other session was signed out" : why(r), r.ok ? "ok" : "bad");
         b.focus();
       });
+    },
+  };
+
+  // The Overview, signed in (ui::settings::embed): the bookmark and widget
+  // dialogs behind its "Add" links, no list. After a save, and after a
+  // change elsewhere, its Bookmarks and Widgets panels are swapped in from
+  // the page itself (never over a dialog: checkChanged waits for it).
+  // An outside change reloads the page instead (checkChanged); `load` is
+  // this page's own save, and the reload after a 409 (freshBase). Focus,
+  // and an open dialog's trigger, move to the same control in the new
+  // parts (the Add link, a bookmark) instead of falling to <body>.
+  TABS["bookmarks widgets"] = {
+    init() {
+      TABS.bookmarks.init(); TABS.widgets.init();
+      const h = doc.querySelector(".head-add[data-hash]"); if (h) S.hash = h.dataset.hash;
+      S.saved = () => this.load();
+    },
+    async load() {
+      const ids = ["ov-marks", "ov-w"], cc = HB.current(), act = doc.activeElement;
+      const within = (x) => x && x.nodeType === 1 && ids.some((id) => $(id) && $(id).contains(x));
+      const sel = (x) => {
+        if (!within(x)) return null;
+        if (x.id) return "#" + CSS.escape(x.id);
+        if (x.dataset.dlg) return `[data-dlg="${CSS.escape(x.dataset.dlg)}"]`;
+        const h = x.getAttribute("href");
+        return h ? `a[href="${CSS.escape(h)}"]` : null;
+      };
+      const ts = cc && sel(cc.trigger), as = sel(act);
+      const ok = await refreshForms(ids, true);
+      const find = (s) => s && ids.map((id) => $(id) && $(id).querySelector(s)).find(Boolean);
+      if (cc && ts && cc.trigger && !cc.trigger.isConnected) cc.trigger = find(ts) || cc.trigger;
+      if (as && !act.isConnected) { const n = find(as); if (n) n.focus({ preventScroll: true }); }
+      const h = doc.querySelector(".head-add[data-hash]"); if (h) S.hash = h.dataset.hash;
+      return ok;
     },
   };
 

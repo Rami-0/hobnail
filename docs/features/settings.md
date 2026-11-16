@@ -2,8 +2,14 @@
 
 `/settings`, signed in (see [login.md](login.md)). Tabs: General, Containers and
 groups, Bookmarks, Widgets, Notifications, Appearance, History and data, Config
-file, Security. Signed out (or before `set-password`), every tab shows a lock
-panel and no config data.
+file, Security. `/settings` itself is the General tab (there is no index page);
+the Settings links point at the tab this browser used last (the script
+remembers it; without it they open General). On a phone the tab strip fades
+at the edge that has more tabs behind it. Signed out (or before
+`set-password`), every tab shows only a lock panel: no tab strip, no config
+data. The bookmark and widget dialogs also open from "Add" on the Overview,
+and the channel and rule lists also sit on the Alerts page (signed in only;
+see [notifications.md](notifications.md)).
 
 **How a save works** (`src/settings/`): load the file and its SHA-256 →
 patch with `toml_edit` (comments, order, blank lines and unknown keys survive)
@@ -89,7 +95,8 @@ atomically (temp file + rename, same mode) → add a revision → record a
   Every form is `method="post"` (so no value, a password least of all, can end
   up in a URL), its save button is disabled, and a note says why (also while
   the script is still loading, or if it failed to load). Settings pages are
-  served `Cache-Control: no-store`. A plain form
+  served `Cache-Control: no-store`, as is every page or fragment rendered
+  with a session (the Overview and Alerts carry Settings dialogs). A plain form
   post that reaches the server anyway is refused by the write guard.
 - One toast system for the whole app: at most three, dismissible, above the
   phone's bottom bar, never over an open dialog (the dialog's note is used).

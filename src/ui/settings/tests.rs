@@ -73,6 +73,15 @@ fn signed_out_every_tab_is_locked_and_leaks_nothing() {
         }
         assert!(html.contains("/static/settings.css?v="), "{p}");
         assert!(html.contains("/static/settings.js?v="), "{p}");
+        // The lock panel only: no tab strip, no cards (Y11, SET-21, SET-22).
+        assert!(!html.contains("set-nav"), "{p}: tab strip signed out");
+        assert!(!html.contains("set-card"), "{p}: index cards");
+        for s in SETTINGS {
+            assert!(
+                !html.contains(&format!(r#"href="/settings/{}""#, s.1)),
+                "{p}: a tab link signed out"
+            );
+        }
     }
     // Once a password exists, the panel links to the login with `next`.
     st.db.kv_set("auth.password", "pbkdf2-sha256$1$00$00");
@@ -80,6 +89,12 @@ fn signed_out_every_tab_is_locked_and_leaks_nothing() {
     assert!(html.contains("Sign in to change settings"), "{html}");
     assert!(html.contains(r#"href="/login?next=%2Fsettings%2Fwidgets""#));
     assert!(!html.contains("set-password"));
+    // Signing in from `/settings` comes back to `/settings`.
+    let (_, html) = get(&st, "/settings", &h);
+    assert!(
+        html.contains(r#"class="btn primary" href="/login?next=%2Fsettings""#),
+        "{html}"
+    );
 }
 
 #[test]
@@ -104,6 +119,19 @@ fn signed_in_tabs_render_editors() {
         assert!(html.contains(r#"<meta name="rh-csrf""#), "{p}");
         assert!(html.contains(r#"data-signed="1""#), "{p}");
     }
+    // `/settings` has no index (SET-22): it is the General tab, with the
+    // tab strip, General marked current and no cards.
+    let (_, html) = get(&st, "/settings", &h);
+    assert!(
+        html.contains(r#"id="f-general""#),
+        "general form at /settings"
+    );
+    assert!(html.contains(r#"data-tab="general""#));
+    assert!(
+        html.contains(r#"<a href="/settings/general" aria-current="page">"#),
+        "{html}"
+    );
+    assert!(html.contains(r#"id="set-nav""#) && !html.contains("set-card"));
     let (_, html) = get(&st, "/settings/config", &h);
     assert!(html.contains(r#"id="raw-text""#));
     let (_, html) = get(&st, "/settings/general", &h);
@@ -1308,4 +1336,157 @@ fn general_appearance_history_config_security_render_their_values() {
         s2 == StatusCode::OK && f2.starts_with(r#"<div id="rev-list" data-hash=""#),
         "{f2}"
     );
+}
+
+/// The Alerts page signed out (Y15): exactly what it always showed (rule
+/// and channel names, kinds, what a rule watches, delivery state) and
+/// nothing of the Notifications tab: no env-variable names, secret files,
+/// chat ids, header values, `data-item`, dialogs, page forms, CSRF token or
+/// settings script, whatever `?add=` / `?edit=` is asked for.
+#[test]
+fn alerts_page_signed_out_carries_no_settings() {
+    let st = state_with(sample(), LISTS);
+    let h = HeaderMap::new();
+    for q in [
+        "",
+        "add=channel",
+        "edit=channel:hook-mark",
+        "add=rule",
+        "edit=rule:rule-mark",
+    ] {
+        let (status, page) = get(&st, &format!("/alerts?{q}"), &h);
+        assert_eq!(status, StatusCode::OK, "{q}");
+        // After the inlined CSS (it names the classes), and without the
+        // visitor's own URL echoed in the sign-in link (`next=`).
+        let html = &page[page.find("</style>").unwrap()..];
+        let html = html
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, part)| {
+                if i == 0 {
+                    part
+                } else {
+                    &part[part.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect::<String>();
+        for leak in [
+            "RH_HOOK_MARK",
+            "/data/secrets",
+            "tg-mark\" data",
+            "-1001234",
+            "Sekrit",
+            "X-Key",
+            "data-item",
+            "data-hash",
+            "data-test",
+            "data-toggle",
+            "dlg-channel",
+            "dlg-rule",
+            "dlg-confirm",
+            "dlg-page",
+            "set-main",
+            "ch-list",
+            "ru-list",
+            "settings.js",
+            "settings.css",
+            "rh-csrf",
+            "?add=",
+            "?edit=",
+        ] {
+            if let Some(i) = html.find(leak) {
+                panic!(
+                    "/alerts?{q}: leaked {leak}: …{}…",
+                    &html[i.saturating_sub(200)..(i + 50).min(html.len())]
+                );
+            }
+        }
+        // What it always showed is still there.
+        assert!(
+            html.contains(r#"id="al-pub""#)
+                && html.contains("rule-mark")
+                && html.contains("hook-mark"),
+            "{q}"
+        );
+    }
+}
+
+/// Signed in, the Alerts page carries the Notifications tab's lists, dialogs
+/// and script (Y15, LG-57): "Add channel", "Add rule", "Send test" per
+/// channel, the rule switches, edit links; the lists come from the tab's own
+/// fragment (`data-frag`) and save through the same routes. `?add=` /
+/// `?edit=` without the script is the tab's page form.
+#[test]
+fn alerts_page_signed_in_carries_the_notifications_lists() {
+    let st = state_with(sample(), LISTS);
+    assert!(st.db.is_enabled(), "needs the history database (sessions)");
+    let h = signed_in(&st);
+    let (_, html) = get(&st, "/alerts", &h);
+    for want in [
+        r#"id="set-main" data-tab="notifications" data-signed="1" data-frag="/settings/notifications""#,
+        r#"id="ch-list" data-hash=""#,
+        r#"id="ru-list" data-hash=""#,
+        r#"id="ch-add" href="?add=channel" data-dlg="dlg-channel""#,
+        r#"id="ru-add" href="?add=rule" data-dlg="dlg-rule""#,
+        r#"data-test="hook-mark""#,
+        "data-toggle",
+        r#"id="dlg-channel""#,
+        r#"id="dlg-rule""#,
+        r#"id="dlg-confirm""#,
+        "/static/settings.js?v=",
+        "/static/settings.css?v=",
+        r#"<meta name="rh-csrf""#,
+    ] {
+        assert!(html.contains(want), "/alerts signed in: no {want}");
+    }
+    // The read-only tables are the signed-out view only.
+    assert!(!html.contains(r#"id="al-pub""#));
+    // Never a header value or body, signed in either.
+    assert!(!html.contains("Sekrit"));
+    let (_, html) = get(&st, "/alerts?edit=channel:hook-mark", &h);
+    assert!(
+        html.contains(r#"class="dlg-page"#) && html.contains("RH_HOOK_MARK"),
+        "page form"
+    );
+    let (_, html) = get(&st, "/alerts?add=rule", &h);
+    assert!(html.contains(r#"class="dlg-page"#), "page form");
+}
+
+/// Overview (OV-12): signed in, "Add" on Bookmarks and Widgets opens the
+/// Settings dialog on the page (its `?add=` page without the script);
+/// signed out, none of it: no Add, no dialog, no config version, no script.
+#[test]
+fn overview_add_links_are_for_a_session_only() {
+    let st = state_with(sample(), LISTS);
+    let (_, page) = get(&st, "/", &HeaderMap::new());
+    let html = &page[page.find("</style>").unwrap()..];
+    for leak in [
+        "head-add",
+        "data-hash",
+        "dlg-bookmark",
+        "dlg-widget",
+        "settings.js",
+        "rh-csrf",
+        "?add=",
+        "Sekrit",
+        "wurl.example",
+    ] {
+        assert!(!html.contains(leak), "signed-out overview has {leak}");
+    }
+    let h = signed_in(&st);
+    let (_, html) = get(&st, "/", &h);
+    for want in [
+        r#"<a class="btn sm" href="/settings/bookmarks?add=bookmark" data-dlg="dlg-bookmark">"#,
+        r#"<a class="btn sm" href="/settings/widgets?add=widget" data-dlg="dlg-widget">"#,
+        r#"id="dlg-bookmark""#,
+        r#"id="dlg-widget""#,
+        r#"id="ov-marks""#,
+        r#"id="ov-w""#,
+        r#"data-tab="bookmarks widgets""#,
+        "/static/settings.js?v=",
+    ] {
+        assert!(html.contains(want), "signed-in overview: no {want}");
+    }
+    assert!(html.contains(r#"class="head-add" data-hash=""#));
+    assert!(!html.contains("Sekrit"));
 }

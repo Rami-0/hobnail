@@ -36,6 +36,8 @@ pub enum Nav {
     Host,
     /// `/logs` and the per-container / per-stack log pages.
     Logs,
+    /// `/more`: the phone drawer's contents as a page (ROB-16).
+    More,
 }
 
 /// Everything a page needs to know about the request.
@@ -167,6 +169,8 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                             }
                             button.icon-btn.rail-toggle type="button" #rail-toggle
                                 aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false" { (ic("panel")) }
+                            // The phone drawer's own close control (NAV-34).
+                            button.icon-btn.side-close type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
                         }
                         nav.nav aria-label="Main" {
                             @for (n, href, label, icon) in NAV {
@@ -201,8 +205,6 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                     div.scrim #scrim {}
                     div.col {
                         header.top {
-                            button.icon-btn.menu-btn type="button" #menu-btn aria-label="Open sidebar"
-                                aria-controls="side" aria-expanded="false" { (ic("menu")) }
                             div.crumbs { (heading) }
                             button.cmd type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
                                 (ic("search"))
@@ -245,7 +247,9 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
 }
 
 /// Phone navigation (under 700 px): the four places you go most, and
-/// "More", which opens the sidebar drawer.
+/// "More", the only way into the drawer (Y3, NAV-35): a link to `/more`, the
+/// drawer's contents as a page (ROB-16), which the script turns into the
+/// drawer. It is current on the pages it holds (NAV-31).
 fn bottom_bar(nav: Nav, firing: usize) -> Markup {
     let item = |n: Nav, href: &str, label: &str, icon: &str| {
         html! {
@@ -261,7 +265,10 @@ fn bottom_bar(nav: Nav, firing: usize) -> Markup {
             (item(Nav::Containers, "/containers", "Containers", "box"))
             (item(Nav::Logs, "/logs", "Logs", "logs"))
             (item(Nav::Alerts, "/alerts", "Alerts", "bell"))
-            button.bb-i type="button" data-act="more" aria-controls="side" { (ic("more")) span { "More" } }
+            a.bb-i href="/more" data-act="more" aria-controls="side" aria-expanded="false"
+                aria-current=[matches!(nav, Nav::Host | Nav::History | Nav::Settings | Nav::More).then_some("page")] {
+                (ic("more")) span { "More" }
+            }
         }
     }
 }
@@ -290,7 +297,7 @@ fn keys_dialog() -> Markup {
                 (row(&["k"], "Previous row"))
                 (row(&["↵"], "Open the row"))
                 (row(&["l"], "Logs of the focused or open container"))
-                (row(&["/"], "Filter this page"))
+                (row(&["/"], "Filter this page (Containers, Logs), elsewhere search"))
                 (row(&["Ctrl", "K"], "Search and commands"))
                 (row(&["?"], "This list"))
                 (row(&["Esc"], "Close"))
@@ -312,27 +319,66 @@ pub fn nav_alerts(firing: usize) -> Markup {
     }
 }
 
+/// Signed in: the account menu (who, Sign out; Settings is in the sidebar,
+/// Y4). Signed out: a plain "Sign in" link back to this page (NAV-43).
 fn account(ctx: &Ctx) -> Markup {
+    let Some(u) = &ctx.user else {
+        return html! {
+            div.acct #account {
+                a.btn.sm.ghost.acct-in href={"/login?next=" (url_encode(&next_of(ctx)))} { (ic("log-in")) span { "Sign in" } }
+            }
+        };
+    };
     html! {
         div.acct #account {
             button.icon-btn.menu-btn-acct type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
-                aria-label={"Account" @if let Some(u) = &ctx.user { ": " (u) }}
-                title=(ctx.user.as_deref().unwrap_or("Account")) {
+                aria-label={"Account: " (u)} title=(u) {
                 (ic("user"))
-                @if ctx.user.is_some() { span.signed {} }
+                span.signed {}
             }
             div.menu-body #account-menu role="menu" hidden {
-                @if let Some(u) = &ctx.user {
-                    div.menu-who { "Signed in as " strong { (u) } }
-                    a.menu-item role="menuitem" href="/settings" { (ic("sliders")) "Settings" }
-                    button.menu-item role="menuitem" type="button" data-act="logout" { (ic("log-out")) "Sign out" }
-                } @else {
-                    div.menu-who { "Viewing is open. Changing settings needs a login." }
-                    a.menu-item role="menuitem" href={"/login?next=" (url_encode(&next_of(ctx)))} { (ic("log-in")) "Sign in" }
-                }
+                div.menu-who { "Signed in as " strong { (u) } }
+                button.menu-item role="menuitem" type="button" data-act="logout" { (ic("log-out")) "Sign out" }
             }
         }
     }
+}
+
+/// `/more`: everything the phone drawer holds, as a plain page (ROB-16):
+/// every page, then each stack's containers with their logs. "More" links
+/// here; with the script it opens the drawer instead. Public, like the
+/// sidebar it copies.
+pub fn more_page(ctx: &Ctx) -> String {
+    let snap = ctx.state.snapshot();
+    let stats = crate::ui::view::stats_with_history(ctx.state, &snap);
+    let groups = crate::ui::view::build_groups(&ctx.cfg, &snap, &stats, ctx.host);
+    let body = html! {
+        div.page.more-page {
+            nav.more-nav aria-label="All pages" {
+                ul {
+                    @for (_, href, label, icon) in NAV {
+                        li { a href=(href) { (ic(icon)) span { (label) } } }
+                    }
+                }
+            }
+            @for g in groups.iter().filter(|g| g.cards.iter().any(|c| c.container)) {
+                section.panel.more-stack aria-label=(g.title) {
+                    h2 { (g.title) }
+                    ul {
+                        @for c in g.cards.iter().filter(|c| c.container) {
+                            li.rl {
+                                (status_dot(c))
+                                a.row-link href={"/containers/" (url_encode(&c.name))} { (c.title) }
+                                @if !c.running { span.sr { " (" (c.label) ")" } }
+                                a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    layout(ctx, Nav::More, "More", html! { h1.title { "More" } }, body)
 }
 
 fn next_of(ctx: &Ctx) -> String {
@@ -356,13 +402,14 @@ fn palette_shell() -> Markup {
                     input #pal-q type="text" autocomplete="off" spellcheck="false"
                         placeholder="Containers, pages, bookmarks, actions… or search the web"
                         role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list";
-                    kbd { "Esc" }
+                    kbd.pal-esc { "Esc" }
+                    button.icon-btn.pal-x type="button" data-act="pal-close" aria-label="Close search" { (ic("x")) }
                 }
                 ul.pal-list #pal-list role="listbox" aria-label="Results" {}
                 div.pal-foot {
                     span { kbd { "↑" } kbd { "↓" } " move" }
                     span { kbd { "↵" } " open" }
-                    span { kbd { "⇧↵" } " details" }
+                    span { kbd { "Home" } kbd { "End" } " first, last" }
                     span { kbd { "Esc" } " close" }
                 }
             }
@@ -403,7 +450,7 @@ pub fn vitals(cfg: &Config, s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> 
         |key: &str, label: &str, v: Option<f64>, tip: String, color: &str, h: Option<String>| {
             let lv = level(v);
             html! {
-                a.chip.(lv) href="/history" title=(tip) {
+                a.chip.(lv) href="/host" title=(tip) {
                     span.chip-l { (label) }
                     b.num { @match v { Some(v) => { (format!("{v:.0}")) "%" } None => { "—" } } }
                     @if !lv.is_empty() { span.sr { " (high)" } }
@@ -516,7 +563,8 @@ fn tree_inner(
                 details.stack data-k=(g.name) open {
                     summary.cur[has_active] {
                         (ic("chev-r"))
-                        span.stack-name title=(g.title) { (g.title) }
+                        // The name opens the stack in the table; the chevron folds (NAV-25).
+                        a.stack-name href={"/containers?stack=" (url_encode(&g.name))} title=(g.title) { (g.title) }
                         @if trouble { span.dot.bad role="img" aria-label="problem in this stack" {} }
                         span.cnt.num.all-up[g.running == ctrs.len()] title={(g.running) " of " (ctrs.len()) " running"} {
                             (g.running) "/" (ctrs.len())
@@ -598,6 +646,13 @@ mod tests {
             "{html}"
         );
         assert!(html.contains(r#"<summary class="cur">"#), "{html}");
+        // The stack's name opens it in the table; the chevron folds (NAV-25).
+        assert!(
+            html.contains(
+                r#"<a class="stack-name" href="/containers?stack=shop" title="shop">shop</a>"#
+            ),
+            "{html}"
+        );
         assert!(html.contains(r#"aria-current="page""#));
         assert!(html.contains(">1/2<"), "{html}");
         // Stopped containers are dimmed and say so in text.
@@ -670,6 +725,9 @@ mod tests {
         assert!(html.contains("95%"));
         assert!(html.contains("(high)"), "never colour only");
         assert!(html.contains("4.0 GiB of 8.0 GiB"));
+        // The chips open the Host page (NAV-40).
+        assert_eq!(html.matches(r#"href="/host""#).count(), 3, "{html}");
+        assert!(!html.contains("/history"));
         let mut off = Config::default();
         off.system.enabled = false;
         assert_eq!(
@@ -1024,6 +1082,65 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains(r#"class="menu""#), "{html}");
+    }
+
+    /// Phone navigation: no hamburger; "More" is a link to `/more`, the
+    /// drawer's contents as a plain page (ROB-16, Y3), current on the pages
+    /// it holds (NAV-31). Signed out the account control is a plain "Sign
+    /// in" link (NAV-43); signed in its menu has no Settings item (Y4).
+    #[test]
+    fn phone_nav_and_account() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let get = |p: &str| crate::ui::pages::render(&Ctx::new(&st, "h", p, "", &h));
+        let (status, html) = get("/more");
+        assert_eq!(status, hyper::StatusCode::OK);
+        let more = r#"<a class="bb-i" href="/more" data-act="more" aria-controls="side" aria-expanded="false""#;
+        assert!(
+            html.contains(&format!(r#"{more} aria-current="page">"#)),
+            "{html}"
+        );
+        for (_, href, _, _) in NAV {
+            assert!(
+                html.contains(&format!(r#"<li><a href="{href}">"#)),
+                "/more lists {href}"
+            );
+        }
+        assert!(html.contains(r#"<a class="row-link" href="/containers/web">"#));
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/web/logs""#));
+        assert!(!html.contains("id=\"menu-btn\""), "no hamburger");
+        assert!(
+            html.contains(r#"data-act="side-close" aria-label="Close menu""#),
+            "the drawer's close control"
+        );
+        for p in ["/host", "/history", "/settings/general"] {
+            assert!(
+                get(p)
+                    .1
+                    .contains(&format!(r#"{more} aria-current="page">"#)),
+                "{p}"
+            );
+        }
+        let (_, html) = get("/containers");
+        assert!(
+            html.contains(&format!("{more}>")),
+            "not current on Containers"
+        );
+        assert!(
+            html.contains(r#"<a class="btn sm ghost acct-in" href="/login?next=%2Fcontainers">"#),
+            "{html}"
+        );
+        assert!(!html.contains("account-menu"));
+        // Signed in: who and Sign out, no Settings item.
+        let mut ctx = Ctx::new(&st, "h", "/", "", &h);
+        ctx.user = Some("admin".into());
+        let a = account(&ctx).into_string();
+        assert!(
+            a.contains("Signed in as")
+                && a.contains(r#"data-act="logout""#)
+                && !a.contains("/settings"),
+            "{a}"
+        );
     }
 
     #[test]

@@ -1067,13 +1067,30 @@ try {
   await outsideTouch();
   await click("#dlg-confirm [data-ok]"); await sleep(600);
   check((await toasts()).some((x) => /^Not restored/.test(x)), "config: a restore based on a moved file writes nothing", await toasts());
-  await ev("(() => { const t = document.getElementById('raw-text'); t.setSelectionRange(0, 0); })()");
+  // Into the editor first, as a user would: after the refused restore the
+  // focus is wherever the revision list's refresh left it, and text typed
+  // there would not reach the editor.
+  await click("#raw-text"); await ev("(() => { const t = document.getElementById('raw-text'); t.setSelectionRange(0, 0); })()");
   await typeText("# ui-check stale\n"); await outsideTouch(); await ctrlS();
   await until("!document.querySelector('#f-raw .dlg-note').hidden");
   await click("#f-raw .dlg-note .btn.primary"); await sleep(500);
   check(await ev("document.querySelector('#f-raw [type=submit]').disabled") && await ev("document.getElementById('raw-text').value.startsWith('# ui-check stale')"), "config: changed elsewhere: Save stays off, the text stays");
   await click("#f-raw .dlg-note .btn.primary"); await sleep(500);
   check(await ev("document.getElementById('raw-text').value") === (await fileText()) && await ev("!document.querySelector('#f-raw [type=submit]').disabled"), "config: Discard loads the current file");
+  // An outside change reloads a clean editor, but input typed while the
+  // file is being fetched is kept (the fetch is held back 1.5 s here).
+  await ev("(() => { const f = window.fetch; window.__rawf = f; window.fetch = (u, o) => (String(u).endsWith('/api/settings/config') && (!o || !o.method || o.method === 'GET') ? new Promise((r) => setTimeout(r, 1500)).then(() => f(u, o)) : f(u, o)); })()");
+  await outsideTouch(); await sleep(700);
+  await ev("(() => { const t = document.getElementById('raw-text'); t.focus(); t.setSelectionRange(0, 0); })()");
+  await typeText("# ui-check typed during a reload\n"); await sleep(2500);
+  await ev("window.fetch = window.__rawf");
+  check(await ev("document.getElementById('raw-text').value.startsWith('# ui-check typed during a reload')") && await ev("!!document.querySelector('#set-banners [data-b=changed]')"), "config: input typed while an outside change loads is kept, with the changed banner");
+  await ev("document.querySelector('[data-act=raw-revert]').click()"); await sleep(200);
+  // A clean editor that an outside change reloads keeps its caret.
+  await ev("(() => { const t = document.getElementById('raw-text'); t.focus(); t.setSelectionRange(5, 5); })()");
+  await outsideTouch();
+  await until(`document.getElementById('raw-text').value.includes('# ui-check outside ${outsideN}')`);
+  check(await ev("(() => { const t = document.getElementById('raw-text'); return t.selectionStart === 5 && document.activeElement === t; })()") && await ev("document.getElementById('raw-text').value") === (await fileText()), "config: an outside change reloads a clean editor; the caret stays where it was");
 
   // ---- Security: sign out others asks first ----
   await load("/settings/security");

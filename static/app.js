@@ -51,48 +51,99 @@
   setInterval(tick, 15000);
 
   // ---- theme: auto -> dark -> light -> ember -> contrast ----
+  // One click per step (owner decision Y9); each step says which theme it
+  // switched to, in a toast a phone shows too (NAV-41, A11Y-11).
   const themeBtn = $("theme"), THEMES = ["auto", "dark", "light", "ember", "contrast"];
   const THEME_NAME = { auto: "auto (follows the system)", dark: "dark", light: "light", ember: "ember (warm)", contrast: "high contrast" };
+  const THEME_LABEL = { auto: "Auto (follows the system)", dark: "Dark", light: "Light", ember: "Ember", contrast: "High contrast" };
+  let themeGone = null;
   function showTheme() {
     const t = root.dataset.theme || "auto";
     // The browser UI (phone status bar, installed app title bar) follows the page.
     const m = doc.querySelector('meta[name="theme-color"]');
     if (m) m.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#1D1210";
     if (!themeBtn) return;
-    themeBtn.setAttribute("aria-label", `Theme: ${THEME_NAME[t] || t}. Click to change`);
-    themeBtn.title = `Theme: ${THEME_NAME[t] || t}`;
+    const next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
+    themeBtn.setAttribute("aria-label", `Theme: ${THEME_NAME[t] || t}. Click for ${THEME_NAME[next]}`);
+    themeBtn.title = `Theme: ${THEME_NAME[t] || t} (click for ${THEME_NAME[next]})`;
   }
-  function setTheme(next) {
+  function setTheme(next, say) {
     root.dataset.theme = next;
     try { localStorage.setItem("rh-theme", next); } catch {}
     showTheme();
+    if (say && window.HB && HB.toast) { if (themeGone) themeGone(); themeGone = HB.toast("Theme: " + (THEME_LABEL[next] || next), { kind: "info", ms: 2500 }); }
   }
   function cycleTheme() {
-    setTheme(THEMES[(THEMES.indexOf(root.dataset.theme || "auto") + 1) % THEMES.length]);
+    setTheme(THEMES[(THEMES.indexOf(root.dataset.theme || "auto") + 1) % THEMES.length], true);
   }
   themeBtn && themeBtn.addEventListener("click", cycleTheme);
   showTheme();
 
   // ---- sidebar: rail (wide screens, remembered) or overlay/drawer ----
-  const side = $("side"), menuBtn = $("menu-btn"), railBtn = $("rail-toggle");
+  // Over 1100 px the sidebar is in the page (the toggle makes it a rail);
+  // from 700 to 1100 px it is a rail that the toggle opens over the page;
+  // under 700 px it is a drawer that only "More" opens (Y3). Open over the
+  // page, everything behind is inert and Back closes it (A11Y-03, NAV-33);
+  // a closed drawer is inert (A11Y-01; CSS hides it from the tab order
+  // without the script too).
+  const side = $("side"), railBtn = $("rail-toggle"), moreBtn = $$('[data-act="more"]');
   const wide = () => matchMedia("(min-width:1101px)").matches;
-  function setOpen(open) {
-    root.classList.toggle("side-open", open);
-    menuBtn && menuBtn.setAttribute("aria-expanded", String(open));
-    if (open) { const f = side && side.querySelector(".nav-item"); f && f.focus(); }
+  const phone = () => matchMedia("(max-width:699px)").matches;
+  let drawerPushed = false, drawerPop = false, drawerFrom = null;
+  function sideState() {
+    const open = root.classList.contains("side-open");
+    if (side) side.inert = phone() && !open;
+    $$(".col, #bbar").forEach((x) => { x.inert = open && !wide(); });
+    moreBtn.forEach((b) => b.setAttribute("aria-expanded", String(open)));
+    if (railBtn) {
+      const label = wide() ? (root.dataset.side === "rail" ? "Expand sidebar" : "Collapse sidebar") : open ? "Close sidebar" : "Open sidebar";
+      railBtn.setAttribute("aria-label", label); railBtn.title = label;
+      railBtn.setAttribute("aria-pressed", String(wide() ? root.dataset.side === "rail" : open));
+    }
   }
+  // `entry`: the drawer's history entry is there already (Forward onto it).
+  function setOpen(open, from, entry) {
+    if (open === root.classList.contains("side-open")) return;
+    if (open) drawerFrom = from || doc.activeElement; // focus comes back here
+    root.classList.toggle("side-open", open);
+    sideState();
+    if (open) {
+      const f = side && side.querySelector(".nav-item"); f && f.focus();
+      if (entry) drawerPushed = true;
+      else try { history.pushState({ rhDrawer: 1 }, ""); drawerPushed = true; } catch {}
+    } else {
+      if (drawerPushed) { drawerPushed = false; drawerPop = true; try { history.back(); } catch { drawerPop = false; } }
+      if (drawerFrom && drawerFrom.isConnected && !wide()) drawerFrom.focus({ preventScroll: true });
+    }
+  }
+  // Back closes the drawer; Forward onto its entry opens it again (the
+  // entry is never a dead step).
+  window.addEventListener("popstate", (e) => {
+    if (drawerPop) { drawerPop = false; return; }
+    if (root.classList.contains("side-open")) { drawerPushed = false; setOpen(false); }
+    else if (e.state && e.state.rhDrawer && !wide()) setOpen(true, null, true);
+  });
+  // Leaving through a link in the open drawer replaces its history entry,
+  // so Back from the next page comes straight back here.
+  side && side.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !drawerPushed || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || a.target) return;
+    e.preventDefault(); drawerPushed = false; location.replace(a.href);
+  });
+  window.addEventListener("pageshow", (e) => { if (e.persisted && root.classList.contains("side-open")) { drawerPushed = false; root.classList.remove("side-open"); sideState(); } });
   function toggleSide() {
     if (wide()) {
       const rail = root.dataset.side !== "rail";
       if (rail) root.dataset.side = "rail"; else delete root.dataset.side;
       try { localStorage.setItem("rh-side", rail ? "rail" : "open"); } catch {}
-      railBtn && railBtn.setAttribute("aria-pressed", String(rail));
+      sideState();
     } else setOpen(!root.classList.contains("side-open"));
   }
   railBtn && railBtn.addEventListener("click", toggleSide);
-  railBtn && railBtn.setAttribute("aria-pressed", String(root.dataset.side === "rail"));
-  menuBtn && menuBtn.addEventListener("click", () => setOpen(true));
   $("scrim") && $("scrim").addEventListener("click", () => setOpen(false));
+  matchMedia("(min-width:1101px)").addEventListener("change", () => { if (wide()) setOpen(false); sideState(); });
+  matchMedia("(max-width:699px)").addEventListener("change", sideState);
+  sideState();
 
   // ---- stack tree: remembered open/closed stacks, filter, current container ----
   const TREE = "rh-tree";
@@ -131,12 +182,43 @@
     if (d.open) delete c[d.dataset.k]; else c[d.dataset.k] = true;
     store.set(TREE, c);
   }, true);
-  $("tree-filter") && $("tree-filter").addEventListener("input", treeFilter);
+  // The filter text survives navigation until it is cleared (NAV-23);
+  // Enter opens the first match, Down moves into the results (NAV-22).
+  const tf = $("tree-filter"), TF = "rh-tree-q";
+  if (tf) {
+    try { tf.value = sessionStorage.getItem(TF) || ""; } catch {}
+    tf.addEventListener("input", () => { try { sessionStorage.setItem(TF, tf.value); } catch {} treeFilter(); });
+    const hits = () => $$("#tree li.ctr:not([hidden]) > a:first-child").filter((a) => !a.closest("details[hidden]"));
+    tf.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { const a = hits()[0]; if (a) { e.preventDefault(); a.click(); } }
+      else if (e.key === "ArrowDown") { const a = hits()[0]; if (a) { e.preventDefault(); a.focus(); } }
+    });
+    side.addEventListener("keydown", (e) => {
+      if (!e.target.matches || !e.target.matches("#tree li.ctr > a:first-child") || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      const list = hits(), i = list.indexOf(e.target), next = list[i + (e.key === "ArrowDown" ? 1 : -1)];
+      e.preventDefault();
+      if (e.key === "ArrowUp" && i === 0) tf.focus(); else if (next) next.focus();
+    });
+  }
   treeApply();
+  // The open container's item is in view (NAV-24).
+  const curItem = doc.querySelector('#tree a[aria-current="page"]'), treeBox = $("tree");
+  if (curItem && treeBox) { const r = curItem.getBoundingClientRect(), b = treeBox.getBoundingClientRect(); if (r.top < b.top || r.bottom > b.bottom) treeBox.scrollTop += r.top - b.top - b.height / 3; }
+
+  // "Last 5 checks" under "Why is this red?" starts closed on a phone (it
+  // makes the page long there); without the script it stays open.
+  if (phone()) $$("details.cd-probes[open]").forEach((d) => { d.open = false; });
+
+  // ---- Settings links open the tab used last in this browser (Y17) ----
+  // settings.js remembers it; without the script `/settings` is General.
+  // Only a tab that exists (routes::SETTINGS; a test keeps the two equal).
+  const SET_TABS = ["general", "containers", "bookmarks", "widgets", "notifications", "appearance", "history", "config", "security"];
+  const setTab = (() => { try { const t = localStorage.getItem("rh-set-tab"); return SET_TABS.includes(t) ? "/settings/" + t : "/settings"; } catch { return "/settings"; } })();
+  $$('a[href="/settings"]').forEach((a) => { if (!a.closest(".crumb")) a.setAttribute("href", setTab); });
 
   // ---- account menu and sign out ----
   const acct = $("account");
-  if (acct) {
+  if (acct && acct.querySelector("button")) { // signed in (signed out it is a link)
     const btn = acct.querySelector("button"), menu = $("account-menu");
     const show = (on) => { menu.hidden = !on; btn.setAttribute("aria-expanded", String(on)); if (on) { const f = menu.querySelector(".menu-item"); f && f.focus(); } };
     btn.addEventListener("click", () => show(menu.hidden));
@@ -469,7 +551,7 @@
   // ---- command palette ----
   const pal = $("palette"), palQ = $("pal-q"), palList = $("pal-list");
   let palData = null, palAt = 0, palItems = [], palSel = 0, palReturn = null;
-  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", w: "Search" };
+  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", o: "Open", w: "Search" };
   async function palLoad() {
     if (palData && Date.now() - palAt < 30000) return;
     try {
@@ -477,14 +559,28 @@
       palData = (await r.json()).items || []; palAt = Date.now();
     } catch { palData = palData || []; }
   }
+  // A Settings dialog by its URL (NAV-52): opened in place when this page
+  // carries it (Alerts: channels and rules; Overview: bookmark, widget),
+  // else its page, which opens it on load.
+  function dialogAt(href) {
+    const want = new URLSearchParams(href.split("?")[1] || "");
+    const k = want.has("edit") ? "edit" : "add";
+    const t = window.HB && HB.open && $$("[data-dlg][href]").find((a) => new URLSearchParams((a.getAttribute("href").split("?")[1] || "").split("#")[0]).get(k) === want.get(k));
+    if (t) t.click(); else location.href = href;
+  }
   function actions() {
     const signed = !!doc.querySelector('meta[name="rh-csrf"]');
     const have = new Set((palData || []).filter((x) => x.t === "p").map((x) => x.u));
     const pages = [["Host", "/host"], ["Logs", "/logs"]].filter((p) => !have.has(p[1])).map((p) => ({ t: "p", n: p[0], u: p[1] }));
-    return pages.concat([
-      { t: "a", n: "Toggle theme", s: "auto / dark / light / ember / contrast", run: cycleTheme },
+    // The top tasks, signed in only (they open the Settings dialogs).
+    const tasks = signed ? [
+      ["Add bookmark", "/settings/bookmarks?add=bookmark"], ["Add widget", "/settings/widgets?add=widget"],
+      ["Add channel", "/alerts?add=channel"], ["Add alert rule", "/alerts?add=rule"],
+    ].map(([n, u]) => ({ t: "a", n, s: "Settings", k: "new create", run: () => dialogAt(u) })) : [];
+    // One action per theme (NAV-55).
+    const themes = THEMES.map((t) => ({ t: "a", n: "Theme: " + THEME_LABEL[t], k: "theme colour color " + t, run: () => setTheme(t, true) }));
+    return pages.concat(tasks, themes, [
       { t: "a", n: "Keyboard shortcuts", s: "?", run: keysOpen },
-      { t: "a", n: "Toggle sidebar", run: toggleSide },
       signed ? { t: "a", n: "Sign out", run: logout } : { t: "a", n: "Sign in", u: "/login?next=" + encodeURIComponent(location.pathname + location.search) },
     ]);
   }
@@ -494,27 +590,47 @@
     if (n === q) return 100;
     if (n.startsWith(q)) return 50;
     const i = n.indexOf(q);
-    if (i > 0 && /[\s\-_./]/.test(n[i - 1])) return 30;
+    if (i > 0 && /[\s\-_./:]/.test(n[i - 1])) return 30;
     if (i >= 0) return 20;
     if ((it.k || "").toLowerCase().includes(q) || (it.s || "").toLowerCase().includes(q)) return 8;
     return 0;
   }
+  // A container brings its own rows, right under it (NAV-50, NAV-51):
+  // "Logs: X", "Open service ↗" when it has a link, and, signed in,
+  // "Edit X" (its override dialog).
+  function withRows(x, signed) {
+    if (x.t !== "c") return [x];
+    const out = [x];
+    if (x.d) out.push({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs" });
+    if (x.u) out.push({ t: "o", n: "Open service ↗", s: x.n, u: x.u, ext: true });
+    if (signed && x.d) out.push({ t: "a", n: "Edit " + x.n, s: "name, group, icon, link", run: () => dialogAt("/settings/containers?edit=override:" + x.d.slice("/containers/".length)) });
+    return out;
+  }
   function palRender() {
     const q = palQ.value.trim().toLowerCase();
+    const signed = !!doc.querySelector('meta[name="rh-csrf"]');
     const base = (palData || []).concat(actions());
     let list;
     if (!q) {
-      const order = { p: 0, a: 1, c: 2, b: 3, s: 4 };
-      list = base.filter((x) => x.t !== "s").sort((a, b) => order[a.t] - order[b.t]);
+      // Pages, bookmarks and actions before the long container list (NAV-54).
+      const order = { p: 0, b: 1, a: 2, c: 3 };
+      list = base.filter((x) => x.t in order).sort((a, b) => order[a.t] - order[b.t]);
     } else {
+      // "Logs: X" and "Edit X" are found by typing them too.
       const ctrs = (palData || []).filter((x) => x.t === "c" && x.d);
-      const logs = ctrs.map((x) => ({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs", k: x.k }));
-      list = base.concat(logs).map((x) => [score(x, q) - (x.t === "l" ? 1 : 0), x]).filter((x) => x[0] > 0)
-        .sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+      const extra = ctrs.flatMap((x) => withRows(x, signed).slice(1).filter((r) => r.t !== "o"));
+      const ranked = (xs, min) => xs.map((x) => [score(x, q), x]).filter((x) => x[0] >= min).sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+      const seen = new Set();
+      const put = (r) => { const id = r.t + r.n + (r.u || ""); if (!seen.has(id)) { seen.add(id); list.push(r); } };
+      list = [];
+      for (const x of ranked(base, 1)) withRows(x, signed).forEach(put);
+      ranked(extra, 20).forEach(put);
       list.push({ t: "w", n: palQ.value.trim(), s: "search the web", web: true });
     }
     palItems = list.slice(0, 60);
-    palSel = 0;
+    // A query that matches nothing selects nothing: Enter never sends a
+    // typo to an outside search engine; arrow down to choose it (NAV-57).
+    palSel = q && palItems.length === 1 ? -1 : 0;
     palList.replaceChildren();
     palItems.forEach((it, i) => {
       const li = el("li"); li.id = "pal-" + i; li.setAttribute("role", "option");
@@ -523,7 +639,7 @@
       if (at >= 0 && it.t !== "w") pt.append(n.slice(0, at), el("b", "", n.slice(at, at + q.length)), n.slice(at + q.length)); else pt.textContent = n;
       li.append(el("span", "pk", KIND[it.t]), pt);
       if (it.s) li.append(el("span", "ps", it.t === "c" && it.r === false ? it.s + " · stopped" : it.s));
-      li.addEventListener("click", () => { palSel = i; palGo(false); });
+      li.addEventListener("click", () => { palSel = i; palGo(); });
       li.addEventListener("pointermove", () => { if (palSel !== i) { palSel = i; palMark(); } });
       palList.append(li);
     });
@@ -538,7 +654,7 @@
   function open(u, ext) {
     if (ext || /^[a-z][a-z0-9+.-]*:/i.test(u)) window.open(u, "_blank", "noopener"); else location.href = u;
   }
-  function palGo(alt) {
+  function palGo() {
     const it = palItems[palSel];
     if (!it) return;
     palClose();
@@ -548,8 +664,9 @@
       if (/^https?:\/\//i.test(v)) return open(v, true);
       return open((body.dataset.searchUrl || "https://duckduckgo.com/?q={q}").replace("{q}", encodeURIComponent(v)), true);
     }
-    if (it.t === "c") return alt || !it.u ? open(it.d) : open(it.u, true);
-    open(it.u, it.t === "b");
+    // A container opens its page in Hobnail; its service is its own row.
+    if (it.t === "c") return open(it.d || it.u, !it.d);
+    open(it.u === "/settings" ? setTab : it.u, it.t === "b" || it.ext);
   }
   async function palOpen() {
     if (!pal || !pal.hidden) return;
@@ -571,13 +688,18 @@
     palQ.addEventListener("input", palRender);
     pal.addEventListener("mousedown", (e) => { if (e.target === pal) palClose(); });
     pal.addEventListener("keydown", (e) => {
-      const n = palItems.length;
+      const n = palItems.length, to = (i) => { e.preventDefault(); palSel = Math.max(0, Math.min(n - 1, i)); palMark(); };
       if (e.key === "Escape") { e.preventDefault(); palClose(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); palSel = (palSel + 1) % Math.max(n, 1); palMark(); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); palSel = (palSel - 1 + n) % Math.max(n, 1); palMark(); }
-      else if (e.key === "Enter") { e.preventDefault(); palGo(e.shiftKey); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); palSel = palSel <= 0 ? n - 1 : palSel - 1; palMark(); }
+      else if (e.key === "Home" && n) to(0); // NAV-58
+      else if (e.key === "End" && n) to(n - 1);
+      else if (e.key === "PageDown" && n) to(palSel + 8);
+      else if (e.key === "PageUp" && n) to(palSel - 8);
+      else if (e.key === "Enter") { e.preventDefault(); palGo(); }
       else if (e.key === "Tab") { e.preventDefault(); palQ.focus(); } // focus stays in the dialog
     });
+    pal.addEventListener("click", (e) => { if (e.target.closest && e.target.closest("[data-act=pal-close]")) palClose(); });
   }
   // ---- keyboard map: g+key pages, j/k rows, / filter, l logs, ? help ----
   const keys = $("keys");
@@ -587,9 +709,10 @@
     if (!a) return;
     if (a.dataset.act === "keys") keysOpen();
     else if (a.dataset.act === "keys-close") keys.close();
-    else if (a.dataset.act === "more") setOpen(true);
+    else if (a.dataset.act === "more" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) { e.preventDefault(); setOpen(true, a); }
+    else if (a.dataset.act === "side-close") setOpen(false);
   });
-  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", a: "/alerts", s: "/settings" };
+  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", a: "/alerts", s: setTab };
   let gAt = 0;
   const shown = (x) => x.offsetParent !== null && !x.closest("[hidden]");
   function krows() {
@@ -619,7 +742,7 @@
   doc.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); pal && pal.hidden ? palOpen() : palClose(); return; }
     if (e.key === "Escape" && keys && keys.open) { e.preventDefault(); keys.close(); return; }
-    if (e.key === "Escape" && root.classList.contains("side-open")) { setOpen(false); menuBtn && !wide() && menuBtn.focus(); return; }
+    if (e.key === "Escape" && root.classList.contains("side-open")) { setOpen(false); return; }
     if (typing() || e.ctrlKey || e.metaKey || e.altKey || (pal && !pal.hidden) || (keys && keys.open)) return;
     const k = e.key;
     if (Date.now() - gAt < 1200 && GO[k]) { e.preventDefault(); gAt = 0; location.href = GO[k]; return; }
@@ -729,6 +852,23 @@
       // update after focus leaves brings it up to date.
       if ((fresh.id === "ctable" || fresh.id === "tree") && old.contains(active)) continue;
       const before = $$(".tw", old).map((x) => x.textContent);
+      // The live "Needs attention" is rendered without a session, so it has
+      // no probe lines (NAV-11): a signed-in page keeps the one it was
+      // served with only while the same failing run goes on (same
+      // `data-since`); a new run or a recovery drops it.
+      if (fresh.id === "ov-attn") $$(".probe[data-since]", old).forEach((p) => {
+        const c = p.closest("li") && p.closest("li").querySelector("[data-c]");
+        const n = c && $$("[data-c]", fresh).find((x) => x.dataset.c === c.dataset.c);
+        const why = n && n.parentNode.querySelector(".why");
+        if (why && !why.querySelector(".probe") && why.dataset.since === p.dataset.since) why.append(p.cloneNode(true));
+      });
+      // The firing list too: signed in, a rule's name opens its dialog.
+      if (fresh.id === "al-live" && $("ru-list")) $$("b[data-rule]", fresh).forEach((b) => {
+        const a = doc.createElement("a");
+        a.className = "inc-rule-a"; a.dataset.rule = b.dataset.rule; a.textContent = b.textContent;
+        a.href = "/alerts?edit=rule:" + encodeURIComponent(b.dataset.rule);
+        b.replaceWith(a);
+      });
       old.replaceWith(fresh);
       tween(fresh, before);
       if (fresh.id === "tree") { treeApply(); fresh.scrollTop = treeTop; }

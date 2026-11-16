@@ -38,6 +38,14 @@ pub fn time_tag(now: u64, ts: u64) -> Markup {
     }
 }
 
+/// A clock time ("15 Nov, 02:14" in the browser's zone; the server writes
+/// UTC until the script runs).
+pub fn clock_tag(ts: u64) -> Markup {
+    html! {
+        time datetime=(fmt_utc(ts)) data-t=(ts) data-abs="1" { (short_utc(ts)) }
+    }
+}
+
 /// "12%" or "0.4%": one decimal below 10.
 pub fn pct(v: f64) -> String {
     if !v.is_finite() {

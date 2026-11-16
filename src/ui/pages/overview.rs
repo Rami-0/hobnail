@@ -2,11 +2,14 @@
 //! consumers, widgets, recent events and bookmarks.
 
 use maud::{html, Markup};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::alerts::Status;
+use crate::config::Config;
 use crate::db::{Db, EventFilter, Range, SysMetric};
 use crate::model::{Snapshot, SystemStats};
+use crate::ui::alerts::{subject_href, subject_link};
 pub use crate::ui::chart::live_spark;
 use crate::ui::chart::{line_chart, line_chart_ex, seed, ChartSpec, Unit};
 use crate::ui::fmt::{pct, time_tag, url_encode};
@@ -23,7 +26,19 @@ pub struct Live {
     pub snap: Arc<Snapshot>,
     pub groups: Vec<GroupView>,
     pub status: Status,
+    /// When each unhealthy container turned unhealthy (its newest
+    /// `container.health` event), for "unhealthy for 41 min".
+    pub unhealthy_since: HashMap<String, i64>,
+    /// The first line of each unhealthy container's last failing probe.
+    /// **Signed in only** (probe output can carry secrets, NAV-11): filled by
+    /// [`Live::with_probes`] for a page with a session, never for the live
+    /// fragments, which are rendered without one.
+    pub probes: HashMap<String, String>,
 }
+
+/// The most probe lines one Overview view looks up (one `docker inspect`
+/// each): the rest of the unhealthy rows say "unhealthy for …" without one.
+pub const PROBES_MAX: usize = 5;
 
 impl Live {
     pub fn new(ctx: &Ctx) -> Self {
@@ -35,7 +50,47 @@ impl Live {
             snap,
             groups,
             status,
+            unhealthy_since: HashMap::new(),
+            probes: HashMap::new(),
         }
+    }
+
+    /// Adds since when each unhealthy container has been unhealthy (one
+    /// small query each), for the views that render "Needs attention".
+    pub fn with_since(mut self, ctx: &Ctx) -> Self {
+        for c in self.snap.containers.iter() {
+            if !c.is_running() || c.health.as_deref() != Some("unhealthy") {
+                continue;
+            }
+            if let Some(t) = crate::ui::pages::container::unhealthy_since(&ctx.state.db, c, None) {
+                self.unhealthy_since.insert(c.name.clone(), t);
+            }
+        }
+        self
+    }
+
+    /// Adds the probe lines of the unhealthy containers, for a session only
+    /// (one `docker inspect` each, for the first [`PROBES_MAX`] of them;
+    /// nothing for a visitor).
+    pub fn with_probes(mut self, ctx: &Ctx) -> Self {
+        if ctx.user.is_none() {
+            return self;
+        }
+        let sick = self
+            .snap
+            .containers
+            .iter()
+            .filter(|c| c.is_running() && c.health.as_deref() == Some("unhealthy"))
+            .take(PROBES_MAX);
+        for c in sick {
+            let Ok(i) = crate::docker::inspect_blocking(&ctx.state.env.docker_socket, &c.id) else {
+                continue;
+            };
+            if let Some(line) = crate::ui::pages::container::probe_line(&i) {
+                self.probes.insert(c.name.clone(), line);
+            }
+        }
+        self
     }
 
     pub fn containers(&self) -> impl Iterator<Item = &CardView> {
@@ -52,7 +107,7 @@ impl Live {
 
 pub fn page(ctx: &Ctx) -> String {
     let cfg = &ctx.cfg;
-    let v = Live::new(ctx);
+    let v = Live::new(ctx).with_since(ctx).with_probes(ctx);
     let db = &ctx.state.db;
     let now = ctx.now as i64;
     let mut sys = ctx.state.system.lock().unwrap().1.clone();
@@ -62,7 +117,12 @@ pub fn page(ctx: &Ctx) -> String {
         .groups
         .iter()
         .any(|g| g.cards.iter().any(|c| !c.container));
+    // Signed in: "Add" on Bookmarks and Widgets opens the Settings dialog
+    // here (OV-12; the dialogs, script and routes are the tabs' own).
+    let embed = crate::ui::settings::embed(ctx, "bookmarks widgets");
+    let add = embed.as_ref().map(|e| e.hash.as_str());
     let body = html! {
+        @if let Some(e) = &embed { (e.head) }
         div.page.ov {
             div.ov-head {
                 div.ov-hi {
@@ -78,7 +138,7 @@ pub fn page(ctx: &Ctx) -> String {
             }
             section.panel.primary.pulse aria-label="Status" {
                 (health(&v))
-                (attention(ctx.now, &v))
+                (attention(cfg, ctx.now, &v))
                 (stack_strips(&v, &strips))
             }
             @if cfg.system.enabled {
@@ -92,9 +152,13 @@ pub fn page(ctx: &Ctx) -> String {
                 }
             }
             (top(&v, cfg.page.show_stats))
-            @if !cfg.widgets.is_empty() {
-                section.sec.ghost aria-labelledby="h-w" {
-                    div.sec-h { h2.label #h-w { "Widgets" } }
+            @if !cfg.widgets.is_empty() || add.is_some() {
+                section.sec.ghost #ov-w aria-labelledby="h-w" {
+                    div.sec-h {
+                        h2.label #h-w { "Widgets" }
+                        @if let Some(h) = add { (add_link("widget", "widgets", h)) }
+                    }
+                    @if cfg.widgets.is_empty() { p.muted { "No widgets yet." } }
                     div.widgets {
                         @for w in &cfg.widgets {
                             @let out = ctx.state.widgets.lock().unwrap().get(&w.id).cloned();
@@ -103,11 +167,12 @@ pub fn page(ctx: &Ctx) -> String {
                     }
                 }
             }
-            div.cols.c-ev[!has_marks] {
+            div.cols.c-ev[!has_marks && add.is_none()] {
                 (recent_events(ctx))
-                @if has_marks { (bookmarks(&v)) }
+                @if has_marks || add.is_some() { (bookmarks(&v, add)) }
             }
         }
+        @if let Some(e) = &embed { (e.body) (e.tail) }
     };
     layout(
         ctx,
@@ -178,7 +243,13 @@ pub fn logs_ia(c: &CardView) -> Markup {
     }
 }
 
-pub fn attention(now: u64, v: &Live) -> Markup {
+/// "Needs attention": one row per subject, the whole row a link to the
+/// cause with the reason inline and, for a container, its logs beside it
+/// (OV-01, OV-04). A firing alert about something that is not a container
+/// opens its subject (the Host page, the widget, the checked URL) and names
+/// its rule. An unhealthy container says for how long and, for a session,
+/// the first line of its failing probe (NAV-11).
+pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
     // One row per subject, ranked by severity: a container with a firing
     // alert is one red row ("unhealthy · alert firing 5m"), not two.
     let mut rows: Vec<(Sev, Markup)> = Vec::new();
@@ -189,12 +260,13 @@ pub fn attention(now: u64, v: &Live) -> Markup {
         .iter()
         .filter(|i| !names.contains(i.subject.as_str()))
     {
+        let href = subject_href(cfg, &i.rule, &i.subject).unwrap_or(("/alerts".into(), false));
         rows.push((
             Sev::Bad,
             html! {
                 span.dot.bad role="img" aria-label="alert firing" {}
-                a.nm href="/alerts" { (i.subject) }
-                span.why { (i.state) }
+                (subject_link(Some(href), &i.subject, "nm"))
+                span.why { (i.state) span.muted { " · rule " (i.rule) } }
                 span.when.num { "firing " (human_duration(now.saturating_sub(i.since))) }
             },
         ));
@@ -213,8 +285,20 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                 sev,
                 html! {
                     (status_dot(c))
-                    a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
-                    span.why { (why) }
+                    a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) }
+                    // `data-since` keys the probe line: the script keeps the
+                    // one the page was served with only while the failing
+                    // run it belongs to goes on (NAV-11).
+                    @let since = v.unhealthy_since.get(&c.name).filter(|_| c.label == "unhealthy");
+                    span.why data-since=[since] {
+                        (why)
+                        @if let Some(t) = since {
+                            " for " (human_duration(now.saturating_sub(*t as u64)))
+                        }
+                        @if let Some(p) = v.probes.get(&c.name).filter(|_| c.label == "unhealthy") {
+                            span.probe data-since=[since] title="The check's output when this page was loaded" { " · " (p) }
+                        }
+                    }
                     @if let Some(i) = inc {
                         span.when.num { a href="/alerts" { "alert firing " (human_duration(now.saturating_sub(i.since))) } }
                     } @else {
@@ -247,7 +331,7 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                     Sev::Warn,
                     html! {
                         (status_dot(c))
-                        a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
+                        a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) }
                         span.why { "recovered after: " (why) }
                         span.when { "last hour" }
                         (logs_ia(c))
@@ -272,7 +356,7 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                 }
             } @else {
                 ul.rows {
-                    @for (_, r) in &rows { li { (r) } }
+                    @for (_, r) in &rows { li.rl { (r) } }
                 }
             }
             @if clean_stopped > 0 {
@@ -327,7 +411,7 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             div.panel.res-mem {
                 div.panel-h {
                     h2 { "Memory by container" }
-                    a.more href="/containers?sort=mem" { "All" (ic("arrow-right")) }
+                    a.more href="/containers?sort=mem&group=0" { "All" (ic("arrow-right")) }
                 }
                 @if !show_stats {
                     p.muted { "Live stats are off (" code { "page.show_stats = false" } ")." }
@@ -338,7 +422,7 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             div.panel.res-cpu {
                 div.panel-h {
                     h2 { "Top CPU" }
-                    a.more href="/containers?sort=cpu" { "All" (ic("arrow-right")) }
+                    a.more href="/containers?sort=cpu&group=0" { "All" (ic("arrow-right")) }
                 }
                 @if show_stats {
                     div.boards { (board("", "--ch-cpu", |c| c.cpu, pct)) }
@@ -348,9 +432,45 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
     }
 }
 
-/// "Where did my RAM go": a squarified treemap of container memory (the 18
-/// biggest, the rest folded into "others"), coloured by stack, as positioned
-/// HTML boxes (crisp text, no script). Each box links to its container.
+/// The treemap's box on a phone (px), the smallest it is drawn: a tile must
+/// hold its name there, or it folds into "+N others" (Y10, OV-09).
+const TM_W: f64 = 326.0;
+const TM_H: f64 = 200.0;
+/// The smallest tile that holds a one-line name (px, on that box).
+const TM_MIN_W: f64 = 64.0;
+const TM_MIN_H: f64 = 24.0;
+
+/// The layout: the boxes (in % of the treemap) of the `k` biggest and, when
+/// any are left, one more for the rest. `k` is the most tiles (at most 18)
+/// whose boxes, and the rest's, all hold a name on a phone.
+fn tm_layout(w: &[f64]) -> (usize, Vec<(f64, f64, f64, f64)>) {
+    let fits = |r: &(f64, f64, f64, f64)| r.2 * TM_W >= TM_MIN_W && r.3 * TM_H >= TM_MIN_H;
+    let mut k = w.len().min(18);
+    loop {
+        let rest: f64 = w[k..].iter().sum();
+        let mut weights = w[..k].to_vec();
+        if rest > 0.0 {
+            weights.push(rest);
+        }
+        let rects: Vec<_> = squarify(&weights, 0.0, 0.0, 1.0, 1.0);
+        if k == 0 || rects.iter().all(fits) {
+            let pct = rects
+                .iter()
+                .map(|r| (r.0 * 100.0, r.1 * 100.0, r.2 * 100.0, r.3 * 100.0))
+                .collect();
+            return (k, pct);
+        }
+        k -= 1;
+    }
+}
+
+/// "Where did my RAM go": a squarified treemap of container memory,
+/// coloured by stack, as positioned HTML boxes (crisp text, no script).
+/// A tile is a box holding a stretched name link to the container and, as
+/// a sibling (never a link inside a link), its logs icon, which shows when
+/// the tile is big enough (CSS container query: 64 × 40 px, 88 × 56 px on
+/// touch; OV-01). Tiles too small for a name on a phone fold into "+N
+/// others", a link to the containers table sorted by memory (OV-10).
 pub fn treemap(cards: &[&CardView]) -> Markup {
     let mut items: Vec<(&CardView, f64)> = cards
         .iter()
@@ -361,15 +481,10 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
         return html! { div.tmap.sk-box { span.muted { "Waiting for the first sample…" } } };
     }
     let total: f64 = items.iter().map(|x| x.1).sum();
-    const MAX: usize = 18;
-    let rest: f64 = items.iter().skip(MAX).map(|x| x.1).sum();
-    let rest_n = items.len().saturating_sub(MAX);
-    items.truncate(MAX);
-    let mut weights: Vec<f64> = items.iter().map(|x| x.1).collect();
-    if rest > 0.0 {
-        weights.push(rest);
-    }
-    let rects = squarify(&weights, 0.0, 0.0, 100.0, 100.0);
+    let weights: Vec<f64> = items.iter().map(|x| x.1).collect();
+    let (k, rects) = tm_layout(&weights);
+    let rest: f64 = weights[k..].iter().sum();
+    let rest_n = items.len() - k;
     let hue = |s: &str| {
         s.bytes()
             .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32))
@@ -378,23 +493,25 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
     html! {
         div.tmap-wrap {
             p.tmap-sum.muted {
-                b.num { (human_bytes(total as u64)) } " in " (items.len() + rest_n) " containers"
+                b.num { (human_bytes(total as u64)) } " in " (items.len()) " containers"
             }
             div.tmap role="list" aria-label="Memory by container" {
                 @for (i, r) in rects.iter().enumerate() {
                     @let style = format!("left:{:.2}%;top:{:.2}%;width:{:.2}%;height:{:.2}%", r.0, r.1, r.2, r.3);
-                    // Boxes too small for two lines get one; tiny ones none
-                    // (the title still says what they are).
-                    @let fit = if r.3 < 9.0 || r.2 < 6.0 { "tm tiny" } else if r.3 < 19.0 { "tm short" } else { "tm" };
-                    @if let Some((c, m)) = items.get(i) {
-                        a class=(fit) role="listitem" href={"/containers/" (url_encode(&c.name))}
-                            style={(style) ";--h:" (hue(&c.stack))}
+                    // Under two lines' height on a phone: one line.
+                    @let fit = if r.3 * TM_H / 100.0 < 40.0 { "tm short" } else { "tm" };
+                    @if let Some((c, m)) = items.get(i).filter(|_| i < k) {
+                        div class=(fit) role="listitem" style={(style) ";--h:" (hue(&c.stack))}
                             title={(c.title) ": " (human_bytes(*m as u64)) " (" (format!("{:.0}", m / total * 100.0)) "%)"} {
-                            span.tm-n { (c.title) }
-                            span.tm-v { (human_bytes(*m as u64)) }
+                            a.tm-a.row-link href={"/containers/" (url_encode(&c.name))} {
+                                span.tm-n { (c.title) }
+                                span.tm-v { (human_bytes(*m as u64)) }
+                            }
+                            a.ia.logs.tm-logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
                         }
                     } @else {
-                        span.tm.tm-rest role="listitem" style=(style) title={(rest_n) " smaller containers: " (human_bytes(rest as u64))} {
+                        a class={(fit) " tm-rest"} role="listitem" href="/containers?sort=mem&group=0" style=(style)
+                            title={(rest_n) " smaller containers: " (human_bytes(rest as u64)) ". Open them in the table, by memory"} {
                             span.tm-n { "+" (rest_n) " others" }
                             span.tm-v { (human_bytes(rest as u64)) }
                         }
@@ -732,7 +849,19 @@ pub fn event_row(
     }
 }
 
-fn bookmarks(v: &Live) -> Markup {
+/// "Add" in a panel head, signed in only (OV-12): the Settings dialog on
+/// this page, or that tab's `?add=` page without the script. `hash`: the
+/// config version the page shows (the dialog's base).
+fn add_link(kind: &str, tab: &str, hash: &str) -> Markup {
+    html! {
+        span.head-add data-hash=(hash) {
+            a.btn.sm href={"/settings/" (tab) "?add=" (kind)} data-dlg={"dlg-" (kind)} { (ic("plus")) "Add" span.sr { " " (kind) } }
+        }
+    }
+}
+
+/// Bookmarks (`#ov-marks`); `add`: the config version, for a session.
+fn bookmarks(v: &Live, add: Option<&str>) -> Markup {
     let marks: Vec<(&GroupView, Vec<&CardView>)> = v
         .groups
         .iter()
@@ -745,10 +874,14 @@ fn bookmarks(v: &Live) -> Markup {
         .filter(|(_, v)| !v.is_empty())
         .collect();
     html! {
-        section.panel aria-label="Bookmarks" {
-            (panel_head("Bookmarks", None))
+        section.panel #ov-marks aria-label="Bookmarks" {
+            div.panel-h {
+                h2 { "Bookmarks" }
+                @if let Some(h) = add { (add_link("bookmark", "bookmarks", h)) }
+            }
             @if marks.is_empty() {
-                p.muted { "No bookmarks. Add " code { "[[bookmarks]]" } " entries to the config." }
+                @if add.is_some() { p.muted { "No bookmarks yet." } }
+                @else { p.muted { "No bookmarks. Add " code { "[[bookmarks]]" } " entries to the config." } }
             }
             @for (g, cards) in marks {
                 div.mark-group {
@@ -860,6 +993,8 @@ mod tests {
                 cards,
             }],
             status: Status::default(),
+            unhealthy_since: HashMap::new(),
+            probes: HashMap::new(),
         }
     }
 
@@ -894,7 +1029,7 @@ mod tests {
         let clean = card("clean", "stopped", false);
         let fine = card("fine", "running", true);
         let v = live(vec![crashed, sick, clean, fine.clone()], None);
-        let html = attention(100, &v).into_string();
+        let html = attention(&Config::default(), 100, &v).into_string();
         assert!(html.contains("sick") && html.contains("unhealthy"));
         assert!(html.contains("stopped, exit 1"));
         assert!(!html.contains(">fine<"));
@@ -904,8 +1039,59 @@ mod tests {
         // Every container row ends with its logs action (one click, §11.9).
         assert!(html.contains(r#"<a class="ia logs" href="/containers/sick/logs" title="Logs" aria-label="Logs of sick">"#), "{html}");
         assert!(html.contains(r#"href="/containers/crashed/logs""#));
-        let html = attention(100, &live(vec![fine], None)).into_string();
+        let html = attention(&Config::default(), 100, &live(vec![fine], None)).into_string();
         assert!(html.contains("All clear"));
+    }
+
+    /// Rows open their cause, say why inline and how long an unhealthy
+    /// container has been unhealthy; the probe line only when the page
+    /// put one in (a session, `Live::with_probes`) (OV-04, NAV-11).
+    #[test]
+    fn attention_rows_open_their_cause() {
+        let mut sick = card("sick", "unhealthy", true);
+        sick.dot = Some(crate::ui::view::Dot::Bad);
+        let mut v = live(vec![sick], None);
+        v.unhealthy_since.insert("sick".into(), 10_000 - 2460);
+        let cfg = crate::config::parse(
+            "[[alerts]]\nname = \"mem\"\ntype = \"host\"\nmetric = \"memory\"\nabove = 90\n",
+            "t.toml",
+        )
+        .unwrap();
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(html.contains(r#"<li class="rl">"#), "{html}");
+        assert!(
+            html.contains(
+                r#"<a class="nm row-link" href="/containers/sick" data-c="sick">sick</a>"#
+            ),
+            "{html}"
+        );
+        assert!(html.contains("unhealthy for 41m"), "{html}");
+        assert!(
+            !html.contains("probe"),
+            "no probe line without a session: {html}"
+        );
+        assert!(html.contains(r#"href="/containers/sick/logs""#));
+        v.probes.insert("sick".into(), "curl: (7) <refused>".into());
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<span class="why" data-since="7540">unhealthy for 41m<span class="probe" data-since="7540" title="The check's output when this page was loaded"> · curl: (7) &lt;refused&gt;</span></span>"#),
+            "{html}"
+        );
+        // A firing alert about the host opens the Host page and names its rule.
+        v.status.incidents.push(crate::alerts::Incident {
+            rule: "mem".into(),
+            subject: "memory".into(),
+            state: "92% > 90%".into(),
+            value: "92".into(),
+            since: 9_000,
+            notified: true,
+        });
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<a class="nm row-link" href="/host">memory</a>"#),
+            "{html}"
+        );
+        assert!(html.contains(" · rule mem"), "{html}");
     }
 
     #[test]
@@ -964,10 +1150,39 @@ mod tests {
             .collect();
         let refs: Vec<&CardView> = cards.iter().collect();
         let html = treemap(&refs).into_string();
-        assert_eq!(html.matches("<a class=\"tm").count(), 18, "{html}");
-        assert!(html.contains("+7 others"));
+        // Tiles too small for a name on a phone fold into "+N others"
+        // (Y10, OV-09), a link to the table sorted by memory (OV-10).
+        let count = |h: &str| {
+            h.matches(r#"<div class="tm" role"#).count()
+                + h.matches(r#"<div class="tm short" role"#).count()
+        };
+        let tiles = count(&html);
+        assert!((1..=18).contains(&tiles), "{tiles}");
+        assert!(html.contains(&format!("+{} others", 25 - tiles)), "{html}");
+        assert!(
+            html.contains(
+                r#"<a class="tm tm-rest" role="listitem" href="/containers?sort=mem&amp;group=0""#
+            ),
+            "{html}"
+        );
+        let (k, rects) = tm_layout(&(0..25).rev().map(|i| (i + 1) as f64).collect::<Vec<_>>());
+        assert_eq!(k, tiles);
+        for r in &rects {
+            assert!(
+                r.2 * TM_W / 100.0 >= TM_MIN_W - 1e-6 && r.3 * TM_H / 100.0 >= TM_MIN_H - 1e-6,
+                "{r:?}"
+            );
+        }
+        // A tile: the name link stretched over it and, as its sibling (never
+        // a link inside a link), the logs icon (OV-01).
+        assert!(html.contains(r#"<a class="tm-a row-link" href="/containers/c24%3C"><span class="tm-n">c24&lt;</span><span class="tm-v">25.0 MiB</span></a><a class="ia logs tm-logs" href="/containers/c24%3C/logs""#), "{html}");
         assert!(html.contains("c24&lt;") && !html.contains("c24<"));
         assert!(treemap(&[]).into_string().contains("Waiting"));
+        // Few containers: no fold.
+        let few: Vec<&CardView> = cards.iter().rev().take(3).collect();
+        let html = treemap(&few).into_string();
+        assert_eq!(count(&html), 3, "{html}");
+        assert!(!html.contains("others"));
     }
 
     #[test]

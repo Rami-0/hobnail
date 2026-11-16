@@ -741,3 +741,49 @@ async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
         .unwrap()
         .contains(r#"exclude = ["ex-mark", "new-*"]"#));
 }
+
+/// Any page or fragment rendered with a session is `no-store`: signed in,
+/// `/` and `/alerts` carry the config hash, the CSRF token and the
+/// Settings dialogs (and `/` the probe lines). Signed out they keep
+/// `no-cache`; Settings stays `no-store` either way.
+#[tokio::test]
+async fn pages_rendered_with_a_session_are_no_store() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st.clone()).await;
+    let cache = |h: &str| {
+        h.lines()
+            .find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.eq_ignore_ascii_case("cache-control")
+                    .then(|| v.trim().to_ascii_lowercase())
+            })
+            .unwrap_or_default()
+    };
+    let pages = [
+        "/",
+        "/?add=bookmark",
+        "/alerts",
+        "/alerts?add=channel",
+        "/containers/web",
+        "/more",
+    ];
+    for path in pages {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(cache(&r.head), "no-cache", "{path} signed out: {}", r.head);
+    }
+    let r = req(addr, "GET", "/settings/general", &[], "").await;
+    assert_eq!(cache(&r.head), "no-store", "settings signed out");
+    let (cookie, _) = login(addr).await;
+    for path in pages {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(cache(&r.head), "no-store", "{path} signed in: {}", r.head);
+    }
+    let r = req(addr, "GET", "/alerts", &[("Cookie", &cookie)], "").await;
+    assert!(
+        r.body.contains("data-hash"),
+        "the signed-in /alerts has the hash"
+    );
+}

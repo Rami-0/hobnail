@@ -341,7 +341,8 @@ if (widths.includes(390) && PARTS.includes("hits")) {
     ["/containers", "tbody tr.row"],
     ["/host", ".hx-p tbody tr"],
     ["/history", "tbody tr, .events li"],
-    ["/alerts", ".incident, .events li"],
+    ["/alerts", ".incident, .events li, .al-log li"],
+    ["/more", ".more-stack li, .more-nav li"],
     ["/logs", "#lpick li, .lpick-h"],
     ["/settings/containers", "tbody tr"],
   ];

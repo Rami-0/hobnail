@@ -138,6 +138,7 @@ svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
 .stack>summary svg.i{width:12px;height:12px;color:var(--text-3);transition:transform var(--t)}
 .stack[open]>summary svg.i{transform:rotate(90deg)}
 .stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:underline}
 .stack .cnt{font:11px var(--mono);color:var(--text-3)}
 .stack .cnt:not(.all-up){color:var(--text-2)}
 .stack ul{list-style:none;margin:0 0 4px;padding:0}
@@ -178,19 +179,29 @@ svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
  .side-open .side{position:fixed;left:0;top:0;width:260px;box-shadow:var(--shadow-2)}
  .side-open .rail-toggle{transform:scaleX(-1)}
  .side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25}
+ /* NAV-21: the page keeps its column while the sidebar is open over it */
+ .col{grid-column:2}
 }
 @media (max-width:699px){
  .app{grid-template-columns:minmax(0,1fr)}
- .side{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--t) ease;box-shadow:none}
- .side-open .side{transform:none;box-shadow:var(--shadow-2)}
+ .side{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--t) ease,visibility 0s linear var(--t);box-shadow:none;visibility:hidden}
+ .side-open .side{transform:none;box-shadow:var(--shadow-2);visibility:visible;transition:transform var(--t) ease}
  .side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25}
  .rail-toggle{display:none}
 }
 
 .col{min-width:0;display:flex;flex-direction:column}
 .top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;height:var(--top-h);padding:0 16px 0 20px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.icon-btn.menu-btn{display:none}
-@media (max-width:699px){.icon-btn.menu-btn{display:inline-flex}.top{padding:0 8px 0 6px;gap:6px}}
+@media (max-width:699px){.top{padding:0 8px 0 16px;gap:6px}}
+/* the drawer's close control: only while it is open over the page (NAV-34) */
+.icon-btn.side-close{display:none}
+@media (max-width:1100px){.side-open .icon-btn.side-close{display:inline-flex;margin-left:auto}.side-open .rail-toggle{display:none}}
+/* signed out: a plain "Sign in" link (NAV-43) */
+.acct-in{white-space:nowrap}
+@media (max-width:699px){.acct-in span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}
+/* breadcrumbs at 390: parents keep their name, the title ellipsises (NAV-44) */
+.crumb>a{flex:none}
+.crumb .title{min-width:0}
 .crumbs{flex:1;min-width:0;display:flex;align-items:center}
 .title{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .title.mono{font-size:14px}
@@ -278,6 +289,8 @@ pre.cmdline{margin:8px 0;padding:8px 10px;border-radius:var(--r-sm);background:v
 .pal-in{display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);flex:none}
 .pal-in>svg{color:var(--text-3);width:18px;height:18px}
 .pal-in input{flex:1;height:50px;border:0;background:none;font-size:15px;outline:none;min-width:0}
+.pal-x{display:none}
+@media (pointer:coarse),(max-width:699px){.pal-x{display:inline-flex;margin-right:-6px}.pal-esc{display:none}}
 .pal-list{list-style:none;margin:0;padding:6px;overflow-y:auto;flex:1}
 .pal-list li{display:flex;align-items:center;gap:10px;height:38px;padding:0 10px;border-radius:var(--r-sm);cursor:pointer;color:var(--text-2)}
 .pal-list li[aria-selected=true]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
@@ -407,3 +420,14 @@ dialog.keys::backdrop{background:var(--scrim)}
 /* ---- v3: motion ---- */
 .nav-item,.ctr>a:first-child,.icon-btn,.seg a,.chip,.mark,.hs-cell,.tm{transition:background-color var(--t) var(--ease),color var(--t) var(--ease),border-color var(--t) var(--ease)}
 
+
+/* ---- /more: the phone drawer's contents as a page (ROB-16) ---- */
+.more-nav ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.more-nav a{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--text)}
+.more-nav a:hover{background:var(--surface-2);text-decoration:none}
+.more-nav svg{color:var(--text-3)}
+.more-stack h2{font-size:var(--fs-sm);margin-bottom:6px}
+.more-stack ul{list-style:none;margin:0;padding:0}
+.more-stack li{display:flex;align-items:center;gap:8px;min-height:40px;border-top:1px solid var(--line)}
+@media (pointer:coarse){.more-stack li{min-height:45px}}
+.more-stack li .row-link{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}

@@ -27,16 +27,14 @@
  .set-nav ul{display:flex;gap:2px;padding:0 12px 8px;width:max-content}
  .set-nav a{height:30px;padding:0 10px;font-size:12.5px}
  .set-nav a[aria-current=page]{box-shadow:inset 0 -2px 0 var(--accent)}
+ /* SET-23: the edge with more tabs behind it fades (set by the script) */
+ .set-nav.more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent)}
+ .set-nav.more-l{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to left,#000 calc(100% - 40px),transparent)}
+ .set-nav.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent)}
 }
 
-/* index cards and the lock panel */
-.set-cards{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:10px}
-.set-card{display:grid;grid-template-columns:32px 1fr;grid-template-rows:auto auto;column-gap:12px;row-gap:2px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);color:var(--text);height:100%}
-.set-card:hover{border-color:var(--border);background:var(--surface-2);text-decoration:none}
-.set-card-ic{grid-row:1/3;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--r-sm);background:var(--surface-2);color:var(--accent-fg)}
-.set-card:hover .set-card-ic{background:var(--bg)}
-.set-card-t{font-weight:600}
-.set-card-d{font-size:12.5px;color:var(--text-3)}
+/* the lock panel (signed out: the whole page, no tab strip) */
+.page.set.locked{grid-template-columns:minmax(0,1fr);max-width:860px}
 .set-lock{display:flex;gap:16px;align-items:flex-start;padding:20px 22px;box-shadow:inset 3px 0 0 var(--warn)}
 .lock-ic{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn-fg);flex:none}
 .lock-ic svg{width:20px;height:20px}
@@ -126,12 +124,13 @@ body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
  .ctr-c .sub{white-space:normal}
 }
 
-/* rows of a dialog (widget fields and display rows) */
-.rows{display:grid;gap:6px;min-width:0}
-.row{display:grid;gap:8px;align-items:center;min-width:0}
+/* rows of a dialog (widget fields and display rows); scoped, since the
+   dialogs also sit on the Overview, whose attention list is a .rows */
+:is(.dlg,.set-main) .rows{display:grid;gap:6px;min-width:0}
+:is(.dlg,.set-main) .row{display:grid;gap:8px;align-items:center;min-width:0}
 .kv-row{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) auto}
 @media (max-width:699px){
- .rows{gap:8px}
+ :is(.dlg,.set-main) .rows{gap:8px}
  .kv-row{grid-template-columns:minmax(0,1fr) auto;row-gap:4px;padding-bottom:8px;border-bottom:1px dashed var(--line)}
  .kv-row .in:nth-child(2){grid-column:1;grid-row:2}
 }
@@ -187,7 +186,7 @@ body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
 .stats dd .when{font:500 13px var(--font)}
 .data-acts{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12.5px}
 .danger-zone{box-shadow:inset 3px 0 0 var(--bad)}
-.when .muted{font-size:12px}
+.set-main .when .muted{font-size:12px}
 
 /* config file editor */
 .raw-path{margin-left:auto;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -238,3 +237,8 @@ code.trunc{display:inline-block;min-width:4ch;max-width:18ch;overflow:hidden;tex
 .th-fld{max-width:420px}
 #css-warn:empty{display:none}
 .more-revs{margin-top:10px;font-size:13px}
+
+/* A tab's lists and dialogs on another page (Alerts; Overview: dialogs only) */
+.set-embed.bare{display:contents}
+.head-add{margin-left:auto}
+.sec-h .head-add{display:inline-flex}

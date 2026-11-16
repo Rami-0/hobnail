@@ -45,9 +45,12 @@ pub async fn route(
         let body = pages::containers::table(&ctx, &v.snap, &v.groups, &q).into_string();
         return html(StatusCode::OK, body);
     }
-    // Settings pages carry form values and the CSRF token (signed in), and
-    // their fragments the lists: never stored by a cache.
-    let no_store = path == "/settings" || path.starts_with("/settings/");
+    // Settings pages are never stored by a cache, signed in or not (their
+    // fragments carry the lists). Any other page is `no-store` when it was
+    // rendered with a session (below): it may carry the config hash, the
+    // CSRF token, settings data (the dialogs on `/` and `/alerts`) or probe
+    // output. Signed out a page keeps `no-cache`.
+    let settings = path == "/settings" || path.starts_with("/settings/");
     let (path, query) = (
         path.to_string(),
         req.uri().query().unwrap_or("").to_string(),
@@ -55,15 +58,17 @@ pub async fn route(
     let (st, host, headers) = (state.clone(), host.to_string(), req.headers().clone());
     let job = move || {
         let ctx = Ctx::new(&st, &host, &path, &query, &headers);
+        let session = ctx.user.is_some();
         // `/settings/<tab>?frag=…`: built from this request's session (401
         // without one), never from an empty HeaderMap like the table above.
-        if let Some(r) = crate::ui::settings::fragment(&ctx) {
-            return r;
+        if let Some((s, b)) = crate::ui::settings::fragment(&ctx) {
+            return (s, b, session);
         }
-        pages::render(&ctx)
+        let (s, b) = pages::render(&ctx);
+        (s, b, session)
     };
     // History queries are synchronous SQLite calls: keep them off the reactor.
-    let (status, body) = if state.db.is_enabled() {
+    let (status, body, session) = if state.db.is_enabled() {
         match tokio::task::spawn_blocking(job).await {
             Ok(r) => r,
             Err(_) => return text(StatusCode::INTERNAL_SERVER_ERROR, "render failed\n"),
@@ -72,7 +77,7 @@ pub async fn route(
         job()
     };
     let mut r = html(status, body);
-    if no_store {
+    if settings || session {
         set(&mut r, CACHE_CONTROL, "no-store");
     }
     r
@@ -191,5 +196,26 @@ mod tests {
         let js = crate::http::server::APP_JS;
         assert!(!js.contains("Dozzle"), "NAV-53");
         assert!(js.contains("\"Logs: \" + x.n"), "Logs: X stays");
+        // Y5: no "Toggle sidebar"; NAV-55: one action per theme, no blind
+        // toggle; NAV-50: a container's service is its own row.
+        assert!(!js.contains("Toggle sidebar") && !js.contains("Toggle theme"));
+        assert!(js.contains("\"Theme: \" + THEME_LABEL[t]"));
+        assert!(js.contains("\"Open service ↗\""));
+    }
+
+    /// The remembered Settings tab is taken only when it is one of these
+    /// (a stale `rh-set-tab` must not send every Settings link to a 404).
+    #[test]
+    fn script_knows_every_settings_tab() {
+        let js = crate::http::server::APP_JS;
+        let want = SETTINGS
+            .iter()
+            .map(|t| format!("\"{}\"", t.1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert!(
+            js.contains(&format!("const SET_TABS = [{want}];")),
+            "app.js SET_TABS differs from routes::SETTINGS"
+        );
     }
 }

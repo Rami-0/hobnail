@@ -170,8 +170,13 @@ fn login_page_keeps_only_safe_next() {
 fn settings_signed_out_explains_set_password() {
     let (_, html) = get("/settings", "");
     assert!(html.contains("docker exec -it hobnail /hobnail set-password"));
+    // Signed out: the lock panel only, no tab strip (Y11).
     for s in crate::ui::routes::SETTINGS {
-        assert!(html.contains(&format!("/settings/{}", s.1)), "{}", s.0);
+        assert!(
+            !html.contains(&format!(r#"href="/settings/{}""#, s.1)),
+            "{}",
+            s.0
+        );
     }
 }
 
