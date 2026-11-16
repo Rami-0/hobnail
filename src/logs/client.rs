@@ -143,6 +143,10 @@ pub struct Query {
     /// Unix seconds, fractional allowed (Docker accepts `secs.nanos`).
     pub since: Option<f64>,
     pub until: Option<f64>,
+    /// Stop after this many lines (the server's own limit, not Docker's).
+    /// Docker applies `tail` before `since` / `until`, so a closed window
+    /// (both set) is read from its start with `tail=all` and cut here.
+    pub cap: Option<u32>,
 }
 
 impl Query {
@@ -291,6 +295,7 @@ mod tests {
             tail: Some(500),
             since: Some(1700000000.5),
             until: None,
+            cap: None,
         };
         assert_eq!(
             q.path("abc"),

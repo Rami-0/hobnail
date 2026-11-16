@@ -233,7 +233,25 @@ fn range_query(q: &[(String, String)], default_tail: Option<u32>) -> client::Que
         tail,
         since,
         until,
+        cap: None,
     }
+}
+
+/// What the viewer's stream reads. The browser ring bounds what is shown, so
+/// never more than `MAX_TAIL` lines. A closed window (`since` and `until`: a
+/// custom range, "Load older lines") is read from its start and cut at that
+/// many lines by the server: Docker applies `tail` to the whole log before
+/// the window, which leaves nothing once more lines came after it.
+fn stream_query(q: &[(String, String)], default_tail: u32) -> client::Query {
+    let mut rq = range_query(q, Some(default_tail));
+    let n = rq.tail.unwrap_or(client::MAX_TAIL).min(client::MAX_TAIL);
+    if rq.since.is_some() && rq.until.is_some() {
+        rq.tail = None;
+        rq.cap = Some(n);
+    } else {
+        rq.tail = Some(n);
+    }
+    rq
 }
 
 /// `/api/logs/*` (GET only): `stream` (SSE), `download` (text), `levels`
@@ -253,10 +271,7 @@ pub async fn route(
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
-            let mut rq = range_query(&q, Some(cfg.logs.tail()));
-            // The browser ring bounds what is shown; never send more.
-            rq.tail = Some(rq.tail.unwrap_or(client::MAX_TAIL).min(client::MAX_TAIL));
-            tail::sse(state, names, rq)
+            tail::sse(state, names, stream_query(&q, cfg.logs.tail()))
         }
         "/api/logs/download" => {
             let names = targets(state, &q, 4);

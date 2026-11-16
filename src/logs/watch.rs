@@ -379,6 +379,7 @@ async fn tail_one(state: Arc<AppState>, name: String, rules: Arc<Vec<Rule>>) {
         tail: Some(0),
         since: Some(crate::util::unix_now() as f64),
         until: None,
+        cap: None,
     };
     let Ok(mut stream) = client::open(&socket, &info.id, info.tty, &q).await else {
         return;
