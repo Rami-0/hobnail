@@ -1268,6 +1268,30 @@
       after: (stale) => { if (stale) refreshForms(["th-box"], true); },
     });
   };
+  // A config parser's type message in plain words (SET-67):
+  // `invalid type: string "ninety", expected f64` -> `text ("ninety") where a number is expected`.
+  function plainErr(m) {
+    const kind = (k) => /^(i|u)(8|16|32|64|size)$|integer/.test(k) ? "a whole number" : /float/.test(k) ? "a decimal number" : /^f(32|64)$|number/.test(k) ? "a number" : /bool/.test(k) ? "true or false" : /string|str\b|char/.test(k) ? "text" : /seq|array|list/.test(k) ? "a list" : /map|struct|table/.test(k) ? "a table" : k;
+    return String(m).replace(/invalid type: (\w+)(?: (\S.*?))?, expected (.+)$/, (_, got, val, want) => `${kind(got)}${val ? ` (${val.replace(/^point /, "").replace(/`/g, "")})` : ""} where ${kind(want.replace(/^an? /, ""))} is expected`);
+  }
+  // The first thing in a style sheet that does not close, in words with its
+  // line, or "" (SET-44).
+  function cssSyntax(t) {
+    const open = []; let line = 1, q = "", qAt = 0, cAt = 0;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (c === "\n") { line++; if (q) return `line ${qAt}: a string that does not close.`; continue; }
+      if (cAt) { if (c === "*" && t[i + 1] === "/") { cAt = 0; i++; } continue; }
+      if (q) { if (c === "\\") i++; else if (c === q) q = ""; continue; }
+      if (c === "/" && t[i + 1] === "*") { cAt = line; i++; }
+      else if (c === '"' || c === "'") { q = c; qAt = line; }
+      else if (c === "{") open.push(line);
+      else if (c === "}") { if (!open.length) return `line ${line}: a } without its {.`; open.pop(); }
+    }
+    if (cAt) return `line ${cAt}: a comment (/*) that does not close.`;
+    if (q) return `line ${qAt}: a string that does not close.`;
+    return open.length ? `line ${open[open.length - 1]}: a { that does not close.` : "";
+  }
   // custom.css as a note on the form: the retired token names it sets.
   function cssWarnings(list) {
     const box = $("css-warn");
@@ -1297,7 +1321,16 @@
         if (link) link.disabled = true;
       };
       size();
-      ta.addEventListener("input", () => { size(); if ($("css-live").checked) preview(ta.value); });
+      // A syntax warning while typing (SET-44): braces, comments and strings
+      // that do not close. A warning, not a refusal: browsers skip what they
+      // cannot read, but a stray brace swallows the rules after it.
+      const syn = el("p", { class: "err-line", id: "css-syntax", role: "status", "aria-live": "polite" });
+      (ta.closest(".fld") || ta).after(syn);
+      ta.setAttribute("aria-describedby", ((ta.getAttribute("aria-describedby") || "") + " css-syntax").trim());
+      let synT = 0;
+      const syntax = () => { const p = cssSyntax(ta.value); syn.textContent = p ? `Check the CSS: ${p}` : ""; };
+      syntax();
+      ta.addEventListener("input", () => { size(); if ($("css-live").checked) preview(ta.value); clearTimeout(synT); synT = setTimeout(syntax, 300); });
       $("css-live").addEventListener("change", (e) => preview(e.target.checked ? ta.value : null));
       tabIndent(ta);
       pageForm(fc, {
@@ -1519,8 +1552,16 @@
         box.replaceChildren(icon("lock"), el("span", { text: "Would be refused: " + String(v.error).replace(/^refused:\s*/i, "") }));
       } else {
         box.className = "raw-status bad";
-        box.replaceChildren(icon("alert"), el("span", null, v.line ? el("b", { text: `Line ${v.line}, column ${v.col}: ` }) : null, v.error));
+        box.replaceChildren(icon("alert"), el("span", null, v.line ? el("b", { text: `Line ${v.line}, column ${v.col}: ` }) : null, plainErr(v.error)));
       }
+      // A new error line out of sight is scrolled into view, the caret and
+      // focus left where they are (SET-67).
+      const ta = $("raw-text"), line = this.err && this.err.line;
+      if (line && line !== this.shown) {
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, y = (line - 1) * lh;
+        if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - lh) ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+      }
+      this.shown = line || 0;
       this.mark();
     },
     // View / Diff: the revision dialog (Esc, ×, Close and the backdrop close it).

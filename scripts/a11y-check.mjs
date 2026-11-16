@@ -239,6 +239,11 @@ await ev("(() => { const c = document.querySelector('main input[type=checkbox]')
 await key("g"); await key("y");
 check(await until("location.pathname === '/history'", 4000), "g y from a focused checkbox opens History");
 
+// custom.css: a syntax warning while typing (SET-44); nothing is saved.
+await load("/settings/appearance");
+await ev(`(() => { const t = document.getElementById("css-text"); t.value = "a{color:red}\\n}}} not css"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+check(await until(`/line 2: a \\} without/.test((document.getElementById("css-syntax") || {}).textContent || "")`, 2000), "custom.css: a stray } is named with its line before saving", await ev(`(document.getElementById("css-syntax") || {}).textContent`));
+
 // ---- keyboard: phone drawer ----
 await view(390, true);
 await load("/");
