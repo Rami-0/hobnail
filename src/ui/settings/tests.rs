@@ -1491,6 +1491,24 @@ fn overview_add_links_are_for_a_session_only() {
     assert!(!html.contains("Sekrit"));
 }
 
+/// A11Y-10: every header cell of every Settings list has a scope (and the
+/// actions column a hidden name).
+#[test]
+fn settings_table_headers_have_scope() {
+    let st = state_with(sample(), WAVE2C);
+    let h = signed_in(&st);
+    for p in paths() {
+        let (_, html) = get(&st, &p, &h);
+        for (i, _) in html.match_indices("<th") {
+            let tag = &html[i..i + html[i..].find('>').unwrap()];
+            if tag.starts_with("<thead") {
+                continue;
+            }
+            assert!(tag.contains("scope="), "{p}: {tag}");
+        }
+    }
+}
+
 /// SET-64: the revisions are paged, 25 a page, newest first, with real
 /// links (no script needed); a page past the end shows the last one; the
 /// fragment serves the same page; signed out nothing of it.
