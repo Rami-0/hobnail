@@ -276,10 +276,13 @@ fn paths(
 /// A point in time worth marking on a chart (a crash, an alert).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Marker {
+    /// The event's id (its timeline row is `#ev-<id>` on History).
+    pub id: i64,
     pub ts: i64,
-    /// Tooltip and accessible name ("web: die, exit code 1").
+    /// Tooltip, accessible name and the read-out's text under the
+    /// crosshair ("web: die, exit code 1").
     pub label: String,
-    /// Where a click goes (container page, alerts page).
+    /// Where a click goes: the event's row in the History timeline.
     pub href: Option<String>,
     /// `bad`, `warn` or empty.
     pub level: &'static str,
@@ -287,26 +290,39 @@ pub struct Marker {
 
 /// Markers for the events worth seeing on a time chart: crashes, OOM kills,
 /// failing health checks and fired alerts. Clean exits and plain starts are
-/// left out (they are routine).
+/// left out (they are routine). A marker opens its event (LG-44): the row
+/// in the History timeline, highlighted, in an hour around it (History
+/// itself points them at its own window, `pages::history`).
 pub fn markers_from_events(evs: &[crate::db::Event]) -> Vec<Marker> {
-    use crate::ui::fmt::url_encode;
     evs.iter()
         .filter_map(|e| {
-            let ctr = || format!("/containers/{}", url_encode(&e.subject));
-            let (level, href) = match e.kind.as_str() {
-                "container.die" if e.level != "info" => ("bad", ctr()),
-                "container.oom" => ("bad", ctr()),
-                "container.health" if e.detail == "unhealthy" => ("warn", ctr()),
-                k if k.starts_with("alert.fired") => ("bad", "/alerts".to_string()),
+            let level = match e.kind.as_str() {
+                "container.die" if e.level != "info" => "bad",
+                "container.oom" => "bad",
+                "container.health" if e.detail == "unhealthy" => "warn",
+                k if k.starts_with("alert.fired") => "bad",
                 _ => return None,
             };
+            let all = if e.level == "info" { "&events=all" } else { "" };
+            let href = format!(
+                "/history?from={}&to={}{all}&before={}#ev-{}",
+                e.ts - 1800,
+                e.ts + 1800,
+                e.id + 1,
+                e.id
+            );
             let what = e.kind.rsplit('.').next().unwrap_or(&e.kind);
             let label = if e.detail.is_empty() {
                 format!("{}: {what}", e.subject)
             } else {
-                format!("{}: {what}, {}", e.subject, e.detail)
+                format!(
+                    "{}: {what}, {}",
+                    e.subject,
+                    crate::ui::pages::alerts::without_echo(&e.detail)
+                )
             };
             Some(Marker {
+                id: e.id,
                 ts: e.ts,
                 label,
                 href: Some(href),
@@ -369,17 +385,15 @@ fn cluster_markers(spec: &ChartSpec, ms: &[Marker]) -> Vec<(f64, Marker)> {
             if g.len() > 4 {
                 label.push_str("; …");
             }
-            let same = g.iter().all(|m| m.href == worst.href);
+            // The worst event's row; the others sit next to it in the
+            // timeline (LG-44).
             (
                 x,
                 Marker {
+                    id: worst.id,
                     ts: worst.ts,
                     label,
-                    href: if same {
-                        worst.href.clone()
-                    } else {
-                        Some("/history#events".into())
-                    },
+                    href: worst.href.clone(),
                     level: worst.level,
                 },
             )
@@ -616,9 +630,9 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                         div.evm {
                             @for (left, m) in &marks {
                                 @if let Some(h) = &m.href {
-                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} title=(m.label) aria-label=(m.label) {}
+                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} data-t=(m.ts) title=(m.label) aria-label=(m.label) {}
                                 } @else {
-                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} title=(m.label) {}
+                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} data-t=(m.ts) title=(m.label) aria-label=(m.label) {}
                                 }
                             }
                         }
@@ -988,6 +1002,7 @@ mod tests {
             86_400,
         );
         let marks = vec![Marker {
+            id: 3,
             ts: NOW - 60,
             label: "web: die, exit code 1".into(),
             href: Some("/containers/web".into()),
@@ -1004,7 +1019,9 @@ mod tests {
         assert!(html.contains("class=\"cmp\""), "{html}");
         assert!(html.contains("data-ser=\"max\"") && html.contains("data-ser=\"cmp\""));
         assert!(
-            html.contains("class=\"mk bad\" href=\"/containers/web\""),
+            html.contains(
+                r#"class="mk bad" href="/containers/web" style="left:98.3%" data-t="1799999940""#
+            ),
             "{html}"
         );
         assert!(html.contains("data-zoom=\"1\""));
@@ -1030,8 +1047,36 @@ mod tests {
             ev("alert.fired", "error", "cpu"),
         ]);
         assert_eq!(m.len(), 2);
-        assert_eq!(m[0].href.as_deref(), Some("/containers/a%3Cb"));
-        assert_eq!(m[1].href.as_deref(), Some("/alerts"));
+        // Each opens its row in the History timeline, an hour around it
+        // (LG-44), not the subject's page or the top of a list.
+        let row = format!(
+            "/history?from={}&to={}&before=2#ev-1",
+            NOW - 1800,
+            NOW + 1800
+        );
+        assert_eq!(m[0].href.as_deref(), Some(row.as_str()));
+        assert_eq!(m[1].href.as_deref(), Some(row.as_str()));
+        // Folded markers open the worst event's row, never a bare list.
+        let evs: Vec<crate::db::Event> = (0..3)
+            .map(|i| crate::db::Event {
+                id: 10 + i,
+                ts: NOW - 100 + i,
+                kind: if i == 1 {
+                    "container.oom"
+                } else {
+                    "container.health"
+                }
+                .into(),
+                level: "warn".into(),
+                subject: format!("c{i}"),
+                detail: "unhealthy".into(),
+            })
+            .collect();
+        let folded = cluster_markers(&spec(Unit::Percent), &markers_from_events(&evs));
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].1.id, 11);
+        assert!(folded[0].1.label.starts_with("3 events: "));
+        assert!(folded[0].1.href.as_deref().unwrap().ends_with("#ev-11"));
     }
 
     #[test]

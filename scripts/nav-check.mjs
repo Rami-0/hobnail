@@ -486,6 +486,57 @@ try {
   // Breadcrumbs at 390: the parent keeps its name (NAV-44).
   await load(`/containers/${enc(CTR)}`);
   check(await ev("(() => { const a = document.querySelector('.crumb > a'); return !!a && a.getBoundingClientRect().width > 30 && document.documentElement.scrollWidth <= innerWidth; })()"), "390: the breadcrumb's parent link keeps its width, no sideways scroll (NAV-44)");
+
+  // ================================================== History, Host: windows, markers, tables
+  // Every table on Host fits its panel; History does not scroll sideways
+  // (LG-35, LG-36, LG-45).
+  const tablesFit = "[...document.querySelectorAll('.hx-t')].filter((t) => t.offsetParent && t.scrollWidth > (t.closest('.scroll-x') || t.parentElement).clientWidth + 1).map((t) => (t.querySelector('caption') || t.closest('section').querySelector('h2')).textContent)";
+  for (const w of [390, 1440]) {
+    await view(w);
+    await load("/host");
+    const over = await ev(tablesFit);
+    check(over.length === 0 && (await ev("document.documentElement.scrollWidth <= innerWidth")), `${w}: /host: every table fits its panel, signed in (LG-35, LG-36)`, over);
+  }
+  await view(390);
+  await load("/history?range=24h&events=all");
+  check(await ev("document.documentElement.scrollWidth <= innerWidth"), "390: /history does not scroll sideways (LG-45)", await ev("document.documentElement.scrollWidth"));
+  // The timeline shows the chart window (LG-43).
+  const inWindow = "(() => { const f = document.querySelector('figure.chart[data-t0]'); if (!f) return null; const t0 = +f.dataset.t0, t1 = +f.dataset.t1; return [...document.querySelectorAll('.tl .ev time[data-t]')].every((t) => +t.dataset.t >= t0 && +t.dataset.t <= t1); })()";
+  await view(1440);
+  await load("/history?range=6h&events=all");
+  check(await ev(inWindow) !== false, "1440: /history: every timeline row is inside the chart window (LG-43)");
+  // Zoom by a plain link: by touch and without the script too (LG-46).
+  clicks = 0;
+  await click(".zoom-nav a.btn:nth-child(2)");
+  check((await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)")) && (await ev(inWindow)) !== false && clicks === 1, "1440: Zoom in is one click, and the timeline follows the zoom (LG-43, LG-46)", await here());
+  await click(".zoom-nav a.btn:first-child", false);
+  check(await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)") && (await ev("!!document.querySelector('.zoom-nav a[href*=\"to=\"]:last-child')")), "1440: Earlier moves the window back; Later is then a link");
+  // A marker opens its event's row, highlighted (LG-44).
+  await load("/history?range=24h");
+  const mk = await ev("(() => { const m = document.querySelector('.evm a.mk'); return m && m.getAttribute('href'); })()");
+  if (mk) {
+    await click(".evm a.mk", false);
+    const id = mk.split("#ev-")[1];
+    check(await until(`location.hash === '#ev-${id}' && !!document.querySelector('.tl .ev:target')`, 6000), "1440: a chart marker opens its timeline row, as the target (LG-44)", { mk, at: await here() });
+  } else check(true, "1440: no event markers in 24 h (marker check skipped)");
+  // Legend toggles act on every chart and are remembered (LG-51).
+  if (await ev("!!document.querySelector('.lg[data-ser=max]')")) {
+    await click(".lg[data-ser=max]", false);
+    const all = "[...document.querySelectorAll('figure.chart:has(.lg[data-ser=max])')].every((f) => f.classList.contains('off-max'))";
+    const offNow = await ev(all);
+    await load("/history?range=24h");
+    check(offNow && (await ev(all)), "1440: a legend toggle hides that layer on every chart, still after a reload (LG-51)");
+    await click(".lg[data-ser=max]", false);
+    check(!(await ev("!!document.querySelector('figure.chart.off-max')")), "1440: and shows it again");
+  }
+  // Touch: a sideways drag across a chart zooms (LG-46).
+  await view(390);
+  await load("/history?range=6h");
+  const box = await ev("(() => { const c = document.querySelector('figure.chart[data-zoom] .canvas'); c.scrollIntoView({ block: 'center' }); const b = c.getBoundingClientRect(); return [b.left, b.top + b.height / 2, b.width]; })()");
+  await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box[0] + box[2] * 0.3, y: box[1] }] });
+  for (let i = 1; i <= 6; i++) { await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box[0] + box[2] * (0.3 + i * 0.07), y: box[1] }] }); await sleep(30); }
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  check(await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)"), "390: a sideways touch drag across a chart zooms (LG-46)", await here());
   check(errors.length === 0, "no script errors", errors);
 } catch (e) {
   check(false, "the run finished", String(e.stack || e).slice(0, 600));

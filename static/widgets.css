@@ -194,3 +194,27 @@
 .tm .tm-logs{display:none;position:absolute;top:2px;right:2px}
 @container (min-width:64px) and (min-height:40px){.tm .tm-logs{display:inline-flex}.tm:has(.tm-logs) .tm-a{padding-right:26px}}
 @media (pointer:coarse){@container (max-width:87.98px),(max-height:55.98px){.tm .tm-logs{display:none}.tm:has(.tm-logs) .tm-a{padding-right:0}}}
+
+/* ---- charts: markers, touch zoom; the History toolbar and timeline ---- */
+/* Markers: a 24 px target around the 7 px dot (A11Y-19); one opens its
+   timeline row, which is highlighted as the target (LG-44). */
+.mk{width:24px;margin-left:-12px}
+.mk::before{left:12px}.mk::after{left:8.5px}
+/* Sideways drags on a zoomable chart are the zoom gesture by touch too;
+   vertical drags still scroll the page (LG-46). */
+.chart[data-zoom] .canvas{touch-action:pan-y}
+.hist-bar .zoom-nav{display:inline-flex;flex-wrap:wrap;gap:4px}
+.zoom-nav [aria-disabled=true],.hist-bar .tgl[aria-disabled=true]{opacity:.5;cursor:not-allowed}
+.tl-scope{margin:-4px 0 6px;font-size:12px}
+.tl-more{margin-top:10px}
+.tl .ev{scroll-margin-top:calc(var(--top-h) + 16px)}
+.tl .ev:target{background:var(--tint-2);box-shadow:inset 3px 0 0 var(--accent)}
+.tl .ev .when{flex-basis:auto;min-width:96px}
+/* A phone: rows wrap and the detail takes its own line; the switch wraps
+   under the title instead of widening the page (LG-45). */
+#events .panel-h{flex-wrap:wrap;row-gap:6px}
+@media (max-width:699px){.tl .ev{flex-wrap:wrap;row-gap:0;padding-block:4px}.tl .ev .detail{order:1;white-space:normal;overflow-wrap:anywhere;flex-basis:100%}.tl .ev .nm{white-space:normal;overflow-wrap:anywhere}}
+/* The read-out sits inside the plot, clear of the header's value and the
+   min / max line (OV-07); a marker under the crosshair adds its line. */
+.canvas .tip{top:4px;transform:translateX(-50%);max-width:min(320px,90%);white-space:normal}
+.tip .tip-mk{display:block;margin-top:2px;color:var(--bad-fg);font-family:var(--font)}
