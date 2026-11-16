@@ -234,8 +234,10 @@
     try {
       await fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-RH-CSRF": m ? m.content : "" } });
     } catch {}
-    location.href = "/";
+    try { sessionStorage.setItem("rh-out", "1"); } catch {}
+    location.replace(/^\/settings(\/|$)/.test(location.pathname) ? "/" : location.pathname + location.search);
   }
+  try { if (sessionStorage.getItem("rh-out")) { sessionStorage.removeItem("rh-out"); window.HB && HB.toast && HB.toast("Signed out", { kind: "info" }); } } catch {}
   doc.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest('[data-act="logout"]'); if (b) { e.preventDefault(); logout(); } });
 
   // ---- live sparklines: a ring buffer per key, drawn zero based ----
@@ -686,7 +688,7 @@
   async function palOpen() {
     if (!pal || !pal.hidden) return;
     palReturn = doc.activeElement;
-    pal.hidden = false; palQ.value = ""; palQ.focus();
+    pal.hidden = false; palQ.value = ""; palQ.focus(); palQ.setAttribute("aria-expanded", "true");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "true");
     palRender();
     await palLoad();
@@ -694,7 +696,7 @@
   }
   function palClose() {
     if (!pal || pal.hidden) return;
-    pal.hidden = true;
+    pal.hidden = true; palQ.setAttribute("aria-expanded", "false");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "false");
     palReturn && palReturn.focus && palReturn.focus({ preventScroll: true });
   }

@@ -432,7 +432,7 @@ fn palette_shell() -> Markup {
                     (ic("search"))
                     input #pal-q type="text" autocomplete="off" spellcheck="false"
                         placeholder="Containers, pages, bookmarks, actions… or search the web"
-                        role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list";
+                        role="combobox" aria-expanded="false" aria-controls="pal-list" aria-autocomplete="list";
                     kbd.pal-esc { "Esc" }
                     button.icon-btn.pal-x type="button" data-act="pal-close" aria-label="Close search" { (ic("x")) }
                 }
@@ -1247,6 +1247,64 @@ mod tests {
         // j / k only over rows with a link (NAV-60); a checkbox keeps the keys (NAV-64).
         assert!(js.contains(r#"shown(r) && r.querySelector("a[href]")"#));
         assert!(js.contains("checkbox|radio|button"));
+    }
+
+    /// NAV-80, NAV-82, A11Y-09, A11Y-11: signing out stays on the page
+    /// (Settings goes to Overview) and says so; the login page has a way
+    /// back to `next`; the Settings lock panel's heading follows the h1;
+    /// the palette box is not "expanded" while closed.
+    #[test]
+    fn sign_in_and_out_paths() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let (_, login) =
+            crate::ui::pages::render(&Ctx::new(&st, "h", "/login", "next=%2Fhost", &h));
+        assert!(
+            login.contains(r#"<a class="btn ghost login-back" href="/host">Back</a>"#),
+            "{login}"
+        );
+        assert!(login.contains(r#"role="combobox" aria-expanded="false""#));
+        let (_, set) = crate::ui::pages::render(&Ctx::new(&st, "h", "/settings/general", "", &h));
+        assert!(set.contains(r#"<h2 id="lock-h">"#) && !set.contains("<h3 id=\"lock-h\""));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"? "/" : location.pathname + location.search"#));
+        assert!(js.contains(r#"HB.toast("Signed out""#));
+        assert!(!js.contains(r#"location.href = "/";"#));
+    }
+
+    /// A11Y-20: the shell, component and Settings CSS size text in rem, so
+    /// a larger default font size in the browser or OS scales the UI.
+    #[test]
+    fn type_sizes_are_in_rem() {
+        for (f, css) in [
+            ("app.css", APP_CSS_SRC),
+            (
+                "components.css",
+                include_str!("../../static/components.css"),
+            ),
+            ("settings.css", include_str!("../../static/settings.css")),
+        ] {
+            let mut rest = css;
+            while let Some(i) = rest.find("font") {
+                rest = &rest[i + 4..];
+                let decl = &rest[..rest.find([';', '}']).unwrap_or(rest.len())];
+                let size = if let Some(v) = decl.strip_prefix("-size:") {
+                    v
+                } else if let Some(v) = decl.strip_prefix(':') {
+                    // the shorthand's size: the word before "/" or the family
+                    v.split_whitespace()
+                        .map(|w| w.split('/').next().unwrap_or(""))
+                        .find(|w| {
+                            w.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+                                && w.ends_with(|c: char| c.is_ascii_alphabetic() || c == '%')
+                        })
+                        .unwrap_or("")
+                } else {
+                    continue;
+                };
+                assert!(!size.trim().ends_with("px"), "{f}: font{decl}");
+            }
+        }
     }
 
     /// A11Y-17: brand Accent and Error have the same luminance, so the
