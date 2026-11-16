@@ -591,27 +591,38 @@
   Pane.prototype.olderOk = function () {
     this.older.hidden = !(S.range === "" && this.lines.length && !this.noOlder && RING - this.lines.length >= 50);
   };
-  Pane.prototype.loadOlder = function () {
-    var self = this, first = this.lines[0];
-    if (!first || this.loading) return;
+  // The window before the oldest line is guessed from the pace of the lines
+  // held (about twice `want` lines); the server reads it from its start and
+  // stops at CAP. A full CAP means the window was too wide (a gap could be
+  // left): try a narrower one; too few lines: a wider one, three times.
+  var CAP = 5000;
+  Pane.prototype.loadOlder = function (span, tries) {
+    var self = this, first = this.lines[0], last = this.lines[this.lines.length - 1];
+    if (!first || (this.loading && !tries)) return;
     var want = Math.min(TAIL, RING - this.lines.length), got = [], lab = this.older.lastChild;
+    tries = tries || 0;
+    span = span || Math.min(86400, Math.max(60, (last.t - first.t) / 1000 / this.lines.length * want * 2));
     this.loading = true; this.older.disabled = true; lab.textContent = "Loading older lines…";
-    var es = this.oes = new EventSource("/api/logs/stream?" + this.q + "&until=" + (first.t / 1000).toFixed(3) + "&tail=" + want);
+    var until = first.t / 1000, since = Math.max(0, until - span);
+    var es = this.oes = new EventSource("/api/logs/stream?" + this.q + "&since=" + since.toFixed(3) + "&until=" + until.toFixed(3) + "&tail=" + CAP);
     var end = function (ok) {
-      es.close(); self.oes = null; self.loading = false; self.older.disabled = false; lab.textContent = "Load older lines";
-      if (ok) self.prepend(got.filter(function (x) { return x.t < first.t; }), want);
+      es.close(); self.oes = null;
+      got = got.filter(function (x) { return x.t < first.t; });
+      if (ok && tries < 3 && (got.length >= CAP - 1 || (got.length < want && since > 0))) return self.loadOlder(got.length >= CAP - 1 ? span / 8 : span * 8, tries + 1);
+      self.loading = false; self.older.disabled = false; lab.textContent = "Load older lines";
+      if (ok) self.prepend(got, want, got.length < want);
       else say("Could not load older lines.");
     };
     es.addEventListener("l", function (e) { got = got.concat(JSON.parse(e.data)); });
     es.addEventListener("done", function () { end(true); });
     es.onerror = function () { end(false); };
   };
-  Pane.prototype.prepend = function (arr, want) {
-    var room = RING - this.lines.length;
+  Pane.prototype.prepend = function (arr, want, all) {
+    var room = Math.min(want, RING - this.lines.length);
     var recs = arr.map(mk).sort(function (a, b) { return a.t - b.t; });
     if (recs.length > room) recs = recs.slice(recs.length - room);
-    // Fewer than asked for: that was the start of what Docker kept.
-    if (arr.length < want) this.noOlder = true;
+    // Fewer than asked for, even in a wide window: that was all there is.
+    if (all) this.noOlder = true;
     if (!recs.length) { this.olderOk(); say("No older lines."); return; }
     var frag = document.createDocumentFragment();
     for (var k = 0; k < recs.length; k++) { var r = recs[k]; this.counts[r.l]++; r.e = this.render(r); frag.appendChild(r.e); }
@@ -799,7 +810,12 @@
   }
 
   // A short note (a toast when the page has them).
-  function say(t) { if (window.HB && HB.toast) HB.toast(t, { kind: "info" }); }
+  // (The page's own script may run after this one: then once it has.)
+  function say(t) {
+    var done = false, go = function () { if (!done && window.HB && HB.toast) { done = true; HB.toast(t, { kind: "info" }); } };
+    go();
+    if (!done) { document.addEventListener("DOMContentLoaded", go); setTimeout(go, 1000); }
+  }
 
   var lastQ = null, findOnLoad = !!S.q; // a search from the address goes to its newest match once the lines are in
   function refilterAll() {
@@ -1167,7 +1183,8 @@
     if (phone && panes.length > 1) return;
     // Whatever the page adds below (margins, the room kept for the bottom
     // bar) is taken off again, once.
-    var over = document.documentElement.scrollHeight - window.innerHeight;
+    // (Measured on `main`: a long sidebar is not ours to fit.)
+    var main = root.closest("main"), over = main ? Math.ceil(main.getBoundingClientRect().bottom + window.scrollY - window.innerHeight) : 0;
     if (over > 0) panes.forEach(function (p) { p.body.style.height = Math.max(phone ? 240 : 280, p.body.offsetHeight - over) + "px"; });
     // The height in between may have clamped a pane's scroll: not the
     // reader's move. Put each pane back now, before that scroll event runs.

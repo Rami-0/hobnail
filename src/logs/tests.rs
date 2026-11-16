@@ -755,6 +755,41 @@ async fn stream_tails_and_stops_after_disconnect() {
     eprintln!("docker stream closed {took:?} after the viewer left");
 }
 
+/// A closed window is read from its start (`tail=all` toward Docker) and
+/// cut by the server at the asked-for count; an open one keeps `tail`.
+#[test]
+fn closed_window_is_cut_by_the_server() {
+    let q = crate::ui::fmt::parse_query("c=web&since=100&until=200&tail=3");
+    let rq = super::stream_query(&q, 500);
+    assert_eq!((rq.tail, rq.cap, rq.follow), (None, Some(3), false));
+    assert!(
+        rq.path("x").contains("&tail=all&since=100."),
+        "{}",
+        rq.path("x")
+    );
+    let rq = super::stream_query(
+        &crate::ui::fmt::parse_query("c=web&until=200&tail=9000"),
+        500,
+    );
+    assert_eq!((rq.tail, rq.cap), (Some(5000), None));
+    let rq = super::stream_query(&crate::ui::fmt::parse_query("c=web"), 500);
+    assert_eq!((rq.tail, rq.cap, rq.follow), (Some(500), None, true));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn closed_window_stops_at_the_cap() {
+    let fake = fake_docker("cap").await;
+    let st = state_on(&fake.path, "cap");
+    let addr = serve(st).await;
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(b"GET /api/logs/stream?c=web&since=100&until=200&tail=3 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .await
+        .unwrap();
+    let got = read_until(&mut s, "event: done", Duration::from_secs(5)).await;
+    assert!(got.contains("event: done"), "{got}");
+    assert!(got.contains("line 3 ") && !got.contains("line 4 "), "{got}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn stream_reports_missing_container_and_bad_request() {
     let fake = fake_docker("missing").await;

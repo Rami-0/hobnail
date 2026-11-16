@@ -114,18 +114,23 @@ async fn reader(socket: String, idx: usize, name: String, q: Query, tx: mpsc::Se
     };
     let _open = OpenGuard::new();
     let mut buf = Vec::new();
+    let mut left = q.cap.map(|c| c as usize);
     loop {
         let more = tokio::select! {
             m = stream.next(&mut buf) => m,
             _ = tx.closed() => return,
         };
+        if let Some(l) = left.as_mut() {
+            buf.truncate(*l);
+            *l -= buf.len();
+        }
         if !buf.is_empty() {
             let lines: Vec<Line> = buf.drain(..).map(Line::from_raw).collect();
             if tx.send(Msg::Lines(idx, lines)).await.is_err() {
                 return;
             }
         }
-        if !more {
+        if !more || left == Some(0) {
             let _ = tx.send(Msg::End(idx)).await;
             return;
         }

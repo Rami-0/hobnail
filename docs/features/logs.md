@@ -65,7 +65,8 @@ current match or the first line in view and focuses Copy; Arrow Up / Down
 move to the neighbouring line, Esc goes back to the pane.
 
 **Older lines.** A live tail offers "Load older lines" at its top: the lines
-before the oldest one held (a stream with `until=`), put in front without
+before the oldest one held (a closed window ending there, sized from the pace
+of the lines held), put in front without
 moving the reader, while the ring has room. In a stack, a container that sent
 its full tail gets a mark where its loaded history starts. A `#t=` link to a
 moment with no line says when the next line is; one to the future shows the
@@ -92,7 +93,10 @@ so it never rewrites the DOM.
 ## API (GET only)
 
 - `/api/logs/stream?c=a[,b…]` or `?stack=x`, `&tail=N` (≤ 5000), `&since=<unix s | 15m | 1h | start>`,
-  `&until=<unix s>` (no follow). SSE events: `meta`, `l` (array of
+  `&until=<unix s>` (no follow). With both `since` and `until` (a closed window: a custom
+  range, "Load older lines") the window is read from its start and the server stops after
+  `tail` lines (Docker applies `tail` to the whole log before `since`/`until`, which left a
+  window followed by more than `tail` lines empty). SSE events: `meta`, `l` (array of
   `{c, t (unix ms), m, s:2 for stderr, l: e|w|i|d, x:1 if cut at 16 KiB}`), `err`
   (`kind`: notfound, unreachable, error), `end`, `done`.
 - `/api/logs/download?…` same parameters, plain text without ANSI, `Content-Disposition: attachment`.

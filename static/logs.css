@@ -14,10 +14,10 @@
 .ltool{--lh:var(--ctl-h-sm);display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
 .lmore{display:contents}
 .lfilt{display:none}
-/* Time and Download as icons below 1600 px, so the row fits beside the sidebar
+/* Time, Download and Add as icons below 1600 px, so the row fits beside the sidebar
    (the words stay as their names). */
-@media (max-width:1600px){.ltool :is(#ltime,#ldl)>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.ltool :is(#ltime,#ldl){gap:0}}
-.lsearch{position:relative;display:flex;align-items:center;gap:2px;flex:1 1 200px;max-width:460px;height:var(--lh);padding:0 3px 0 8px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+@media (max-width:1600px){.ltool :is(#ltime,#ldl,#ladd)>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.ltool :is(#ltime,#ldl,#ladd){gap:0}}
+.lsearch{position:relative;display:flex;align-items:center;gap:2px;flex:1 1 160px;min-width:150px;max-width:460px;height:var(--lh);padding:0 3px 0 8px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
 .lsearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .lsearch>svg{color:var(--text-3);flex:none}
 .lsearch input{flex:1;width:0;min-width:0;height:100%;border:0;background:none;color:var(--text);font:13px var(--mono);outline:none;padding:0 6px}
@@ -52,8 +52,8 @@
 .ldot{width:8px;height:8px;border-radius:2px;background:var(--off)}
 .lchip[data-lv=e] .ldot{background:var(--bad)}.lchip[data-lv=w] .ldot{background:var(--warn)}
 .lchip[data-lv=i] .ldot{background:var(--accent)}.lchip[data-lv=d] .ldot{background:var(--ch-mem)}
-.lsp{flex:1}
-.lcount{flex:0 1 auto;min-width:4em;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
+.lsp{display:none}
+.lcount{flex:1 1 0;min-width:4em;text-align:right;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
 
 .lpanes{display:grid;gap:8px;min-width:0}
 .lpanes.multi{grid-template-columns:repeat(var(--n),minmax(0,1fr))}
