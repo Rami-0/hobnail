@@ -201,8 +201,12 @@
     ids = [].concat(ids);
     if (!ids.some((id) => $(id))) return false; // none of them on this page (the Overview)
     let r;
-    const all = new URLSearchParams(location.search).get("revs") === "all" ? "&revs=all" : ""; // Config file: every revision
-    try { r = await fetch(FRAG + "?frag=list" + all, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
+    // Config file: the revision page in view; after a save (a row to
+    // flash) the first page, where the new revision is (SET-64).
+    const rp = new URLSearchParams(location.search).get("rp");
+    if (flash && rp) history.replaceState(history.state, "", location.pathname);
+    const page = rp && !flash ? "&rp=" + encodeURIComponent(rp) : "";
+    try { r = await fetch(FRAG + "?frag=list" + page, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
     if (r.status === 401) banner("expired");
     if (!r.ok) return false;
     const t = doc.createElement("template");
@@ -235,6 +239,8 @@
         const live = () => Array.from(a.rows).filter((x) => !x._gone);
         want.forEach((w, i) => { const c = live()[i]; if (c !== w) a.insertBefore(w, c || null); });
       }
+      const pa = box.querySelector(".rev-pager"), pb = next.querySelector(".rev-pager");
+      if (pa && pb) pa.replaceWith(pb); else if (pa) pa.remove(); else if (pb) box.append(pb);
       const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
       if (row) HB.flash(row);
     }
@@ -1413,6 +1419,18 @@
       ta.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); this.fromEditor = true; f.requestSubmit(); } });
       onAct("raw-revert", () => { ta.value = f._open.text; this.gutter(); this.validate(); HB.noteIn(f, ""); toast("Back to the file as it was loaded", "info"); });
       onAct("raw-goto", () => this.goto(this.err && this.err.line));
+      // Revision pages in place (the links work without the script too);
+      // focus stays on the pager (SET-64).
+      $("rev-sec") && $("rev-sec").addEventListener("click", async (e) => {
+        const a = e.target.closest && e.target.closest(".rev-pager a[data-rp]");
+        if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+        e.preventDefault();
+        const rel = a.rel;
+        history.replaceState(history.state, "", "?rp=" + a.dataset.rp);
+        await refreshList("rev-list");
+        const b = $("rev-list").querySelector(`.rev-pager a[rel="${rel}"]`) || $("rev-list").querySelector(".rev-pager [aria-live]");
+        if (b) { if (!b.matches("a")) b.tabIndex = -1; b.focus(); }
+      });
       this.gutter();
       this.validate();
       // Revisions: View and Diff in a dialog, Restore after the confirm.
