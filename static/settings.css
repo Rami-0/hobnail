@@ -74,6 +74,10 @@ body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
 /* lists and tables */
 .none{font-size:13px;padding:4px 0}
 .tbl-wrap{overflow-x:auto;margin:0 -2px;padding:0 2px}
+/* long values never widen a tab: cells wrap, a name wraps inside a bounded
+   column (SET-41, SET-48, ROB-08) */
+.set-main .tbl td{overflow-wrap:anywhere}
+.set-main .tbl .linkbtn{max-width:36ch}
 .tbl td.act{text-align:right;white-space:nowrap;width:1%}
 .tbl td.act>*{vertical-align:middle}
 .tbl td.act .btn{margin-left:4px}

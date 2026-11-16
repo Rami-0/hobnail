@@ -58,7 +58,7 @@ tr.rl>td>:not(.row-link),li.rl>:not(.row-link){position:relative;z-index:1}
 /* A name link with its logs action beside it (tables on Host, History). */
 .nm-l{display:inline-flex;align-items:center;gap:var(--s-1);max-width:100%;vertical-align:middle}
 .nm-l>a:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.linkbtn{padding:0;border:0;background:none;color:var(--text);font:600 var(--fs-sm)/1.3 var(--font);text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.linkbtn{display:inline-block;padding:0;border:0;background:none;color:var(--text);font:600 var(--fs-sm)/1.3 var(--font);text-align:left;cursor:pointer;overflow-wrap:anywhere}
 .linkbtn:hover{color:var(--accent-fg);text-decoration:underline}
 tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)}
 @keyframes row-new{from{background-color:color-mix(in srgb,var(--accent) 20%,transparent)}}

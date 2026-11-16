@@ -1217,6 +1217,19 @@ mod tests {
         assert!(!css.contains("inset:-6px -13px -21px"));
     }
 
+    /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:
+    /// every cell may break anywhere and a row's name wraps inside a bounded
+    /// column (a fixed width: a percentage is ignored while the table sizes
+    /// its columns).
+    #[test]
+    fn settings_tables_wrap_long_values() {
+        let css = include_str!("../../static/settings.css");
+        assert!(css.contains("\n.set-main .tbl td{overflow-wrap:anywhere}"));
+        assert!(css.contains("\n.set-main .tbl .linkbtn{max-width:36ch}"));
+        let comp = include_str!("../../static/components.css");
+        assert!(comp.contains(".linkbtn{display:inline-block;"), "max-width needs a box");
+    }
+
     /// ROB-03: the stack tree is the containing block of the visually
     /// hidden text inside it, so items far down the scrolled tree never
     /// stretch the page.
