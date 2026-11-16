@@ -226,6 +226,7 @@
    no longer sits on the first time label (OV-15). */
 .chart .plot{font:10.5px var(--mono)}
 .chart .xaxis,.chart.compact .xaxis{margin-left:calc(var(--yw,6ch) + 12px)}
-.chart-since{flex-basis:100%;order:9;margin-top:-4px;font-size:11px;color:var(--text-3)}
+.chart figcaption{flex-wrap:wrap;row-gap:2px}
+.chart-since{flex-basis:100%;order:9;font-size:11px;color:var(--text-3)}
 /* A phone: min / max on its own line under the title, never cut (OV-52). */
 @media (max-width:699px){.chart figcaption{flex-wrap:wrap;row-gap:2px}.chart:not(.compact) .chart-mm{flex-basis:100%;margin-left:0;order:8}}
