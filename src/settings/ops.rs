@@ -144,7 +144,6 @@ pub const RULE_KEYS: &[&str] = &[
     "recovery",
     "enabled",
 ];
-pub const DOCKER_FIELDS: &[&str] = &["exclude"];
 pub const SYSTEM_FIELDS: &[&str] = &["enabled"];
 pub const RAW_FIELDS: &[&str] = &[];
 
@@ -669,20 +668,6 @@ pub struct PatchReq {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExcludeReq {
-    pub base_hash: String,
-    pub exclude: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GroupsReq {
-    pub base_hash: String,
-    pub groups: Vec<J>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct OverrideReq {
     pub base_hash: String,
     pub names: Vec<String>,
@@ -967,9 +952,13 @@ pub fn history(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
     }
     let mut doc = parse_doc(cur)?;
     let root = doc.as_table_mut();
+    let mut patch = patch.clone();
+    if patch.get("enabled") == Some(&J::Bool(true)) && back_to_default(root, "history", "enabled") {
+        patch.remove("enabled");
+    }
     let existed = root.contains_key("history");
     let t = doc::table_mut(root, "history", false).map_err(engine)?;
-    for (k, v) in patch {
+    for (k, v) in &patch {
         doc::set_json(t, k, Some(v), Style::Inline).map_err(engine)?;
     }
     if !existed && t.is_empty() {
@@ -983,29 +972,6 @@ pub fn history(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
 }
 
 // ------------------------------------------------------------ containers
-
-pub fn docker_exclude(cur: &Current, req: &ExcludeReq) -> Result<Draft, ApiError> {
-    if req.exclude.len() > 500 {
-        return Err(ApiError::bad_request("exclude: at most 500 patterns"));
-    }
-    if req
-        .exclude
-        .iter()
-        .any(|p| p.trim().is_empty() || p.len() > 256)
-    {
-        return Err(ApiError::bad_request(
-            "exclude: patterns must be 1-256 characters",
-        ));
-    }
-    let mut doc = parse_doc(cur)?;
-    let t = doc::table_mut(doc.as_table_mut(), "docker", false).map_err(engine)?;
-    let v = (!req.exclude.is_empty()).then(|| J::from(req.exclude.clone()));
-    doc::set_json(t, "exclude", v.as_ref(), Style::Inline).map_err(engine)?;
-    if t.is_empty() {
-        doc.as_table_mut().remove("docker");
-    }
-    Ok(draft(&doc, "containers: exclude".into(), DOCKER_FIELDS))
-}
 
 /// One pattern of `[docker] exclude` added, changed or removed (the Hidden
 /// containers list: `{action, id: index, item: {pattern}}`). The array is
@@ -1024,6 +990,15 @@ pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
         if p.chars().count() > 256 {
             return Err(ApiError::invalid(
                 "At most 256 characters.",
+                Some("pattern"),
+                None,
+            ));
+        }
+        // A container name never holds one, and a line break would be
+        // written as a multi-line string.
+        if p.chars().any(char::is_control) {
+            return Err(ApiError::invalid(
+                "No line breaks, tabs or other control characters.",
                 Some("pattern"),
                 None,
             ));
@@ -1068,7 +1043,7 @@ pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
                 return Err(dup());
             }
             match t.get_mut("exclude").and_then(Item::as_array_mut) {
-                Some(a) => a.push(p.as_str()),
+                Some(a) => push_like(a, p.as_str()),
                 None => doc::set_json(t, "exclude", Some(&J::from(vec![p.clone()])), Style::Inline)
                     .map_err(engine)?,
             }
@@ -1094,13 +1069,7 @@ pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
                 .get_mut("exclude")
                 .and_then(Item::as_array_mut)
                 .ok_or_else(not_list)?;
-            a.remove(i);
-            // `["a", "b"]` without "a" is `["b"]`, not `[ "b"]`.
-            if let Some(first) = a.get_mut(0) {
-                if first.decor().prefix().and_then(|p| p.as_str()) == Some(" ") {
-                    first.decor_mut().set_prefix("");
-                }
-            }
+            remove_like(a, i);
             if a.is_empty() {
                 t.remove("exclude");
             }
@@ -1108,110 +1077,160 @@ pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
         }
         Action::Reorder => return Err(ApiError::bad_request("patterns have no order")),
     };
-    // As `docker_exclude`: a `[docker]` left empty goes.
+    // A `[docker]` left empty goes.
     if t.is_empty() {
         doc.as_table_mut().remove("docker");
     }
     Ok(draft(&doc, note, &["pattern"]))
 }
 
+fn has_comment(d: &toml_edit::Decor) -> bool {
+    [d.prefix(), d.suffix()]
+        .iter()
+        .any(|x| x.and_then(|r| r.as_str()).is_some_and(|s| s.contains('#')))
+}
+
+/// A switch that is on by default turned back on: a plain `enabled =
+/// false` (what turning it off writes) goes again instead of becoming
+/// `enabled = true`, and so does its table when nothing else is left in it,
+/// so off then on gives back the file as it was without the key. A key or
+/// table with a comment stays (the key is then set to `true`). Returns
+/// whether it did that.
+fn back_to_default(root: &mut Table, table: &str, key: &str) -> bool {
+    let Some(Item::Table(t)) = root.get_mut(table) else {
+        return false;
+    };
+    let plain = match t.get_key_value(key) {
+        Some((k, Item::Value(Value::Boolean(b)))) => {
+            !*b.value() && !has_comment(k.leaf_decor()) && !has_comment(b.decor())
+        }
+        _ => false,
+    };
+    if !plain {
+        return false;
+    }
+    t.remove(key);
+    if t.is_empty() && !has_comment(t.decor()) {
+        root.remove(table);
+    }
+    true
+}
+
+/// The text before a value of an array (its comments and indentation).
+fn prefix_of(v: &Value) -> &str {
+    v.decor().prefix().and_then(|p| p.as_str()).unwrap_or("")
+}
+
+/// `s` split after its first line break: what ends the line before (a
+/// comment after the previous value's comma) and the rest. No line break:
+/// `("", s)`.
+fn split_line(s: &str) -> (&str, &str) {
+    match s.find('\n') {
+        Some(n) => (&s[..=n], &s[n + 1..]),
+        None => ("", s),
+    }
+}
+
+/// The text after a value (before its comma, or before `]` for the last
+/// value of an array without a trailing comma).
+fn suffix_of(v: &Value) -> &str {
+    v.decor().suffix().and_then(|p| p.as_str()).unwrap_or("")
+}
+
+/// What follows the last value of `a`: its suffix and the array's
+/// trailing text without a trailing comma, the trailing text with one.
+fn after_last(a: &toml_edit::Array, last_suffix: &str) -> String {
+    let tr = a.trailing().as_str().unwrap_or("");
+    if a.trailing_comma() {
+        tr.to_string()
+    } else {
+        format!("{last_suffix}{tr}")
+    }
+}
+
+/// Puts `text` back after the last value (see [`after_last`]).
+fn set_after_last(a: &mut toml_edit::Array, text: String) {
+    if a.trailing_comma() {
+        a.set_trailing(text);
+    } else if let Some(v) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+        v.decor_mut().set_suffix(text);
+        a.set_trailing("");
+    }
+}
+
+/// Appends `v` the way the array is written: one per line, with the same
+/// indentation, when its values are on lines of their own; inline else.
+fn push_like(a: &mut toml_edit::Array, v: &str) {
+    let indent = a
+        .iter()
+        .filter_map(|x| {
+            let p = prefix_of(x);
+            p.rfind('\n').map(|n| p[n + 1..].to_string())
+        })
+        .last();
+    let Some(indent) = indent else {
+        a.push(v);
+        return;
+    };
+    // What follows the last value holds its own comment up to the line
+    // break: that stays on its line, the new value starts the next one.
+    let last_sfx = a
+        .iter()
+        .last()
+        .map(|x| suffix_of(x).to_string())
+        .unwrap_or_default();
+    let tail = after_last(a, &last_sfx);
+    if !a.trailing_comma() {
+        if let Some(x) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+            x.decor_mut().set_suffix("");
+        }
+    }
+    let (head, rest) = split_line(&tail);
+    let (pre, after) = if head.is_empty() {
+        (format!("\n{indent}"), tail.clone())
+    } else {
+        (format!("{head}{indent}"), format!("\n{rest}"))
+    };
+    a.push(v);
+    if let Some(x) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+        x.decor_mut().set_prefix(pre);
+        x.decor_mut().set_suffix("");
+    }
+    set_after_last(a, after);
+}
+
+/// Removes value `i` with what belongs to it: the comments above it, and
+/// the comment after its comma (which the file keeps in front of the next
+/// value, or after the last one). The neighbours keep theirs.
+fn remove_like(a: &mut toml_edit::Array, i: usize) {
+    let (gone, gone_sfx) = a
+        .get(i)
+        .map(|v| (prefix_of(v).to_string(), suffix_of(v).to_string()))
+        .unwrap_or_default();
+    let was_last = i + 1 == a.len();
+    let tail = was_last.then(|| after_last(a, &gone_sfx));
+    a.remove(i);
+    // What ends the line before the removed value (the bracket line or the
+    // previous value's comment) stays.
+    let keep = split_line(&gone).0.to_string();
+    let next = |s: &str| -> Option<String> {
+        let (_, rest) = split_line(s);
+        s.contains('\n').then(|| format!("{keep}{rest}"))
+    };
+    if let Some(v) = a.get_mut(i) {
+        match next(prefix_of(v)) {
+            Some(p) => v.decor_mut().set_prefix(p),
+            // Inline: `["a", "b"]` without "a" is `["b"]`, not `[ "b"]`.
+            None if i == 0 && prefix_of(v) == " " => v.decor_mut().set_prefix(""),
+            None => {}
+        }
+    } else if let Some(t) = tail.filter(|_| !a.is_empty()).and_then(|t| next(&t)) {
+        set_after_last(a, t);
+    }
+}
+
 fn str_field<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
     t.get(k).and_then(Item::as_str)
-}
-
-fn names_of(aot: &toml_edit::ArrayOfTables, key: &str) -> Vec<String> {
-    aot.iter()
-        .map(|t| str_field(t, key).unwrap_or("").to_string())
-        .collect()
-}
-
-/// Note for a whole-list replace: what was added, removed, changed, moved.
-fn list_note(label: &str, old: &[String], new: &[String], edited: bool) -> String {
-    let added: Vec<&String> = new.iter().filter(|n| !old.contains(n)).collect();
-    let removed: Vec<&String> = old.iter().filter(|n| !new.contains(n)).collect();
-    let mut parts = Vec::new();
-    if !added.is_empty() {
-        parts.push(format!(
-            "added {}",
-            added
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if !removed.is_empty() {
-        parts.push(format!(
-            "removed {}",
-            removed
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    let kept_old: Vec<&String> = old.iter().filter(|n| new.contains(n)).collect();
-    let kept_new: Vec<&String> = new.iter().filter(|n| old.contains(n)).collect();
-    if kept_old != kept_new {
-        parts.push("reordered".into());
-    }
-    if parts.is_empty() || edited {
-        parts.push("edited".into());
-    }
-    format!("{label}: {}", parts.join(", "))
-}
-
-pub fn groups(cur: &Current, req: &GroupsReq) -> Result<Draft, ApiError> {
-    let mut want = Vec::new();
-    for (i, g) in req.groups.iter().enumerate() {
-        let _: GroupShape = shape(g, &format!("groups[{i}]"))?;
-        let m = object(g, "group")?;
-        let name = m.get("name").and_then(J::as_str).unwrap_or("").to_string();
-        if name.trim().is_empty() {
-            return Err(ApiError::bad_request(format!("groups[{i}]: name is empty")));
-        }
-        if want.iter().any(|(n, _): &(String, _)| *n == name) {
-            return Err(ApiError::bad_request(format!(
-                "group {name:?} is listed twice"
-            )));
-        }
-        want.push((name, m));
-    }
-    let mut doc = parse_doc(cur)?;
-    let aot = doc::aot_mut(&mut doc, "groups").map_err(engine)?;
-    let old = names_of(aot, "name");
-    let mut used = vec![false; old.len()];
-    let plan: Vec<Option<usize>> = want
-        .iter()
-        .map(|(n, _)| {
-            let i = old.iter().enumerate().position(|(i, o)| o == n && !used[i]);
-            if let Some(i) = i {
-                used[i] = true;
-            }
-            i
-        })
-        .collect();
-    let before: Vec<J> = aot.iter().map(|t| doc::table_json(t)).collect();
-    let orphan = doc::rebuild_aot(aot, &plan);
-    let mut edited = false;
-    for (i, (_, m)) in want.iter().enumerate() {
-        let t = aot.get_mut(i).expect("rebuilt slot");
-        doc::patch_managed(t, m, GROUP_KEYS, Style::Inline).map_err(engine)?;
-        if let Some(Some(o)) = plan.get(i) {
-            edited |= before[*o] != doc::table_json(t);
-        }
-    }
-    let empty = aot.is_empty();
-    if empty {
-        doc.as_table_mut().remove("groups");
-        doc::keep_orphan_comment(&mut doc, orphan);
-    }
-    let new: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
-    Ok(draft(
-        &doc,
-        list_note("groups", &old, &new, edited),
-        GROUP_KEYS,
-    ))
 }
 
 pub fn container_override(cur: &Current, req: &OverrideReq) -> Result<Draft, ApiError> {
@@ -1596,8 +1615,10 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
 
 pub fn system(cur: &Current, req: &SystemReq) -> Result<Draft, ApiError> {
     let mut doc = parse_doc(cur)?;
-    let t = doc::table_mut(doc.as_table_mut(), "system", false).map_err(engine)?;
-    doc::set_json(t, "enabled", Some(&J::Bool(req.enabled)), Style::Inline).map_err(engine)?;
+    if !(req.enabled && back_to_default(doc.as_table_mut(), "system", "enabled")) {
+        let t = doc::table_mut(doc.as_table_mut(), "system", false).map_err(engine)?;
+        doc::set_json(t, "enabled", Some(&J::Bool(req.enabled)), Style::Inline).map_err(engine)?;
+    }
     let note = format!(
         "widgets: system tiles {}",
         if req.enabled { "on" } else { "off" }

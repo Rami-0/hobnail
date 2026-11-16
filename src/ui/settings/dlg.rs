@@ -31,9 +31,13 @@
 //!    write sends the file version the user started from. A dialog takes it
 //!    when it opens (the `data-hash` of the list around its trigger, or
 //!    `Spec::list`), a confirm or arrow click before anything is awaited.
-//!    Nothing adopts a newer hash for it, so a moved file is always a 409;
-//!    after a 409 an edit is only retargeted to an entry found again with all
-//!    its original values, otherwise it cannot be saved.
+//!    Nothing adopts a newer hash written elsewhere, so a moved file is
+//!    always a 409; after a 409 an edit is only retargeted to an entry found
+//!    again with all its original values, otherwise it cannot be saved. The
+//!    page's own save is not an outside change: every control based on the
+//!    file it started from moves to the file it wrote (`adopt` in
+//!    settings.js; not for a whole-file write, nor across custom.css).
+//!    An untouched edit dialog sends nothing ("No changes").
 //! 6. Show [`needs_js`] with `Values::Shown` (the values are on the page).
 //!
 //! A setting with several fields that stays on the page (General, Sample
@@ -298,10 +302,30 @@ pub fn switch(
     for_: Option<&str>,
     hidden: bool,
 ) -> Markup {
+    switch_in(prefix, name, label, hint, on, for_, hidden, false)
+}
+
+/// A switch of a form that stays on the page (General): disabled until the
+/// script is ready (`data-ready`), so without it nothing looks live.
+pub fn page_switch(prefix: &str, name: &str, label: &str, hint: &str, on: bool) -> Markup {
+    switch_in(prefix, name, label, hint, on, None, false, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn switch_in(
+    prefix: &str,
+    name: &str,
+    label: &str,
+    hint: &str,
+    on: bool,
+    for_: Option<&str>,
+    hidden: bool,
+    ready: bool,
+) -> Markup {
     let id = cid(prefix, name);
     html! {
         div.fld.tg data-for=[for_] hidden[hidden] {
-            input.sw type="checkbox" role="switch" id=(id) name=(name) checked[on] disabled[on_page(prefix)]
+            input.sw type="checkbox" role="switch" id=(id) name=(name) checked[on] disabled[on_page(prefix) || ready] data-ready=[ready.then_some("")]
                 aria-describedby={(id) "-e" @if !hint.is_empty() { " " (id) "-h" }};
             label for=(id) { (label) }
             p.fld-err id={(id) "-e"} hidden {}

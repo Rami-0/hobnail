@@ -198,7 +198,12 @@ pub struct Draft {
 
 /// Validate, guard, write, record and reload. The caller holds [`lock`] and
 /// has checked `base_hash` against `cur`. Returns the JSON for the client.
-pub fn commit(state: &AppState, cur: &Current, user: &str, d: Draft) -> Result<J, ApiError> {
+pub fn commit(state: &AppState, cur: &Current, user: &str, mut d: Draft) -> Result<J, ApiError> {
+    // A CRLF file stays CRLF (the editor and new lines bring LF). A restore
+    // writes the revision exactly as it was.
+    if d.kind != "config.restored" {
+        d.text = doc::keep_line_ends(&cur.text, d.text);
+    }
     if d.text == cur.text {
         return Ok(json!({
             "ok": true, "unchanged": true, "hash": cur.hash,

@@ -93,6 +93,8 @@ tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)
 :is(.dlg,.set-main) .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
 :is(.dlg,.set-main) .sw:checked{background:var(--accent);border-color:var(--accent)}
 :is(.dlg,.set-main) .sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
+/* not live (no script yet, locked, or saving): looks it */
+:is(.dlg,.set-main) input:is(.sw,[type=checkbox],[type=search]):disabled{opacity:.5;cursor:not-allowed}
 /* choice: a radio group drawn as a segmented control (few options, all visible) */
 :is(.dlg,.set-main) .choice{justify-self:start;display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
 :is(.dlg,.set-main) .choice label{position:relative;display:inline-flex;align-items:center;gap:6px;height:calc(var(--ctl-h) - 6px);padding:0 var(--s-3);border-radius:var(--r-xs);color:var(--text-2);font:500 var(--fs-sm)/1 var(--font);cursor:pointer;white-space:nowrap}

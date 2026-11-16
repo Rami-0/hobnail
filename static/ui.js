@@ -356,6 +356,8 @@
   // flight included; HB.unsaved() adds any open dialog and the page's own
   // checks (HB.keep(fn)): nothing reloads a page while it is true.
   HB.dirty = () => !!cur && (cur.busy || snapOf(cur.form) !== cur.snap);
+  // The open dialog's values are the ones it opened with (or last saved).
+  HB.pristine = () => !!cur && snapOf(cur.form) === cur.snap;
   const keeps = [];
   HB.keep = (fn) => keeps.push(fn);
   HB.unsaved = () => !!doc.querySelector("dialog.dlg[open]") || HB.dirty() || keeps.some((f) => f());

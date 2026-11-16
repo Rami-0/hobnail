@@ -31,6 +31,31 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     s
 }
 
+/// Every line break of `text` is CRLF (and there is at least one).
+pub fn is_crlf(text: &str) -> bool {
+    let lf = text.matches('\n').count();
+    lf > 0 && text.matches("\r\n").count() == lf
+}
+
+/// `new` with the line breaks of `old`: a file written with CRLF only stays
+/// so when its text comes back with LF (a browser's textarea gives LF) or
+/// gets new lines from an edit. Anything else is returned as it is.
+pub fn keep_line_ends(old: &str, new: String) -> String {
+    if !is_crlf(old) || is_crlf(&new) || !new.contains('\n') {
+        return new;
+    }
+    let mut out = String::with_capacity(new.len() + new.len() / 32);
+    let mut prev = '\0';
+    for c in new.chars() {
+        if c == '\n' && prev != '\r' {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = c;
+    }
+    out
+}
+
 /// 1-based line and column of a byte offset.
 pub fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let mut off = offset.min(text.len());

@@ -13,7 +13,14 @@ atomically (temp file + rename, same mode) → add a revision → record a
 
 - **Stale protection:** every form sends the hash it loaded; if the file changed
   on disk in between, the save is refused (HTTP 409) and the page offers to
-  reload. A hand edit is never overwritten.
+  reload. A hand edit is never overwritten. A save from the page itself is
+  not an outside change: the other controls on the page that showed the
+  file it started from move on to the file it wrote, so switching Recording
+  after saving the Sample interval just works (custom.css has its own hash
+  and never moves a config one).
+- **Line endings:** a config file or custom.css written with CRLF only stays
+  CRLF (the editors give LF; new lines get CRLF too). A restore writes the
+  revision exactly as it was.
 - **Invalid is never written:** HTTP 422 with the field (or line:column) to fix.
 - **Revisions:** newest 200, with author and note ("widgets: added mailpit",
   "raw edit", "restored #12"); hand edits show up as "on disk" revisions. Diff
@@ -50,12 +57,18 @@ atomically (temp file + rename, same mode) → add a revision → record a
 - An edit sends only the fields you changed; the server keeps every key the
   request leaves out (`null` removes one). A save therefore never removes
   something the form does not show, and Save with no change writes nothing
-  ("No changes").
+  ("No changes"). An untouched edit dialog sends nothing at all, so it says
+  "No changes" even when the file moved meanwhile ("Save and send test" on
+  an untouched channel only sends the test).
 - Channel names and widget ids stay editable. Renaming one that rules refer
   to asks first, naming the rules; saving again renames it and changes those
   rules to match (one revision).
 - A setting that is one control saves when changed: a rule's on / off in its
-  row, System tiles, the default theme, Recording on / off.
+  row, System tiles, the default theme, Recording on / off. Switching System
+  tiles or Recording back on removes the `enabled = false` that switching
+  it off wrote (and an emptied `[system]` / `[history]` table), so off then
+  on gives back the file as it was; a key or table with a comment stays and
+  is set to `true`.
 - Settings with several fields that stay on the page (General, Sample
   interval, custom.css, the raw editor, Change password) use the same submit
   path: every error at once on its field, a busy Save, only the changed
@@ -69,6 +82,8 @@ atomically (temp file + rename, same mode) → add a revision → record a
   and keep my input": an edit then goes on only if the same entry is found
   again with all its original values, otherwise it cannot be saved (Discard).
   Session expired: sign in in a new tab, then save again; the input stays.
+  A switch, an arrow or the bulk bar whose save meets an expired session is
+  put back and shows the same banner with "Sign in (new tab)".
 - **Without JavaScript** every page still shows its values, but nothing can be
   saved: writes need the `X-RH-CSRF` header, which a plain form cannot send.
   Every form is `method="post"` (so no value, a password least of all, can end
@@ -109,9 +124,15 @@ atomically (temp file + rename, same mode) → add a revision → record a
   (Name, Title, Icon, Collapsed, Hidden; one-click up / down), and every
   container with its override dialog (Display name, Group, Icon, URL,
   Description, Hide, Order, Card size; "Remove overrides…" asks and offers
-  Undo). Search and "Only with overrides" filter the list; the bulk bar (Set
-  group, Hide, Show, Remove overrides…) stays in view and each action is one
-  revision with Undo.
+  Undo). Search and "Only with overrides" filter the list (without
+  JavaScript they are shown disabled); the bulk bar (Set group, Hide, Show,
+  Remove overrides…) stays in view and each action is one revision with
+  Undo. A pattern is added the way the `exclude` array is written (one per
+  line with the same indentation when it is multi-line), deleting one takes
+  its own comments with it, and a pattern with a line break or other control
+  character is refused. `POST /api/settings/docker` and `/api/settings/groups`
+  take one entry at a time (`{base_hash, action, id?, item?, order?}`); the
+  older whole-list bodies are refused (400).
 - *Appearance:* Default theme (saves when changed) and `data/custom.css`
   (atomic, 64 KiB max, event recorded, no revision; live preview). When the
   saved custom.css sets a retired token name (`--ctl`, `--border-2`,

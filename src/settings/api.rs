@@ -127,26 +127,15 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         // ---- containers and groups
         (true, _, ["containers"]) => json(containers_get(state)?),
         // Both take one entry at a time (`{base_hash, action, id?, item?,
-        // order?}`, as every list), or the whole list as before.
-        (_, true, ["docker"]) if has_action(call) => {
+        // order?}`, as every list). The old whole-list bodies are gone: a
+        // whole list rewrote keys the caller never showed (`columns`).
+        (_, true, ["docker"]) => {
             let r: CollectionReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
                 ops::exclude_action(c, &r).and_then(ops::precheck)
             })?)
         }
-        (_, true, ["docker"]) => {
-            let r: ops::ExcludeReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::docker_exclude(c, &r).and_then(ops::precheck)
-            })?)
-        }
-        (_, true, ["groups"]) if has_action(call) => json(list_post(state, call, &ops::GROUPS)?),
-        (_, true, ["groups"]) => {
-            let r: ops::GroupsReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::groups(c, &r).and_then(ops::precheck)
-            })?)
-        }
+        (_, true, ["groups"]) => json(list_post(state, call, &ops::GROUPS)?),
         (_, true, ["containers", "override"]) => {
             let r: ops::OverrideReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
@@ -283,11 +272,6 @@ fn password_error(e: String) -> ApiError {
         Some(f) => ApiError::invalid(&msg, Some(f), None),
         None => ApiError::bad_request(msg),
     }
-}
-
-/// The body is a one-entry request (`{"action": …}`).
-fn has_action(call: &Call) -> bool {
-    serde_json::from_slice::<J>(&call.body).is_ok_and(|v| v.get("action").is_some())
 }
 
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
@@ -714,13 +698,15 @@ fn css_post(state: &AppState, user: &str, r: &ops::CssReq) -> Result<J, ApiError
     if cur["hash"].as_str() != Some(r.base_hash.trim()) {
         return Err(ApiError::stale());
     }
-    let hash = doc::sha256_hex(r.css.as_bytes());
+    // A CRLF file stays CRLF (the textarea gives LF).
+    let css = doc::keep_line_ends(cur["css"].as_str().unwrap_or(""), r.css.clone());
+    let hash = doc::sha256_hex(css.as_bytes());
     // Saved or not, the retired token names it sets (shown on the form).
-    let warnings = ops::css_token_warnings(&r.css);
-    if cur["css"].as_str() == Some(r.css.as_str()) {
+    let warnings = ops::css_token_warnings(&css);
+    if cur["css"].as_str() == Some(css.as_str()) {
         return Ok(json!({"ok": true, "unchanged": true, "hash": hash, "warnings": warnings}));
     }
-    doc::write_atomic(&css_path(state), r.css.as_bytes(), 0o644).map_err(ApiError::internal)?;
+    doc::write_atomic(&css_path(state), css.as_bytes(), 0o644).map_err(ApiError::internal)?;
     let now = crate::util::unix_now() as i64;
     state
         .db

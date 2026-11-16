@@ -24,7 +24,11 @@
   refresh; widgets are fetched only while someone is viewing (or an alert rule
   uses them).
 - Header secrets (`headers_env`, `headers_file`) are set in the file on the
-  host: they are bound to their URL so the app cannot redirect them.
+  host: they are bound to their URL so the app cannot redirect them. If the
+  destination echoes request headers back (TRACE, a debug or error page),
+  their values are replaced with `<redacted>` in what the widget shows, stores
+  and returns (`_text`, extracted values, the raw JSON, errors), also in the
+  Fetch now preview.
 
 ## Add a widget
 

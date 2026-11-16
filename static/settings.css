@@ -220,6 +220,15 @@ textarea.code{font:12.5px/20px var(--mono);white-space:pre;tab-size:2;min-height
 .d-l.d-del .d-op{color:var(--bad-fg)}
 .diff-sum .d-add{color:var(--ok-fg);font:600 12.5px var(--mono)}
 .diff-sum .d-del{color:var(--bad-fg);font:600 12.5px var(--mono)}
+/* phones: the revision sheet takes its full height, the text fills it */
+@media (max-width:699px){
+ #dlg-rev[open]{height:94vh;height:94dvh}
+ #dlg-rev .dlg-b{display:flex;flex-direction:column}
+ #dlg-rev-b{flex:1;display:flex;flex-direction:column;gap:var(--s-3);min-height:0}
+ #dlg-rev-b>.diff,#dlg-rev-b>.code-view{flex:1;min-height:0;max-height:none}
+}
+/* a value that must stay on one line (an icon reference): cut with "…", the whole in its title */
+code.trunc{display:inline-block;min-width:4ch;max-width:18ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 
 /* appearance */
 .css-size{margin-left:auto;font:12px var(--mono)}

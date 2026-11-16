@@ -452,7 +452,7 @@ fn ov_row(r: &Row, standalone: &str) -> Markup {
                     None => @if r.known.is_some() { span.muted { (project.unwrap_or(standalone)) } } @else { span.muted { "—" } },
                 }
             }
-            td data-l="Icon" { @match text("icon") { Some(s) => code.wrap { (s) }, None => span.muted { "—" } } }
+            td data-l="Icon" { @match text("icon") { Some(s) => code.trunc title=(s) { (s) }, None => span.muted { "—" } } }
             td.flags data-l="Flags" {
                 @match get("hide").and_then(J::as_bool) {
                     Some(true) => span.pill.warn { "hidden" },
@@ -576,9 +576,9 @@ pub fn body(ctx: &Ctx) -> Markup {
                 div.search-in {
                     (ic("search"))
                     label.sr for="ov-q" { "Search containers" }
-                    input #ov-q type="search" placeholder="Search name, project, image" autocomplete="off" spellcheck="false";
+                    input #ov-q type="search" placeholder="Search name, project, image" autocomplete="off" spellcheck="false" disabled data-ready;
                 }
-                label.cb { input #ov-only type="checkbox"; span { "Only with overrides" } }
+                label.cb { input #ov-only type="checkbox" disabled data-ready; span { "Only with overrides" } }
             }
             div.bulk #ov-bulk hidden role="region" aria-label="Bulk edit" {
                 span.bulk-n #ov-bulk-n role="status" {}

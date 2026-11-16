@@ -409,36 +409,6 @@ fn bookmarks_add_edit_reorder_delete() {
 }
 
 #[test]
-fn groups_replace_and_reorder() {
-    let req: ops::GroupsReq = serde_json::from_value(json!({"base_hash": "x", "groups": [
-        {"name": "beszel", "title": "Monitoring", "collapsed": true},
-        {"name": "dev", "columns": 3},
-    ]}))
-    .unwrap();
-    let d = ops::groups(&cur(FIXTURE), &req).unwrap();
-    assert_eq!(changes(FIXTURE, &d.text).1, 0);
-    let c = parse_ok(&d.text);
-    assert_eq!(c.groups.len(), 2);
-    assert_eq!(c.groups[0].title.as_deref(), Some("Monitoring"));
-    assert_eq!(d.note, "groups: added beszel, dev");
-    let req: ops::GroupsReq = serde_json::from_value(json!({"base_hash": "x", "groups": [
-        {"name": "dev", "columns": 3},
-        {"name": "beszel", "title": "Monitoring", "collapsed": true},
-    ]}))
-    .unwrap();
-    let d2 = ops::groups(&cur(&d.text), &req).unwrap();
-    assert_eq!(parse_ok(&d2.text).groups[0].name, "dev");
-    assert_eq!(d2.note, "groups: reordered");
-    let req: ops::GroupsReq =
-        serde_json::from_value(json!({"base_hash": "x", "groups": []})).unwrap();
-    assert_eq!(ops::groups(&cur(&d2.text), &req).unwrap().text, FIXTURE);
-    let dup: ops::GroupsReq =
-        serde_json::from_value(json!({"base_hash": "x", "groups": [{"name": "a"}, {"name": "a"}]}))
-            .unwrap();
-    assert!(ops::groups(&cur(FIXTURE), &dup).is_err());
-}
-
-#[test]
 fn container_overrides_quote_names_and_bulk_edit() {
     let req: ops::OverrideReq = serde_json::from_value(json!({
         "base_hash": "x", "names": ["web.1", "my-app_2", "dozzle"],
@@ -492,19 +462,7 @@ fn container_overrides_quote_names_and_bulk_edit() {
 }
 
 #[test]
-fn docker_exclude_and_system_toggle() {
-    let req: ops::ExcludeReq =
-        serde_json::from_value(json!({"base_hash": "x", "exclude": ["*-e2e-*", "buildx_*"]}))
-            .unwrap();
-    let d = ops::docker_exclude(&cur(FIXTURE), &req).unwrap();
-    assert_eq!(parse_ok(&d.text).docker.exclude, ["*-e2e-*", "buildx_*"]);
-    let req: ops::ExcludeReq =
-        serde_json::from_value(json!({"base_hash": "x", "exclude": []})).unwrap();
-    assert_eq!(
-        ops::docker_exclude(&cur(&d.text), &req).unwrap().text,
-        FIXTURE
-    );
-
+fn system_toggle() {
     let req: ops::SystemReq =
         serde_json::from_value(json!({"base_hash": "x", "enabled": false})).unwrap();
     let d = ops::system(&cur(FIXTURE), &req).unwrap();
@@ -2374,6 +2332,63 @@ fn exclude_patterns_one_at_a_time() {
     );
 }
 
+#[test]
+fn exclude_patterns_follow_a_multi_line_array() {
+    let text = "[docker]\nexclude = [\n  \"ci-*\",   # ci\n  # dev boxes\n  \"dev-*\",  # dev\n  \"tmp\",    # tmp\n]\nstandalone_group = \"x\"\n";
+    let req = |action: &str, id: Option<J>, p: Option<&str>| {
+        list_req(action, id, p.map(|p| json!({"pattern": p})), None)
+    };
+    let del = |t: &str, i: u64| {
+        ops::exclude_action(&cur(t), &req("delete", Some(json!(i)), None))
+            .unwrap()
+            .text
+    };
+    // The first goes with its own comment; the bracket line stays clean.
+    assert_eq!(
+        del(text, 0),
+        "[docker]\nexclude = [\n  # dev boxes\n  \"dev-*\",  # dev\n  \"tmp\",    # tmp\n]\nstandalone_group = \"x\"\n"
+    );
+    // A middle one goes with the comment above it and the one after it.
+    assert_eq!(
+        del(text, 1),
+        "[docker]\nexclude = [\n  \"ci-*\",   # ci\n  \"tmp\",    # tmp\n]\nstandalone_group = \"x\"\n"
+    );
+    // The last one: the one before keeps its comment.
+    assert_eq!(
+        del(text, 2),
+        "[docker]\nexclude = [\n  \"ci-*\",   # ci\n  # dev boxes\n  \"dev-*\",  # dev\n]\nstandalone_group = \"x\"\n"
+    );
+    // Add: on a line of its own, indented as the others, after the last
+    // value's comment.
+    let d = ops::exclude_action(&cur(text), &req("add", None, Some("new-*"))).unwrap();
+    assert_eq!(
+        d.text,
+        "[docker]\nexclude = [\n  \"ci-*\",   # ci\n  # dev boxes\n  \"dev-*\",  # dev\n  \"tmp\",    # tmp\n  \"new-*\",\n]\nstandalone_group = \"x\"\n"
+    );
+    assert_eq!(
+        parse_ok(&d.text).docker.exclude,
+        ["ci-*", "dev-*", "tmp", "new-*"]
+    );
+    // Delete what was added: the file as it was.
+    assert_eq!(del(&d.text, 3), text);
+    // No trailing comma, no comments.
+    let plain = "[docker]\nexclude = [\n    \"a\",\n    \"b\"\n]\n";
+    let d = ops::exclude_action(&cur(plain), &req("add", None, Some("c"))).unwrap();
+    assert_eq!(
+        d.text,
+        "[docker]\nexclude = [\n    \"a\",\n    \"b\",\n    \"c\"\n]\n"
+    );
+    assert_eq!(del(&d.text, 2), plain);
+    assert_eq!(del(plain, 0), "[docker]\nexclude = [\n    \"b\"\n]\n");
+    // A pattern with a control character is refused on its field.
+    for p in ["a\nb", "a\tb", "a\u{7f}"] {
+        let e = ops::exclude_action(&cur(text), &req("add", None, Some(p))).unwrap_err();
+        assert_eq!(e.body["field"], "pattern", "{p:?}");
+        let e = ops::exclude_action(&cur(text), &req("edit", Some(json!(0)), Some(p))).unwrap_err();
+        assert_eq!(e.body["field"], "pattern", "{p:?}");
+    }
+}
+
 #[tokio::test]
 async fn docker_and_groups_routes_take_one_entry_or_the_whole_list() {
     let cfg = "[docker]\nexclude = [\"a\"]\n\n[[groups]]\nname = \"g\"\ncolumns = 2\n";
@@ -2390,15 +2405,19 @@ async fn docker_and_groups_routes_take_one_entry_or_the_whole_list() {
     let (s, v) = post(&st, "groups", json!({"base_hash": hash(&now), "action": "edit", "id": "g", "item": {"name": "g", "title": "G"}})).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert!(file(&dir).contains("columns = 2") && file(&dir).contains("title = \"G\""));
-    // The old whole-list shapes still work.
+    // The old whole-list shapes are gone: refused, nothing written.
     let now = file(&dir);
-    let (s, _) = post(
-        &st,
-        "docker",
-        json!({"base_hash": hash(&now), "exclude": ["a"]}),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK);
+    for (path, body) in [
+        ("docker", json!({"base_hash": hash(&now), "exclude": ["a"]})),
+        (
+            "groups",
+            json!({"base_hash": hash(&now), "groups": [{"name": "g"}]}),
+        ),
+    ] {
+        let (s, _) = post(&st, path, body).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(file(&dir), now, "{path}");
+    }
     // A stale base is a 409 for the one-entry shape too.
     let (s, _) = post(
         &st,
@@ -2511,4 +2530,95 @@ async fn saving_custom_css_reports_old_token_names() {
         (Some(true), Some(1))
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn a_crlf_file_stays_crlf() {
+    let crlf = |s: &str| s.replace('\n', "\r\n");
+    let text = crlf("# mine\n[page]\ntitle = \"Lab\"\n\n[history]\nsample_interval = \"30s\"\n");
+    let (dir, st) = state_with(Some(&text));
+    // The raw editor sends LF (a browser's textarea does): one line changed.
+    let edited = text.replace("\r\n", "\n").replace("Lab", "Home");
+    let (s, v) = post(
+        &st,
+        "config",
+        json!({"base_hash": hash(&text), "text": edited}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let now = file(&dir);
+    assert_eq!(now, text.replace("Lab", "Home"));
+    assert_eq!(v["hash"], hash(&now));
+    // The same text again, LF: nothing to save.
+    let (s, v) = post(
+        &st,
+        "config",
+        json!({"base_hash": hash(&now), "text": now.replace("\r\n", "\n")}),
+    )
+    .await;
+    assert_eq!((s, v["unchanged"].clone()), (StatusCode::OK, J::Bool(true)));
+    // A form edit that adds lines: they are CRLF too.
+    let (s, v) = post(
+        &st,
+        "general",
+        json!({"base_hash": hash(&now), "page": {"greeting": "Hi"}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let now = file(&dir);
+    assert!(doc::is_crlf(&now), "{now:?}");
+    assert!(now.contains("greeting = \"Hi\"\r\n"));
+    // custom.css too.
+    let css = crlf(":root {\n  --radius: 8px;\n}\n");
+    std::fs::write(dir.join("custom.css"), &css).unwrap();
+    let (_, g) = get(&st, "appearance").await;
+    let (s, v) = post(
+        &st,
+        "appearance",
+        json!({"base_hash": g["hash"], "css": css.replace("\r\n", "\n").replace("8px", "4px")}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let saved = std::fs::read_to_string(dir.join("custom.css")).unwrap();
+    assert_eq!(saved, css.replace("8px", "4px"));
+    assert_eq!(v["hash"], hash(&saved));
+    // An LF file is left alone.
+    assert_eq!(doc::keep_line_ends("a\nb\n", "a\nc\n".into()), "a\nc\n");
+    assert_eq!(
+        doc::keep_line_ends("a\r\nb\n", "a\nc\n".into()),
+        "a\nc\n",
+        "mixed: as sent"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn switches_off_then_on_give_back_the_file() {
+    let sys = |t: &str, on: bool| {
+        let r: ops::SystemReq =
+            serde_json::from_value(json!({"base_hash": "x", "enabled": on})).unwrap();
+        ops::system(&cur(t), &r).unwrap().text
+    };
+    let rec = |t: &str, on: bool| {
+        let r: ops::PatchReq =
+            serde_json::from_value(json!({"base_hash": "x", "history": {"enabled": on}})).unwrap();
+        ops::history(&cur(t), &r).unwrap().text
+    };
+    let with_history = "[page]\ntitle = \"x\"\n\n[history]\nsample_interval = \"30s\"\n";
+    for t in [FIXTURE, with_history, "[page]\ntitle = \"x\"\n"] {
+        let off = sys(t, false);
+        assert!(!parse_ok(&off).system.enabled);
+        assert_eq!(sys(&off, true), t, "system off then on");
+        let off = rec(t, false);
+        assert!(off.contains("enabled = false"), "{off}");
+        assert_eq!(rec(&off, true), t, "recording off then on");
+    }
+    // Written by hand with a comment: kept, switched on in place.
+    let t = "[system]\nenabled = false # for now\n";
+    assert_eq!(sys(t, true), "[system]\nenabled = true # for now\n");
+    let t = "[history]\n# paused\nenabled = false\n";
+    assert_eq!(rec(t, true), "[history]\n# paused\nenabled = true\n");
+    // Already on: nothing changes.
+    let t = "[system]\nenabled = true\n";
+    assert_eq!(sys(t, true), t);
 }

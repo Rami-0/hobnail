@@ -213,21 +213,44 @@
   // takes it before anything is awaited, and that base is sent as base_hash.
   // Nothing adopts a newer hash on its behalf, so the server answers 409
   // whenever the file moved, and an id that is a list position can never
-  // hit another entry. The one hash a dialog may move to without asking is
-  // the one its own save wrote ("Save and send test" stays open on what it
-  // saved: HB.edited). S.hash only says which version the list on screen
-  // shows.
+  // hit another entry. The one hash a control may move to without asking
+  // is one written by a save from this page: the user's own write is not an
+  // outside change. So after a save every control whose base was the file
+  // that save started from (its base_hash) moves to the file it wrote: the
+  // `data-hash` of lists, switches and boxes, page forms' base and an open
+  // dialog's (`adopt`; "Save and send test" stays open on what it saved:
+  // HB.edited). A control already based on an older file stays there (its
+  // save still gets the 409), and a write that replaces the whole file (the
+  // raw editor, a restore or an Undo) moves nothing else. custom.css is its
+  // own file with its own hash: it never moves a config base, nor S.hash,
+  // which only says which config version the page shows.
   //
-  // A write of a list: counted in S.saving like save() does, so a config
-  // change event that arrives meanwhile waits for the answer and then finds
-  // the new hash instead of reloading the list.
+  // A write: counted in S.saving like save() does, so a config change event
+  // that arrives meanwhile waits for the answer and then finds the new hash
+  // instead of reloading the list. A 401 that the fresh token did not cure
+  // shows the "session expired" banner with its Sign in action (every save
+  // path; the caller puts its control back).
+  const CSS_PATH = "appearance";
+  const WHOLE = (path) => path === "config" || path.startsWith("revision/");
   async function post(path, body) {
     S.saving++;
     let r;
     try { r = await call("POST", path, body); } finally { S.saving--; }
-    if (r.status === 200 && r.data && r.data.hash) S.hash = r.data.hash;
+    if (r.status === 200 && r.data && r.data.hash && path !== CSS_PATH) {
+      if (!WHOLE(path)) adopt(body.base_hash, r.data.hash);
+      S.hash = r.data.hash;
+    }
+    if (r.status === 401) banner("expired");
     if (S.recheck && !S.saving) { S.recheck = false; setTimeout(checkChanged, 0); }
     return r;
+  }
+  // Every base on `from` (the file before this page's own save) moves to `to`.
+  function adopt(from, to) {
+    if (!from || !to || from === to) return;
+    $$("[data-hash]").forEach((x) => { if (x.dataset.hash === from) x.dataset.hash = to; });
+    $$("form[data-hb]").forEach((f) => { if (f._base === from) f._base = to; });
+    const c = HB.current();
+    if (c && c.base === from) c.base = to;
   }
   const itemOfEl = (x) => { try { return JSON.parse((x && x.dataset && x.dataset.item) || "{}"); } catch { return {}; } };
   const rowItem = (tr) => itemOfEl(tr.querySelector("[data-item]"));
@@ -256,6 +279,16 @@
       const c = HB.current();
       const edit = ctx.mode === "edit" && ctx.key;
       const was = openedWith(c);
+      // Nothing changed since the dialog opened (or since its last save):
+      // nothing is sent, so a moved file is no conflict either. "Save and
+      // send test" still sends the test.
+      if (edit && HB.pristine()) {
+        if (ctx.action !== "save" && o.test) {
+          const t = await o.test(v, c.key, {});
+          return { ok: true, stay: true, note: [t[0], `No changes to save. ${t[1]}`] };
+        }
+        return { ok: true, toast: "No changes", focus: `[data-dlg][data-key="${CSS.escape(c.key)}"]` };
+      }
       const stop = edit && o.ask && o.ask(v, c, was);
       if (stop) return stop;
       const before = $$("tr[data-key]", $(o.list)).length;
@@ -554,7 +587,12 @@
     it.enabled = v.enabled === false ? false : null;
     // A new rule that fires on the default conditions leaves `on` out.
     if (!was && it.on && it.on.length === DEFAULT_ON.length && DEFAULT_ON.every((x) => it.on.includes(x))) it.on = null;
-    return onlyChanged(it, v, was, ["name", "type"], ["on", "channels"]);
+    // A condition of another type is not shown: like a field that is not
+    // there, it is sent (as null) only when the rule had a value for it.
+    const shown = { ...v };
+    for (const k of Object.values(RULE_FOR).flat()) if (!cond.includes(k)) delete shown[k];
+    if (v.metric !== "disk") delete shown.disk;
+    return onlyChanged(it, shown, was, ["name", "type"], ["on", "channels"]);
   }
   const RULES = {
     list: "ru-list", also: ["ch-list"], add: "ru-add", dlg: "dlg-rule", menu: "m-ru", path: "alerts", kind: "rule", noun: "rule",
@@ -873,7 +911,8 @@
         discard: () => discardForm(form, o),
       });
       if (!r.ok) {
-        if (res.status === 401) banner("expired");
+        // custom.css: the note names its own file.
+        if (o.file && r.note) r.note[1] = r.note[1].replace("the config file", o.file);
         return r;
       }
       const d = r.data;
@@ -882,7 +921,7 @@
       $$("input:not([type=checkbox]):not([type=radio]),textarea", form).forEach((c) => { c._was = c.value; c.defaultValue = c.value; });
       $$("input[type=checkbox]", form).forEach((c) => { c.defaultChecked = c.checked; });
       if (o.done) await o.done(d, now, changed);
-      $$('#set-banners [data-b="changed"]').forEach((b) => b.remove());
+      if (!o.file) $$('#set-banners [data-b="changed"]').forEach((b) => b.remove());
       const warn = (d.warnings || []).join(" ");
       return { ok: true, toast: d.unchanged ? "No changes" : (o.saved ? o.saved(d, changed) : `Saved${revNo(d)}`), note: warn && !o.ownWarnings ? ["warn", warn] : null, refocus };
     };
@@ -1189,7 +1228,8 @@
       $("css-live").addEventListener("change", (e) => preview(e.target.checked ? ta.value : null));
       tabIndent(ta);
       pageForm(fc, {
-        path: "appearance",
+        path: CSS_PATH,
+        file: "custom.css",
         // custom.css is its own file: its base is its own hash (data-hash).
         body: (now) => ({ css: now.css }),
         check: (now) => (new Blob([now.css]).size > max ? { css: `custom.css is limited to ${max / 1024} KiB.` } : null),

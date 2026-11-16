@@ -84,8 +84,8 @@ pub fn body(ctx: &Ctx) -> Markup {
                         (dlg::field(P, &title, &v("title"), false))
                         (dlg::field(P, &greeting, &v("greeting"), false))
                         (dlg::field(P, &search, &v("search_url"), false))
-                        (dlg::switch(P, "show_stopped", "Show stopped containers", "Off: only running containers appear on the overview.", on("show_stopped", p.show_stopped), None, false))
-                        (dlg::switch(P, "show_stats", "Show live CPU and memory", "On the overview and in the containers table.", on("show_stats", p.show_stats), None, false))
+                        (dlg::page_switch(P, "show_stopped", "Show stopped containers", "Off: only running containers appear on the overview.", on("show_stopped", p.show_stopped)))
+                        (dlg::page_switch(P, "show_stats", "Show live CPU and memory", "On the overview and in the containers table.", on("show_stats", p.show_stats)))
                     }
                     (dlg::needs_js(dlg::Values::Shown))
                     (foot("Save"))

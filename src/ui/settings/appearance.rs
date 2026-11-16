@@ -82,7 +82,7 @@ pub fn body(ctx: &Ctx) -> Markup {
                     p.muted.sf-lead { "Saved as " code { "custom.css" } " in the data directory and loaded after the app's styles on every page." }
                     div.note.dlg-note hidden tabindex="-1" {}
                     (css_warnings(text))
-                    label.cb.css-live { input #css-live type="checkbox" checked; span { "Live preview on this page" } }
+                    label.cb.css-live { input #css-live type="checkbox" checked disabled data-ready; span { "Live preview on this page" } }
                     div.fld.wide data-hb-body {
                         label for="css-text" { "custom.css" }
                         textarea.in.mono.code #css-text name="css" rows="16" spellcheck="false" wrap="off"

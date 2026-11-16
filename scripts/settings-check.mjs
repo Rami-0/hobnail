@@ -1104,7 +1104,146 @@ try {
   const pm = await ev("(() => { const r = document.getElementById('dlg-override').getBoundingClientRect(), s = document.querySelector('#dlg-override [type=submit]').getBoundingClientRect(); return { w: Math.round(r.width), bottom: Math.round(r.bottom), vh: innerHeight, save: Math.round(s.bottom), pw: document.documentElement.scrollWidth }; })()");
   check(pm.w === 390 && pm.bottom === pm.vh && pm.save <= pm.vh && pm.pw === 390, "phone: the override dialog is a bottom sheet with Save in view", pm);
   await key("Escape"); await sleep(200);
+  // The revision viewer on a phone: the sheet takes its full height.
+  await load("/settings/config", 390, true);
+  await click("#rev-list tr[data-rev]:nth-child(2) [data-rev-act=diff]"); await until("!!document.querySelector('#dlg-rev-b .diff, #dlg-rev-b p')"); await sleep(300);
+  const rv = await ev("(() => { const r = document.getElementById('dlg-rev').getBoundingClientRect(), d = document.querySelector('#dlg-rev-b .diff'); return { h: Math.round(r.height), vh: innerHeight, diff: d ? Math.round(d.getBoundingClientRect().height) : 0 }; })()");
+  check(rv.h >= Math.floor(rv.vh * 0.93) && (!rv.diff || rv.diff > rv.vh * 0.5), "phone: the revision Diff sheet uses its full height", rv);
+  await key("Escape"); await sleep(200);
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+
+  // ====================================================================
+  // Wave 2c review fixes.
+  // (1) A save from the page moves every other control that was based on
+  //     the file it started from: control A saves, then control B on the
+  //     same tab saves too (no 409, no "changed" note).
+  // (2) custom.css has its own hash: its save never reloads the page.
+  // (3) A 401 on a switch, the bulk bar or an arrow: the expired banner
+  //     with its Sign in action, the control put back, nothing written.
+  // (4) An untouched edit dialog sends nothing, also on a moved file.
+  // ====================================================================
+  const watchToasts = () => ev("(() => { window.__all = []; new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.classList && n.classList.contains('toast')) window.__all.push(n.textContent.trim()); }))).observe(document.body, { childList: true, subtree: true }); })()");
+  const allToasts = () => ev("window.__all || []");
+  const conflict = async () => (await allToasts()).filter((x) => /^Not (changed|switched|moved|deleted|removed|saved)|changed since|^Reloaded/.test(x));
+  const banners = () => ev("[...document.querySelectorAll('#set-banners [data-b]')].map((b) => b.dataset.b)");
+  const setTheme = (v) => ev(`(() => { const s = document.getElementById('th-theme'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  // History: Sample interval, then Recording, and back: no 409, and the
+  // file is back byte for byte (Recording on again removes what off wrote).
+  await load("/settings/history"); await watchToasts();
+  const rec0 = await ev("document.getElementById('hi-enabled').checked");
+  if (!rec0) { await click("#hi-enabled"); await sleep(700); } // on: no `enabled` key in the file
+  const hh0 = await fileHash(), iv = await ev("document.getElementById('hi-sample-interval').value");
+  await ev("document.getElementById('hi-sample-interval').select()"); await typeText(iv === "25s" ? "30s" : "25s"); await key("Enter"); await sleep(600);
+  await click("#hi-enabled"); await sleep(700);
+  check(!(await conflict()).length && (await allToasts()).some((x) => /^Recording off/.test(x)) && !(await ev("document.getElementById('hi-enabled').checked")), "own save: Sample interval saved, then Recording switches (no 409)", await allToasts());
+  await click("#hi-enabled"); await sleep(700);
+  await ev("document.getElementById('hi-sample-interval').select()"); await typeText(iv); await key("Enter"); await sleep(700);
+  check(!(await conflict()).length && await ev("document.getElementById('hi-enabled').checked"), "own save: Recording back on, then the interval back (no 409)", await allToasts());
+  check((await fileHash()) === hh0, "own save: Recording off then on and the interval back: the file is as it was, byte for byte", (await fileText()).slice(-200));
+  if (!rec0) { await click("#hi-enabled"); await sleep(700); }
+  // Appearance: theme, then custom.css twice, then theme: no 409, and the
+  // custom.css saves never say "Reloaded" nor raise a banner.
+  await load("/settings/appearance"); await watchToasts();
+  const th0 = await ev("document.getElementById('th-theme').value");
+  await setTheme(th0 === "dark" ? "light" : "dark"); await sleep(700);
+  const cssEdit = async (s) => { await click("#css-text"); await ev("(() => { const t = document.getElementById('css-text'); t.setSelectionRange(t.value.length, t.value.length); })()"); await typeText(s); await click("#f-css [type=submit]"); await sleep(700); };
+  await cssEdit("\n/* ui-check 2c a */");
+  await cssEdit("\n/* ui-check 2c b */");
+  await setTheme(th0); await sleep(1500); // the reload event of each save has come by now
+  const at = await allToasts();
+  check(at.filter((x) => /^Saved custom\.css/.test(x)).length === 2 && at.filter((x) => /^Default theme/.test(x)).length === 2 && !(await conflict()).length, "own save: theme, custom.css twice, theme again: every save goes through", at);
+  check(!(await banners()).length && (await api("GET", "appearance")).data.css.endsWith("/* ui-check 2c b */"), "custom.css: its save is not an outside change (no Reloaded, no banner)", { at, b: await banners() });
+  // custom.css changed elsewhere: the note names custom.css.
+  const cn = (await api("GET", "appearance")).data;
+  await api("POST", "appearance", { base_hash: cn.hash, css: cn.css + "/* outside 2c */" });
+  await cssEdit("\n/* ui-check 2c c */"); await until("!document.querySelector('#f-css .dlg-note').hidden");
+  check(/^Not saved: custom\.css changed on disk/.test(await noteOf("#f-css")), "custom.css: its 409 note names custom.css", await noteOf("#f-css"));
+  await click("#f-css .dlg-note .btn:not(.primary)"); await sleep(500);
+  // General: two saves in a row.
+  await load("/settings/general"); await watchToasts();
+  await clear("#gen-greeting"); await typeText("ui-check 2c one"); await key("Enter"); await sleep(600);
+  await clear("#gen-greeting"); await typeText("ui-check 2c two"); await key("Enter"); await sleep(600);
+  check(!(await conflict()).length && (await fileText()).includes('greeting = "ui-check 2c two"'), "own save: General twice in a row (no 409)", await allToasts());
+  // Widgets: System tiles, then a widget edit, then System tiles again.
+  await load("/settings/widgets"); await watchToasts();
+  const wk = await ev("(() => { const r = [...document.querySelectorAll('#w-list tr[data-key]')].find((r) => r.querySelector('[data-item]')); return r ? r.dataset.key : null; })()");
+  await click("#sys-tiles"); await sleep(700);
+  await openRow("w-list", wk); await clear("#wf-title"); await typeText("ui-check 2c"); await key("Enter");
+  await until("!document.getElementById('dlg-widget').open"); await sleep(400);
+  await click("#sys-tiles"); await sleep(700);
+  check(!(await conflict()).length && (await allToasts()).filter((x) => /^System tiles/.test(x)).length === 2 && (await fileText()).includes('title = "ui-check 2c"'), "own save: System tiles, a widget edit, System tiles again (no 409)", await allToasts());
+  // Notifications: a rule switch, a channel edit, the switch again.
+  await load("/settings/notifications"); await watchToasts();
+  const rk = await ev("document.querySelector('#ru-list tr[data-key] [data-toggle]').closest('tr').dataset.key");
+  await click(`#ru-list tr[data-key="${rk}"] [data-toggle]`); await sleep(700);
+  const ck = await ev("document.querySelector('#ch-list tr[data-key]').dataset.key");
+  await openRow("ch-list", ck); await click("#dlg-channel details summary"); await clear("#ch-timeout"); await typeText("7s"); await key("Enter");
+  await until("!document.getElementById('dlg-channel').open"); await sleep(400);
+  await click(`#ru-list tr[data-key="${rk}"] [data-toggle]`); await sleep(700);
+  check(!(await conflict()).length && (await allToasts()).filter((x) => /switched (on|off)/.test(x)).length === 2 && (await allToasts()).some((x) => /^Saved “/.test(x)), "own save: a rule switch, a channel edit, the switch again (no 409)", await allToasts());
+  // (4) Untouched dialogs on a moved file: nothing is sent, "No changes".
+  const countPosts = () => ev("(() => { const f = window.fetch; window.__posts = []; window.fetch = (u, o) => { if (o && o.method === 'POST' && !/\\/(test|validate|preview)$/.test(String(u))) window.__posts.push(String(u)); return f(u, o); }; })()");
+  await countPosts();
+  for (const [list, dlg] of [["ch-list", "dlg-channel"], ["ru-list", "dlg-rule"]]) {
+    await clearToasts(); await watchToasts();
+    const k = await ev(`document.querySelector('#${list} tr[data-key]').dataset.key`);
+    await openRow(list, k); await outsideTouch(); await key("Enter");
+    await until(`!document.getElementById('${dlg}').open`); await sleep(300);
+    check((await allToasts()).includes("No changes") && !(await ev("window.__posts.length")), `untouched ${dlg} on a moved file: No changes, nothing sent`, { t: await allToasts(), posts: await ev("window.__posts") });
+  }
+  // "Save and send test" on an untouched channel: the test still runs.
+  await openRow("ch-list", ck); await outsideTouch();
+  await click("#dlg-channel [data-submit]"); await until("!document.querySelector('#dlg-channel .dlg-note').hidden");
+  // (The first channel may be the mock's failing one: the test ran either way.)
+  check(/^No changes to save\. (Test sent|The test to .* failed)/.test(await noteOf("#dlg-channel")) && !(await ev("window.__posts.length")), "untouched channel, Save and send test: no save, the test is sent", await noteOf("#dlg-channel"));
+  await key("Escape"); await sleep(200);
+  for (const [path, list, dlg] of [["/settings/bookmarks", "bm-list", "dlg-bookmark"], ["/settings/widgets", "w-list", "dlg-widget"], ["/settings/containers", "grp-list", "dlg-group"], ["/settings/containers", "ex-list", "dlg-exclude"]]) {
+    await load(path); await watchToasts(); await countPosts();
+    const k = await ev(`(() => { const a = document.querySelector('#${list} tr[data-key] [data-dlg]'); return a ? a.dataset.key : null; })()`);
+    if (!k) { check(false, `untouched ${dlg}: a row to open`); continue; }
+    await openRow(list, k); await outsideTouch(); await key("Enter");
+    await until(`!document.getElementById('${dlg}').open`); await sleep(300);
+    check((await allToasts()).includes("No changes") && !(await ev("window.__posts.length")), `untouched ${dlg} on a moved file: No changes, nothing sent`, { t: await allToasts(), posts: await ev("window.__posts") });
+  }
+  // Containers: a pattern, the bulk bar twice, a group, its arrow, deletes.
+  await load("/settings/containers"); await watchToasts();
+  await click("#ex-add"); await typeText("ui-check-2c-*"); await key("Enter"); await until("!document.getElementById('dlg-exclude').open"); await sleep(400);
+  const fr = await ev("(() => { const r = [...document.querySelectorAll('#ov-list tr[data-key]')].find((r) => !r.dataset.ov); return r ? r.dataset.key : null; })()");
+  await click(`#ov-list tr[data-key="${fr}"] [data-sel]`);
+  await click("[data-bulk=hide]"); await sleep(700);
+  await click("[data-bulk=show]"); await sleep(700);
+  await click("#grp-add"); await typeText("ui-check-2c-g"); await key("Enter"); await until("!document.getElementById('dlg-group').open"); await sleep(400);
+  await click('#grp-list tr[data-key="group:ui-check-2c-g"] [data-move=up]'); await sleep(700);
+  await menuDelete("grp-list", "group:ui-check-2c-g", "m-grp"); await click("#dlg-confirm [data-ok]"); await sleep(700);
+  const ek = await rowKey("ex-list", "ui-check-2c-*");
+  await menuDelete("ex-list", ek, "m-ex"); await click("#dlg-confirm [data-ok]"); await sleep(700);
+  const ct = await allToasts();
+  check(!(await conflict()).length && ct.some((x) => /^Hid 1 container/.test(x)) && ct.some((x) => /shown again/.test(x)) && ct.some((x) => /^Moved “ui-check-2c-g” up/.test(x)) && !(await fileText()).includes("ui-check-2c"), "own save: pattern, bulk hide and show, group, arrow, two deletes in a row (no 409)", ct);
+  // (3) A 401 the fresh token does not cure: banner with Sign in, control back.
+  const deny = () => ev("(() => { const f = window.fetch; window.fetch = (u, o) => (o && o.method === 'POST' && String(u).includes('/api/settings/') ? Promise.resolve(new Response('{\"error\":\"sign in\"}', { status: 401, headers: { 'Content-Type': 'application/json' } })) : f(u, o)); })()");
+  const expired = () => ev("(() => { const b = document.querySelector('#set-banners [data-b=expired]'); const a = b && b.querySelector('a.btn'); return !!a && /Sign in \\(new tab\\)/.test(a.textContent) && a.target === '_blank' && a.getAttribute('href').startsWith('/login?next='); })()");
+  await load("/settings/history"); await deny();
+  const h401 = await fileHash(), on401 = await ev("document.getElementById('hi-enabled').checked");
+  await click("#hi-enabled"); await sleep(600);
+  check(await expired() && await ev("document.getElementById('hi-enabled').checked") === on401 && await ev("!document.getElementById('hi-enabled').disabled") && (await fileHash()) === h401, "401 on a switch: the expired banner with Sign in (new tab), the switch put back");
+  await load("/settings/containers"); await deny();
+  await click(`#ov-list tr[data-key="${fr}"] [data-sel]`); await click("[data-bulk=hide]"); await sleep(600);
+  check(await expired() && (await fileHash()) === h401, "401 on the bulk bar: the expired banner with Sign in");
+  await load("/settings/bookmarks"); await deny();
+  await click("#bm-list tr[data-key] [data-move=down]:not([disabled])"); await sleep(600);
+  check(await expired() && (await fileHash()) === h401, "401 on an arrow: the expired banner with Sign in");
+  // Without JavaScript nothing looks live: filters, switches, live preview.
+  await send("Emulation.setScriptExecutionDisabled", { value: true });
+  for (const [path, ids] of [["/settings/containers", ["ov-q", "ov-only"]], ["/settings/general", ["gen-show-stopped", "gen-show-stats"]], ["/settings/appearance", ["css-live"]]]) {
+    await load(path);
+    const st = await ev(`${JSON.stringify(ids)}.map((i) => { const x = document.getElementById(i); return x ? x.disabled : 'missing'; })`).catch(() => null);
+    check(Array.isArray(st) && st.every((x) => x === true), `no JS: ${ids.join(", ")} on ${path} are disabled`, st);
+  }
+  await send("Emulation.setScriptExecutionDisabled", { value: false });
+  for (const [path, ids] of [["/settings/containers", ["ov-q", "ov-only"]], ["/settings/general", ["gen-show-stopped", "gen-show-stats"]], ["/settings/appearance", ["css-live"]]]) {
+    await load(path);
+    check(await ev(`${JSON.stringify(ids)}.every((i) => !document.getElementById(i).disabled)`), `with JS: ${ids.join(", ")} on ${path} work`);
+  }
   }
 
   check(errors.length === 0, "no script errors on the page", errors);
