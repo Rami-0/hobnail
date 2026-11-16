@@ -45,7 +45,12 @@ use hyper::{Method, Request, Response, StatusCode};
 use std::sync::Arc;
 
 use crate::http::server::Body;
+
 use crate::state::AppState;
+/// The config file on disk with its hash, for the Settings pages that render
+/// their lists on the server (`ui::settings::disk`): the same bytes and hash
+/// the save pipeline checks `base_hash` against.
+pub(crate) use store::read_current;
 
 /// Everything under `/api/settings/`. Generic over the body so tests can
 /// call it with a `Full<Bytes>`; the server passes `Incoming`.

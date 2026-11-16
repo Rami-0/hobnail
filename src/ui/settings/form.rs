@@ -177,13 +177,15 @@ impl Form {
     }
 }
 
-/// Form footer: the submit button, optional extra buttons, and the status
-/// line the script writes to.
+/// Form footer: the submit button (disabled until the script runs, see
+/// `dlg.rs`), optional extra buttons, and the status line the script
+/// writes to.
 pub fn foot(save: &str, extra: Markup) -> Markup {
     html! {
         div.sf-note hidden {}
+        (super::dlg::needs_js(super::dlg::Values::LoadWithJs))
         div.sf-foot {
-            button.btn.primary type="submit" { (ic("check")) (save) }
+            button.btn.primary type="submit" disabled data-ready { (ic("check")) (save) }
             (extra)
             span.sf-msg role="status" aria-live="polite" {}
         }

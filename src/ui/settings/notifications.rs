@@ -14,7 +14,7 @@ const ENV_HINT: &str =
 fn channel_form() -> Markup {
     let f = Form("ch");
     html! {
-        form.sf.editor #f-channel data-form="channel" hidden novalidate {
+        form.sf.editor #f-channel data-form="channel" hidden method="post" action="/settings/notifications" novalidate {
             h3.ed-h #ch-ed-h { "Add channel" }
             div.sf-grid {
                 (f.input("name", "Name", "Rules refer to it; letters, digits, - and _.", MONO))
@@ -46,7 +46,7 @@ fn rule_form(ctx: &Ctx) -> Markup {
     ];
     html! {
         datalist #widget-ids { @for w in &ctx.cfg.widgets { option value=(w.id) {} } }
-        form.sf.editor #f-rule data-form="rule" hidden novalidate {
+        form.sf.editor #f-rule data-form="rule" hidden method="post" action="/settings/notifications" novalidate {
             h3.ed-h #ru-ed-h { "Add rule" }
             div.sf-grid {
                 (f.input("name", "Name", "Unique.", MONO))
@@ -103,6 +103,8 @@ fn rule_form(ctx: &Ctx) -> Markup {
 
 pub fn body(ctx: &Ctx) -> Markup {
     html! {
+        // The channel and rule editors open with the script only.
+        (super::dlg::needs_js(super::dlg::Values::LoadWithJs))
         section.panel aria-labelledby="ch-h" {
             (head("Channels", Some(("ch-new", "plus", "Add channel"))))
             div.sec-note hidden {}

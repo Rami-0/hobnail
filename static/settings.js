@@ -1,10 +1,31 @@
-// Settings pages only (loaded by /settings/*). Loads each tab from
-// /api/settings/*, renders lists with createElement/textContent (never
-// innerHTML with API data; the one exception is the widget preview, which
-// is HTML escaped by our own server renderer), saves with fetch: X-RH-CSRF,
-// same-origin credentials and the base_hash of what was loaded.
+// Settings pages only (loaded by /settings/*). Lists that moved onto the
+// dialog (Bookmarks) are rendered by the server and swapped in from its
+// `?frag=list` after a save; the other tabs load from /api/settings/* and
+// render with createElement/textContent (never innerHTML with API data; the
+// exceptions are the widget preview and the list fragments, both HTML
+// escaped by our own server). Every save is HB.api: X-RH-CSRF, same-origin
+// credentials and the base_hash of what was loaded. Runs once window.HB
+// exists: ui.js comes with app.js, which is deferred after this script.
 (() => {
   "use strict";
+  // ---- never auto-reload a signed-in settings page: input would be lost ----
+  // app.js reloads the page on the SSE "reload" event (any config change).
+  // It opens the stream when it runs, which is after this deferred script and
+  // before `start`, so the wrapper is installed here; `start` points the event
+  // at checkChanged (the file hash) once it knows the page is signed in.
+  let onReload = () => location.reload();
+  const ES = window.EventSource;
+  if (ES) {
+    const Wrapped = function (url, opts) {
+      const es = new ES(url, opts);
+      const add = es.addEventListener.bind(es);
+      es.addEventListener = (type, fn, o) => add(type, type === "reload" ? () => onReload() : fn, o);
+      return es;
+    };
+    Wrapped.prototype = ES.prototype;
+    window.EventSource = Wrapped;
+  }
+  const start = () => {
   const doc = document, SVG = "http://www.w3.org/2000/svg";
   const $ = (id) => doc.getElementById(id);
   const $$ = (s, el) => Array.from((el || doc).querySelectorAll(s));
@@ -32,23 +53,14 @@
 
   const main = $("set-main"), meta = doc.querySelector('meta[name="rh-csrf"]');
   if (!main || main.dataset.signed !== "1" || !meta) return;
+  // /static/app.js (window.HB) did not load: stay the no-JavaScript page.
+  // Its "Saving needs JavaScript" notes are still shown (no html.hb-ready).
+  if (!window.HB) { onReload = () => {}; return; }
   const TAB = main.dataset.tab;
   const S = { hash: null, saving: 0, recheck: false };
 
-  // ---- never auto-reload a settings page: unsaved edits would be lost ----
-  // app.js reloads the page on the SSE "reload" event (any config change).
-  // Here that event checks the file hash instead (see checkChanged).
-  const ES = window.EventSource;
-  if (ES) {
-    const Wrapped = function (url, opts) {
-      const es = new ES(url, opts);
-      const add = es.addEventListener.bind(es);
-      es.addEventListener = (type, fn, o) => add(type, type === "reload" ? () => checkChanged() : fn, o);
-      return es;
-    };
-    Wrapped.prototype = ES.prototype;
-    window.EventSource = Wrapped;
-  }
+  // A config change checks the file hash instead of reloading (see the top).
+  onReload = () => checkChanged();
 
   // ---- DOM helpers ----
   function el(tag, attrs, ...kids) {
@@ -109,20 +121,8 @@
     tbody.replaceChildren(el("tr", { class: "empty-row" }, el("td", { colspan: cols }, muted(text))));
   }
 
-  // ---- API ----
-  async function call(method, path, body) {
-    const headers = { "X-RH-CSRF": meta.content };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
-    let r;
-    try {
-      r = await fetch("/api/settings/" + path, { method, credentials: "same-origin", headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    } catch (e) {
-      return { status: 0, data: { error: "Network error: the server did not answer (" + e.message + ")" } };
-    }
-    let data = {};
-    try { data = await r.json(); } catch {}
-    return { status: r.status, data };
-  }
+  // ---- API (HB.api: the CSRF header, a fresh token after a new sign-in) ----
+  const call = (method, path, body) => HB.api(method, "/api/settings/" + path, body);
   async function get(path) {
     const r = await call("GET", path);
     if (r.status === 200) return r.data;
@@ -154,11 +154,8 @@
       kind === "changed" || kind === "error" ? ibtn("x", "Dismiss", () => b.remove()) : null);
     box.append(b);
   }
-  function toast(text, kind) {
-    const n = el("div", { class: "toast " + (kind || "ok") }, icon(kind === "bad" ? "alert" : kind === "info" ? "info" : "check"), el("span", { text }));
-    $("toasts").append(n);
-    setTimeout(() => { n.classList.add("out"); setTimeout(() => n.remove(), 250); }, 4200);
-  }
+  // The one toast system (HB.toast: capped, dismissible, never over a dialog).
+  const toast = (text, kind) => HB.toast(text, { kind: kind || "ok" });
   function noteBox(scope) {
     return scope && (scope.matches(".sf-note,.sec-note") ? scope : scope.querySelector(":scope > .sf-note, :scope > .sec-note"));
   }
@@ -242,13 +239,24 @@
   // ---- unsaved edits and outside changes ----
   main.addEventListener("input", (e) => { const f = e.target.closest("form"); if (f) f._dirty = true; });
   main.addEventListener("change", (e) => { const f = e.target.closest("form"); if (f) f._dirty = true; });
-  const dirty = () => $$("form", main).some((f) => f._dirty && !f.hidden && f.id !== "f-clear");
+  const pageDirty = () => $$("form", main).some((f) => f._dirty && !f.hidden && f.id !== "f-clear" && !f.hasAttribute("data-hb"));
+  HB.keep(pageDirty); // app.js does not reload over it either
+  const dirty = () => HB.dirty() || pageDirty();
   window.addEventListener("beforeunload", (e) => { if (dirty() && !S.leaving) { e.preventDefault(); e.returnValue = ""; } });
+  // The file changed (another tab, a hand edit). With a dialog or a confirm
+  // open nothing is refreshed and nothing is announced: the dialog keeps the
+  // base hash it opened with and its save gets a 409 note instead (one
+  // message for one conflict). The check runs again once the last closes.
+  doc.addEventListener("close", (e) => {
+    if (S.later && e.target.matches && e.target.matches("dialog.dlg") && !doc.querySelector("dialog.dlg[open]")) { S.later = false; setTimeout(checkChanged, 0); }
+  }, true);
   async function checkChanged() {
     if (S.saving) { S.recheck = true; return; }
     if (!S.hash || !TABS[TAB]) return;
+    if (doc.querySelector("dialog.dlg[open]")) { S.later = true; return; }
     const r = await call("GET", "meta");
     if (r.status !== 200 || r.data.hash === S.hash) return;
+    if (doc.querySelector("dialog.dlg[open]")) { S.later = true; return; }
     if (dirty()) banner("changed");
     else { await TABS[TAB].load(); toast("Reloaded: the config file changed", "info"); }
   }
@@ -556,42 +564,215 @@
     },
   };
 
-  // ---- bookmarks ----
-  const BOOKMARK_KEYS = ["name", "url", "group", "icon", "description"];
-  TABS.bookmarks = {
-    init() {
-      const f = $("f-bookmark");
-      onAct("bm-new", () => { f._orig = null; f._id = null; fill(f, {}); openEditor(f, "Add bookmark", $("bm-list").closest(".tbl-wrap")); });
-      onSubmit(f, () => {
-        clearErrs(f);
-        if (!required(f, ["name", "url"])) return;
-        const item = { ...pick(f._orig, BOOKMARK_KEYS), ...collect(f) };
-        const body = f._id == null ? { base_hash: S.hash, action: "add", item } : { base_hash: S.hash, action: "edit", id: f._id, item };
-        save(f, "bookmarks", body, () => { closeEditor(f); return this.load(); });
+  // ---- lists rendered by the server (the dialog pattern, DESIGN.md §11.6) ----
+  // `refreshList(id, flash)` fetches this tab's `?frag=list` (the same markup
+  // as the page, session only) and swaps rows by data-key: an unchanged row
+  // stays as it is (focus and scroll keep), a changed or new one is put in,
+  // a gone one is removed, and the row named by `flash` flashes once.
+  async function refreshList(id, flash) {
+    let r;
+    try { r = await fetch(location.pathname + "?frag=list", { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
+    if (r.status === 401) banner("expired");
+    if (!r.ok) return false;
+    const t = doc.createElement("template");
+    t.innerHTML = await r.text(); // our server's markup: every value escaped there
+    const next = t.content.getElementById(id), box = $(id);
+    if (!next || !box) return false;
+    S.hash = next.dataset.hash;
+    box.dataset.hash = next.dataset.hash;
+    $$("[data-ready]", next).forEach((b) => { b.disabled = false; }); // as ui.js does on load
+    const a = box.querySelector("tbody"), b = next.querySelector("tbody");
+    if (!a || !b) box.replaceChildren(...next.childNodes);
+    else {
+      const old = new Map($$("tr[data-key]", a).map((x) => [x.dataset.key, x]));
+      const same = (o, x) => { const c = o.cloneNode(true); c.classList.remove("row-new"); return c.isEqualNode(x); };
+      const want = Array.from(b.rows).map((x) => { const o = old.get(x.dataset.key); return o && same(o, x) ? o : x; });
+      want.forEach((w, i) => { if (a.rows[i] !== w) a.insertBefore(w, a.rows[i] || null); });
+      while (a.rows.length > want.length) a.rows[want.length].remove();
+    }
+    const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
+    if (row) HB.flash(row);
+    return true;
+  }
+  // THE BASE-HASH RULE (every list form, the next ones included): a write is
+  // based on the file version the user was looking at when they started it.
+  // A dialog takes its base when it opens (ui.js: the `data-hash` of the
+  // list its trigger sits in), a confirm or an arrow click takes it before
+  // anything is awaited, and that base is sent as base_hash. Nothing adopts
+  // a newer hash on its behalf, so the server answers 409 whenever the file
+  // moved, and an id that is a list position can never hit another entry.
+  // S.hash only says which version the list on screen shows.
+  //
+  // A write of a list: counted in S.saving like save() does, so a config
+  // change event that arrives meanwhile waits for the answer and then finds
+  // the new hash instead of reloading the list.
+  async function post(path, body) {
+    S.saving++;
+    let r;
+    try { r = await call("POST", path, body); } finally { S.saving--; }
+    if (r.status === 200 && r.data && r.data.hash) S.hash = r.data.hash;
+    if (S.recheck && !S.saving) { S.recheck = false; setTimeout(checkChanged, 0); }
+    return r;
+  }
+  const rowItem = (tr) => { try { return JSON.parse(tr.querySelector("[data-item]").dataset.item); } catch { return {}; } };
+  const rowOf = (o, key) => $(o.list).querySelector(`tr[data-key="${CSS.escape(key)}"]`);
+  const keyId = (key) => key.slice(key.indexOf(":") + 1);
+  const revNo = (d) => (d.revision != null ? ` · revision #${d.revision}` : "");
+
+  // A list's add / edit dialog. `o`: {list, path, kind, noun, item(values) →
+  // the API item, id(key) → the API id, newKey(values, rowsBefore),
+  // movedKey(key, newIndex), label(values)}. Saves send the dialog's own
+  // base (ctx.base), never S.hash.
+  function listDialog(dlg, o) {
+    if (!dlg) return;
+    dlg._submit = async (v, ctx) => {
+      const edit = ctx.mode === "edit" && ctx.key;
+      const before = $$("tr[data-key]", $(o.list)).length;
+      const item = o.item(v);
+      const body = edit ? { base_hash: ctx.base, action: "edit", id: o.id(ctx.key), item } : { base_hash: ctx.base, action: "add", item };
+      const r = HB.result(await post(o.path, body), {
+        // 409, "Reload and keep my input": show the file as it is now and
+        // keep every value typed. RETARGET RULE: an add simply moves to the
+        // new version. An edit moves only when the entry it was opened on
+        // can be found again unambiguously: exactly one entry of the new file
+        // has all the values the dialog was opened with. Then key and base
+        // follow it. Otherwise Save (and Delete…) stay disabled and only
+        // Discard is offered: the input can be copied from the fields, but it
+        // can never be saved onto another entry.
+        reload: async () => {
+          await refreshList(o.list);
+          const c = HB.current(), box = $(o.list);
+          if (!c || c.dlg !== dlg) return;
+          if (!edit) { c.base = box.dataset.hash; HB.note("ok", "Reloaded the current file. Save again to add it."); ctx.form.querySelector("[type=submit]").focus(); return; }
+          let was = {};
+          try { was = JSON.parse((ctx.trigger && ctx.trigger.dataset && ctx.trigger.dataset.item) || "{}"); } catch {}
+          const same = $$("tr[data-key]", box).filter((tr) => JSON.stringify(rowItem(tr)) === JSON.stringify(was));
+          if (same.length === 1) {
+            c.key = same[0].dataset.key; c.base = box.dataset.hash;
+            HB.note("ok", "Reloaded the current file. Save again to apply your input on top of it.");
+            ctx.form.querySelector("[type=submit]").focus();
+          } else {
+            $$("[type=submit],[data-act=dlg-delete]", dlg).forEach((b) => { b.disabled = true; });
+            HB.note("bad", `This ${o.noun} was changed, moved or removed in the file meanwhile, so your input cannot be saved onto it. Copy what you need, discard, and open it again from the list.`, [{ label: "Discard my input", run: () => HB.close(true) }]);
+          }
+        },
+        discard: () => { HB.close(true); refreshList(o.list); },
       });
-    },
-    async load() {
-      const d = await get("bookmarks");
-      if (!d) return;
-      S.hash = d.hash;
-      const list = d.bookmarks || [], tb = $("bm-list"), f = $("f-bookmark"), sec = tb.closest("section");
-      if (!list.length) { emptyRow(tb, 4, "No bookmarks yet. Add links to things that are not containers."); return; }
-      const reorder = (i, j) => {
-        if (j < 0 || j >= list.length) return;
-        save(sec, "bookmarks", { base_hash: S.hash, action: "reorder", order: swap(list.map((b) => b.id), i, j) }, () => this.load());
+      if (!r.ok) return r;
+      const key = edit ? ctx.key : o.newKey(v, before), d = r.data;
+      await refreshList(o.list, d.unchanged ? null : key);
+      $$('#set-banners [data-b="changed"], #set-banners [data-b="stale"]').forEach((b) => b.remove());
+      const warn = (d.warnings || []).join(" ");
+      return {
+        ok: true,
+        toast: d.unchanged ? "No changes" : `${edit ? "Saved" : "Added"} “${o.label(v)}”${revNo(d)}`,
+        focus: `[data-dlg][data-key="${CSS.escape(key)}"]`,
+        after: warn ? () => setTimeout(() => toast(warn, "info"), 0) : null,
       };
-      tb.replaceChildren(...list.map((b, i) => {
-        const it = b.item || {};
-        return el("tr", null,
-          el("td", null, el("span", { class: "nm-t", text: it.name || "(no name)" }), it.description ? el("span", { class: "sub muted", text: it.description }) : null),
-          el("td", { class: "url-c" }, code(it.url || "", "wrap")),
-          el("td", null, it.group ? code(it.group) : muted("Bookmarks")),
-          el("td", { class: "act" }, moveBtns(list, i, reorder),
-            ibtn("edit", `Edit ${it.name}`, () => { f._orig = it; f._id = b.id; fill(f, it); openEditor(f, `Edit bookmark: ${it.name}`, tb.closest(".tbl-wrap")); }),
-            ibtn("x", `Delete ${it.name}`, () => { if (confirm(`Delete the bookmark "${it.name}"?`)) save(sec, "bookmarks", { base_hash: S.hash, action: "delete", id: b.id }, () => { closeEditor(f); return this.load(); }); }, "danger")));
-      }));
-      labelCells(tb);
-    },
+    };
+  }
+  // Delete with the confirm, then Undo. `key`, `base` and `name` are taken
+  // by the caller before the confirm is awaited (the base-hash rule): if the
+  // file moved while the confirm was open, the delete is refused (409), never
+  // applied to whatever sits at that position now. The toast's Undo restores
+  // the revision the delete was made on, refused (409) if the file changed
+  // since.
+  const confirmDelete = (o, name) => HB.confirm({ title: `Delete the ${o.noun} “${name}”?`, body: "It is removed from the config file. You can undo this from the message that follows, or restore it later under Config file.", ok: `Delete ${o.noun}` });
+  async function deleteRow(o, key, base, name) {
+    const before = base;
+    const r = HB.result(await post(o.path, { base_hash: base, action: "delete", id: o.id(key) }));
+    if (!r.ok) {
+      toast(r.note && /changed on disk/.test(r.note[1]) ? `Not deleted: the config file changed since you asked. Nothing was removed; check the list and try again.` : (r.note && r.note[1]) || Object.values(r.fields || {}).join(" "), "bad");
+      refreshList(o.list);
+      return;
+    }
+    const row = rowOf(o, key);
+    if (row) { HB.remove(row); await new Promise((res) => setTimeout(res, 170)); }
+    await refreshList(o.list);
+    const d = r.data, after = d.hash, rev = d.revision;
+    const undo = async () => {
+      // The revision just before the delete holds the file as it was; its
+      // hash proves it before anything is written. (The revision list has no
+      // hashes, so this fetches that one revision's text.)
+      const prev = rev != null ? await call("GET", `revision/${rev - 1}`) : null;
+      if (!prev || prev.status !== 200 || prev.data.hash !== before) { toast(`Cannot undo: the file as it was before the delete is not in the revisions. Look under Config file.`, "bad"); return; }
+      const u = await post(`revision/${rev - 1}/restore`, { base_hash: after });
+      if (u.status === 409) { toast("Not undone: the config file changed since the delete. Its revisions are under Config file.", "bad"); return; }
+      const ur = HB.result(u);
+      if (!ur.ok) { toast(ur.note ? ur.note[1] : "Not undone.", "bad"); return; }
+      await refreshList(o.list, key);
+      toast(`Restored “${name}”${revNo(ur.data)}`);
+    };
+    HB.toast(`Deleted “${name}”${revNo(d)}`, rev != null ? { action: { label: "Undo", run: undo } } : {});
+    const add = $(o.add);
+    if (add && (doc.activeElement === doc.body || !doc.activeElement)) add.focus();
+  }
+  // One-click up / down (owner decision Y13: one revision per step).
+  function moveRow(o, btn) {
+    const tr = btn.closest("tr[data-key]"), rows = $$("tr[data-key]", $(o.list));
+    const i = rows.indexOf(tr), j = i + (btn.dataset.move === "up" ? -1 : 1);
+    if (i < 0 || j < 0 || j >= rows.length || o.moving) return;
+    const order = rows.map((r) => o.id(r.dataset.key));
+    [order[i], order[j]] = [order[j], order[i]];
+    o.moving = true;
+    btn.setAttribute("aria-busy", "true");
+    const dir = btn.dataset.move, name = o.label(rowItem(tr)), base = $(o.list).dataset.hash;
+    (async () => {
+      const r = HB.result(await post(o.path, { base_hash: base, action: "reorder", order }));
+      btn.removeAttribute("aria-busy");
+      o.moving = false;
+      if (!r.ok) { toast((r.note && r.note[1]) || "Not moved.", "bad"); refreshList(o.list); return; }
+      const key = o.movedKey(tr.dataset.key, j);
+      await refreshList(o.list, key);
+      const nr = rowOf(o, key), same = nr && nr.querySelector(`[data-move="${dir}"]`);
+      const f = same && !same.disabled ? same : nr && nr.querySelector("[data-move]:not([disabled])");
+      if (f) f.focus();
+      toast(`Moved “${name}” ${dir}${revNo(r.data)}`);
+    })();
+  }
+  // Row actions of a server-rendered list: ↑ / ↓, the ⋯ menu (Edit, Delete…)
+  // and Delete… inside the dialog.
+  function listActions(o) {
+    const box = $(o.list);
+    if (!box) return;
+    S.hash = box.dataset.hash;
+    box.addEventListener("click", (e) => { const b = e.target.closest("[data-move]"); if (b && !b.disabled) moveRow(o, b); });
+    doc.addEventListener("click", (e) => {
+      const a = e.target.closest("[data-row-act]"), t = HB.menuFor;
+      if (a && t && t.dataset.menu === o.menu && box.contains(t)) {
+        const tr = t.closest("tr[data-key]");
+        if (a.dataset.rowAct === "edit") tr.querySelector("[data-dlg]").click();
+        else {
+          // Taken now, before the confirm is awaited (the base-hash rule).
+          const key = tr.dataset.key, base = box.dataset.hash, name = o.label(rowItem(tr));
+          confirmDelete(o, name).then((ok) => ok && deleteRow(o, key, base, name));
+        }
+      }
+      const del = e.target.closest("[data-act=dlg-delete]"), c = HB.current();
+      if (del && c && c.dlg.id === o.dlg && c.key) {
+        // The dialog's own key and base, and the name it was opened on.
+        const key = c.key, base = c.base;
+        let name = "";
+        try { name = o.label(JSON.parse(c.trigger.dataset.item)); } catch {}
+        confirmDelete(o, name).then((ok) => { if (ok) { HB.close(true); deleteRow(o, key, base, name); } });
+      }
+    });
+  }
+
+  // ---- bookmarks: the reference list ----
+  const BOOKMARKS = {
+    list: "bm-list", add: "bm-add", dlg: "dlg-bookmark", menu: "m-bm", path: "bookmarks", kind: "bookmark", noun: "bookmark",
+    // The API sends a whole item; an emptied optional field removes the key.
+    item: (v) => { const it = {}; for (const k of ["name", "url", "group", "icon", "description"]) it[k] = v[k] ? v[k] : null; return it; },
+    id: (key) => Number(keyId(key)),
+    newKey: (v, before) => `bookmark:${before}`, // appended at the end
+    movedKey: (key, j) => `bookmark:${j}`, // keys are positions
+    label: (v) => v.name || "(no name)",
+  };
+  TABS.bookmarks = {
+    ssr: true,
+    init() { listDialog($("dlg-bookmark"), BOOKMARKS); listActions(BOOKMARKS); },
+    load() { return refreshList(BOOKMARKS.list); },
   };
 
   // ---- widgets ----
@@ -1156,26 +1337,18 @@
   // ---- security ----
   TABS.security = {
     init() {
+      // Change password: a page form on the dialog's submit path (data-hb):
+      // all problems at once, busy button, passwords never trimmed.
       const f = $("f-password");
-      onSubmit(f, async () => {
-        clearErrs(f);
-        const cur = ctl(f, "current").value, nw = ctl(f, "new").value, rep = ctl(f, "repeat").value;
-        if (!cur) { fieldErr(f, "current", "Required."); return; }
-        if ([...nw].length < 8) { fieldErr(f, "new", "At least 8 characters."); return; }
-        if (nw !== rep) { fieldErr(f, "repeat", "Does not match the new password."); return; }
-        const sub = f.querySelector("button[type=submit]");
-        sub.disabled = true; setMsg(f, "Saving…");
-        const res = await call("POST", "security/password", { current: cur, new: nw });
-        sub.disabled = false; setMsg(f, "");
-        if (res.status === 200 && res.data.ok) {
-          f.reset();
-          note(f, "ok", "Password changed. Every session was signed out, this one too: sign in again with the new password.");
-          toast("Password changed");
-          S.leaving = true;
-          setTimeout(() => { location.href = "/login?next=" + encodeURIComponent("/settings/security"); }, 2500);
-        } else if (res.status === 400 && /current/i.test(res.data.error || "")) fieldErr(f, "current", res.data.error);
-        else fail(res, f);
-      });
+      f._check = (v) => (v.repeat && v.new !== v.repeat ? { repeat: "Does not match the new password." } : {});
+      f._submit = async (v) => {
+        const r = HB.result(await call("POST", "security/password", { current: v.current, new: v.new }));
+        if (!r.ok) return r;
+        f.reset();
+        S.leaving = true;
+        setTimeout(() => { location.href = "/login?next=" + encodeURIComponent("/settings/security"); }, 2500);
+        return { ok: true, toast: "Password changed", note: ["ok", "Password changed. Every session was signed out, this one too: sign in again with the new password."] };
+      };
       onAct("sign-out-others", async (e) => {
         const b = e.currentTarget, sec = b.closest("section");
         b.disabled = true;
@@ -1197,5 +1370,10 @@
   };
 
   const T = TABS[TAB];
-  if (T) { T.init(); T.load(); }
+  if (T) { T.init(); if (!T.ssr) T.load(); }
+  };
+  // This deferred script runs before app.js: wait for DOMContentLoaded, which
+  // comes after every deferred script, also when app.js failed to load.
+  if (window.HB) start();
+  else document.addEventListener("DOMContentLoaded", start, { once: true });
 })();

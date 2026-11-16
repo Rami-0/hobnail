@@ -872,8 +872,9 @@
   function disconnect(text) { if (es) { es.close(); es = null; } setLive(false, text); }
   function resume() {
     clearTimeout(hideTimer);
-    // Paused for over a minute: reload for fresh data (widgets refresh slowly).
-    if (!es && hiddenAt && Date.now() - hiddenAt > 60000) { location.reload(); return; }
+    // Paused for over a minute: reload for fresh data (widgets refresh slowly),
+    // but never over an open dialog or unsaved input (owner decision Y12).
+    if (!es && hiddenAt && Date.now() - hiddenAt > 60000 && !(window.HB && HB.unsaved && HB.unsaved())) { location.reload(); return; }
     hiddenAt = 0;
     connect();
   }

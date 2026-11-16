@@ -38,6 +38,13 @@ before you. Setting a password signs out every session. Minimum 8 characters.
   are never shown, and a secret cannot be pointed at a new host from the app
   (see [settings.md](settings.md)).
 - Login history (with IPs of failed attempts) is visible only when signed in.
+- Settings forms never send a value in a URL: they post, and without
+  JavaScript their save buttons are disabled (the write guard needs a header a
+  plain form cannot send). A wrong current password in Settings › Security
+  counts against the same back-off as a failed login.
+- After signing in again in another tab, an open Settings page picks up the
+  new session's CSRF token by reloading itself in the background (a same-origin
+  GET of the page), so unsaved input survives an expired session.
 
 **Not covered:** the cookie cannot be `Secure` over plain HTTP. Sign in over an
 encrypted path (a VPN such as Tailscale, or a TLS reverse proxy), not over a

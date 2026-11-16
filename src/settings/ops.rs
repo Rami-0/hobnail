@@ -17,7 +17,7 @@ use toml_edit::{DocumentMut, Item, Key, Table, Value};
 
 use super::doc::{self, Style};
 use super::guard;
-use super::store::{ApiError, Current, Draft};
+use super::store::{self, ApiError, Current, Draft};
 
 pub const PAGE_KEYS: &[&str] = &[
     "title",
@@ -146,7 +146,134 @@ pub const RAW_FIELDS: &[&str] = &[];
 // ------------------------------------------------------------ shapes
 
 fn shape<T: serde::de::DeserializeOwned>(v: &J, what: &str) -> Result<T, ApiError> {
-    serde_json::from_value(v.clone()).map_err(|e| ApiError::bad_request(format!("{what}: {e}")))
+    serde_json::from_value(v.clone()).map_err(|e| shape_error::<T>(v, what, &e.to_string()))
+}
+
+/// A shape error as a 422 on the form field that caused it, in plain words
+/// (SET-07): a missing required key is "Required."; a value of the wrong
+/// type is found by checking each key on its own (a lone key with the right
+/// type only misses the others). An unknown key stays a 400: the form never
+/// sends one, so it is a client bug, not a field problem.
+fn shape_error<T: serde::de::DeserializeOwned>(v: &J, what: &str, msg: &str) -> ApiError {
+    let raw = || ApiError::bad_request(format!("{what}: {msg}"));
+    if let Some(f) = msg
+        .strip_prefix("missing field `")
+        .and_then(|r| r.split('`').next())
+    {
+        return ApiError::invalid("Required.", Some(f), None);
+    }
+    if msg.starts_with("unknown field") {
+        return raw();
+    }
+    for (k, x) in v.as_object().into_iter().flatten() {
+        let one = J::Object(Map::from_iter([(k.clone(), x.clone())]));
+        if let Err(e) = serde_json::from_value::<T>(one) {
+            let e = e.to_string();
+            if !e.starts_with("missing field") && !e.starts_with("unknown field") {
+                return ApiError::invalid(&plain(&e), Some(k), None);
+            }
+        }
+    }
+    raw()
+}
+
+/// A validator or deserialiser message in the words a form uses (SET-06,
+/// SET-07, SET-55). Messages it does not know are returned as they are.
+pub fn plain(msg: &str) -> String {
+    let m = msg.trim();
+    let int = [
+        "expected u8",
+        "expected u16",
+        "expected u32",
+        "expected u64",
+        "expected i32",
+        "expected i64",
+        "expected usize",
+    ];
+    if m.contains("untagged enum DurJ") || m.starts_with("invalid duration") {
+        return "Use a duration like 30s or 5m.".into();
+    }
+    if m.starts_with("invalid value: integer") && int.iter().any(|t| m.contains(t)) {
+        return "This number is out of range.".into();
+    }
+    if m.starts_with("invalid type") && int.iter().any(|t| m.contains(t)) {
+        return "Use a whole number.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected f64") {
+        return "Use a number.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected a boolean") {
+        return "Use on or off.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected a string") {
+        return "Use text here.".into();
+    }
+    if m.starts_with("unknown variant") {
+        return "Choose one of the offered options.".into();
+    }
+    // `page.columns must be 1..=6, got 9`, `… must be between 5s and 5m, got 1s`
+    if let Some((_, r)) = m.split_once(" must be ") {
+        let r = r.split(", got").next().unwrap_or(r);
+        if let Some((a, b)) = r.split_once("..=") {
+            return format!("Use a number from {a} to {b}.");
+        }
+        if let Some((a, b)) = r
+            .strip_prefix("between ")
+            .and_then(|r| r.split_once(" and "))
+        {
+            return format!("Use a value from {a} to {b}.");
+        }
+    }
+    m.to_string()
+}
+
+/// Validate a form's draft before the save pipeline does (it validates
+/// again; parsing twice is cheap next to a write), to put a config error on
+/// the form field that caused it (SET-06): when the validator names no field
+/// the key at the reported line and column does. A field error loses its
+/// line and column (the form never shows the file) and is put in plain
+/// words. An error that belongs to no field is returned unchanged.
+pub fn precheck(d: Draft) -> Result<Draft, ApiError> {
+    let Err(mut e) = store::validate(&d.text, d.fields) else {
+        return Ok(d);
+    };
+    if e.body["field"].is_null() {
+        let at = (e.body["line"].as_u64(), e.body["col"].as_u64());
+        if let (Some(l), Some(c)) = at {
+            let line = d
+                .text
+                .lines()
+                .nth((l as usize).saturating_sub(1))
+                .unwrap_or("");
+            if let Some(k) = key_before(line, c as usize).filter(|k| d.fields.contains(k)) {
+                e.body["field"] = J::String(k.to_string());
+            }
+        }
+    }
+    if !e.body["field"].is_null() {
+        let msg = plain(e.body["error"].as_str().unwrap_or(""));
+        e.body["error"] = J::String(msg);
+        e.body["line"] = J::Null;
+        e.body["col"] = J::Null;
+    }
+    Err(e)
+}
+
+/// The key of the last `key =` before column `col` (1-based) of a TOML line:
+/// `refresh = "abc"` and `{ name = "x", url = "bad" }` both work.
+pub fn key_before(line: &str, col: usize) -> Option<&str> {
+    let end = line
+        .char_indices()
+        .nth(col.saturating_sub(1))
+        .map_or(line.len(), |(i, _)| i);
+    let upto = &line[..end];
+    let eq = upto.rfind('=')?;
+    let k = upto[..eq].trim_end();
+    let start = k
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .map_or(0, |i| i + 1);
+    let k = &k[start..];
+    (!k.is_empty()).then_some(k)
 }
 
 fn object<'a>(v: &'a J, what: &str) -> Result<&'a Map<String, J>, ApiError> {
@@ -603,7 +730,11 @@ pub fn history(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
     if !existed && t.is_empty() {
         root.remove("history");
     }
-    Ok(draft(&doc, "history".into(), &[]))
+    Ok(draft(
+        &doc,
+        "history".into(),
+        &["enabled", "sample_interval"],
+    ))
 }
 
 // ------------------------------------------------------------ containers
@@ -875,7 +1006,10 @@ fn check_widget_item(item: &J) -> Result<Vec<String>, ApiError> {
 fn check_item(spec: &ListSpec, item: &J) -> Result<Vec<String>, ApiError> {
     match spec.key {
         "bookmarks" => {
-            let _: BookmarkShape = shape(item, "bookmark")?;
+            let b: BookmarkShape = shape(item, "bookmark")?;
+            if b.name.trim().is_empty() {
+                return Err(ApiError::invalid("Required.", Some("name"), None));
+            }
         }
         "widgets" => return check_widget_item(item),
         "alerts" => {
@@ -884,6 +1018,33 @@ fn check_item(spec: &ListSpec, item: &J) -> Result<Vec<String>, ApiError> {
         _ => {}
     }
     Ok(Vec::new())
+}
+
+/// SET-40: a bookmark URL from the form must be a web link (no
+/// `javascript:`, no bare words). Checked on add, and on edit only when the
+/// URL changed: a hand-written entry such as `url = "/files"` stays editable
+/// (the config validator itself still accepts it).
+fn bookmark_url(spec: &ListSpec, item: &J, old: Option<&str>) -> Result<(), ApiError> {
+    if spec.key != "bookmarks" {
+        return Ok(());
+    }
+    let url = item.get("url").and_then(J::as_str).unwrap_or("");
+    if old == Some(url) {
+        return Ok(());
+    }
+    let u = url.trim().to_ascii_lowercase();
+    let host = u
+        .strip_prefix("http://")
+        .or_else(|| u.strip_prefix("https://"))
+        .unwrap_or("");
+    if host.is_empty() || host.starts_with('/') || u.contains(char::is_whitespace) {
+        return Err(ApiError::invalid(
+            "Use a link that starts with http:// or https://.",
+            Some("url"),
+            None,
+        ));
+    }
+    Ok(())
 }
 
 fn locked_entry(spec: &ListSpec, t: &Table) -> bool {
@@ -916,6 +1077,7 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                 .as_ref()
                 .ok_or_else(|| ApiError::bad_request("add needs item"))?;
             warnings.extend(check_item(spec, item)?);
+            bookmark_url(spec, item, None)?;
             if let (Some(id), Some(f)) = (item_id(item), spec.id_field) {
                 if let Some(t) = aot.iter().find(|t| str_field(t, f) == Some(id.as_str())) {
                     if locked_entry(spec, t) {
@@ -949,6 +1111,7 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                 return Err(locked_err(aot.get(i).unwrap()));
             }
             warnings.extend(check_item(spec, item)?);
+            bookmark_url(spec, item, str_field(aot.get(i).unwrap(), "url"))?;
             if let (Some(new_id), Some(f)) = (item_id(item), spec.id_field) {
                 if let Some(t) = aot
                     .iter()

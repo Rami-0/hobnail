@@ -14,7 +14,7 @@ pub fn body() -> Markup {
     html! {
         section.panel aria-labelledby="th-h" {
             div.panel-h { h2 #th-h { "Theme" } }
-            form.sf #f-theme data-form="theme" novalidate {
+            form.sf #f-theme data-form="theme" method="post" action="/settings/appearance" novalidate {
                 div.sf-grid {
                     (f.select("theme", "Default theme", "For browsers that have not picked one with the theme button in the top bar.", &[("", "Default (auto)"), ("auto", "Auto (follow the OS)"), ("dark", "Dark"), ("light", "Light"), ("ember", "Ember (warm dark)"), ("contrast", "High contrast")], None))
                 }
@@ -30,7 +30,7 @@ pub fn body() -> Markup {
                 h2 #css-h { "Custom CSS" }
                 span.muted.css-size #css-size {}
             }
-            form.sf #f-css data-form="css" novalidate {
+            form.sf #f-css data-form="css" method="post" action="/settings/appearance" novalidate {
                 p.muted.sf-lead { "Saved as " code { "custom.css" } " in the data directory and loaded after the app's styles on every page." }
                 label.cb.css-live { input #css-live type="checkbox" checked; span { "Live preview on this page" } }
                 div.fld.wide {

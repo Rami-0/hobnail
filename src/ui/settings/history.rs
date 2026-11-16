@@ -11,7 +11,7 @@ pub fn body() -> Markup {
     html! {
         section.panel aria-labelledby="hi-h" {
             div.panel-h { h2 #hi-h { "Recording" } }
-            form.sf #f-history data-form="history" novalidate {
+            form.sf #f-history data-form="history" method="post" action="/settings/history" novalidate {
                 div.sf-grid {
                     (f.toggle("enabled", "Record host and container samples", "Events are recorded either way while the database is available.", None))
                     (f.input("sample_interval", "Sample interval", "5s to 5m. Default 15s.", In { placeholder: Some("15s"), ..MONO }))
@@ -29,7 +29,7 @@ pub fn body() -> Markup {
         }
         section.panel.danger-zone aria-labelledby="clr-h" {
             div.panel-h { h2 #clr-h { "Clear history" } }
-            form.sf #f-clear data-form="clear" novalidate {
+            form.sf #f-clear data-form="clear" method="post" action="/settings/history" novalidate {
                 p.muted.sf-lead { "Deletes all recorded samples and events. Config revisions and the login are kept. This cannot be undone." }
                 div.sf-grid {
                     div.fld {
@@ -39,6 +39,7 @@ pub fn body() -> Markup {
                     }
                 }
                 div.sf-note hidden {}
+                (super::dlg::needs_js(super::dlg::Values::None))
                 div.sf-foot {
                     button.btn.danger type="submit" disabled { (ic("x")) "Clear history" }
                     span.sf-msg role="status" aria-live="polite" {}

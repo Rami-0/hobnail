@@ -31,7 +31,7 @@ pub fn body(ctx: &Ctx) -> Markup {
         (group_names(ctx))
         section.panel aria-labelledby="ex-h" {
             div.panel-h { h2 #ex-h { "Hidden containers" } }
-            form.sf #f-exclude data-form="exclude" novalidate {
+            form.sf #f-exclude data-form="exclude" method="post" action="/settings/containers" novalidate {
                 p.muted.sf-lead { "Containers whose name matches one of these patterns are not shown anywhere. " code { "*" } " matches any run of characters, " code { "?" } " one character." }
                 ul.chips #ex-list aria-label="Exclude patterns" {}
                 div.add-line {
@@ -44,7 +44,7 @@ pub fn body(ctx: &Ctx) -> Markup {
         }
         section.panel aria-labelledby="grp-h" {
             div.panel-h { h2 #grp-h { "Groups" } }
-            form.sf #f-groups data-form="groups" novalidate {
+            form.sf #f-groups data-form="groups" method="post" action="/settings/containers" novalidate {
                 p.muted.sf-lead { "A group is a compose project (or a name used by overrides and bookmarks). Listed groups come first on the overview, in this order." }
                 div.rows #grp-list { (super::form::loading()) }
                 div.add-line {
@@ -94,7 +94,7 @@ pub fn body(ctx: &Ctx) -> Markup {
                 }
             }
             // The inline editor; the script moves it under the edited row.
-            form.sf.ov-edit #f-override data-form="override" hidden novalidate {
+            form.sf.ov-edit #f-override data-form="override" hidden method="post" action="/settings/containers" novalidate {
                 h3.ov-edit-h { "Override for " code #ov-edit-name {} }
                 div.sf-grid {
                     (ov.text("name", "Display name", "Empty: the compose service or container name."))

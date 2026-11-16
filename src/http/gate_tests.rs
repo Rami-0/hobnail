@@ -38,6 +38,9 @@ const WRITES: &[(&str, &str)] = &[
     ("PATCH", "/api/settings/config"),
     ("POST", "/"),
     ("POST", "/containers"),
+    // Where the Settings forms point (`method="post"`): refused like any write.
+    ("POST", "/settings/security"),
+    ("POST", "/settings/bookmarks"),
     ("POST", "/api/events"),
     ("DELETE", "/api/history/system"),
 ];
@@ -372,4 +375,118 @@ async fn anonymous_events_hide_login_history() {
             "{page} shows login history"
         );
     }
+}
+
+/// ROB-15: a Settings form that is submitted without the script (a plain
+/// form post, no `X-RH-CSRF`) is refused by the gate exactly as before,
+/// changes nothing and echoes nothing of what was sent.
+#[tokio::test]
+async fn a_plain_form_post_is_refused_and_leaks_nothing() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let stored = st.db.kv_get("auth.password");
+    let cfg = std::fs::read_to_string(st.config.path()).unwrap_or_default();
+    let addr = start(st.clone()).await;
+    let (cookie, _) = login(addr).await;
+    let origin = format!("http://{addr}");
+    let form = "current=correct+horse+battery&new=Sekrit-New-Value-1&repeat=Sekrit-New-Value-1";
+    for path in [
+        "/settings/security",
+        "/api/settings/security/password",
+        "/settings/bookmarks",
+    ] {
+        let r = req(
+            addr,
+            "POST",
+            path,
+            &[
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Origin", &origin),
+                ("Cookie", &cookie),
+            ],
+            form,
+        )
+        .await;
+        assert_eq!(r.status, 403, "{path}: {}", r.body);
+        assert_eq!(r.body, "missing or bad X-RH-CSRF header\n", "{path}");
+        assert!(
+            !r.head.contains("Sekrit") && !r.body.contains("Sekrit"),
+            "{path}"
+        );
+        // Signed out: 401, same refusal as today.
+        let r = req(
+            addr,
+            "POST",
+            path,
+            &[
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Origin", &origin),
+            ],
+            form,
+        )
+        .await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(!r.body.contains("Sekrit"), "{path}");
+    }
+    assert_eq!(
+        st.db.kv_get("auth.password"),
+        stored,
+        "the password is unchanged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(st.config.path()).unwrap_or_default(),
+        cfg,
+        "the config is unchanged"
+    );
+}
+
+/// The Settings list fragment reads the session from the request: 401 and
+/// an empty body without one, the list with one.
+#[tokio::test]
+async fn settings_fragments_need_a_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    std::fs::write(
+        st.config.path(),
+        "[[bookmarks]]\nname = \"Wiki\"\nurl = \"https://wiki.example/frag-mark\"\n",
+    )
+    .unwrap();
+    let addr = start(st).await;
+    let r = req(addr, "GET", "/settings/bookmarks?frag=list", &[], "").await;
+    assert_eq!(r.status, 401);
+    assert!(r.body.is_empty(), "{}", r.body);
+    let r = req(addr, "GET", "/settings/bookmarks?edit=bookmark:0", &[], "").await;
+    assert_eq!(r.status, 200);
+    assert!(!r.body.contains("data-item") && !r.body.contains("value=\"Wiki\""));
+    let (cookie, _) = login(addr).await;
+    let r = req(
+        addr,
+        "GET",
+        "/settings/bookmarks?frag=list",
+        &[("Cookie", &cookie)],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("frag-mark") && r.body.contains("data-hash="));
+    assert!(!r.body.contains("<html"), "a fragment, not a page");
+    // Form values and the CSRF token are never stored by a cache.
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    assert!(no_store(&r.head), "{}", r.head);
+    let r = req(
+        addr,
+        "GET",
+        "/settings/bookmarks",
+        &[("Cookie", &cookie)],
+        "",
+    )
+    .await;
+    assert!(
+        r.body.contains("rh-csrf") && no_store(&r.head),
+        "{}",
+        r.head
+    );
 }

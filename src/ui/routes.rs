@@ -45,6 +45,9 @@ pub async fn route(
         let body = pages::containers::table(&ctx, &v.snap, &v.groups, &q).into_string();
         return html(StatusCode::OK, body);
     }
+    // Settings pages carry form values and the CSRF token (signed in), and
+    // their fragments the lists: never stored by a cache.
+    let no_store = path == "/settings" || path.starts_with("/settings/");
     let (path, query) = (
         path.to_string(),
         req.uri().query().unwrap_or("").to_string(),
@@ -52,6 +55,11 @@ pub async fn route(
     let (st, host, headers) = (state.clone(), host.to_string(), req.headers().clone());
     let job = move || {
         let ctx = Ctx::new(&st, &host, &path, &query, &headers);
+        // `/settings/<tab>?frag=…`: built from this request's session (401
+        // without one), never from an empty HeaderMap like the table above.
+        if let Some(r) = crate::ui::settings::fragment(&ctx) {
+            return r;
+        }
         pages::render(&ctx)
     };
     // History queries are synchronous SQLite calls: keep them off the reactor.
@@ -63,7 +71,11 @@ pub async fn route(
     } else {
         job()
     };
-    html(status, body)
+    let mut r = html(status, body);
+    if no_store {
+        set(&mut r, CACHE_CONTROL, "no-store");
+    }
+    r
 }
 
 /// `GET /api/palette`: what the command palette can jump to.

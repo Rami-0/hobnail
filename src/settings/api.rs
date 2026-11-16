@@ -120,7 +120,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["general"]) => {
             let r: ops::PatchReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::general(c, &r)
+                ops::general(c, &r).and_then(ops::precheck)
             })?)
         }
 
@@ -129,19 +129,19 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["docker"]) => {
             let r: ops::ExcludeReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::docker_exclude(c, &r)
+                ops::docker_exclude(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["groups"]) => {
             let r: ops::GroupsReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::groups(c, &r)
+                ops::groups(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["containers", "override"]) => {
             let r: ops::OverrideReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::container_override(c, &r)
+                ops::container_override(c, &r).and_then(ops::precheck)
             })?)
         }
 
@@ -183,7 +183,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["system"]) => {
             let r: ops::SystemReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::system(c, &r)
+                ops::system(c, &r).and_then(ops::precheck)
             })?)
         }
 
@@ -192,7 +192,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["channels"]) => {
             let r: CollectionReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::channel_action(c, &r)
+                ops::channel_action(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["channels", "test"]) => {
@@ -213,7 +213,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["history"]) => {
             let r: ops::PatchReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::history(c, &r)
+                ops::history(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["history", "clear"]) => {
@@ -235,10 +235,9 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["security", "password"]) => {
             let r: ops::PasswordReq = body(call)?;
             if r.new.is_empty() || r.new.len() > 1024 {
-                return Err(ApiError::bad_request("new password: 1 to 1024 bytes"));
+                return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
             }
-            crate::auth::change_password(state, &r.current, &r.new)
-                .map_err(ApiError::bad_request)?;
+            crate::auth::change_password(state, &r.current, &r.new).map_err(password_error)?;
             json(json!({"ok": true}))
         }
         (_, true, ["security", "sign-out-others"]) => {
@@ -256,10 +255,31 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     })
 }
 
+/// A refused password change on the field it is about (422), in plain
+/// words; anything else (no password set, too many attempts) stays a 400.
+fn password_error(e: String) -> ApiError {
+    let field = if e.contains("current password") {
+        Some("current")
+    } else if e.starts_with("the password must") {
+        Some("new")
+    } else {
+        None
+    };
+    let mut c = e.chars();
+    let msg = c
+        .next()
+        .map(|f| f.to_uppercase().chain(c).collect::<String>() + ".")
+        .unwrap_or_default();
+    match field {
+        Some(f) => ApiError::invalid(&msg, Some(f), None),
+        None => ApiError::bad_request(msg),
+    }
+}
+
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
     store::edit(state, &r.base_hash, &call.user, |c| {
-        ops::list_action(c, spec, &r)
+        ops::list_action(c, spec, &r).and_then(ops::precheck)
     })
 }
 

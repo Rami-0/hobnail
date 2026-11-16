@@ -11,7 +11,7 @@ pub fn body() -> Markup {
     html! {
         section.panel aria-labelledby="gen-h" {
             div.panel-h { h2 #gen-h { "Page" } }
-            form.sf #f-general data-form="general" novalidate {
+            form.sf #f-general data-form="general" method="post" action="/settings/general" novalidate {
                 div.sf-grid {
                     (f.text("title", "Title", "Shown in the sidebar and the browser tab. Empty: the host name."))
                     (f.text("greeting", "Greeting", "Line under the title on the overview. Empty: a time-of-day greeting."))

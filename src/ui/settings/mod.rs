@@ -1,15 +1,21 @@
 //! The settings pages: `/settings` (overview of the tabs) and
 //! `/settings/<tab>` (DESIGN.md section 5), in the shell.
 //!
-//! The server renders each tab's structure (sections, labelled controls,
-//! hidden entity editors); `static/settings.js` loads the values from the
-//! settings JSON API (`/api/settings/*`, see `crate::settings`), renders the
-//! lists with `createElement`/`textContent`, and saves with `fetch`
-//! (`X-RH-CSRF`, `base_hash`). `static/settings.css` and `settings.js` are
-//! linked from these pages only.
+//! Forms that moved onto the dialog (DESIGN.md §11.6; Bookmarks so far, see
+//! the recipe in `dlg.rs`) are rendered with their values by the server,
+//! from the file on disk, for a session only; the add / edit dialog and the
+//! `?add=` / `?edit=` page form come from `dlg.rs`, and `?frag=list` serves
+//! a list again for in-place updates ([`fragment`]). The other tabs still
+//! render their structure only: `static/settings.js` loads their values
+//! from the settings JSON API (`/api/settings/*`, see `crate::settings`).
+//! Every save is a `fetch` with `X-RH-CSRF` and `base_hash`; every form is
+//! `method="post"` with its submit button disabled until the script runs,
+//! so no value can ever end up in a URL (ROB-15). `static/settings.css`
+//! and `settings.js` are linked from these pages only.
 //!
 //! Signed out, a tab shows only the lock panel (how to set the first
-//! password, or a sign-in link) and no config data at all.
+//! password, or a sign-in link) and no config data at all: no list, no
+//! dialog, no `data-item`, no page form, and `?frag=` answers 401.
 //!
 //! Controls carry `data-t` (how the script converts a value: `list`, `num`,
 //! `json`, `bool`, `tri`, `set`) and sit in `.fld` wrappers; a wrapper with
@@ -19,6 +25,8 @@ mod appearance;
 mod bookmarks;
 mod config;
 mod containers;
+mod disk;
+mod dlg;
 mod form;
 mod general;
 mod history;
@@ -29,9 +37,10 @@ mod widgets;
 #[cfg(test)]
 mod tests;
 
+use hyper::StatusCode;
 use maud::{html, Markup};
 
-use crate::ui::fmt::url_encode;
+use crate::ui::fmt::{parse_query, query_get, url_encode};
 use crate::ui::ic;
 use crate::ui::pages::login::SET_PASSWORD_CMD;
 use crate::ui::routes::SETTINGS;
@@ -64,26 +73,58 @@ pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
         Some(s) => Some(SETTINGS.iter().find(|t| t.1 == s)?),
     };
     let signed = ctx.user.is_some();
-    let content = match (tab, signed) {
-        (None, _) => index(ctx),
-        (Some(t), false) => lock_panel(ctx, t.1),
+    let none = html! {};
+    let (content, dialogs, acts) = match (tab, signed) {
+        (None, _) => (index(ctx), none, None),
+        (Some(t), false) => (lock_panel(ctx, t.1), none, None),
         (Some(t), true) => match t.1 {
-            "general" => general::body(),
-            "containers" => containers::body(ctx),
-            "bookmarks" => bookmarks::body(ctx),
-            "widgets" => widgets::body(ctx),
-            "notifications" => notifications::body(ctx),
-            "appearance" => appearance::body(),
-            "history" => history::body(),
-            "config" => config::body(),
-            "security" => security::body(),
+            "general" => (general::body(), none, None),
+            "containers" => (containers::body(ctx), none, None),
+            "bookmarks" => (
+                bookmarks::body(ctx),
+                bookmarks::dialogs(),
+                Some(bookmarks::head_actions()),
+            ),
+            "widgets" => (widgets::body(ctx), none, None),
+            "notifications" => (notifications::body(ctx), none, None),
+            "appearance" => (appearance::body(), none, None),
+            "history" => (history::body(), none, None),
+            "config" => (config::body(), none, None),
+            "security" => (security::body(), none, None),
             _ => return None,
         },
     };
-    Some(shell(ctx, tab, content))
+    Some(shell(ctx, tab, content, dialogs, acts))
 }
 
-fn shell(ctx: &Ctx, tab: Option<&Tab>, content: Markup) -> String {
+/// `GET /settings/<tab>?frag=<name>`: one part of a tab, for the script to
+/// swap in after a save. `None` when the request is not a fragment request.
+/// Reads the session from the request (unlike the containers-table
+/// fragment, which is public): without one the answer is 401 with an empty
+/// body, whatever was asked for.
+pub fn fragment(ctx: &Ctx) -> Option<(StatusCode, String)> {
+    let slug = ctx.path.strip_prefix("/settings/")?;
+    let q = parse_query(ctx.query);
+    let frag = query_get(&q, "frag")?;
+    if ctx.user.is_none() {
+        return Some((StatusCode::UNAUTHORIZED, String::new()));
+    }
+    Some(match (slug, frag) {
+        ("bookmarks", "list") => (
+            StatusCode::OK,
+            bookmarks::list_markup(&disk::Disk::read(ctx.state)).into_string(),
+        ),
+        _ => (StatusCode::NOT_FOUND, String::new()),
+    })
+}
+
+fn shell(
+    ctx: &Ctx,
+    tab: Option<&Tab>,
+    content: Markup,
+    dialogs: Markup,
+    acts: Option<Markup>,
+) -> String {
     let sha = ctx.state.build.sha;
     let heading = match tab {
         None => html! { h1.title { "Settings" } },
@@ -114,15 +155,23 @@ fn shell(ctx: &Ctx, tab: Option<&Tab>, content: Markup) -> String {
             div.set-main #set-main data-tab=(slug) data-signed=(if signed { "1" } else { "0" }) {
                 @if let Some((name, _, desc)) = tab {
                     div.set-head {
-                        h2 { (name) }
-                        p.page-sub { (desc) }
+                        div.set-head-t {
+                            h2 { (name) }
+                            p.page-sub { (desc) }
+                        }
+                        @if let Some(a) = acts { div.set-acts { (a) } }
                     }
                 }
                 div.set-banners #set-banners aria-live="assertive" {}
                 (content)
             }
         }
-        div.toasts #toasts role="status" aria-live="polite" {}
+        // Dialogs sit outside `#set-main`, whose forms the page-level
+        // unsaved-edits check watches; the dialog has its own guard.
+        @if signed {
+            (dlg::confirm())
+            (dialogs)
+        }
         script src={"/static/settings.js?v=" (sha)} defer {}
     };
     let title = tab.map(|t| t.0).unwrap_or("Settings");
@@ -133,8 +182,10 @@ fn shell(ctx: &Ctx, tab: Option<&Tab>, content: Markup) -> String {
 fn index(ctx: &Ctx) -> Markup {
     html! {
         div.set-head {
+            div.set-head-t {
             h2 { "Settings" }
             p.page-sub { "Change the config from the browser. Every save is validated, keeps the file's comments and is kept as a revision." }
+            }
         }
         @if ctx.user.is_none() { (lock_panel(ctx, "")) }
         ul.set-cards {

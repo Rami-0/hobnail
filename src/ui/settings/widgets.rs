@@ -59,7 +59,7 @@ pub fn body(ctx: &Ctx) -> Markup {
     html! {
         section.panel aria-labelledby="sys-h" {
             div.panel-h { h2 #sys-h { "System tiles" } }
-            form.sf #f-system data-form="system" novalidate {
+            form.sf #f-system data-form="system" method="post" action="/settings/widgets" novalidate {
                 div.sf-grid {
                     (sys.toggle("enabled", "Show host tiles and vitals", "CPU, memory, disk, network and temperature on the overview and in the top bar.", None))
                 }
@@ -76,7 +76,7 @@ pub fn body(ctx: &Ctx) -> Markup {
                     tbody #w-list { tr { td colspan="5" { (loading()) } } }
                 }
             }
-            form.sf.editor #f-widget data-form="widget" hidden novalidate {
+            form.sf.editor #f-widget data-form="widget" hidden method="post" action="/settings/widgets" novalidate {
                 h3.ed-h #w-ed-h { "Add widget" }
                 div.sf-grid {
                     (f.input("id", "Id", "Unique; letters, digits, - and _. Used by alert rules.", MONO))

@@ -208,12 +208,19 @@ fn shapes_reject_unknown_fields_and_bad_types() {
         serde_json::from_value(json!({"base_hash": "x", "page": {"titel": "x"}})).unwrap();
     let e = ops::general(&cur(FIXTURE), &req).unwrap_err();
     assert_eq!(e.status, StatusCode::BAD_REQUEST);
+    // A bad value is a 422 on its field, in plain words (SET-07).
     let req: ops::PatchReq =
         serde_json::from_value(json!({"base_hash": "x", "page": {"theme": "pink"}})).unwrap();
-    assert_eq!(
-        ops::general(&cur(FIXTURE), &req).unwrap_err().status,
-        StatusCode::BAD_REQUEST
-    );
+    let e = ops::general(&cur(FIXTURE), &req).unwrap_err();
+    assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(e.body["field"], "theme");
+    assert_eq!(e.body["error"], "Choose one of the offered options.");
+    let req: ops::PatchReq =
+        serde_json::from_value(json!({"base_hash": "x", "page": {"columns": 2.5}})).unwrap();
+    let e = ops::general(&cur(FIXTURE), &req).unwrap_err();
+    assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(e.body["field"], "columns");
+    assert_eq!(e.body["error"], "Use a whole number.");
     assert!(
         serde_json::from_value::<ops::PatchReq>(json!({"base_hash": "x", "page": {}, "x": 1}))
             .is_err()
@@ -355,14 +362,35 @@ fn bookmarks_add_edit_reorder_delete() {
             .text;
     }
     assert_eq!(t, FIXTURE, "adding and deleting restores the file");
-    // Missing url: shape error.
+    // Missing url: "Required." on the field.
     let req = list_req("add", None, Some(json!({"name": "x"})), None);
+    let e = ops::list_action(&cur(FIXTURE), &ops::BOOKMARKS, &req).unwrap_err();
+    assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
-        ops::list_action(&cur(FIXTURE), &ops::BOOKMARKS, &req)
-            .unwrap_err()
-            .status,
-        StatusCode::BAD_REQUEST
+        (&e.body["field"], &e.body["error"]),
+        (&json!("url"), &json!("Required."))
     );
+    // Only web links (SET-40), and a name.
+    for url in [
+        "not a url",
+        "javascript:alert(1)",
+        "ftp://x",
+        "http://",
+        "https:// x",
+    ] {
+        let req = list_req("add", None, Some(json!({"name": "x", "url": url})), None);
+        let e = ops::list_action(&cur(FIXTURE), &ops::BOOKMARKS, &req).unwrap_err();
+        assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY, "{url}");
+        assert_eq!(e.body["field"], "url", "{url}");
+    }
+    let req = list_req(
+        "add",
+        None,
+        Some(json!({"name": " ", "url": "https://x"})),
+        None,
+    );
+    let e = ops::list_action(&cur(FIXTURE), &ops::BOOKMARKS, &req).unwrap_err();
+    assert_eq!(e.body["field"], "name");
 }
 
 #[test]
@@ -967,6 +995,161 @@ async fn invalid_input_is_never_written() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, _) = get(&st, "nope").await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+/// Form errors land on the field that caused them, in plain words, without
+/// the config file's line and column (SET-06, SET-07, SET-61).
+#[tokio::test]
+async fn form_errors_name_their_field_in_plain_words() {
+    let (dir, st) = state_with(Some(FIXTURE));
+    let h = hash(FIXTURE);
+    let mut w = mailpit2();
+    w["refresh"] = json!("abc");
+    let (s, b) = post(
+        &st,
+        "widgets",
+        json!({"base_hash": h, "action": "add", "item": w}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert_eq!(b["field"], "refresh", "{b}");
+    assert_eq!(b["error"], "Use a duration like 30s or 5m.");
+    assert!(b["line"].is_null(), "{b}");
+    for (v, msg) in [
+        ("abc", "Use a duration like 30s or 5m."),
+        ("1s", "Use a value from 5s to 5m."),
+    ] {
+        let (s, b) = post(
+            &st,
+            "history",
+            json!({"base_hash": h, "history": {"sample_interval": v}}),
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+        assert_eq!(b["field"], "sample_interval", "{v}: {b}");
+        assert_eq!(b["error"], msg, "{v}: {b}");
+        assert!(b["line"].is_null() && b["col"].is_null(), "{b}");
+    }
+    let (_, b) = post(
+        &st,
+        "general",
+        json!({"base_hash": h, "page": {"columns": 9}}),
+    )
+    .await;
+    assert_eq!(
+        (&b["field"], &b["error"]),
+        (&json!("columns"), &json!("Use a number from 1 to 6."))
+    );
+    let (_, b) = post(
+        &st,
+        "containers/override",
+        json!({"base_hash": h, "names": ["web"], "set": {"order": 1.5}}),
+    )
+    .await;
+    assert_eq!(
+        (&b["field"], &b["error"]),
+        (&json!("order"), &json!("Use a whole number.")),
+        "{b}"
+    );
+    // Bookmarks: an add with a bad link is refused on the URL field.
+    let (s, b) = post(
+        &st,
+        "bookmarks",
+        json!({"base_hash": h, "action": "add", "item": {"name": "Docs", "url": "javascript:alert(1)"}}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(b["field"], "url");
+    assert_eq!(file(&dir), FIXTURE, "nothing was written");
+}
+
+/// A hand-written bookmark whose URL is not a web link stays editable as
+/// long as the URL is not changed; a changed URL and an add are checked.
+#[test]
+fn bookmark_url_check_skips_an_unchanged_url_on_edit() {
+    let text = "[[bookmarks]]\nname = \"Files\"\nurl = \"/files\"\n";
+    let edit = |url: &str| {
+        list_req(
+            "edit",
+            Some(json!(0)),
+            Some(json!({"name": "Shared files", "url": url})),
+            None,
+        )
+    };
+    let d = ops::list_action(&cur(text), &ops::BOOKMARKS, &edit("/files")).unwrap();
+    assert!(
+        d.text.contains("Shared files") && d.text.contains("/files"),
+        "{}",
+        d.text
+    );
+    let e = ops::list_action(&cur(text), &ops::BOOKMARKS, &edit("/other")).unwrap_err();
+    assert_eq!(e.body["field"], "url");
+    let add = list_req(
+        "add",
+        None,
+        Some(json!({"name": "x", "url": "/files"})),
+        None,
+    );
+    let e = ops::list_action(&cur(text), &ops::BOOKMARKS, &add).unwrap_err();
+    assert_eq!(e.body["field"], "url");
+}
+
+#[test]
+fn plain_words_and_the_key_at_a_column() {
+    assert_eq!(
+        ops::plain("invalid duration \"x\""),
+        "Use a duration like 30s or 5m."
+    );
+    assert_eq!(
+        ops::plain("invalid type: floating point `1.5`, expected i32"),
+        "Use a whole number."
+    );
+    assert_eq!(ops::plain("something else"), "something else");
+    let d = |text: &str| store::Draft {
+        text: text.into(),
+        note: String::new(),
+        kind: "config.saved",
+        fields: ops::BOOKMARK_KEYS,
+        warnings: vec![],
+    };
+    assert!(ops::precheck(d("[[bookmarks]]\nname = \"a\"\nurl = \"https://a\"\n")).is_ok());
+    // The key before a column: a plain line, an inline table, none.
+    assert_eq!(ops::key_before("refresh = \"abc\"", 11), Some("refresh"));
+    let inline = "{ name = \"x\", url = \"bad\" }";
+    let col = inline.find("\"bad").unwrap() + 1;
+    assert_eq!(ops::key_before(inline, col), Some("url"));
+    let col = inline.find("\"x").unwrap() + 1;
+    assert_eq!(ops::key_before(inline, col), Some("name"));
+    assert_eq!(ops::key_before("no equals here", 5), None);
+    assert_eq!(ops::key_before("= 1", 3), None);
+}
+
+/// Change password: a wrong current password or a short new one is a 422
+/// on that field; the password itself is never echoed.
+#[tokio::test]
+async fn password_errors_land_on_their_field() {
+    let (_dir, st) = state_with(Some(FIXTURE));
+    assert!(st.db.is_enabled(), "this test needs the history database");
+    crate::auth::set_password_for_tests(&st.db, "old password 1");
+    let (s, b) = post(
+        &st,
+        "security/password",
+        json!({"current": "not it at all", "new": "new password 1"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert_eq!(b["field"], "current");
+    assert_eq!(b["error"], "The current password is wrong.");
+    assert!(!b.to_string().contains("not it at all"));
+    let (s, b) = post(
+        &st,
+        "security/password",
+        json!({"current": "old password 1", "new": "short"}),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
+    assert_eq!(b["field"], "new");
+    assert!(!b.to_string().contains("short\""), "{b}");
 }
 
 #[tokio::test]

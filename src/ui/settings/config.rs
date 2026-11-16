@@ -14,7 +14,7 @@ pub fn body() -> Markup {
                 h2 #raw-h { "config.toml" }
                 code.muted.raw-path #raw-path {}
             }
-            form.sf #f-raw data-form="raw" novalidate {
+            form.sf #f-raw data-form="raw" method="post" action="/settings/config" novalidate {
                 div.editor-wrap {
                     pre.gutter #raw-gutter aria-hidden="true" {}
                     div.ed-hl #raw-hl hidden {}
@@ -24,8 +24,9 @@ pub fn body() -> Markup {
                 }
                 div.raw-status #raw-status role="status" aria-live="polite" { span.muted { "Loading…" } }
                 div.sf-note hidden {}
+                (super::dlg::needs_js(super::dlg::Values::LoadWithJs))
                 div.sf-foot {
-                    button.btn.primary type="submit" { (ic("check")) "Save" }
+                    button.btn.primary type="submit" disabled data-ready { (ic("check")) "Save" }
                     button.btn type="button" data-act="raw-revert" { (ic("refresh")) "Revert" }
                     button.btn type="button" data-act="raw-goto" hidden { "Go to error" }
                     span.sf-msg role="status" aria-live="polite" {}
