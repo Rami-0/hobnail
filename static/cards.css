@@ -88,6 +88,7 @@ tbody.none:not([data-why=stopped]) .why-stopped,tbody.none:not([data-why=problem
  .bar .seg{overflow-x:auto;max-width:100%}
  .search-in{max-width:none;flex-basis:100%}
  .sortctl{display:flex}
+ #cbar{min-width:0}
  .bar select{height:var(--ctl-h)}
  .ctbl,.ctbl tbody{display:block}
  .ctbl thead{display:none}
