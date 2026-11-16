@@ -299,6 +299,29 @@ try {
     await load("/");
     const setHref = await ev(`document.querySelector(${JSON.stringify(phone ? "#bbar a[href^='/settings'], .nav a[href^='/settings']" : ".nav a[href^='/settings']")}).getAttribute('href')`);
     check(setHref === "/settings/notifications", `${w}: the Settings link opens the tab used last`, setHref);
+    // ---- wave 5: the containers table and a container page at this width ----
+    const noX = "document.documentElement.scrollWidth <= innerWidth";
+    await load("/containers");
+    check(await ev(noX), `${w}: /containers does not scroll sideways (ROB-07)`, await ev("document.documentElement.scrollWidth"));
+    if (phone) {
+      check(await ev("(() => { const s = document.getElementById('csort'); return !!s && s.offsetParent !== null && s.options.length === 6; })()"), "390: the table can be sorted from the toolbar (OV-19)");
+      await ev("(() => { const s = document.getElementById('csort'); s.value = 'mem'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+      check(await until("/[?&]sort=mem/.test(location.search) && document.querySelector('#ctable th[data-sort=mem]').getAttribute('aria-sort') === 'descending'"), "390: Sort: Memory sorts the table and is in the URL (OV-19)", await here());
+      await click("#cdir", false);
+      check(await until("/dir=asc/.test(location.search) && document.getElementById('cdir').dataset.dir === 'asc'"), "390: the direction button flips the sort (OV-19)", await here());
+      await ev("localStorage.removeItem('rh-ctr-view')"); // the remembered sort goes back to the default
+    } else {
+      check(await ev("getComputedStyle(document.getElementById('csortw')).display === 'none'"), "1440: the toolbar's sort select is hidden (the header sorts)");
+      await load("/containers?group=0");
+      check(await ev("[...document.querySelectorAll('#ctable tbody.flat td.c-state')].every((td) => td.scrollWidth <= td.clientWidth + 1)"), "1440: flat view: no State cell is cut (OV-21)");
+      await ev("localStorage.removeItem('rh-ctr-view')");
+    }
+    await load(`/containers/${enc(CTR)}`);
+    check(await ev(noX), `${w}: a container page does not scroll sideways (OV-40)`, await ev("document.documentElement.scrollWidth"));
+    if (phone) {
+      const t = await ev("(() => { const n = document.querySelector('.cd-tabs'); return n.scrollWidth > n.clientWidth + 1 ? n.classList.contains('more-r') : 'fits'; })()");
+      check(t === true || t === "fits", "390: the tab strip fades where more tabs are (OV-36)", t);
+    }
   }
 
   // ================================================== outside changes (Y12) and the 409 way out

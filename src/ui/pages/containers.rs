@@ -264,6 +264,12 @@ pub fn select<'a>(
         all.sort_by(|a, b| cmp_card(a.1, b.1, q.sort, desc));
         return all.into_iter().map(|(g, c)| (g, vec![c])).collect();
     }
+    // Grouped and sorted by a number: the stacks follow their top row, so
+    // "CPU ↓" puts the busiest container first (OV-22); the script does the
+    // same after a re-sort.
+    if matches!(q.sort, Sort::Cpu | Sort::Mem) {
+        out.sort_by(|a, b| cmp_card(a.1[0], b.1[0], q.sort, desc));
+    }
     out
 }
 
@@ -301,7 +307,6 @@ pub fn page(ctx: &Ctx) -> String {
                         autocomplete="off" spellcheck="false" aria-label="Filter containers";
                 }
                 @if q.state != StateFilter::All { input type="hidden" name="state" value=(q.state.as_str()); }
-                @if q.sort != Sort::Name { input type="hidden" name="sort" value=(q.sort.as_str()); }
                 @if let Some(d) = q.desc { input type="hidden" name="dir" value=(if d { "desc" } else { "asc" }); }
                 @if let Some(g) = q.group { input type="hidden" name="group" value=(u8::from(g)); }
                 nav.seg #cstate aria-label="State" {
@@ -316,6 +321,7 @@ pub fn page(ctx: &Ctx) -> String {
                         option value=(g.name) selected[q.stack.as_deref() == Some(g.name.as_str())] { (g.title) }
                     }
                 }
+                (sort_ctl(&q))
                 nav.seg #cgroup aria-label="Layout" {
                     a href=(q.with(|x| x.group = Some(true))) data-group="1" aria-current=[grouped.then_some("true")] { (ic("layers")) span { "Stacks" } }
                     a href=(q.with(|x| x.group = Some(false))) data-group="0" aria-current=[(!grouped).then_some("true")] { (ic("menu")) span { "Flat" } }
@@ -333,6 +339,38 @@ pub fn page(ctx: &Ctx) -> String {
         crumb_title("Containers"),
         body,
     )
+}
+
+/// Column labels, shared by the table header and the phone sort control.
+const SORT_LABELS: [(Sort, &str); 6] = [
+    (Sort::Name, "Name"),
+    (Sort::Stack, "Stack"),
+    (Sort::Image, "Image"),
+    (Sort::Status, "State"),
+    (Sort::Cpu, "CPU"),
+    (Sort::Mem, "Memory"),
+];
+
+/// "Sort by" for phones, where the table header is hidden (OV-19): a select
+/// that is part of the toolbar form (the "Apply" button sends it without
+/// the script) and a link that flips the direction. Above 700 px the header
+/// does the job and this stays hidden (it still carries `sort` in the form).
+fn sort_ctl(q: &ListQuery) -> Markup {
+    let desc = q.is_desc();
+    let flip = q.with(|x| x.desc = Some(!desc));
+    html! {
+        div.sortctl #csortw {
+            select #csort name="sort" aria-label="Sort by" {
+                @for (k, label) in SORT_LABELS {
+                    option value=(k.as_str()) selected[q.sort == k] { "Sort: " (label) }
+                }
+            }
+            a.btn.icon #cdir href=(flip) data-dir=(if desc { "desc" } else { "asc" })
+                aria-label=(if desc { "Descending; switch to ascending" } else { "Ascending; switch to descending" }) {
+                svg.i aria-hidden="true" { use href=(if desc { "#i-arrow-down" } else { "#i-arrow-up" }) {} }
+            }
+        }
+    }
 }
 
 fn th(q: &ListQuery, label: &str, key: Sort, cls: &str) -> Markup {
@@ -396,6 +434,8 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                 table.tbl.ctbl.grouped[grouped] {
                     caption.count aria-live="polite" {
                         "Showing " b.shown.num { (shown) } " of " span.num { (total) } " containers"
+                        // " · 2 in collapsed stacks", filled by the script (OV-30).
+                        span.coll {}
                     }
                     thead {
                         tr {
@@ -418,7 +458,7 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                                     th colspan=(COLS) scope="rowgroup" {
                                         button.grp-t type="button" aria-expanded="true" title=(g.counts()) {
                                             (ic("chev-d"))
-                                            span.grp-n { (g.title) }
+                                            span.grp-n title=(g.title) { (g.title) }
                                             span.cnt.num { (g.running) "/" (all_in) }
                                             span.grp-strip { (health_strip(&stack_strip(&strips, g), &strips, &g.title, StripStyle::Runs)) }
                                         }
@@ -488,7 +528,7 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
                 @if c.restarts > 0 { (pill("warn", &format!("{}× exit/1h", c.restarts))) }
             }
             td.c-stack data-l="Stack" { a href={"/containers?stack=" (url_encode(&c.stack))} { (g.title) } }
-            td.c-image data-l="Image" { span.mono.img title=(c.image) { (c.image) } }
+            td.c-image data-l="Image" { span.mono.img title=(c.image) { (image_label(&c.image)) } }
             td.c-state data-l="State" title=(c.state_text.as_deref().unwrap_or("")) {
                 span class={"st-l " (c.dot.map(|d| d.class()).unwrap_or("off"))} { (c.label) }
                 @if let Some(code) = c.exit_code { " " span.mono.exit title="exit code" { (code) } }
@@ -540,7 +580,17 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
     }
 }
 
-/// "Up 3 hours" -> "3 hours"; "stopped · 2 hours ago" -> "2 hours ago".
+/// An image whose tag is gone shows as a bare digest; say so in words and
+/// keep the digest short (the full one is in the cell's title) (OV-26).
+fn image_label(image: &str) -> String {
+    match image.strip_prefix("sha256:") {
+        Some(h) => format!("untagged {}", h.get(..12).unwrap_or(h)),
+        None => image.to_string(),
+    }
+}
+
+/// "Up 3 hours" -> "3 h"; "stopped · 2 weeks ago" -> "2 wk ago". The cell
+/// carries the full text in its `title`; the short form is never cut (OV-21).
 fn short_state(c: &CardView) -> String {
     let t = c.state_text.as_deref().unwrap_or("");
     let t = t.strip_prefix("Up ").unwrap_or(t);
@@ -548,13 +598,54 @@ fn short_state(c: &CardView) -> String {
     if t == c.label || t == "stopped" {
         String::new()
     } else {
-        // "About an hour" reads oddly mid-line.
-        let mut s = t.to_string();
-        if let Some(f) = s.get(..1) {
-            s.replace_range(..1, &f.to_lowercase());
-        }
-        s
+        compact_age(t)
     }
+}
+
+/// Docker's ages in short units: "About an hour" -> "1 h", "12 minutes" ->
+/// "12 min", "Less than a second ago" -> "<1 s ago". Anything else (a
+/// "(Paused)" suffix, words it does not know) passes through lower-cased.
+pub(crate) fn compact_age(t: &str) -> String {
+    let lower = t.trim().to_lowercase();
+    let (head, tail) = match lower.find(" ago") {
+        Some(i) => (&lower[..i], &lower[i..]),
+        None => (lower.as_str(), ""),
+    };
+    let mut w = head.split_whitespace();
+    let n = match w.next() {
+        Some("about") => {
+            // "about an hour"
+            w.next();
+            "1".to_string()
+        }
+        Some("an" | "a") => "1".to_string(),
+        Some("less") => {
+            // "less than a second"
+            w.next();
+            w.next();
+            "<1".to_string()
+        }
+        Some(x) if x.chars().all(|ch| ch.is_ascii_digit()) => x.to_string(),
+        _ => return lower,
+    };
+    let unit = match w.next().map(|u| u.trim_end_matches('s')) {
+        Some("second") => "s",
+        Some("minute") => "min",
+        Some("hour") => "h",
+        Some("day") => "d",
+        Some("week") => "wk",
+        Some("month") => "mo",
+        Some("year") => "y",
+        _ => return lower,
+    };
+    let rest: Vec<&str> = w.collect();
+    let mut s = format!("{n} {unit}");
+    if !rest.is_empty() {
+        s.push(' ');
+        s.push_str(&rest.join(" "));
+    }
+    s.push_str(tail);
+    s
 }
 
 #[cfg(test)]
@@ -645,6 +736,73 @@ mod tests {
             acts.find(">Logs</a>").unwrap() < acts.find("aria-label=\"Open ").unwrap(),
             "Logs first"
         );
+    }
+
+    /// OV-21: state ages in short units, so the State cell is never cut.
+    #[test]
+    fn compact_ages() {
+        for (a, b) in [
+            ("3 hours", "3 h"),
+            ("About an hour", "1 h"),
+            ("About a minute", "1 min"),
+            ("Less than a second", "<1 s"),
+            ("2 weeks ago", "2 wk ago"),
+            ("12 minutes (Paused)", "12 min (paused)"),
+            ("13 days", "13 d"),
+            ("1 second", "1 s"),
+            ("3 months", "3 mo"),
+            ("2 years ago", "2 y ago"),
+            ("created, never started", "created, never started"),
+        ] {
+            assert_eq!(compact_age(a), b, "{a}");
+        }
+    }
+
+    #[test]
+    fn bare_digest_images_say_untagged() {
+        assert_eq!(
+            image_label(&format!("sha256:{}", "ab".repeat(32))),
+            "untagged abababababab"
+        );
+        assert_eq!(image_label("nginx:1.27"), "nginx:1.27");
+    }
+
+    /// OV-19: phones get a "Sort by" select (part of the toolbar form, so it
+    /// works without the script) and a direction link.
+    #[test]
+    fn sort_control_for_phones() {
+        let h = sort_ctl(&ListQuery::parse("sort=cpu&group=0")).into_string();
+        assert!(
+            h.contains(r#"<select id="csort" name="sort" aria-label="Sort by">"#),
+            "{h}"
+        );
+        assert!(
+            h.contains(r#"<option value="cpu" selected>Sort: CPU</option>"#),
+            "{h}"
+        );
+        assert_eq!(h.matches("<option").count(), 6);
+        // CPU is descending by default: the link flips it and keeps the rest.
+        assert!(
+            h.contains(r#"href="/containers?sort=cpu&amp;dir=asc&amp;group=0""#),
+            "{h}"
+        );
+        assert!(h.contains(r#"data-dir="desc""#) && h.contains("switch to ascending"));
+        let h = sort_ctl(&ListQuery::default()).into_string();
+        assert!(h.contains(r#"<option value="name" selected>"#));
+        assert!(h.contains(r#"href="/containers?dir=desc""#), "{h}");
+    }
+
+    /// OV-22: grouped and sorted by a number, the stacks follow their top row.
+    #[test]
+    fn grouped_numeric_sort_orders_stacks() {
+        let gs = groups();
+        let rows = select(&gs, &ListQuery::parse("sort=cpu"), true);
+        assert_eq!(names(&rows), ["zeta", "alpha", "mid"]);
+        let rows = select(&gs, &ListQuery::parse("sort=cpu&dir=asc"), true);
+        assert_eq!(names(&rows), ["alpha", "mid", "zeta"]);
+        // Name sort keeps the configured stack order.
+        let rows = select(&gs, &ListQuery::parse("sort=name&dir=desc"), true);
+        assert_eq!(names(&rows), ["mid", "alpha", "zeta"]);
     }
 
     #[test]

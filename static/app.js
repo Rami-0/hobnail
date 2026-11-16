@@ -209,6 +209,23 @@
   // makes the page long there); without the script it stays open.
   if (phone()) $$("details.cd-probes[open]").forEach((d) => { d.open = false; });
 
+  // Container tabs: on a phone the strip scrolls; the current tab is in view
+  // and the edge with more tabs behind it fades (OV-36). A tab or range
+  // change keeps the reader's place on the page (OV-37).
+  const cdTabs = doc.querySelector(".cd-tabs");
+  if (cdTabs) {
+    const edges = () => { const more = cdTabs.scrollWidth - cdTabs.clientWidth; cdTabs.classList.toggle("more-l", more > 1 && cdTabs.scrollLeft > 1); cdTabs.classList.toggle("more-r", more > 1 && cdTabs.scrollLeft < more - 1); };
+    const cur = cdTabs.querySelector("[aria-current]");
+    if (cur && cdTabs.scrollWidth > cdTabs.clientWidth) cdTabs.scrollLeft += cur.getBoundingClientRect().left - cdTabs.getBoundingClientRect().left - (cdTabs.clientWidth - cur.offsetWidth) / 2;
+    cdTabs.addEventListener("scroll", edges, { passive: true }); window.addEventListener("resize", edges, { passive: true }); edges();
+    try { const y = JSON.parse(sessionStorage.getItem("rh-cd-y") || "null"); sessionStorage.removeItem("rh-cd-y"); if (y && y.p === location.pathname + location.search) window.scrollTo(0, y.y); } catch {}
+    doc.addEventListener("click", (e) => {
+      const a = e.target.closest && e.target.closest(".cd-tabs a, .cd .panel-h .seg a");
+      if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button || /\/logs( |$)/.test(a.pathname + " " + location.pathname)) return;
+      try { sessionStorage.setItem("rh-cd-y", JSON.stringify({ p: a.pathname + a.search, y: Math.round(scrollY) })); } catch {}
+    });
+  }
+
   // ---- Settings links open the tab used last in this browser (Y17) ----
   // settings.js remembers it; without the script `/settings` is General.
   // Only a tab that exists (routes::SETTINGS; a test keeps the two equal).
@@ -361,9 +378,11 @@
     try { d = JSON.parse(j.dataset.j || "{}").c[box.dataset.cdName]; } catch { return; }
     if (!d) return;
     const set = (k, txt) => { const el = box.querySelector(`[data-cd="${k}"]`); if (el) el.textContent = txt; };
-    set("l", d[0]); set("s", d[2]); set("c", d[3]); set("m", d[4]);
-    const l = box.querySelector('[data-cd="l"]');
-    if (l) l.className = "st-l lg " + d[1];
+    set("s", d[2]); set("c", d[3]); set("m", d[4]);
+    // With a health check, State says running and Health has the check's word (OV-42).
+    const l = box.querySelector('[data-cd="l"]'), h = box.querySelector('[data-cd="h"]'), hw = /^(healthy|unhealthy|starting)$/.test(d[0]);
+    if (l) { l.textContent = l.hasAttribute("data-run") && hw ? "running" : d[0]; l.className = "st-l lg " + (l.hasAttribute("data-run") && hw ? "ok" : d[1]); }
+    if (h && hw) { h.textContent = d[0]; h.className = "st-l lg " + d[1]; }
     const push = (suffix, v) => {
       const svg = box.querySelector(`svg.spark[data-k$="${suffix}"]`);
       if (svg && v !== null && v !== undefined) { svg.dataset.v = String(v); svg.dataset.seen = ""; }
@@ -413,7 +432,7 @@
     const fromUrl = keys.some((k) => p.has(k));
     const v = fromUrl ? {} : store.get(VIEW, {});
     keys.forEach((k) => { if (p.has(k)) v[k] = p.get(k); });
-    if (!fromUrl) delete v.q;
+    if (!fromUrl) { delete v.q; delete v.state; delete v.stack; } // only sort and grouping are remembered (OV-28)
     return v;
   }
   function grouped() { return view.group ? view.group === "1" : bar.dataset.defaultGroup === "1"; }
@@ -424,8 +443,7 @@
     ["state", "stack", "sort", "dir", "group"].forEach((k) => { if (view[k]) p.set(k, view[k]); });
     const s = p.toString();
     history.replaceState(null, "", "/containers" + (s ? "?" + s : ""));
-    const keep = Object.assign({}, view); delete keep.q;
-    store.set(VIEW, keep);
+    store.set(VIEW, { sort: view.sort, dir: view.dir, group: view.group });
   }
   function matches(tr) {
     const st = view.state || "";
@@ -472,7 +490,8 @@
     if (g) {
       const groups = new Map();
       hit.forEach((r) => { const k = r.dataset.gi; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
-      [...groups.keys()].sort((a, b) => a - b).forEach((gi) => {
+      const num = view.sort === "cpu" || view.sort === "mem"; // stacks follow their top row (OV-22)
+      [...groups.keys()].sort((a, b) => (num && cmp(groups.get(a)[0], groups.get(b)[0])) || a - b).forEach((gi) => {
         const rs = groups.get(gi), k = rs[0].dataset.k;
         const all = rows.filter((r) => r.dataset.k === k), run = all.filter((r) => r.dataset.run === "1").length;
         const tb = el("tbody", "grp"); tb.dataset.k = k;
@@ -481,7 +500,8 @@
         const tr = el("tr", "grp-h"), th = el("th"); th.colSpan = cols; th.scope = "rowgroup";
         const b = el("button", "grp-t"); b.type = "button";
         b.setAttribute("aria-expanded", String(!tb.classList.contains("closed")));
-        b.append(svgUse("chev-d"), el("span", "grp-n", rs[0].dataset.kt), el("span", "cnt num", `${run}/${all.length}`));
+        const gn = el("span", "grp-n", rs[0].dataset.kt); gn.title = rs[0].dataset.kt;
+        b.append(svgUse("chev-d"), gn, el("span", "cnt num", `${run}/${all.length}`));
         const gs = $$(".gstrips > span", wrapOf(table)).find((s) => s.dataset.k === k);
         if (gs && gs.firstElementChild) { const sp = el("span", "grp-strip"); sp.append(gs.firstElementChild.cloneNode(true)); b.append(sp); }
         th.append(b); tr.append(th); tb.append(tr, ...rs);
@@ -499,7 +519,7 @@
     // Nothing shown: good news for an empty state filter on its own, else "no match" (OV-24).
     none.dataset.why = !view.q && !view.stack && (view.state === "stopped" || view.state === "problem") ? view.state : "filter";
     table.classList.toggle("grouped", g);
-    const shown = table.querySelector("caption .shown"); shown && (shown.textContent = hit.length);
+    collCount(table);
     // controls
     const desc = isDesc();
     $$("th[data-sort]", table).forEach((th) => {
@@ -513,9 +533,17 @@
     rows.forEach((r) => { r.dataset.run === "1" ? cnt.running++ : cnt.stopped++; if (r.dataset.prob === "1") cnt.problem++; });
     $$("#cstate .n").forEach((n) => { n.textContent = cnt[n.dataset.n]; });
     const sel = $("cstack"); if (sel && sel.value !== (view.stack || "")) sel.value = view.stack || "";
+    const cs = $("csort"), cd = $("cdir"); if (cs) cs.value = view.sort || "name";
+    if (cd) { cd.dataset.dir = desc ? "desc" : "asc"; cd.setAttribute("aria-label", desc ? "Descending; switch to ascending" : "Ascending; switch to descending"); cd.querySelector("use").setAttribute("href", desc ? "#i-arrow-down" : "#i-arrow-up"); }
     const q = $("cq"); if (q && doc.activeElement !== q && q.value !== (view.q || "")) q.value = view.q || "";
     if (store_) canonical();
     sparks(table);
+  }
+  // "Showing 38 of 40": rows in collapsed stacks are not shown (OV-30).
+  function collCount(table) {
+    const shown = table.querySelector("caption .shown"), hid = $$("tbody.grp.closed tr.row", table).length;
+    if (shown) shown.textContent = $$("tbody.grp tr.row, tbody.flat tr.row", table).length - hid;
+    const c = table.querySelector("caption .coll"); if (c) c.textContent = hid ? ` · ${hid} in collapsed stacks` : "";
   }
   if (bar) {
     view = readView();
@@ -523,11 +551,13 @@
     bar.addEventListener("submit", (e) => e.preventDefault());
     $("cq").addEventListener("input", (e) => { view.q = e.target.value.trim(); applyView(true); });
     $("cstack").addEventListener("change", (e) => { view.stack = e.target.value; applyView(true); });
+    $("csort") && $("csort").addEventListener("change", (e) => { view.sort = e.target.value === "name" ? "" : e.target.value; view.dir = ""; applyView(true); });
     bar.addEventListener("click", (e) => {
-      const a = e.target.closest("a[data-state], a[data-group]");
+      const a = e.target.closest("a[data-state], a[data-group], a[data-dir]");
       if (!a) return;
       e.preventDefault();
-      if ("state" in a.dataset) view.state = a.dataset.state; else view.group = a.dataset.group;
+      if ("dir" in a.dataset) { const def = view.sort === "cpu" || view.sort === "mem", d = !isDesc(); view.dir = d === def ? "" : d ? "desc" : "asc"; }
+      else if ("state" in a.dataset) view.state = a.dataset.state; else view.group = a.dataset.group;
       applyView(true);
     });
     doc.addEventListener("click", (e) => {
@@ -548,6 +578,7 @@
         tb.classList.toggle("closed", closed); gt.setAttribute("aria-expanded", String(!closed));
         if (!closed) HB.unfold($$("tr.row", tb));
         const c = store.get(COLL, {}); c[tb.dataset.k] = closed; store.set(COLL, c);
+        collCount(tb.closest("table"));
         return;
       }
       const clr = e.target.closest && e.target.closest("#ctable [data-clear]");

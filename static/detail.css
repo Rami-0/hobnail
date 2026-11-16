@@ -30,3 +30,33 @@
 .cd .charts.two>:last-child:nth-child(odd){grid-column:1/-1}
 .cd .facts .sub{white-space:normal}
 @media (max-width:760px){.cd .charts.two{grid-template-columns:1fr}}
+/* the tab strip scrolls on a phone: the edge with more tabs behind it fades (OV-36) */
+.cd-tabs.more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent)}
+.cd-tabs.more-l{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to left,#000 calc(100% - 40px),transparent)}
+.cd-tabs.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent)}
+.cd .cols>*{min-width:0}
+.cd-stack td{overflow-wrap:anywhere}
+/* phones: tables become label / value blocks, nothing scrolls sideways (OV-40, OV-54, OV-58) */
+@media (max-width:699px){
+ .cd-stack,.cd-stack tbody,.cd-stack tr,.cd-stack td{display:block;width:auto;max-width:none}
+ .cd-stack thead{display:none}
+ .cd-stack tr{padding:6px 0;border-bottom:1px solid var(--line)}
+ .cd-stack tbody tr:last-child{border-bottom:0}
+ .cd-stack td{height:auto;padding:1px 0;border:0;white-space:normal;text-align:left}
+ .cd-stack td[data-l]::before{content:attr(data-l) " ";display:inline-block;min-width:84px;color:var(--text-3);font:11px var(--font)}
+ .cd-stack td:empty{display:none}
+ .tbl.cd-stack td.num{text-align:left}
+ .cd-procs.cd-stack tr{display:flex;flex-direction:column}
+ .cd-procs td.cd-args{order:-1;max-width:none;white-space:normal;overflow-wrap:anywhere;color:var(--text)}
+}
+.cd-env+p{margin-top:12px}
+.cd-rules .why{white-space:normal;overflow-wrap:anywhere}
+.cd-labels{margin-top:8px}
+.cd-labels summary{cursor:pointer;font-size:12.5px;color:var(--text-2);padding:4px 0}
+.cd-labels .kv{margin-top:6px}
+.cd-hnote{margin:-4px 0 8px}
+.ctr-id h2{font-family:var(--font)}
+.ctr-t{min-width:0}
+.cd .strip.facts.n4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@container (max-width:1000px){.cd .strip.facts.n4{grid-template-columns:repeat(2,minmax(0,1fr))}.cd .strip.facts:not(.n4)>.cell:last-child{grid-column:span 2}}
+@container (max-width:560px){.cd .strip.facts:not(.n4)>.cell:last-child{grid-column:1/-1}}

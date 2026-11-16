@@ -153,6 +153,73 @@ fn detail_page_has_header_charts_and_rules() {
     );
 }
 
+/// Wave 5 on the detail page: the title is not repeated in the sub-line
+/// (ROB-08), every tab keeps the range (OV-37), the strip has an id for the
+/// scroll cue (OV-36), ports stack on phones (OV-40), a container without a
+/// health check has four tiles and no Health tile (OV-42, OV-46), the
+/// Metrics link line is gone (OV-48), and a visitor sees "Sign in to view"
+/// links instead of quoted placeholders (OV-56).
+#[test]
+fn detail_page_wave5() {
+    let (_, html) = get("/containers/web", "range=24h");
+    let sub = &html[html.find("<p class=\"mono muted\">").unwrap()..];
+    let sub = &sub[..sub.find("</p>").unwrap()];
+    assert!(!sub.contains("web ·"), "name not repeated: {sub}");
+    assert!(
+        sub.contains("img/web:latest") && sub.contains(" · id "),
+        "{sub}"
+    );
+    assert!(html.contains(r#"<span class="ctr-t">web</span>"#));
+    for t in ["overview", "metrics", "inspect", "processes", "events"] {
+        assert!(
+            html.contains(&format!(r#"href="/containers/web?tab={t}&amp;range=24h""#)),
+            "{t} keeps the range"
+        );
+    }
+    assert!(html.contains(r#"class="tbl small cd-stack""#) && html.contains(r#"data-l="Link""#));
+    assert!(html.contains(r#"class="strip facts n4""#), "four tiles");
+    assert!(!html.contains(r#"data-cd="h""#) && html.contains("Restarts (1 h)"));
+    assert!(!html.contains("on the Metrics tab"));
+    let (_, ins) = get("/containers/web", "tab=inspect");
+    assert!(
+        !ins.contains(crate::ui::pages::container::HIDDEN),
+        "no quoted placeholder"
+    );
+    let (_, ev) = get("/containers/web", "tab=events");
+    assert!(
+        !ev.contains(r#"aria-label="Kind""#),
+        "no filters over nothing"
+    );
+    // A container with a health check: State says running, Health has the word.
+    let mut c = ctr("api", Some("shop"), "running");
+    c.health = Some("unhealthy".into());
+    let st = state_with(vec![c], "");
+    let h = page_of(&st, "/containers/api", "");
+    assert!(h.contains(r#"data-cd="l" data-run>running<"#), "state tile");
+    assert!(h.contains(r#"data-cd="h">unhealthy<"#), "health tile");
+    assert!(h.contains(r#"class="strip facts""#));
+}
+
+/// ROB-07: a long stack name is one ellipsised line with the full name in
+/// its title; OV-19: phones get a sort control in the toolbar.
+#[test]
+fn containers_table_long_stack_and_sort_control() {
+    let long = format!("a-very-long-compose-project-{}", "y".repeat(80));
+    let st = state_with(vec![ctr("web", Some(&long), "running")], "");
+    let html = page_of(&st, "/containers", "");
+    assert!(
+        html.contains(&format!(r#"<span class="grp-n" title="{long}">"#)),
+        "title"
+    );
+    assert!(html.contains(r#"id="csort" name="sort""#) && html.contains(r#"id="cdir""#));
+    assert_eq!(
+        html.matches(r#"name="sort""#).count(),
+        1,
+        "one sort field in the form"
+    );
+    assert!(html.contains(r#"<span class="coll"></span>"#));
+}
+
 #[test]
 fn login_page_keeps_only_safe_next() {
     let (_, html) = get("/login", "next=%2F%09%2Fevil.example");
