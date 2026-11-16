@@ -52,7 +52,7 @@ OS, the ◐ button overrides it per browser.
   The health strip's "problems" is the same count as the table's
   "Problems" filter. Top CPU lists eight rows; a full bar is one whole core.
   "Last 24 h" on a young instance says how much history it has ("running
-  100% · 30m of history").
+  100% of 30m with data").
 - **Alerts:** firing incidents and the alert log link to their subject (the
   container, the Host page, the widget, the URL), name the rule and show a
   clock time ("since …" in one right-aligned column); rows about a container

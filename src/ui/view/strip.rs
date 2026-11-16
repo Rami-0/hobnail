@@ -62,7 +62,7 @@ pub fn summary(s: &Strip, st: &Strips) -> String {
     let n = s.cells.len().max(1);
     let mut out = if known * 2 < n {
         let secs = (st.to - st.from).max(0) as u64 * known as u64 / n as u64;
-        format!("running {p}% · {} of history", human_duration(secs))
+        format!("running {p}% of {} with data", human_duration(secs))
     } else {
         format!("running {p}% of the last {}", window_label(st))
     };
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(cells.matches("<rect").count(), 96);
     }
 
-    /// OV-3: two cells of data in 96 is "of 30m of history", not "of 24 h".
+    /// OV-03: two cells of data in 96 is "of 30m with data", not "of 24 h".
     #[test]
     fn mostly_empty_history_says_how_much() {
         let st = strips(96);
@@ -182,7 +182,7 @@ mod tests {
         };
         s.cells[94] = Cell::Ok;
         s.cells[95] = Cell::Ok;
-        assert_eq!(summary(&s, &st), "running 100% · 30m of history");
+        assert_eq!(summary(&s, &st), "running 100% of 30m with data");
     }
 
     #[test]

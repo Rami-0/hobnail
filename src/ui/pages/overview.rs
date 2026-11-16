@@ -693,7 +693,10 @@ fn stack_strips(v: &Live, st: &crate::db::strips::Strips) -> Markup {
                             a.sl-n href={"/containers?stack=" (url_encode(&g.name))} title=(g.counts()) { (g.title) }
                             span.sl-c.num { (g.running) "/" (ctrs) }
                             (health_strip(s, st, &g.title, StripStyle::Runs))
-                            span.sl-s.muted { (strip_summary(s, st).split(" of the last").next().unwrap_or("")) }
+                            // "running 98%", or "running 100% of 30m" while the
+                            // history is young (OV-03); the full line on hover.
+                            @let sum = strip_summary(s, st);
+                            span.sl-s.muted title=(sum) { (sum.split(" of the last").next().unwrap_or("").trim_end_matches(" with data")) }
                         }
                     }
                 }
