@@ -68,14 +68,13 @@ pub fn revisions(ctx: &Ctx) -> Markup {
     let db = &ctx.state.db;
     let now = crate::util::unix_now();
     let hash = Disk::read(ctx.state).hash;
-    let mut list = db.revisions(200);
-    // The latest few on the page (SET-64); all of them on request.
-    let all =
-        crate::ui::fmt::query_get(&crate::ui::fmt::parse_query(ctx.query), "revs") == Some("all");
-    let total = list.len();
-    if !all {
-        list.truncate(SHOWN);
-    }
+    let all = db.revisions(200);
+    // Paged, newest first, `SHOWN` a page (SET-64): `?rp=2` is the second
+    // page; a page past the end shows the last one.
+    let (page, pages) = rev_page(ctx.query, all.len());
+    let first = (page - 1) * SHOWN;
+    let list = &all[first.min(all.len())..(first + SHOWN).min(all.len())];
+    let total = all.len();
     html! {
         div #rev-list data-hash=(hash) {
             @if !db.is_enabled() {
@@ -92,7 +91,7 @@ pub fn revisions(ctx: &Ctx) -> Markup {
                                     td.num data-l="#" { code { "#" (r.id) } }
                                     td data-l="Time" { (time_tag(now, r.ts.max(0) as u64)) }
                                     td data-l="By" { @if r.author == "file" { span.pill { "on disk" } } @else { span { (r.author) } } }
-                                    td.wrap data-l="Note" { span { (r.note) } @if i == 0 { " " span.pill.ok { "latest" } } }
+                                    td.wrap data-l="Note" { span { (r.note) } @if i == 0 && page == 1 { " " span.pill.ok { "latest" } } }
                                     td.num data-l="Size" { (human_bytes(r.bytes as u64)) }
                                     td.act {
                                         div.ra {
@@ -106,16 +105,39 @@ pub fn revisions(ctx: &Ctx) -> Markup {
                         }
                     }
                 }
-                @if list.len() < total {
-                    p.more-revs { a href="?revs=all" { "Show all " (total) " revisions" } }
+                @if pages > 1 {
+                    nav.rev-pager aria-label="Revision pages" {
+                        @if page > 1 {
+                            a.btn.sm href={"?rp=" (page - 1)} data-rp=(page - 1) rel="prev" { span aria-hidden="true" { "←" } "Newer" }
+                        } @else {
+                            span.btn.sm aria-disabled="true" { span aria-hidden="true" { "←" } "Newer" }
+                        }
+                        span.muted aria-live="polite" { "Revisions " (first + 1) "–" (first + list.len()) " of " (total) }
+                        @if page < pages {
+                            a.btn.sm href={"?rp=" (page + 1)} data-rp=(page + 1) rel="next" { "Older" span aria-hidden="true" { "→" } }
+                        } @else {
+                            span.btn.sm aria-disabled="true" { "Older" span aria-hidden="true" { "→" } }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-/// Revisions on the page unless `?revs=all`.
+/// Revisions per page.
 const SHOWN: usize = 25;
+
+/// The page asked for by `?rp=` (1-based, clamped to the pages there are)
+/// and the number of pages for `total` revisions.
+fn rev_page(query: &str, total: usize) -> (usize, usize) {
+    let pages = total.div_ceil(SHOWN).max(1);
+    let q = crate::ui::fmt::parse_query(query);
+    let want = crate::ui::fmt::query_get(&q, "rp")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1);
+    (want.clamp(1, pages), pages)
+}
 
 /// The revision viewer: one dialog for View and Diff, filled by the script.
 pub fn dialogs() -> Markup {

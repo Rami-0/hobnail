@@ -152,7 +152,7 @@ pub fn list_markup(disk: &Disk) -> Markup {
                 },
                 Ok(cfg) => div.tbl-wrap {
                     table.tbl.stack-sm {
-                        thead { tr { th { "Name" } th { "URL" } th { "Group" } th.act { span.sr { "Actions" } } } }
+                        thead { tr { th scope="col" { "Name" } th scope="col" { "URL" } th scope="col" { "Group" } th.act scope="col" { span.sr { "Actions" } } } }
                         tbody {
                             @for (i, b) in cfg.bookmarks.iter().enumerate() {
                                 (row(i, cfg.bookmarks.len(), b))

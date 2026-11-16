@@ -201,8 +201,12 @@
     ids = [].concat(ids);
     if (!ids.some((id) => $(id))) return false; // none of them on this page (the Overview)
     let r;
-    const all = new URLSearchParams(location.search).get("revs") === "all" ? "&revs=all" : ""; // Config file: every revision
-    try { r = await fetch(FRAG + "?frag=list" + all, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
+    // Config file: the revision page in view; after a save (a row to
+    // flash) the first page, where the new revision is (SET-64).
+    const rp = new URLSearchParams(location.search).get("rp");
+    if (flash && rp) history.replaceState(history.state, "", location.pathname);
+    const page = rp && !flash ? "&rp=" + encodeURIComponent(rp) : "";
+    try { r = await fetch(FRAG + "?frag=list" + page, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
     if (r.status === 401) banner("expired");
     if (!r.ok) return false;
     const t = doc.createElement("template");
@@ -235,6 +239,8 @@
         const live = () => Array.from(a.rows).filter((x) => !x._gone);
         want.forEach((w, i) => { const c = live()[i]; if (c !== w) a.insertBefore(w, c || null); });
       }
+      const pa = box.querySelector(".rev-pager"), pb = next.querySelector(".rev-pager");
+      if (pa && pb) pa.replaceWith(pb); else if (pa) pa.remove(); else if (pb) box.append(pb);
       const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
       if (row) HB.flash(row);
     }
@@ -546,9 +552,24 @@
   };
   TABS.bookmarks = {
     ssr: true,
-    init() { listDialog($("dlg-bookmark"), BOOKMARKS); listActions(BOOKMARKS); },
+    init() { listDialog($("dlg-bookmark"), BOOKMARKS); listActions(BOOKMARKS); dupWarn($("dlg-bookmark"), BOOKMARKS); },
     load() { return refreshList(BOOKMARKS.list); },
   };
+  // A name another row already has: said under the field while typing
+  // (SET-43). A warning: two entries may share a name.
+  function dupWarn(dlg, o) {
+    const inp = dlg && dlg.querySelector("input[name=name]");
+    if (!inp) return;
+    const out = el("p", { class: "hint", role: "status", "aria-live": "polite" });
+    inp.after(out);
+    const check = () => {
+      const v = inp.value.trim().toLowerCase(), c = HB.current(), mine = c && c.key;
+      const hit = v && $$("tr[data-key]", $(o.list)).find((tr) => tr.dataset.key !== mine && String((rowItem(tr) || {}).name || "").trim().toLowerCase() === v);
+      out.textContent = hit ? `Another ${o.noun} is already called “${inp.value.trim()}”; both will be listed.` : "";
+    };
+    inp.addEventListener("input", check);
+    dlg.addEventListener("hb-open", () => setTimeout(check, 0));
+  }
 
   // ---- notifications: channels and alert rules (server-rendered lists) ----
   const listOf = (s) => { const a = String(s || "").split(",").map((x) => x.trim()).filter(Boolean); return a.length ? a : null; };
@@ -1262,6 +1283,30 @@
       after: (stale) => { if (stale) refreshForms(["th-box"], true); },
     });
   };
+  // A config parser's type message in plain words (SET-67):
+  // `invalid type: string "ninety", expected f64` -> `text ("ninety") where a number is expected`.
+  function plainErr(m) {
+    const kind = (k) => /^(i|u)(8|16|32|64|size)$|integer/.test(k) ? "a whole number" : /float/.test(k) ? "a decimal number" : /^f(32|64)$|number/.test(k) ? "a number" : /bool/.test(k) ? "true or false" : /string|str\b|char/.test(k) ? "text" : /seq|array|list/.test(k) ? "a list" : /map|struct|table/.test(k) ? "a table" : k;
+    return String(m).replace(/invalid type: (\w+)(?: (\S.*?))?, expected (.+)$/, (_, got, val, want) => `${kind(got)}${val ? ` (${val.replace(/^point /, "").replace(/`/g, "")})` : ""} where ${kind(want.replace(/^an? /, ""))} is expected`);
+  }
+  // The first thing in a style sheet that does not close, in words with its
+  // line, or "" (SET-44).
+  function cssSyntax(t) {
+    const open = []; let line = 1, q = "", qAt = 0, cAt = 0;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (c === "\n") { line++; if (q) return `line ${qAt}: a string that does not close.`; continue; }
+      if (cAt) { if (c === "*" && t[i + 1] === "/") { cAt = 0; i++; } continue; }
+      if (q) { if (c === "\\") i++; else if (c === q) q = ""; continue; }
+      if (c === "/" && t[i + 1] === "*") { cAt = line; i++; }
+      else if (c === '"' || c === "'") { q = c; qAt = line; }
+      else if (c === "{") open.push(line);
+      else if (c === "}") { if (!open.length) return `line ${line}: a } without its {.`; open.pop(); }
+    }
+    if (cAt) return `line ${cAt}: a comment (/*) that does not close.`;
+    if (q) return `line ${qAt}: a string that does not close.`;
+    return open.length ? `line ${open[open.length - 1]}: a { that does not close.` : "";
+  }
   // custom.css as a note on the form: the retired token names it sets.
   function cssWarnings(list) {
     const box = $("css-warn");
@@ -1291,7 +1336,16 @@
         if (link) link.disabled = true;
       };
       size();
-      ta.addEventListener("input", () => { size(); if ($("css-live").checked) preview(ta.value); });
+      // A syntax warning while typing (SET-44): braces, comments and strings
+      // that do not close. A warning, not a refusal: browsers skip what they
+      // cannot read, but a stray brace swallows the rules after it.
+      const syn = el("p", { class: "err-line", id: "css-syntax", role: "status", "aria-live": "polite" });
+      (ta.closest(".fld") || ta).after(syn);
+      ta.setAttribute("aria-describedby", ((ta.getAttribute("aria-describedby") || "") + " css-syntax").trim());
+      let synT = 0;
+      const syntax = () => { const p = cssSyntax(ta.value); syn.textContent = p ? `Check the CSS: ${p}` : ""; };
+      syntax();
+      ta.addEventListener("input", () => { size(); if ($("css-live").checked) preview(ta.value); clearTimeout(synT); synT = setTimeout(syntax, 300); });
       $("css-live").addEventListener("change", (e) => preview(e.target.checked ? ta.value : null));
       tabIndent(ta);
       pageForm(fc, {
@@ -1413,6 +1467,18 @@
       ta.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) { e.preventDefault(); this.fromEditor = true; f.requestSubmit(); } });
       onAct("raw-revert", () => { ta.value = f._open.text; this.gutter(); this.validate(); HB.noteIn(f, ""); toast("Back to the file as it was loaded", "info"); });
       onAct("raw-goto", () => this.goto(this.err && this.err.line));
+      // Revision pages in place (the links work without the script too);
+      // focus stays on the pager (SET-64).
+      $("rev-sec") && $("rev-sec").addEventListener("click", async (e) => {
+        const a = e.target.closest && e.target.closest(".rev-pager a[data-rp]");
+        if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+        e.preventDefault();
+        const rel = a.rel;
+        history.replaceState(history.state, "", "?rp=" + a.dataset.rp);
+        await refreshList("rev-list");
+        const b = $("rev-list").querySelector(`.rev-pager a[rel="${rel}"]`) || $("rev-list").querySelector(".rev-pager [aria-live]");
+        if (b) { if (!b.matches("a")) b.tabIndex = -1; b.focus(); }
+      });
       this.gutter();
       this.validate();
       // Revisions: View and Diff in a dialog, Restore after the confirm.
@@ -1501,8 +1567,16 @@
         box.replaceChildren(icon("lock"), el("span", { text: "Would be refused: " + String(v.error).replace(/^refused:\s*/i, "") }));
       } else {
         box.className = "raw-status bad";
-        box.replaceChildren(icon("alert"), el("span", null, v.line ? el("b", { text: `Line ${v.line}, column ${v.col}: ` }) : null, v.error));
+        box.replaceChildren(icon("alert"), el("span", null, v.line ? el("b", { text: `Line ${v.line}, column ${v.col}: ` }) : null, plainErr(v.error)));
       }
+      // A new error line out of sight is scrolled into view, the caret and
+      // focus left where they are (SET-67).
+      const ta = $("raw-text"), line = this.err && this.err.line;
+      if (line && line !== this.shown) {
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, y = (line - 1) * lh;
+        if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - lh) ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+      }
+      this.shown = line || 0;
       this.mark();
     },
     // View / Diff: the revision dialog (Esc, ×, Close and the backdrop close it).

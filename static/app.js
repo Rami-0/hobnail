@@ -13,7 +13,9 @@
   };
   const skew = Date.now() / 1000 - Number(body.dataset.now || 0);
   const nowS = () => Date.now() / 1000 - skew;
-  const typing = () => { const a = doc.activeElement; return a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+  // Shortcuts are off only in fields that take text (NAV-64): a checkbox,
+  // radio, button or range input keeps them; a select keeps its type-ahead.
+  const typing = () => { const a = doc.activeElement; return !!a && (a.isContentEditable || /^(TEXTAREA|SELECT)$/.test(a.tagName) || (a.tagName === "INPUT" && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/.test(a.type))); };
 
   // ---- formatting (mirrors src/util.rs and ui/chart.rs) ----
   function bytes(n) {
@@ -140,6 +142,8 @@
     } else setOpen(!root.classList.contains("side-open"));
   }
   railBtn && railBtn.addEventListener("click", toggleSide);
+  // The rail's labels are styled tooltips (NAV-27), not the native title.
+  $$(".nav-item[title]").forEach((a) => { a.dataset.rtip = a.title; a.title = ""; });
   $("scrim") && $("scrim").addEventListener("click", () => setOpen(false));
   matchMedia("(min-width:1101px)").addEventListener("change", () => { if (wide()) setOpen(false); sideState(); });
   matchMedia("(max-width:699px)").addEventListener("change", sideState);
@@ -230,8 +234,10 @@
     try {
       await fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-RH-CSRF": m ? m.content : "" } });
     } catch {}
-    location.href = "/";
+    try { sessionStorage.setItem("rh-out", "1"); } catch {}
+    location.replace(/^\/settings(\/|$)/.test(location.pathname) ? "/" : location.pathname + location.search);
   }
+  try { if (sessionStorage.getItem("rh-out")) { sessionStorage.removeItem("rh-out"); window.HB && HB.toast && HB.toast("Signed out", { kind: "info" }); } } catch {}
   doc.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest('[data-act="logout"]'); if (b) { e.preventDefault(); logout(); } });
 
   // ---- live sparklines: a ring buffer per key, drawn zero based ----
@@ -682,7 +688,7 @@
   async function palOpen() {
     if (!pal || !pal.hidden) return;
     palReturn = doc.activeElement;
-    pal.hidden = false; palQ.value = ""; palQ.focus();
+    pal.hidden = false; palQ.value = ""; palQ.focus(); palQ.setAttribute("aria-expanded", "true");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "true");
     palRender();
     await palLoad();
@@ -690,7 +696,7 @@
   }
   function palClose() {
     if (!pal || pal.hidden) return;
-    pal.hidden = true;
+    pal.hidden = true; palQ.setAttribute("aria-expanded", "false");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "false");
     palReturn && palReturn.focus && palReturn.focus({ preventScroll: true });
   }
@@ -714,7 +720,15 @@
   }
   // ---- keyboard map: g+key pages, j/k rows, / filter, l logs, ? help ----
   const keys = $("keys");
-  function keysOpen() { if (keys && !keys.open) { keys.showModal ? keys.showModal() : (keys.open = true); } }
+  // "/": the page's own filter when it has one (NAV-56), never the sidebar's.
+  const slashTarget = () => [$("cq"), $("lpq"), $("lq")].find((x) => x && shown(x));
+  function keysOpen() {
+    if (!keys || keys.open) return;
+    // The sheet says what "/" does on this page (NAV-62).
+    const f = slashTarget(), d = keys.querySelector("[data-k=slash]");
+    if (d) d.textContent = f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands (this page has no filter)";
+    keys.showModal ? keys.showModal() : (keys.open = true);
+  }
   doc.addEventListener("click", (e) => {
     const a = e.target.closest && e.target.closest("[data-act]");
     if (!a) return;
@@ -722,14 +736,21 @@
     else if (a.dataset.act === "keys-close") keys.close();
     else if (a.dataset.act === "more" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) { e.preventDefault(); setOpen(true, a); }
     else if (a.dataset.act === "side-close") setOpen(false);
+    else if (a.dataset.act === "rail-stacks" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) {
+      // NAV-27: from the rail to the stacks: expand, focus the filter.
+      e.preventDefault();
+      if (wide()) toggleSide(); else setOpen(true, a);
+      const f = $("tree-filter"); f && f.focus();
+    }
   });
-  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", a: "/alerts", s: setTab };
+  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", y: "/history", a: "/alerts", s: setTab };
   let gAt = 0;
   const shown = (x) => x.offsetParent !== null && !x.closest("[hidden]");
   function krows() {
     const t = $("ctable");
     const sel = t ? "#ctable tbody:not(.pool) tr.row" : "main .attn .rows li, main .strip-list li, main ul.events li, main .tbl tbody tr, main .incident";
-    return $$(sel).filter(shown);
+    // Only rows that open something: Enter follows the row's link (NAV-60).
+    return $$(sel).filter((r) => shown(r) && r.querySelector("a[href]"));
   }
   function kmove(d) {
     const rows = krows();
@@ -761,14 +782,14 @@
     if (k === "g") { gAt = Date.now(); return; }
     if (k === "/") {
       e.preventDefault();
-      const f = [$("cq"), $("lpq"), $("tree-filter")].find((x) => x && shown(x));
+      const f = slashTarget();
       f ? (f.focus(), f.select && f.select()) : palOpen();
     } else if (k === "?") { e.preventDefault(); keysOpen(); }
     else if (k === "j" || k === "k") { e.preventDefault(); kmove(k === "j" ? 1 : -1); }
     else if (k === "l") { const u = logsTarget(); if (u) { e.preventDefault(); location.href = u; } }
   });
   doc.addEventListener("focusin", (e) => { $$(".kfocus").forEach((r) => { if (!r.contains(e.target)) r.classList.remove("kfocus"); }); });
-  if (navigator.platform && /Mac/.test(navigator.platform)) $$(".cmd-k").forEach((k) => { k.textContent = "⌘K"; });
+  if (navigator.platform && /Mac/.test(navigator.platform)) { $$(".cmd-k").forEach((k) => { k.textContent = "⌘K"; }); $$("kbd.mod").forEach((k) => { k.textContent = "⌘"; }); }
 
   // ---- login: JSON post, then a same-origin redirect only ----
   // Rules from the security review (mirrored by ui::fmt::login_next): no
@@ -833,6 +854,7 @@
     if (live) {
       live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
       live.querySelector(".live-t").textContent = text;
+      live.title = "Live updates: " + text; // the rail shows only the dot
     }
     if (on || text !== "reconnecting") { clearTimeout(offT); offT = null; if (offPill) { offPill.remove(); offPill = null; root.classList.remove("stale"); } return; }
     if (offT || offPill) return; // retries keep failing: the first one starts the clock

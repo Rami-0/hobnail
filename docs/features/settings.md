@@ -148,8 +148,10 @@ atomically (temp file + rename, same mode) → add a revision → record a
 - *History and data:* Recording on / off (saves when switched), Sample
   interval, the database figures, export, and Clear history, which asks in
   the confirm dialog with the phrase "clear history" typed.
-- *Config file:* the raw editor (Ctrl+S saves), the latest 25 revisions
-  (`?revs=all` for all), View and Diff in a dialog, Restore after a confirm.
+- *Config file:* the raw editor (Ctrl+S saves), the revisions 25 a page,
+  newest first ("Newer" / "Older" links, `?rp=2` for the second page, which
+  the script loads in place; a save or restore goes back to the first page),
+  View and Diff in a dialog, Restore after a confirm.
 - *Security:* change password (signs out every session; all problems shown at
   once, a wrong current password on its field, passwords never trimmed), sign
   out other sessions (asks first), recent logins.

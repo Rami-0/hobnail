@@ -167,10 +167,10 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                 (logo())
                                 span.brand-name { "Hobnail" span.brand-site { (site) } }
                             }
-                            button.icon-btn.rail-toggle type="button" #rail-toggle
+                            button.icon-btn.rail-toggle.js-only type="button" #rail-toggle
                                 aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false" { (ic("panel")) }
                             // The phone drawer's own close control (NAV-34).
-                            button.icon-btn.side-close type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
+                            button.icon-btn.side-close.js-only type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
                         }
                         nav.nav aria-label="Main" {
                             @for (n, href, label, icon) in NAV {
@@ -180,6 +180,13 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                     span.nav-label { (label) }
                                     @if *n == Nav::Alerts { (nav_alerts(firing)) }
                                 }
+                            }
+                            // The rail's way to the stacks (NAV-27): the script
+                            // expands the sidebar with focus in its filter;
+                            // without it, the plain page that lists them.
+                            a.nav-item.rail-only href="/more" data-act="rail-stacks" data-rtip="Stacks" {
+                                (ic("filter"))
+                                span.nav-label { "Stacks and containers" }
                             }
                         }
                         div.tree-wrap {
@@ -196,7 +203,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                         }
                         div.side-foot {
                             span.live #live title="Live updates" { span.dot.off {} span.live-t { "connecting" } }
-                            button.linklike.keys-btn type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
+                            button.linklike.keys-btn.js-only type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
                             span.ver title={"built " (ctx.state.build.time)} {
                                 "v" (ctx.state.build.version) " · " code { (sha) }
                             }
@@ -206,13 +213,13 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                     div.col {
                         header.top {
                             div.crumbs { (heading) }
-                            button.cmd type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
+                            button.cmd.js-only type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
                                 (ic("search"))
                                 span.cmd-t { "Search or jump to…" }
                                 kbd.cmd-k { "Ctrl K" }
                             }
                             (vitals(&ctx.cfg, sys.as_ref(), Some((&ctx.state.db, now))))
-                            button.icon-btn #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
+                            button.icon-btn.js-only #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
                                 span.th.th-auto { (ic("monitor")) }
                                 span.th.th-dark { (ic("moon")) }
                                 span.th.th-light { (ic("sun")) }
@@ -292,14 +299,16 @@ fn keys_dialog() -> Markup {
                 (row(&["g", "c"], "Containers"))
                 (row(&["g", "h"], "Host"))
                 (row(&["g", "l"], "Logs"))
+                (row(&["g", "y"], "History"))
                 (row(&["g", "a"], "Alerts"))
                 (row(&["g", "s"], "Settings"))
-                (row(&["j"], "Next row"))
+                (row(&["j"], "Next row that opens something"))
                 (row(&["k"], "Previous row"))
                 (row(&["↵"], "Open the row"))
                 (row(&["l"], "Logs of the focused or open container"))
-                (row(&["/"], "Filter this page (Containers, Logs), elsewhere search"))
-                (row(&["Ctrl", "K"], "Search and commands"))
+                // The script names this page's filter (NAV-62).
+                div.kr { dt { kbd { "/" } } dd data-k="slash" { "This page's filter, or search and commands" } }
+                div.kr { dt { kbd.mod { "Ctrl" } " " kbd { "K" } } dd { "Search and commands" } }
                 (row(&["?"], "This list"))
                 (row(&["Esc"], "Close"))
             }
@@ -353,7 +362,7 @@ fn account(ctx: &Ctx) -> Markup {
     };
     html! {
         div.acct #account {
-            button.icon-btn.menu-btn-acct type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
+            button.icon-btn.menu-btn-acct.js-only type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
                 aria-label={"Account: " (u)} title=(u) {
                 (ic("user"))
                 span.signed {}
@@ -423,7 +432,7 @@ fn palette_shell() -> Markup {
                     (ic("search"))
                     input #pal-q type="text" autocomplete="off" spellcheck="false"
                         placeholder="Containers, pages, bookmarks, actions… or search the web"
-                        role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list";
+                        role="combobox" aria-expanded="false" aria-controls="pal-list" aria-autocomplete="list";
                     kbd.pal-esc { "Esc" }
                     button.icon-btn.pal-x type="button" data-act="pal-close" aria-label="Close search" { (ic("x")) }
                 }
@@ -1182,6 +1191,193 @@ mod tests {
         );
         // Nothing on a live region animates its layout (meters change at once).
         assert!(!all.contains("transition:width"), "no width transition");
+    }
+
+    /// A11Y-18: on touch and phones every control is a 44 px target by its
+    /// own size (the tokens), not by a hit area grown over its neighbours.
+    #[test]
+    fn touch_targets_are_44_by_size() {
+        let coarse = block(
+            APP_CSS_SRC,
+            "@media (pointer:coarse),(max-width:699px){:root{",
+        );
+        for t in ["--ctl-h:44px", "--ctl-h-sm:44px", "--ia:44px", "--hit:44px"] {
+            assert!(coarse.contains(t), "{t} in {coarse}");
+        }
+        let css = include_str!("../../static/components.css");
+        let touch = &css[css
+            .find("/* 44 px targets on touch and phones (A11Y-18)")
+            .expect("the touch block")..];
+        for sel in [
+            ".icon-btn",
+            ".crumb>a",
+            ".seg a",
+            ".tab",
+            ".nav-item",
+            ".linkbtn",
+        ] {
+            assert!(touch.contains(sel), "{sel} is sized on touch");
+        }
+        // No hit area that reaches over a neighbour.
+        for s in selectors(css) {
+            assert!(
+                !(s.ends_with("::after") && (s.contains(".linkbtn") || s.contains(".btn.sm"))),
+                "a grown hit area: {s}"
+            );
+        }
+        assert!(!css.contains("inset:-6px -13px -21px"));
+    }
+
+    /// NAV-56, NAV-60 to NAV-64: the shortcut sheet lists History (`g y`)
+    /// and lets the script say what `/` does here; the script's keys match.
+    #[test]
+    fn keyboard_sheet_and_map_agree() {
+        let sheet = keys_dialog().into_string();
+        assert!(
+            sheet.contains("<kbd>g</kbd> <kbd>y</kbd></dt><dd>History"),
+            "{sheet}"
+        );
+        assert!(sheet.contains(r#"<dd data-k="slash">"#));
+        assert!(sheet.contains(r#"<kbd class="mod">Ctrl</kbd>"#));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"y: "/history""#) && js.contains(r#"h: "/host""#));
+        // `/` never means the sidebar filter (NAV-56).
+        let slash = &js[js.find("const slashTarget").unwrap()..];
+        assert!(!slash[..slash.find('\n').unwrap()].contains("tree-filter"));
+        // j / k only over rows with a link (NAV-60); a checkbox keeps the keys (NAV-64).
+        assert!(js.contains(r#"shown(r) && r.querySelector("a[href]")"#));
+        assert!(js.contains("checkbox|radio|button"));
+    }
+
+    /// NAV-80, NAV-82, A11Y-09, A11Y-11: signing out stays on the page
+    /// (Settings goes to Overview) and says so; the login page has a way
+    /// back to `next`; the Settings lock panel's heading follows the h1;
+    /// the palette box is not "expanded" while closed.
+    #[test]
+    fn sign_in_and_out_paths() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let (_, login) =
+            crate::ui::pages::render(&Ctx::new(&st, "h", "/login", "next=%2Fhost", &h));
+        assert!(
+            login.contains(r#"<a class="btn ghost login-back" href="/host">Back</a>"#),
+            "{login}"
+        );
+        assert!(login.contains(r#"role="combobox" aria-expanded="false""#));
+        let (_, set) = crate::ui::pages::render(&Ctx::new(&st, "h", "/settings/general", "", &h));
+        assert!(set.contains(r#"<h2 id="lock-h">"#) && !set.contains("<h3 id=\"lock-h\""));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"? "/" : location.pathname + location.search"#));
+        assert!(js.contains(r#"HB.toast("Signed out""#));
+        assert!(!js.contains(r#"location.href = "/";"#));
+    }
+
+    /// ROB-17: the shell's controls that only the script can run are not
+    /// shown with JavaScript off (`.js-only`); their links keep working.
+    #[test]
+    fn script_only_shell_controls_hide_without_script() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let mut ctx = Ctx::new(&st, "h", "/", "", &h);
+        ctx.user = Some("admin".into());
+        let html = layout(&ctx, Nav::Overview, "t", html! {}, html! {});
+        for c in [
+            r#"class="icon-btn rail-toggle js-only""#,
+            r#"class="icon-btn side-close js-only""#,
+            r#"class="linklike keys-btn js-only""#,
+            r#"class="cmd js-only""#,
+            r#"class="icon-btn js-only" id="theme""#,
+            r#"class="icon-btn menu-btn-acct js-only""#,
+        ] {
+            assert!(html.contains(c), "{c}");
+        }
+        assert!(APP_CSS_SRC.contains("html:not(.js) .js-only{display:none!important}"));
+    }
+
+    /// A11Y-20: the shell, component and Settings CSS size text in rem, so
+    /// a larger default font size in the browser or OS scales the UI.
+    #[test]
+    fn type_sizes_are_in_rem() {
+        for (f, css) in [
+            ("app.css", APP_CSS_SRC),
+            (
+                "components.css",
+                include_str!("../../static/components.css"),
+            ),
+            ("settings.css", include_str!("../../static/settings.css")),
+        ] {
+            let mut rest = css;
+            while let Some(i) = rest.find("font") {
+                rest = &rest[i + 4..];
+                let decl = &rest[..rest.find([';', '}']).unwrap_or(rest.len())];
+                let size = if let Some(v) = decl.strip_prefix("-size:") {
+                    v
+                } else if let Some(v) = decl.strip_prefix(':') {
+                    // the shorthand's size: the word before "/" or the family
+                    v.split_whitespace()
+                        .map(|w| w.split('/').next().unwrap_or(""))
+                        .find(|w| {
+                            w.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+                                && w.ends_with(|c: char| c.is_ascii_alphabetic() || c == '%')
+                        })
+                        .unwrap_or("")
+                } else {
+                    continue;
+                };
+                assert!(!size.trim().ends_with("px"), "{f}: font{decl}");
+            }
+        }
+    }
+
+    /// A11Y-17: brand Accent and Error have the same luminance, so the
+    /// accent is never a status colour: no rule for a status class (ok,
+    /// warn, bad) in the shell or component CSS paints with the accent.
+    #[test]
+    fn accent_is_never_a_status_colour() {
+        for css in [APP_CSS_SRC, include_str!("../../static/components.css")] {
+            let mut rest = css;
+            while let Some(i) = rest.find('{') {
+                let head = rest[..i].rsplit(['}', '\n']).next().unwrap_or("");
+                let end = rest[i..].find('}').map_or(rest.len(), |e| i + e);
+                let body = &rest[i + 1..end];
+                let status = [".ok", ".warn", ".bad"].iter().any(|c| {
+                    head.match_indices(c).any(|(j, _)| {
+                        !matches!(head[j + c.len()..].chars().next(), Some(x) if x.is_ascii_alphanumeric() || x == '-' || x == '_')
+                    })
+                });
+                assert!(
+                    !(status && body.contains("var(--accent")),
+                    "a status painted with the accent: {head}{{{body}}}"
+                );
+                rest = &rest[(end + 1).min(rest.len())..];
+            }
+        }
+    }
+
+    /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:
+    /// every cell may break anywhere and a row's name wraps inside a bounded
+    /// column (a fixed width: a percentage is ignored while the table sizes
+    /// its columns).
+    #[test]
+    fn settings_tables_wrap_long_values() {
+        let css = include_str!("../../static/settings.css");
+        assert!(css.contains("\n.set-main .tbl td{overflow-wrap:anywhere}"));
+        assert!(css.contains("\n.set-main .tbl .linkbtn{max-width:36ch}"));
+        let comp = include_str!("../../static/components.css");
+        assert!(
+            comp.contains(".linkbtn{display:inline-block;"),
+            "max-width needs a box"
+        );
+    }
+
+    /// ROB-03: the stack tree is the containing block of the visually
+    /// hidden text inside it, so items far down the scrolled tree never
+    /// stretch the page.
+    #[test]
+    fn tree_contains_its_hidden_text() {
+        let tree = block(APP_CSS_SRC, "\n.tree{");
+        assert!(tree.starts_with("position:relative;"), "{tree}");
+        assert!(tree.contains("overflow-y:auto"));
     }
 
     /// The account menu is not a `.menu`: that class is the popover menu of

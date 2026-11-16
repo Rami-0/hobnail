@@ -451,7 +451,7 @@ pub fn channel_list(ctx: &Ctx, disk: &Disk) -> Markup {
                 },
                 Ok(_) => div.tbl-wrap {
                     table.tbl.stack-sm {
-                        thead { tr { th { "Channel" } th { "Type" } th { "Secret" } th { "Status" } th.act { span.sr { "Actions" } } } }
+                        thead { tr { th scope="col" { "Channel" } th scope="col" { "Type" } th scope="col" { "Secret" } th scope="col" { "Status" } th.act scope="col" { span.sr { "Actions" } } } }
                         tbody {
                             @for (name, t) in &chans {
                                 @if let Some(t) = t.as_object() { (channel_row(ctx, disk, name, t)) }
@@ -711,7 +711,7 @@ pub fn rule_list(disk: &Disk) -> Markup {
                 },
                 Ok(_) => div.tbl-wrap {
                     table.tbl.stack-sm {
-                        thead { tr { th { "Rule" } th { "Condition" } th { "Channels" } th { "Enabled" } th.act { span.sr { "Actions" } } } }
+                        thead { tr { th scope="col" { "Rule" } th scope="col" { "Condition" } th scope="col" { "Channels" } th scope="col" { "Enabled" } th.act scope="col" { span.sr { "Actions" } } } }
                         tbody { @for t in &rules { (rule_row(t)) } }
                     }
                 },

@@ -435,7 +435,7 @@ pub fn list_markup(disk: &Disk) -> Markup {
                 },
                 Ok(_) => div.tbl-wrap {
                     table.tbl.stack-sm {
-                        thead { tr { th { "Widget" } th { "URL" } th.num { "Refresh" } th { "State" } th.act { span.sr { "Actions" } } } }
+                        thead { tr { th scope="col" { "Widget" } th scope="col" { "URL" } th.num scope="col" { "Refresh" } th scope="col" { "State" } th.act scope="col" { span.sr { "Actions" } } } }
                         tbody { @for (i, t) in ws.iter().enumerate() { (row(disk, i, ws.len(), t)) } }
                     }
                 },

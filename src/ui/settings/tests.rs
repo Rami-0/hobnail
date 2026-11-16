@@ -1490,3 +1490,67 @@ fn overview_add_links_are_for_a_session_only() {
     assert!(html.contains(r#"class="head-add" data-hash=""#));
     assert!(!html.contains("Sekrit"));
 }
+
+/// A11Y-10: every header cell of every Settings list has a scope (and the
+/// actions column a hidden name).
+#[test]
+fn settings_table_headers_have_scope() {
+    let st = state_with(sample(), WAVE2C);
+    let h = signed_in(&st);
+    for p in paths() {
+        let (_, html) = get(&st, &p, &h);
+        for (i, _) in html.match_indices("<th") {
+            let tag = &html[i..i + html[i..].find('>').unwrap()];
+            if tag.starts_with("<thead") {
+                continue;
+            }
+            assert!(tag.contains("scope="), "{p}: {tag}");
+        }
+    }
+}
+
+/// SET-64: the revisions are paged, 25 a page, newest first, with real
+/// links (no script needed); a page past the end shows the last one; the
+/// fragment serves the same page; signed out nothing of it.
+#[test]
+fn revisions_are_paged() {
+    let st = state_with(sample(), WAVE2C);
+    let h = signed_in(&st);
+    for i in 0..62 {
+        st.db
+            .add_revision(1_000 + i, "admin", &format!("note-{i}"), "x = 1\n");
+    }
+    let rows = |html: &str| html.matches(r#"<tr data-key="rev:"#).count();
+    let (_, p1) = get(&st, "/settings/config", &h);
+    assert_eq!(rows(&p1), 25, "page 1");
+    assert!(
+        p1.contains("note-61<") && !p1.contains("note-36<"),
+        "newest first"
+    );
+    assert!(p1.contains(r#"<nav class="rev-pager" aria-label="Revision pages">"#));
+    assert!(p1.contains(r#"href="?rp=2" data-rp="2" rel="next""#) && !p1.contains(r#"rel="prev""#));
+    assert!(p1.contains("Revisions 1–25 of 62"), "{p1}");
+    assert!(p1.contains(r#"class="pill ok">latest"#));
+    let (_, p2) = get(&st, "/settings/config?rp=2", &h);
+    assert_eq!(rows(&p2), 25);
+    assert!(p2.contains("note-36<") && !p2.contains("note-61<"));
+    assert!(p2.contains(r#"href="?rp=1" data-rp="1" rel="prev""#) && p2.contains(r#"rel="next""#));
+    assert!(
+        !p2.contains(r#"class="pill ok">latest"#),
+        "only page 1 has the latest"
+    );
+    let (_, p3) = get(&st, "/settings/config?rp=9", &h);
+    assert_eq!(rows(&p3), 12, "past the end: the last page");
+    assert!(p3.contains("Revisions 51–62 of 62") && !p3.contains(r#"rel="next""#));
+    let (_, bad) = get(&st, "/settings/config?rp=x", &h);
+    assert_eq!(rows(&bad), 25, "not a number: page 1");
+    let (s, f) = frag(&st, "/settings/config", "frag=list&rp=2", &h).unwrap();
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(rows(&f), 25);
+    assert!(f.contains("note-36<") && f.contains("rev-pager"));
+    let (s, f) = frag(&st, "/settings/config", "frag=list&rp=2", &HeaderMap::new()).unwrap();
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(!f.contains("note-"));
+    let (_, out) = get(&st, "/settings/config?rp=2", &HeaderMap::new());
+    assert!(!out.contains("note-") && !out.contains("rev-pager"));
+}

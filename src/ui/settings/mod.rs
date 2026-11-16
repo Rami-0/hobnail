@@ -265,7 +265,7 @@ fn lock_panel(ctx: &Ctx, slug: Option<&str>) -> Markup {
             div.lock-ic { (ic("lock")) }
             div.lock-body {
                 @if !crate::auth::password_is_set(ctx.state) {
-                    h3 #lock-h { "Settings are locked until a password is set on the host" }
+                    h2 #lock-h { "Settings are locked until a password is set on the host" }
                     p { (why) }
                     p { "Run this on the host, then sign in here:" }
                     div.copy-line {
@@ -274,7 +274,7 @@ fn lock_panel(ctx: &Ctx, slug: Option<&str>) -> Markup {
                     }
                     p.muted { "There is no web form for the first password, so nobody on the network can claim it first. Viewing the dashboard stays open." }
                 } @else {
-                    h3 #lock-h { "Sign in to change settings" }
+                    h2 #lock-h { "Sign in to change settings" }
                     p { (why) " Viewing stays open." }
                     p {
                         a.btn.primary href={"/login?next=" (url_encode(&next))} { (ic("log-in")) "Sign in" }
