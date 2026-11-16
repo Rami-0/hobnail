@@ -152,6 +152,7 @@ fn log_row(cfg: &Config, e: &crate::db::Event, names: &HashSet<String>, signed: 
         Some((r, rest)) if cfg.alerts.iter().any(|x| x.name == r) => (Some(r), rest),
         _ => (None, e.detail.as_str()),
     };
+    let rest = without_echo(rest);
     let href = if e.kind == "alert.delivery_failed" {
         signed.then(|| {
             (
@@ -178,6 +179,15 @@ fn log_row(cfg: &Config, e: &crate::db::Event, names: &HashSet<String>, signed: 
                     aria-label={"Logs of " (e.subject) " at that moment"} { (ic("logs")) }
             }
         }
+    }
+}
+
+/// "47.4% > 1% (47.4)" -> "47.4% > 1%": the value in brackets repeats a
+/// number the state already says (LG-61).
+pub fn without_echo(s: &str) -> &str {
+    match s.strip_suffix(')').and_then(|x| x.rsplit_once(" (")) {
+        Some((state, v)) if !v.is_empty() && state.contains(v) => state,
+        _ => s,
     }
 }
 
@@ -209,9 +219,15 @@ pub fn describe(r: &RuleConfig) -> String {
                 .metric
                 .map(|m| format!("{m:?}").to_lowercase())
                 .unwrap_or_else(|| "?".into());
+            // Thresholds carry their unit (LG-60).
+            let unit = match m.as_str() {
+                "temp" => " °C",
+                "?" => "",
+                _ => "%",
+            };
             match (r.above, r.below) {
-                (Some(a), _) => format!("{m} above {a}"),
-                (_, Some(b)) => format!("{m} below {b}"),
+                (Some(a), _) => format!("{m} above {a}{unit}"),
+                (_, Some(b)) => format!("{m} below {b}{unit}"),
                 _ => m,
             }
         }
@@ -227,20 +243,37 @@ pub fn describe(r: &RuleConfig) -> String {
     }
 }
 
+/// How long a condition must hold before the rule fires, and the quiet time
+/// between repeats (LG-60): "fires at once · repeats after 15 min".
+pub fn timing(r: &RuleConfig) -> String {
+    let p = r.params();
+    let d = |s: u64| match s {
+        s if s % 3600 == 0 => format!("{} h", s / 3600),
+        s if s % 60 == 0 => format!("{} min", s / 60),
+        s => format!("{s} s"),
+    };
+    let first = if p.for_secs == 0 {
+        "fires at once".to_string()
+    } else {
+        format!("fires after {}", d(p.for_secs))
+    };
+    format!("{first} · repeats after {}", d(p.cooldown_secs))
+}
+
 fn rules_table(cfg: &Config, status: &Status) -> Markup {
     if cfg.alerts.is_empty() {
         return html! { p.muted { "No rules. Channels are configured but nothing uses them." } };
     }
     html! {
         div.scroll-x {
-            table.tbl.small {
+            table.tbl.small.al-t {
                 thead { tr { th { "Rule" } th { "Watches" } th { "Notifies" } th { "State" } } }
                 tbody {
                     @for r in &cfg.alerts {
                         @let n = status.incidents.iter().filter(|i| i.rule == r.name).count();
                         tr.stopped[!r.enabled()] data-key=(r.name) {
                             td { span.nm { (r.name) } br; span.muted.k { (r.kind.as_str()) } }
-                            td.wrap { (describe(r)) }
+                            td.wrap { (describe(r)) br; span.muted.k { (timing(r)) } }
                             td {
                                 @if r.channels.is_empty() { span.muted { "page only" } }
                                 @else { @for c in &r.channels { span.chip-s { (c) } " " } }
@@ -258,14 +291,32 @@ fn rules_table(cfg: &Config, status: &Status) -> Markup {
     }
 }
 
+/// Notifications, not attempts (LG-59): the ones waiting for a retry and
+/// the ones given up, with the failed attempts behind them on a second line
+/// ("1 queued" / "29 failed attempts"), so one notice retried 29 times does
+/// not read as 29 lost.
+fn undelivered(st: Option<&ChannelStatus>) -> Markup {
+    let (pending, dropped, failed) =
+        st.map_or((0, 0, 0), |s| (s.pending as u64, s.dropped, s.failed));
+    html! {
+        @if pending + dropped == 0 { "0" }
+        @if pending > 0 { (pending) " queued" }
+        @if pending > 0 && dropped > 0 { br; }
+        @if dropped > 0 { (dropped) " given up" }
+        @if failed > 0 {
+            br; span.muted.k { (failed) @if failed == 1 { " failed attempt" } @else { " failed attempts" } }
+        }
+    }
+}
+
 fn channels_table(cfg: &Config, status: &Status, now: u64) -> Markup {
     if cfg.channels.is_empty() {
         return html! { p.muted { "No channels: incidents show on this page only. Add " code { "[channels.<name>]" } " to send them somewhere." } };
     }
     html! {
         div.scroll-x {
-            table.tbl.small {
-                thead { tr { th { "Channel" } th { "Delivery" } th.num { "Sent" } th.num { "Failed" } th { "Last ok" } } }
+            table.tbl.small.al-t {
+                thead { tr { th { "Channel" } th { "Delivery" } th.num { "Sent" } th.num { "Un\u{ad}delivered" } th { "Last ok" } } }
                 tbody {
                     @for (name, c) in &cfg.channels {
                         @let st: Option<&ChannelStatus> = status.channels.get(name);
@@ -281,8 +332,7 @@ fn channels_table(cfg: &Config, status: &Status, now: u64) -> Markup {
                                 @if let Some(e) = st.and_then(|s| s.error.as_deref()) { div.muted.wrap.err-line { (e) } }
                             }
                             td.num { (st.map(|s| s.sent).unwrap_or(0)) }
-                            td.num { (st.map(|s| s.failed).unwrap_or(0))
-                                @if st.is_some_and(|s| s.pending > 0) { " (" (st.map(|s| s.pending).unwrap_or(0)) " queued)" } }
+                            td.num { (undelivered(st)) }
                             td { @if let Some(t) = st.and_then(|s| s.last_success) { (time_tag(now, t)) } @else { span.muted { "—" } } }
                         }
                     }
@@ -321,7 +371,13 @@ url = "http://x/"
 expect_status = 200
 "#);
         assert_eq!(describe(&c.alerts[0]), "a-*: unhealthy");
-        assert_eq!(describe(&c.alerts[1]), "disk above 90");
+        assert_eq!(describe(&c.alerts[1]), "disk above 90%");
+        // Timing in words (LG-60): a container rule rides out 30 s.
+        assert_eq!(
+            timing(&c.alerts[0]),
+            "fires after 30 s · repeats after 15 min"
+        );
+        assert_eq!(timing(&c.alerts[1]), "fires at once · repeats after 15 min");
         assert_eq!(describe(&c.alerts[2]), "GET http://x/ expects 200");
     }
 
@@ -431,7 +487,12 @@ above = 90
         assert!(html.contains("&lt;r&gt;") && !html.contains("<r>"));
         assert!(html.contains("failing") && html.contains("HTTP 500 &lt;b&gt;"));
         assert!(html.contains("cooldown"));
-        assert!(html.contains("(1 queued)"));
+        // Notifications, not attempts (LG-59).
+        assert!(
+            html.contains("1 queued<br><span class=\"muted k\">2 failed attempts</span>"),
+            "{html}"
+        );
+        assert!(html.contains("Un\u{ad}delivered") && !html.contains(">Failed<"));
     }
 
     #[test]
@@ -492,6 +553,17 @@ url = "https://example.com/"
             h.contains(r#"href="https://example.com/" target="_blank""#) && !h.contains("/logs"),
             "{h}"
         );
+        // The value is not said twice (LG-61).
+        let h = log_row(
+            &c,
+            &ev("alert.fired", "web", "down: 47.4% > 1% (47.4)"),
+            &names,
+            false,
+        )
+        .into_string();
+        assert!(h.contains(">47.4% &gt; 1%<"), "{h}");
+        assert_eq!(without_echo("exit 1 (137)"), "exit 1 (137)");
+        assert_eq!(without_echo("no value"), "no value");
         // A rule that no longer exists: plain text, no link, no rule.
         let h = log_row(&c, &ev("alert.fired", "x", "gone: bad"), &names, false).into_string();
         assert!(

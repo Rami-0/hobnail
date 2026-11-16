@@ -31,7 +31,7 @@
       case "b": return bytes(v);
       case "bps": return bytes(v) + "/s";
       case "c": return v.toFixed(0) + " °C";
-      default: return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
+      default: return Number.isInteger(v) ? String(v) : Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
     }
   }
   function dur(s) {
@@ -323,8 +323,13 @@
     const x = Math.min(r.width, (i * step) / (t1 - t0) * r.width);
     cur.hidden = tip.hidden = false;
     cur.style.left = x + "px";
-    tip.style.left = Math.min(r.width - 40, Math.max(40, x)) + "px";
     tip.replaceChildren(el("span", "", fmtTime(t0 + i * step, t1 - t0)), raw === undefined || raw === "" ? "no data" : fmtVal(fig.dataset.u, parseFloat(raw)));
+    // A marker under the crosshair says what happened (OV-17; no title
+    // tooltip on touch): within 8 px of it.
+    const mk = $$(".mk[data-t]", cv).find((m) => Math.abs((+m.dataset.t - t) / (t1 - t0) * r.width) <= 8);
+    if (mk) tip.append(el("span", "tip-mk", mk.getAttribute("aria-label") || ""));
+    const half = tip.offsetWidth / 2;
+    tip.style.left = Math.min(r.width - half, Math.max(half, x)) + "px";
   }
   let hoverT = null;
   function chartHover(e) {
@@ -349,12 +354,15 @@
     const a = Math.max(0, Math.min(drag.x, e.clientX) - r.left), b = Math.min(r.width, Math.max(drag.x, e.clientX) - r.left);
     drag.sel.hidden = b - a < 3; drag.sel.style.left = a + "px"; drag.sel.style.width = b - a + "px";
   }
+  // Touch and pen drag too (LG-46): the canvas lets sideways drags through
+  // (touch-action: pan-y); a tap shows the read-out.
   doc.addEventListener("pointerdown", (e) => {
-    const cv = e.button === 0 && e.pointerType === "mouse" && e.target.closest && e.target.closest("figure.chart[data-zoom] .canvas");
+    const cv = (e.pointerType !== "mouse" || e.button === 0) && e.target.closest && e.target.closest("figure.chart[data-zoom] .canvas");
     if (!cv || e.target.closest(".mk")) return;
-    e.preventDefault();
+    if (e.pointerType === "mouse") e.preventDefault(); else chartHover(e);
     drag = { cv, fig: cv.closest("figure"), x: e.clientX, sel: cv.querySelector(".sel") };
   });
+  doc.addEventListener("pointercancel", () => { if (drag) { drag.sel.hidden = true; drag = null; } });
   doc.addEventListener("pointerup", (e) => {
     if (!drag) return;
     const d = drag; drag = null; d.sel.hidden = true;
@@ -367,13 +375,19 @@
     location.href = location.pathname + "?" + p.toString();
   });
 
-  // Legend buttons toggle a chart's layers (avg, max band, yesterday).
+  // Legend buttons toggle a layer (avg, max band, yesterday) on every chart
+  // of the page at once, remembered in this browser (LG-51).
+  function legend(ser, on) {
+    $$(`.lg[data-ser="${ser}"]`).forEach((b) => { b.setAttribute("aria-pressed", String(on)); b.closest("figure").classList.toggle("off-" + ser, !on); });
+  }
+  const chartOff = () => { const v = store.get("hb.chartOff", []); return Array.isArray(v) ? v : []; };
+  chartOff().forEach((s) => legend(s, false));
   doc.addEventListener("click", (e) => {
     const b = e.target.closest && e.target.closest(".lg[data-ser]");
     if (!b) return;
-    const on = b.getAttribute("aria-pressed") === "false";
-    b.setAttribute("aria-pressed", String(on));
-    b.closest("figure").classList.toggle("off-" + b.dataset.ser, !on);
+    const on = b.getAttribute("aria-pressed") === "false", ser = b.dataset.ser;
+    legend(ser, on);
+    store.set("hb.chartOff", chartOff().filter((s) => s !== ser).concat(on ? [] : [ser]));
   });
 
   // ---- container details: header numbers from the live data ----

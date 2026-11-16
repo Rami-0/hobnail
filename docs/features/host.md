@@ -20,5 +20,12 @@ visible; history comes from the database (1 h … 30 d).
   opens it; a logs icon beside it opens its logs, only for containers whose
   logs may be read (never for an excluded one).
 
-Not available without privileges (deliberately not added): S.M.A.R.T., GPU busy
-%, systemd failed units.
+Rates are averages since the previous reading (the intro says so once). Every
+table fits its panel at 390 px: labels wrap, a rate's unit goes under its
+number on a phone, and the process tables cut long names with "…" instead of
+widening. A GPU panel appears only when the kernel lists a DRM device.
+
+Not available without privileges (deliberately not added, and not shown on
+the page): S.M.A.R.T. (needs raw access to the disks under `/dev`; drive
+temperatures appear under Sensors when the kernel exposes them), GPU busy %,
+systemd failed units (needs the system D-Bus socket).

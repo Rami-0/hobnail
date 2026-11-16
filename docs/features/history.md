@@ -31,6 +31,29 @@ sample_interval = "15s"
 top bar, container detail (6 h / 24 h / 7 d), the History page (1 h … 30 d,
 restarts per day, incident timeline), the Alerts log.
 
+**The History page** (`/history`, public; login events only for a session):
+
+- **Window:** a range (`?range=1h` … `30d`) or a zoom (`?from=&to=`, unix
+  seconds; 5 minutes at least, a shorter one is widened around its middle;
+  30 days back at most). Drag across a chart to zoom, with a mouse or
+  sideways with a finger (vertical drags still scroll). The toolbar's
+  "‹ Earlier", "Zoom in", "Zoom out" and "Later ›" are plain links, so the
+  window moves by touch, keyboard and without JavaScript. "Compare with
+  yesterday" stays in its place and is greyed out above 24 h.
+- **Incident timeline:** the events inside the chart window, newest first,
+  60 per page, "Older events" pages back (`&before=<id>`); "Incidents" shows
+  warnings and errors, "All events" everything. Each row has a clock time,
+  links its subject (a container, or what an alert was about) and has the
+  container's logs at that moment.
+- **Markers** on the charts (crashes, OOM kills, failing health checks, fired
+  alerts) open their timeline row, highlighted; on the Overview they open
+  History an hour around the event. Under the crosshair the read-out says
+  what the marker is (touch has no tooltips).
+- The avg / max / yesterday legend toggles act on every chart and are
+  remembered in the browser.
+- The page reads the events of the window with the paged events query (500
+  per read, at most 20 reads per page view; never on a timer).
+
 **JSON API** (open like the page; GET only):
 
 - `GET /api/history/system?metric=cpu&range=24h` — metrics `cpu mem swap disk

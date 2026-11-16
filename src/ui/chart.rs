@@ -49,6 +49,8 @@ impl Unit {
             Unit::Bytes => human_bytes(v.max(0.0) as u64),
             Unit::BytesPerSec => format!("{}/s", human_bytes(v.max(0.0) as u64)),
             Unit::Celsius => format!("{v:.0} °C"),
+            // Counts (PIDs, OOM kills, pages) are whole numbers (OV-49).
+            Unit::Plain if v.fract() == 0.0 => format!("{v:.0}"),
             Unit::Plain if v.abs() < 10.0 => format!("{v:.2}"),
             Unit::Plain => format!("{v:.1}"),
         }
@@ -276,10 +278,13 @@ fn paths(
 /// A point in time worth marking on a chart (a crash, an alert).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Marker {
+    /// The event's id (its timeline row is `#ev-<id>` on History).
+    pub id: i64,
     pub ts: i64,
-    /// Tooltip and accessible name ("web: die, exit code 1").
+    /// Tooltip, accessible name and the read-out's text under the
+    /// crosshair ("web: die, exit code 1").
     pub label: String,
-    /// Where a click goes (container page, alerts page).
+    /// Where a click goes: the event's row in the History timeline.
     pub href: Option<String>,
     /// `bad`, `warn` or empty.
     pub level: &'static str,
@@ -287,26 +292,39 @@ pub struct Marker {
 
 /// Markers for the events worth seeing on a time chart: crashes, OOM kills,
 /// failing health checks and fired alerts. Clean exits and plain starts are
-/// left out (they are routine).
+/// left out (they are routine). A marker opens its event (LG-44): the row
+/// in the History timeline, highlighted, in an hour around it (History
+/// itself points them at its own window, `pages::history`).
 pub fn markers_from_events(evs: &[crate::db::Event]) -> Vec<Marker> {
-    use crate::ui::fmt::url_encode;
     evs.iter()
         .filter_map(|e| {
-            let ctr = || format!("/containers/{}", url_encode(&e.subject));
-            let (level, href) = match e.kind.as_str() {
-                "container.die" if e.level != "info" => ("bad", ctr()),
-                "container.oom" => ("bad", ctr()),
-                "container.health" if e.detail == "unhealthy" => ("warn", ctr()),
-                k if k.starts_with("alert.fired") => ("bad", "/alerts".to_string()),
+            let level = match e.kind.as_str() {
+                "container.die" if e.level != "info" => "bad",
+                "container.oom" => "bad",
+                "container.health" if e.detail == "unhealthy" => "warn",
+                k if k.starts_with("alert.fired") => "bad",
                 _ => return None,
             };
+            let all = if e.level == "info" { "&events=all" } else { "" };
+            let href = format!(
+                "/history?from={}&to={}{all}&before={}#ev-{}",
+                e.ts - 1800,
+                e.ts + 1800,
+                e.id + 1,
+                e.id
+            );
             let what = e.kind.rsplit('.').next().unwrap_or(&e.kind);
             let label = if e.detail.is_empty() {
                 format!("{}: {what}", e.subject)
             } else {
-                format!("{}: {what}, {}", e.subject, e.detail)
+                format!(
+                    "{}: {what}, {}",
+                    e.subject,
+                    crate::ui::pages::alerts::without_echo(&e.detail)
+                )
             };
             Some(Marker {
+                id: e.id,
                 ts: e.ts,
                 label,
                 href: Some(href),
@@ -369,17 +387,15 @@ fn cluster_markers(spec: &ChartSpec, ms: &[Marker]) -> Vec<(f64, Marker)> {
             if g.len() > 4 {
                 label.push_str("; …");
             }
-            let same = g.iter().all(|m| m.href == worst.href);
+            // The worst event's row; the others sit next to it in the
+            // timeline (LG-44).
             (
                 x,
                 Marker {
+                    id: worst.id,
                     ts: worst.ts,
                     label,
-                    href: if same {
-                        worst.href.clone()
-                    } else {
-                        Some("/history#events".into())
-                    },
+                    href: worst.href.clone(),
                     level: worst.level,
                 },
             )
@@ -567,6 +583,10 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
         unit.fmt(p.max)
     );
     let (y_hi, y_mid, y_lo) = (unit.axis(p.y_hi), unit.axis(mid), unit.axis(p.y_lo));
+    // Data covering only the last part of the window (a young database, a
+    // container started minutes ago): say from when (LG-40, OV-43).
+    let first = window_points(spec, series).first().map(|q| q.0 as i64);
+    let since = first.filter(|&t| t > spec.now - spec.range_secs + spec.range_secs / 5);
     // Y-axis column sized to its widest label (mono font: `ch` is exact), so
     // "20.0 KiB/s" is never clipped and "50%" does not waste space.
     let y_width = [&y_hi, &y_mid, &y_lo]
@@ -576,7 +596,7 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
         .unwrap_or(4)
         .max(3);
     html! {
-        figure.chart.compact[spec.compact] style={"--s:var(" (spec.color) ")"}
+        figure.chart.compact[spec.compact] style={"--s:var(" (spec.color) ");--yw:" (y_width) "ch"}
             data-t0=(spec.now - spec.range_secs) data-t1=(spec.now) data-step=(step)
             data-u=(unit.tag()) data-v=[hover.as_deref()] data-zoom=[x.zoom.then_some("1")] {
             figcaption {
@@ -584,6 +604,11 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                 span.chart-now { (unit.fmt(p.last)) }
                 span.chart-mm title="minimum and maximum in this window" {
                     "min " (unit.fmt(p.min)) " · max " (unit.fmt(p.max))
+                }
+                @if let Some(t) = since {
+                    span.chart-since title="The history database has nothing earlier in this window" {
+                        "data from " time datetime=(fmt_utc(t.max(0) as u64)) data-t=(t) data-abs="1" { (crate::ui::fmt::short_utc(t.max(0) as u64)) }
+                    }
                 }
                 @if legend {
                     span.legend {
@@ -593,7 +618,7 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                     }
                 }
             }
-            div.plot style={"--yw:" (y_width) "ch"} {
+            div.plot {
                 div.yaxis aria-hidden="true" {
                     span style="top:0" { (y_hi) }
                     span style="top:50%" { (y_mid) }
@@ -614,11 +639,14 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                     }
                     @if !marks.is_empty() {
                         div.evm {
+                            // No `title`: the read-out names the marker under the
+                            // crosshair (OV-17, touch too) and a click opens its
+                            // row; the label is sent once, not twice per chart.
                             @for (left, m) in &marks {
                                 @if let Some(h) = &m.href {
-                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} title=(m.label) aria-label=(m.label) {}
+                                    a class={"mk " (m.level)} href=(h) style={"left:" (n(*left)) "%"} data-t=(m.ts) aria-label=(m.label) {}
                                 } @else {
-                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} title=(m.label) {}
+                                    span class={"mk " (m.level)} style={"left:" (n(*left)) "%"} data-t=(m.ts) aria-label=(m.label) {}
                                 }
                             }
                         }
@@ -893,6 +921,17 @@ mod tests {
         assert!(slots[..58].iter().all(|s| s.is_empty()));
         assert!(html.contains("class=\"yaxis\""));
         assert!(html.contains("min 10% · max 30%"));
+        // The y column's width is on the figure, for the x axis too (OV-15).
+        assert!(
+            html.contains(r#"style="--s:var(--ch-cpu);--yw:3ch""#),
+            "{html}"
+        );
+        // Data from the last 2 minutes of an hour: says from when (LG-40).
+        assert!(html.contains("data from <time"), "{html}");
+        let full = series(60, &[(NOW - 3500, 1.0), (NOW, 2.0)]);
+        assert!(!line_chart(&spec(Unit::Percent), &full, true)
+            .into_string()
+            .contains("data from"));
         assert_eq!(html.matches("class=\"tick").count(), 5);
         // Title text is escaped.
         let mut sp = spec(Unit::Percent);
@@ -909,6 +948,8 @@ mod tests {
         assert_eq!(Unit::BytesPerSec.fmt(2048.0), "2.0 KiB/s");
         assert_eq!(Unit::Celsius.fmt(61.2), "61 °C");
         assert_eq!(Unit::Plain.fmt(f64::NAN), "—");
+        assert_eq!(Unit::Plain.fmt(3.0), "3");
+        assert_eq!(Unit::Plain.fmt(1.25), "1.25");
         assert_eq!(Unit::Percent.axis(0.0), "0");
         assert_eq!(Unit::Percent.axis(2.5), "2.5%");
         assert_eq!(Unit::Percent.axis(50.0), "50%");
@@ -988,6 +1029,7 @@ mod tests {
             86_400,
         );
         let marks = vec![Marker {
+            id: 3,
             ts: NOW - 60,
             label: "web: die, exit code 1".into(),
             href: Some("/containers/web".into()),
@@ -1004,7 +1046,9 @@ mod tests {
         assert!(html.contains("class=\"cmp\""), "{html}");
         assert!(html.contains("data-ser=\"max\"") && html.contains("data-ser=\"cmp\""));
         assert!(
-            html.contains("class=\"mk bad\" href=\"/containers/web\""),
+            html.contains(
+                r#"class="mk bad" href="/containers/web" style="left:98.3%" data-t="1799999940""#
+            ),
             "{html}"
         );
         assert!(html.contains("data-zoom=\"1\""));
@@ -1030,8 +1074,36 @@ mod tests {
             ev("alert.fired", "error", "cpu"),
         ]);
         assert_eq!(m.len(), 2);
-        assert_eq!(m[0].href.as_deref(), Some("/containers/a%3Cb"));
-        assert_eq!(m[1].href.as_deref(), Some("/alerts"));
+        // Each opens its row in the History timeline, an hour around it
+        // (LG-44), not the subject's page or the top of a list.
+        let row = format!(
+            "/history?from={}&to={}&before=2#ev-1",
+            NOW - 1800,
+            NOW + 1800
+        );
+        assert_eq!(m[0].href.as_deref(), Some(row.as_str()));
+        assert_eq!(m[1].href.as_deref(), Some(row.as_str()));
+        // Folded markers open the worst event's row, never a bare list.
+        let evs: Vec<crate::db::Event> = (0..3)
+            .map(|i| crate::db::Event {
+                id: 10 + i,
+                ts: NOW - 100 + i,
+                kind: if i == 1 {
+                    "container.oom"
+                } else {
+                    "container.health"
+                }
+                .into(),
+                level: "warn".into(),
+                subject: format!("c{i}"),
+                detail: "unhealthy".into(),
+            })
+            .collect();
+        let folded = cluster_markers(&spec(Unit::Percent), &markers_from_events(&evs));
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].1.id, 11);
+        assert!(folded[0].1.label.starts_with("3 events: "));
+        assert!(folded[0].1.href.as_deref().unwrap().ends_with("#ev-11"));
     }
 
     #[test]

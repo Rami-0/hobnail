@@ -391,8 +391,9 @@ async function refusing(pattern, act) {
 }
 await load(url, "/alerts", 600);
 if (await ev("!!document.querySelector('#ru-list [data-toggle]:not([disabled])')")) {
-  await ev("window.__sw = document.querySelector('#ru-list [data-toggle]'); window.__was = __sw.checked; window.__mid = () => [__sw.checked !== __was, __sw.getAttribute('aria-busy')]");
-  const r = await refusing("*/api/settings/alerts*", async () => { await ev("document.querySelector('#ru-list [data-toggle]').scrollIntoView({ block: 'center' })"); const c = await centre("#ru-list [data-toggle]"); await clickAt(c[0], c[1]); });
+  // In view first: a long firing list can push the rules below the fold.
+  await ev("window.__sw = document.querySelector('#ru-list [data-toggle]'); __sw.scrollIntoView({ block: 'center' }); window.__was = __sw.checked; window.__mid = () => [__sw.checked !== __was, __sw.getAttribute('aria-busy')]");
+  const r = await refusing("*/api/settings/alerts*", async () => { const c = await centre("#ru-list [data-toggle]"); await clickAt(c[0], c[1]); });
   check(r.seen && r.method === "POST", "the switch's save was caught in the browser (nothing reached the server)", r);
   check(r.now && r.now[0] === true && r.now[1] === "true", "a rule switch moves at once and waits busy", r.now);
   const after = await ev("[__sw.checked === __was, __sw.getAttribute('aria-busy'), [...document.querySelectorAll('body>.toasts>.toast.bad')].length > 0]");
