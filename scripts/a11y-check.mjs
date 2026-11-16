@@ -181,7 +181,7 @@ for (let i = 0; i < 40; i++) { await key("Tab"); seen.push(await ev(focused)); }
 const has = (re) => seen.some((s) => re.test(s));
 check(/skip/i.test(seen[0]) || /Skip/.test(await ev("document.activeElement.textContent")), "Tab: the skip link comes first", seen[0]);
 check(has(/^rail-toggle\|side/), "Tab reaches the sidebar's collapse button", seen);
-check(await ev(`[...document.querySelectorAll("#side .nav-item")].length`) === 7 && has(/^tree-filter\|side/), "Tab reaches the sidebar filter", seen);
+check(await ev(`[...document.querySelectorAll("#side .nav-item:not(.rail-only)")].length`) === 7 && has(/^tree-filter\|side/), "Tab reaches the sidebar filter", seen);
 const navSeen = seen.filter((s) => /\|side$/.test(s)).length;
 check(navSeen >= 9, `Tab passes the nav items (${navSeen} sidebar stops in 40 presses)`);
 // From the skip link, the top bar and the page.

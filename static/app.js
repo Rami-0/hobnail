@@ -140,6 +140,8 @@
     } else setOpen(!root.classList.contains("side-open"));
   }
   railBtn && railBtn.addEventListener("click", toggleSide);
+  // The rail's labels are styled tooltips (NAV-27), not the native title.
+  $$(".nav-item[title]").forEach((a) => { a.dataset.rtip = a.title; a.title = ""; });
   $("scrim") && $("scrim").addEventListener("click", () => setOpen(false));
   matchMedia("(min-width:1101px)").addEventListener("change", () => { if (wide()) setOpen(false); sideState(); });
   matchMedia("(max-width:699px)").addEventListener("change", sideState);
@@ -722,6 +724,12 @@
     else if (a.dataset.act === "keys-close") keys.close();
     else if (a.dataset.act === "more" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) { e.preventDefault(); setOpen(true, a); }
     else if (a.dataset.act === "side-close") setOpen(false);
+    else if (a.dataset.act === "rail-stacks" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) {
+      // NAV-27: from the rail to the stacks: expand, focus the filter.
+      e.preventDefault();
+      if (wide()) toggleSide(); else setOpen(true, a);
+      const f = $("tree-filter"); f && f.focus();
+    }
   });
   const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", a: "/alerts", s: setTab };
   let gAt = 0;
@@ -833,6 +841,7 @@
     if (live) {
       live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
       live.querySelector(".live-t").textContent = text;
+      live.title = "Live updates: " + text; // the rail shows only the dot
     }
     if (on || text !== "reconnecting") { clearTimeout(offT); offT = null; if (offPill) { offPill.remove(); offPill = null; root.classList.remove("stale"); } return; }
     if (offT || offPill) return; // retries keep failing: the first one starts the clock

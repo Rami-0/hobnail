@@ -1505,7 +1505,10 @@ fn revisions_are_paged() {
     let rows = |html: &str| html.matches(r#"<tr data-key="rev:"#).count();
     let (_, p1) = get(&st, "/settings/config", &h);
     assert_eq!(rows(&p1), 25, "page 1");
-    assert!(p1.contains("note-61<") && !p1.contains("note-36<"), "newest first");
+    assert!(
+        p1.contains("note-61<") && !p1.contains("note-36<"),
+        "newest first"
+    );
     assert!(p1.contains(r#"<nav class="rev-pager" aria-label="Revision pages">"#));
     assert!(p1.contains(r#"href="?rp=2" data-rp="2" rel="next""#) && !p1.contains(r#"rel="prev""#));
     assert!(p1.contains("Revisions 1–25 of 62"), "{p1}");
@@ -1514,7 +1517,10 @@ fn revisions_are_paged() {
     assert_eq!(rows(&p2), 25);
     assert!(p2.contains("note-36<") && !p2.contains("note-61<"));
     assert!(p2.contains(r#"href="?rp=1" data-rp="1" rel="prev""#) && p2.contains(r#"rel="next""#));
-    assert!(!p2.contains(r#"class="pill ok">latest"#), "only page 1 has the latest");
+    assert!(
+        !p2.contains(r#"class="pill ok">latest"#),
+        "only page 1 has the latest"
+    );
     let (_, p3) = get(&st, "/settings/config?rp=9", &h);
     assert_eq!(rows(&p3), 12, "past the end: the last page");
     assert!(p3.contains("Revisions 51–62 of 62") && !p3.contains(r#"rel="next""#));

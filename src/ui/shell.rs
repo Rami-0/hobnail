@@ -181,6 +181,13 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                     @if *n == Nav::Alerts { (nav_alerts(firing)) }
                                 }
                             }
+                            // The rail's way to the stacks (NAV-27): the script
+                            // expands the sidebar with focus in its filter;
+                            // without it, the plain page that lists them.
+                            a.nav-item.rail-only href="/more" data-act="rail-stacks" data-rtip="Stacks" {
+                                (ic("filter"))
+                                span.nav-label { "Stacks and containers" }
+                            }
                         }
                         div.tree-wrap {
                             div.tree-head {
@@ -1192,19 +1199,21 @@ mod tests {
             APP_CSS_SRC,
             "@media (pointer:coarse),(max-width:699px){:root{",
         );
-        for t in [
-            "--ctl-h:44px",
-            "--ctl-h-sm:44px",
-            "--ia:44px",
-            "--hit:44px",
-        ] {
+        for t in ["--ctl-h:44px", "--ctl-h-sm:44px", "--ia:44px", "--hit:44px"] {
             assert!(coarse.contains(t), "{t} in {coarse}");
         }
         let css = include_str!("../../static/components.css");
         let touch = &css[css
             .find("/* 44 px targets on touch and phones (A11Y-18)")
             .expect("the touch block")..];
-        for sel in [".icon-btn", ".crumb>a", ".seg a", ".tab", ".nav-item", ".linkbtn"] {
+        for sel in [
+            ".icon-btn",
+            ".crumb>a",
+            ".seg a",
+            ".tab",
+            ".nav-item",
+            ".linkbtn",
+        ] {
             assert!(touch.contains(sel), "{sel} is sized on touch");
         }
         // No hit area that reaches over a neighbour.
@@ -1227,7 +1236,10 @@ mod tests {
         assert!(css.contains("\n.set-main .tbl td{overflow-wrap:anywhere}"));
         assert!(css.contains("\n.set-main .tbl .linkbtn{max-width:36ch}"));
         let comp = include_str!("../../static/components.css");
-        assert!(comp.contains(".linkbtn{display:inline-block;"), "max-width needs a box");
+        assert!(
+            comp.contains(".linkbtn{display:inline-block;"),
+            "max-width needs a box"
+        );
     }
 
     /// ROB-03: the stack tree is the containing block of the visually
