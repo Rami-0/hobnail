@@ -16,7 +16,7 @@ use crate::ui::fmt::{pct, time_tag, url_encode};
 use crate::ui::pages::{crumb_title, kind_label};
 use crate::ui::shell::{disk_percent, layout, level, mem_percent, Ctx, Nav};
 use crate::ui::view::{build_groups, CardView, GroupView, Sev};
-use crate::ui::{ic, panel_head, pill, status_dot};
+use crate::ui::{empty, ic, panel_head, pill, skel_word, status_dot, Empty};
 use crate::util::{human_bytes, human_duration};
 
 const NONE: &str = "—";
@@ -158,7 +158,9 @@ pub fn page(ctx: &Ctx) -> String {
                         h2.label #h-w { "Widgets" }
                         @if let Some(h) = add { (add_link("widget", "widgets", h)) }
                     }
-                    @if cfg.widgets.is_empty() { p.muted { "No widgets yet." } }
+                    @if cfg.widgets.is_empty() {
+                        (empty(Empty::First, "inline", "zap", "No widgets yet", html! { "A widget shows a number or a status from any JSON or text URL. Use Add above." }, None))
+                    }
                     div.widgets {
                         @for w in &cfg.widgets {
                             @let out = ctx.state.widgets.lock().unwrap().get(&w.id).cloned();
@@ -207,7 +209,7 @@ pub fn health(v: &Live) -> Markup {
                     @match n {
                         Some(n) => (n),
                         None if v.snap.error.is_some() => (NONE),
-                        None => span.sk { span.sr { "loading" } },
+                        None => (skel_word()),
                     }
                 }
                 span.hs-l { (label) }
@@ -215,7 +217,7 @@ pub fn health(v: &Live) -> Markup {
         }
     };
     html! {
-        section #ov-health.hs aria-label="Container health" {
+        section #ov-health.hs aria-label="Container health" data-wait=[(!known && v.snap.error.is_none()).then_some("")] {
             (cell(known.then_some(running), "running", "/containers?state=running", false, "Containers that are running"))
             (cell(known.then_some(stopped), "stopped", "/containers?state=stopped", false, "Containers that are not running"))
             (cell(known.then_some(unhealthy), "unhealthy", "/containers?state=problem", true, "Unhealthy, restarting or dead"))
@@ -227,8 +229,6 @@ pub fn health(v: &Live) -> Markup {
                         span.u style={"width:" (format!("{:.2}", unhealthy as f64 / total * 100.0)) "%"} {}
                     }
                 }
-            } @else if let Some(e) = &v.snap.error {
-                p.hs-err { (ic("alert")) "Docker unreachable: " (e) }
             }
         }
     }
@@ -252,7 +252,7 @@ pub fn logs_ia(c: &CardView) -> Markup {
 pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
     // One row per subject, ranked by severity: a container with a firing
     // alert is one red row ("unhealthy · alert firing 5m"), not two.
-    let mut rows: Vec<(Sev, Markup)> = Vec::new();
+    let mut rows: Vec<(Sev, String, Markup)> = Vec::new();
     let names: std::collections::HashSet<&str> = v.containers().map(|c| c.name.as_str()).collect();
     for i in v
         .status
@@ -263,6 +263,7 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
         let href = subject_href(cfg, &i.rule, &i.subject).unwrap_or(("/alerts".into(), false));
         rows.push((
             Sev::Bad,
+            format!("a:{}:{}", i.rule, i.subject),
             html! {
                 span.dot.bad role="img" aria-label="alert firing" {}
                 (subject_link(Some(href), &i.subject, "nm"))
@@ -283,6 +284,7 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
         match why {
             Some((sev, why)) => rows.push((
                 sev,
+                format!("c:{}", c.name),
                 html! {
                     (status_dot(c))
                     a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) }
@@ -329,6 +331,7 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
                 let why = s.why.get(&i).map(String::as_str).unwrap_or("problem");
                 rows.push((
                     Sev::Warn,
+                    format!("c:{}", c.name),
                     html! {
                         (status_dot(c))
                         a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) }
@@ -340,23 +343,28 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
             }
         }
     }
-    rows.sort_by_key(|(s, _)| *s != Sev::Bad);
+    rows.sort_by_key(|(s, _, _)| *s != Sev::Bad);
     let total = v.containers().count();
+    let connecting = v.snap.fetched_at == 0 && v.snap.error.is_none();
     html! {
-        section #ov-attn.attn.quiet[rows.is_empty()] aria-label="Needs attention" {
+        section #ov-attn.attn.quiet[rows.is_empty()] aria-label="Needs attention" data-wait=[connecting.then_some("")] {
             div.attn-h {
                 h2.label { "Needs attention" }
                 @if !rows.is_empty() { span.count-pill.bad { (rows.len()) } }
             }
             @if rows.is_empty() {
-                p.ok-line {
-                    (ic("check"))
-                    @if v.known() { "All clear. " span.muted { (total) " containers, nothing needs you." } }
-                    @else { "Nothing needs attention." }
+                @if v.snap.error.is_some() {
+                    p.ok-line.unknown { (ic("alert")) "Unknown while Docker cannot be reached." }
+                } @else if connecting {
+                    div.sk-rows { span.sk {} span.sk {} span.sk-t { "Connecting to Docker…" } }
+                } @else if total == 0 {
+                    p.ok-line.unknown { (ic("box")) "No containers yet." }
+                } @else {
+                    p.ok-line { (ic("check")) "All clear. " span.muted { (total) " containers, nothing needs you." } }
                 }
             } @else {
-                ul.rows {
-                    @for (_, r) in &rows { li.rl { (r) } }
+                ul.rows data-flash {
+                    @for (_, k, r) in &rows { li.rl data-key=(k) { (r) } }
                 }
             }
             @if clean_stopped > 0 {
@@ -375,6 +383,39 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
 
 pub fn top(v: &Live, show_stats: bool) -> Markup {
     let cards: Vec<&CardView> = v.containers().collect();
+    // Nothing to sample is not the same as no sample yet (ROB-01). Both
+    // panels say why in the standard empty state; each its own title.
+    let why: Option<(Empty, &str, &str)> = if v.snap.error.is_some() {
+        Some((
+            Empty::Error,
+            "alert",
+            "Docker cannot be reached, so nothing is sampled.",
+        ))
+    } else if v.known() && cards.is_empty() {
+        Some((
+            Empty::First,
+            "box",
+            "Hobnail lists the containers Docker runs on this host. Hidden ones are under Settings, Containers and groups.",
+        ))
+    } else if v.known() && !cards.iter().any(|c| c.running) {
+        Some((
+            Empty::First,
+            "box",
+            "Stopped containers use no CPU or memory.",
+        ))
+    } else {
+        None
+    };
+    let why_box = |title: &str| {
+        why.map(|(kind, icon, body)| {
+            let title = match (kind, title) {
+                (Empty::Error, _) => "No numbers",
+                _ if cards.is_empty() => "No containers yet",
+                (_, t) => t,
+            };
+            empty(kind, "compact", icon, title, html! { (body) }, None)
+        })
+    };
     let board = |title: &str,
                  color: &str,
                  key: fn(&CardView) -> Option<f64>,
@@ -390,11 +431,14 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             div.board style={"--s:var(" (color) ")"} {
                 @if !title.is_empty() { h3.label { (title) } }
                 @if v.is_empty() {
-                    p.muted { "Waiting for the first sample…" }
+                    div.sk-rows data-wait { span.sk {} span.sk {} span.sk {} span.sk-t { "Waiting for the first sample…" } }
                 } @else {
-                    ol.bars {
+                    // Ranked (HB.morph, data-rank): re-used by position, so
+                    // nothing moves when ranks change; keyed by container,
+                    // so a focused link stays that container's.
+                    ol.bars data-rank {
                         @for (c, x) in v {
-                            li {
+                            li data-key=(c.name) {
                                 a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
                                 span.val { (fmt(x)) }
                                 (logs_ia(c))
@@ -415,6 +459,8 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
                 }
                 @if !show_stats {
                     p.muted { "Live stats are off (" code { "page.show_stats = false" } ")." }
+                } @else if let Some(w) = why_box("Nothing is running") {
+                    (w)
                 } @else {
                     (treemap(&cards))
                 }
@@ -425,7 +471,11 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
                     a.more href="/containers?sort=cpu&group=0" { "All" (ic("arrow-right")) }
                 }
                 @if show_stats {
-                    div.boards { (board("", "--ch-cpu", |c| c.cpu, pct)) }
+                    @if let Some(w) = why_box("Nothing to rank") {
+                        (w)
+                    } @else {
+                        div.boards { (board("", "--ch-cpu", |c| c.cpu, pct)) }
+                    }
                 }
             }
         }
@@ -478,7 +528,12 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
         .collect();
     items.sort_by(|a, b| b.1.total_cmp(&a.1));
     if items.is_empty() {
-        return html! { div.tmap.sk-box { span.muted { "Waiting for the first sample…" } } };
+        return html! {
+            div.tmap-wrap data-wait {
+                p.tmap-sum { span.sk {} span.sk-t { "Waiting for the first sample…" } }
+                div.tmap.sk-box { span.sk.block {} }
+            }
+        };
     }
     let total: f64 = items.iter().map(|x| x.1).sum();
     let weights: Vec<f64> = items.iter().map(|x| x.1).collect();
@@ -495,13 +550,13 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
             p.tmap-sum.muted {
                 b.num { (human_bytes(total as u64)) } " in " (items.len()) " containers"
             }
-            div.tmap role="list" aria-label="Memory by container" {
+            div.tmap role="list" aria-label="Memory by container" data-rank {
                 @for (i, r) in rects.iter().enumerate() {
                     @let style = format!("left:{:.2}%;top:{:.2}%;width:{:.2}%;height:{:.2}%", r.0, r.1, r.2, r.3);
                     // Under two lines' height on a phone: one line.
                     @let fit = if r.3 * TM_H / 100.0 < 40.0 { "tm short" } else { "tm" };
                     @if let Some((c, m)) = items.get(i).filter(|_| i < k) {
-                        div class=(fit) role="listitem" style={(style) ";--h:" (hue(&c.stack))}
+                        div class=(fit) role="listitem" data-key=(c.name) style={(style) ";--h:" (hue(&c.stack))}
                             title={(c.title) ": " (human_bytes(*m as u64)) " (" (format!("{:.0}", m / total * 100.0)) "%)"} {
                             a.tm-a.row-link href={"/containers/" (url_encode(&c.name))} {
                                 span.tm-n { (c.title) }
@@ -510,7 +565,7 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
                             a.ia.logs.tm-logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
                         }
                     } @else {
-                        a class={(fit) " tm-rest"} role="listitem" href="/containers?sort=mem&group=0" style=(style)
+                        a class={(fit) " tm-rest"} role="listitem" data-key="+rest" href="/containers?sort=mem&group=0" style=(style)
                             title={(rest_n) " smaller containers: " (human_bytes(rest as u64)) ". Open them in the table, by memory"} {
                             span.tm-n { "+" (rest_n) " others" }
                             span.tm-v { (human_bytes(rest as u64)) }
@@ -641,7 +696,7 @@ fn meter(p: Option<f64>, color: &str) -> Markup {
 fn skel(s: Option<&SystemStats>) -> Markup {
     match s {
         Some(_) => html! { (NONE) },
-        None => html! { span.sk { span.sr { "loading" } } },
+        None => skel_word(),
     }
 }
 
@@ -672,7 +727,7 @@ pub fn sys_strip(s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> Markup {
         _ => "",
     };
     html! {
-        div #ov-sys.strip aria-label="Host vitals" {
+        div #ov-sys.strip aria-label="Host vitals" data-wait=[s.is_none().then_some("")] {
             div.cell {
                 (cell_head("cpu", "CPU"))
                 div class={"big " (level(cpu))} { @match cpu { Some(p) => { span.tw { (format!("{p:.0}")) } small { "%" } } None => (skel(s)) } }
@@ -801,9 +856,10 @@ fn recent_events(ctx: &Ctx) -> Markup {
         section.panel aria-label="Recent events" {
             (panel_head("Recent events", Some(("/history#events", "Timeline"))))
             @if evs.is_empty() {
-                p.muted {
-                    @if ctx.state.db.is_enabled() { "No events recorded yet." }
-                    @else { "Starts, stops, health changes and alerts appear here once history is recording." }
+                @if ctx.state.db.is_enabled() {
+                    (empty(Empty::First, "inline", "history", "No events yet", html! { "Starts, stops, health changes and alerts appear here as they happen." }, None))
+                } @else {
+                    (empty(Empty::First, "inline", "history", "History is off", html! { "Starts, stops, health changes and alerts appear here once history is recording." }, None))
                 }
             } @else {
                 ul.events {
@@ -880,8 +936,10 @@ fn bookmarks(v: &Live, add: Option<&str>) -> Markup {
                 @if let Some(h) = add { (add_link("bookmark", "bookmarks", h)) }
             }
             @if marks.is_empty() {
-                @if add.is_some() { p.muted { "No bookmarks yet." } }
-                @else { p.muted { "No bookmarks. Add " code { "[[bookmarks]]" } " entries to the config." } }
+                (empty(Empty::First, "inline", "bookmark", "No bookmarks yet", html! {
+                    @if add.is_some() { "Links to things that are not containers, like the router. Use Add above." }
+                    @else { "Links to things that are not containers. They are added in Settings." }
+                }, None))
             }
             @for (g, cards) in marks {
                 div.mark-group {
@@ -1017,7 +1075,25 @@ mod tests {
         let v = live(vec![card("a", "running", true)], Some("down"));
         let html = health(&v).into_string();
         assert!(html.contains(r#"<span class="hs-n tw">—</span>"#));
-        assert!(html.contains("Docker unreachable"));
+        // The cause is the page's banner (ROB-09), not a raw line here, and
+        // nothing is "loading" when Docker is down.
+        assert!(
+            !html.contains("Docker unreachable") && !html.contains("data-wait"),
+            "{html}"
+        );
+        // Connecting: skeleton numbers on a region the script makes busy
+        // (`data-wait`; never `aria-busy` from the server, §11.9).
+        let mut v = live(vec![], None);
+        v.snap = Arc::new(Snapshot::default());
+        let html = health(&v).into_string();
+        assert!(
+            html.contains(r#"data-wait="""#)
+                && !html.contains("aria-busy")
+                && html.contains(
+                    r#"<span class="sk" aria-hidden="true"></span><span class="sk-t">—</span>"#
+                ),
+            "{html}"
+        );
     }
 
     #[test]
@@ -1058,7 +1134,13 @@ mod tests {
         )
         .unwrap();
         let html = attention(&cfg, 10_000, &v).into_string();
-        assert!(html.contains(r#"<li class="rl">"#), "{html}");
+        // Rows are keyed by subject, so a live update keeps the row a reader
+        // is on (A11Y-02), and a new one flashes once.
+        assert!(html.contains(r#"<ul class="rows" data-flash>"#), "{html}");
+        assert!(
+            html.contains(r#"<li class="rl" data-key="c:sick">"#),
+            "{html}"
+        );
         assert!(
             html.contains(
                 r#"<a class="nm row-link" href="/containers/sick" data-c="sick">sick</a>"#
@@ -1113,12 +1195,52 @@ mod tests {
             html.contains(r#"href="/containers/b/logs""#),
             "Top CPU rows carry logs"
         );
+        // Bars and tiles are keyed by container (HB.morph keeps a focused
+        // link on its container when the ranks change).
+        assert!(html.contains(r#"<li data-key="b">"#), "{html}");
+        assert!(
+            html.contains(r#"<li data-key="&lt;i&gt;a&lt;/i&gt;">"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"role="listitem" data-key="b""#), "{html}");
         assert!(top(&live(vec![a], None), false)
             .into_string()
             .contains("show_stats"));
-        assert!(top(&live(vec![], None), true)
-            .into_string()
-            .contains("Waiting for the first sample"));
+        // Nothing to sample is said as such (ROB-01); waiting is a skeleton.
+        let none = top(&live(vec![], None), true).into_string();
+        assert!(
+            none.contains("No containers yet") && !none.contains("data-wait"),
+            "{none}"
+        );
+        let mut idle = card("c", "running", true);
+        idle.cpu = None;
+        idle.mem = None;
+        let wait = top(&live(vec![idle], None), true).into_string();
+        assert!(wait.contains("Waiting for the first sample"), "{wait}");
+        assert!(
+            wait.contains("data-wait")
+                && !wait.contains("aria-busy")
+                && wait.contains(r#"class="sk"#),
+            "{wait}"
+        );
+        let down = top(&live(vec![], Some("no socket")), true).into_string();
+        assert!(
+            down.contains("empty bad") && down.contains("cannot be reached"),
+            "{down}"
+        );
+        // Top CPU says why in the standard empty state too, not a bare line.
+        assert_eq!(
+            down.matches(r#"<div class="empty bad compact">"#).count(),
+            2,
+            "{down}"
+        );
+        assert!(!down.contains("Nothing to rank."), "{down}");
+        let idle = top(&live(vec![card("c", "exited", false)], None), true).into_string();
+        assert!(
+            idle.contains("<h3>Nothing to rank</h3>")
+                && idle.contains("<h3>Nothing is running</h3>"),
+            "{idle}"
+        );
     }
 
     #[test]
@@ -1161,7 +1283,7 @@ mod tests {
         assert!(html.contains(&format!("+{} others", 25 - tiles)), "{html}");
         assert!(
             html.contains(
-                r#"<a class="tm tm-rest" role="listitem" href="/containers?sort=mem&amp;group=0""#
+                r#"<a class="tm tm-rest" role="listitem" data-key="+rest" href="/containers?sort=mem&amp;group=0""#
             ),
             "{html}"
         );

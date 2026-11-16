@@ -974,10 +974,15 @@ fn events_tab(ctx: &Ctx, c: &Container, q: &[(String, String)], base: &str) -> M
                 }
             }
             @if events.is_empty() {
-                p.muted {
-                    @if !ctx.state.db.is_enabled() { "History is off, so no events are recorded." }
-                    @else if before.is_some() { "No older events." }
-                    @else { "No " (kind.1.to_lowercase()) " events recorded for this container." }
+                // OV-61: the filter's name is never pasted into a sentence.
+                @if !ctx.state.db.is_enabled() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "History is off", html! { "No events are recorded while history is off." }, None))
+                } @else if before.is_some() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "No older events", html! { "This is where the recorded history of this container starts." }, None))
+                } @else if kind.2.is_empty() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "No events yet", html! { "Starts, stops, health changes and alerts of this container appear here." }, None))
+                } @else {
+                    (crate::ui::empty(crate::ui::Empty::NoMatch, "compact", "search", "None of this kind", html! { "Nothing of this kind was recorded for this container. " a href={(base) "?tab=events"} { "Show all events" } }, None))
                 }
             } @else {
                 ul.events { @for e in &events { (event_row(ctx.now, e, false, None)) } }
@@ -1056,24 +1061,33 @@ pub fn probe_line(i: &Inspect) -> Option<String> {
 /// time) and to any `container.start` event newer than that health event.
 /// One query; the Overview and the container page both use it.
 pub fn unhealthy_since(db: &crate::db::Db, c: &Container, started: Option<i64>) -> Option<i64> {
-    let evs = db.events(&EventFilter {
-        subject: Some(c.name.clone()),
-        kind_prefix: Some("container.".into()),
-        limit: 20,
-        ..Default::default()
-    });
-    let at = evs.iter().position(|e| e.kind == "container.health")?;
-    let h = &evs[at];
-    if h.detail != "unhealthy" {
-        return None;
-    }
-    let restarted = evs[..at]
-        .iter()
-        .filter(|e| e.kind == "container.start")
-        .map(|e| e.ts)
-        .max()
-        .unwrap_or(0);
-    Some(h.ts.max(restarted).max(started.unwrap_or(0)).max(c.created))
+    // Health and start events are looked up separately: a container that is
+    // recreated often has more start and die events than any fixed window
+    // since its last recorded health change.
+    let newest = |kind: &str| {
+        db.events(&EventFilter {
+            subject: Some(c.name.clone()),
+            kind_prefix: Some(kind.into()),
+            limit: 1,
+            ..Default::default()
+        })
+        .into_iter()
+        .next()
+    };
+    let health = match newest("container.health") {
+        Some(h) if h.detail != "unhealthy" => return None,
+        Some(h) => h.ts,
+        // No health event on record: only a container that is unhealthy
+        // right now has a since-time, counted from its own start.
+        None if c.health.as_deref() == Some("unhealthy") => 0,
+        None => return None,
+    };
+    let restarted = newest("container.start").map_or(0, |e| e.ts);
+    let since = health
+        .max(restarted)
+        .max(started.unwrap_or(0))
+        .max(c.created);
+    (since > 0).then_some(since)
 }
 
 /// One line on what is wrong, or `None` when nothing is. `unhealthy_since`
@@ -1850,6 +1864,40 @@ above = 90
             out.contains("Last 2 checks") && out.contains("exit 1") && !out.contains("Sign in"),
             "{out}"
         );
+    }
+
+    /// A container recreated many times has more start and die events than
+    /// health events; its since-time is still found, from its newest start.
+    #[test]
+    fn unhealthy_since_survives_many_restarts() {
+        let st = state_with(sample(), "");
+        let ev = |action: &str, time: u64, detail: Option<&str>| crate::docker::Event {
+            action: action.into(),
+            name: Some("web".into()),
+            time,
+            detail: detail.map(Into::into),
+        };
+        let t0: u64 = 1_794_600_000;
+        let mut c = sample()[0].clone();
+        c.health = Some("unhealthy".into());
+        c.created = t0 as i64 - 10;
+        crate::db::record_docker_event(&st.db, &ev("health_status", t0, Some("unhealthy")));
+        // Recreated thirty times; the recorder keeps no second "unhealthy".
+        for i in 0..30u64 {
+            crate::db::record_docker_event(&st.db, &ev("die", t0 + 100 * i + 50, Some("137")));
+            crate::db::record_docker_event(&st.db, &ev("start", t0 + 100 * i + 60, None));
+        }
+        let last_start = (t0 + 100 * 29 + 60) as i64;
+        c.created = last_start - 1;
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(last_start));
+        // Not unhealthy and nothing on record: no since-time.
+        let st2 = state_with(sample(), "");
+        let mut ok = sample()[0].clone();
+        ok.health = Some("healthy".into());
+        assert_eq!(unhealthy_since(&st2.db, &ok, None), None);
+        ok.health = Some("unhealthy".into());
+        ok.created = 1234;
+        assert_eq!(unhealthy_since(&st2.db, &ok, None), Some(1234));
     }
 
     /// A container recreated under the same name that turns unhealthy again

@@ -231,6 +231,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                     }
                                 }
                             }
+                            (docker_banner(&ctx.cfg, &snap))
                             (main)
                         }
                     }
@@ -308,6 +309,27 @@ fn keys_dialog() -> Markup {
 
 fn logo() -> Markup {
     PreEscaped(crate::ui::pwa::ICON_SVG.to_string())
+}
+
+/// Docker cannot be reached: one plain sentence on every page, with what to
+/// check, and the raw error behind a disclosure (ROB-09). Live region
+/// `dk-err`, re-rendered with the tree, so it comes and goes on its own.
+pub fn docker_banner(cfg: &Config, snap: &Snapshot) -> Markup {
+    html! {
+        div #dk-err {
+            @if let Some(e) = snap.error.as_ref().filter(|_| cfg.docker.enabled) {
+                div.banner.bad role="alert" {
+                    (ic("alert"))
+                    div {
+                        strong { "Hobnail cannot reach Docker." }
+                        " Is the Docker socket mounted and readable?"
+                        @if !snap.containers.is_empty() { " Containers show their last known state." }
+                        details.dk-raw { summary { "Details" } code.wrap { (e) } }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The count badge next to "Alerts" in the nav (live region `nav-al`).
@@ -560,7 +582,9 @@ fn tree_inner(
                 // Stack logs only where a compose project of that name exists
                 // (a config group has no `/stacks/<x>/logs`, LG-09).
                 @let project = crate::logs::is_project(cfg, snap, &g.name);
-                details.stack data-k=(g.name) open {
+                // Keyed (HB.morph): a stack and a container keep their
+                // nodes, focus and open state when the order changes.
+                details.stack data-k=(g.name) data-key={"s:" (g.name)} open {
                     summary.cur[has_active] {
                         (ic("chev-r"))
                         // The name opens the stack in the table; the chevron folds (NAV-25).
@@ -579,7 +603,7 @@ fn tree_inner(
                     }
                     ul {
                         @for c in ctrs {
-                            li.ctr.stopped[!c.running] data-s=(c.search.to_lowercase()) {
+                            li.ctr.stopped[!c.running] data-key=(c.name) data-s=(c.search.to_lowercase()) {
                                 a href={"/containers/" (url_encode(&c.name))} title=(c.name)
                                     aria-current=[(active == Some(c.name.as_str())).then_some("page")] {
                                     (status_dot(c))
@@ -642,7 +666,7 @@ mod tests {
             "{html}"
         );
         assert!(
-            html.contains(r#"<details class="stack" data-k="shop" open>"#),
+            html.contains(r#"<details class="stack" data-k="shop" data-key="s:shop" open>"#),
             "{html}"
         );
         assert!(html.contains(r#"<summary class="cur">"#), "{html}");
@@ -1064,9 +1088,100 @@ mod tests {
                 "settings.css restyles a field control: {s}"
             );
         }
-        // Motion is wave 4: no cross-document view transition yet.
+        // No cross-document view transition: Chromium makes every link dead
+        // while one runs (measured by scripts/motion-check.mjs).
+        assert!(!css.contains("@view-transition{"));
         assert!(!APP_CSS_SRC.contains("@view-transition"));
-        assert!(!css.contains("@view-transition"));
+    }
+
+    /// Motion (DESIGN.md §11.3): every transition and animation of every
+    /// shipped stylesheet takes its duration from the tokens; the only
+    /// literal durations are the ambient loops of busy indicators, which the
+    /// one reduced-motion rule stops. That rule is the only
+    /// `prefers-reduced-motion: reduce` block and sets every token to 0.
+    #[test]
+    fn motion_uses_the_tokens_and_one_reduced_motion_rule() {
+        use crate::http::server::{APP_CSS, LOGS_CSS, SETTINGS_CSS};
+        let all = format!("{APP_CSS}\n{LOGS_CSS}\n{SETTINGS_CSS}");
+        let literal = |w: &str| {
+            let n = w.trim_end_matches("ms").trim_end_matches('s');
+            n.len() < w.len() && !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')
+        };
+        const LOOPS: &[&str] = &["spin", "sk", "nav", "sw-wait", "pulse"];
+        for prop in [
+            "transition:",
+            "transition-duration:",
+            "animation:",
+            "animation-duration:",
+        ] {
+            for (i, _) in all.match_indices(prop) {
+                let v = &all[i + prop.len()..];
+                let v = &v[..v.find([';', '}']).unwrap_or(v.len())];
+                // Split on the commas between layers, not those in cubic-bezier().
+                let mut parts = vec![String::new()];
+                let mut depth = 0;
+                for c in v.chars() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        ',' if depth == 0 => {
+                            parts.push(String::new());
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    parts.last_mut().unwrap().push(c);
+                }
+                for part in &parts {
+                    let words: Vec<&str> = part.split_whitespace().collect();
+                    let lit: Vec<&&str> = words
+                        .iter()
+                        .filter(|w| literal(w) && !matches!(**w, "0s" | "0ms"))
+                        .collect();
+                    if lit.is_empty() {
+                        continue;
+                    }
+                    let ambient =
+                        prop.starts_with("animation") && words.iter().any(|w| LOOPS.contains(w));
+                    // A start delay (the skeleton's 150 ms) is not a duration.
+                    let delay_only = part.contains("var(--dur-") && lit.len() == 1;
+                    assert!(ambient || delay_only, "a literal duration in `{prop}{v}`");
+                }
+            }
+        }
+        assert_eq!(
+            all.matches("prefers-reduced-motion:reduce").count(),
+            1,
+            "one reduced-motion rule"
+        );
+        let rm = &APP_CSS[APP_CSS
+            .find("@media (prefers-reduced-motion:reduce)")
+            .unwrap()..];
+        let rm = &rm[..rm.find("}}").unwrap() + 2];
+        for t in [
+            "--dur-1:0ms",
+            "--dur-2:0ms",
+            "--dur-3:0ms",
+            "--dur-4:0ms",
+            "animation-duration:0ms!important",
+            "transition-duration:0ms!important",
+            "scroll-behavior:auto!important",
+        ] {
+            assert!(rm.contains(t), "{t} in {rm}");
+        }
+        // Script-driven motion asks the same query.
+        let js = crate::http::server::APP_JS;
+        assert!(
+            js.contains("HB.dur = (n) => (calm.matches ? 0"),
+            "HB.dur follows reduced motion"
+        );
+        assert!(
+            !js.contains("behavior: \"smooth\"")
+                && !crate::http::server::SETTINGS_JS.contains("smooth"),
+            "no smooth scroll (A11Y-22)"
+        );
+        // Nothing on a live region animates its layout (meters change at once).
+        assert!(!all.contains("transition:width"), "no width transition");
     }
 
     /// The account menu is not a `.menu`: that class is the popover menu of

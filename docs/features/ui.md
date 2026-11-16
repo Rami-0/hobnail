@@ -128,6 +128,60 @@ OS, the ◐ button overrides it per browser.
   dialog, the field styles (inputs, checkboxes, switches) apply only inside a
   dialog, and the Settings pages keep their own fields and toasts.
 
+- **Motion:** four duration tokens (`--dur-1` 90 ms hover and press,
+  `--dur-2` 160 ms toast, menu, tab underline, palette, leaving dialogs,
+  `--dur-3` 240 ms dialogs, the phone sheet, the drawer and its scrim,
+  `--dur-4` 1.6 s the highlight on a new or changed row) and three easings.
+  Only opacity and transform move; nothing animates per log line or per live
+  tick (meters change at once). A `<details>` you open unfolds; a removed
+  list row fades where it was and is out of the pointer's way at once.
+  Page to page there is no View Transition: Chromium sends every click to
+  the page root while a cross-document one runs, so links would be dead for
+  its duration. `prefers-reduced-motion: reduce` makes all of it instant: one rule
+  in `app.css` sets the tokens to 0, stops every transition and animation
+  (spinners and skeletons stand still), and the
+  script's own motion (`HB.dur`, `HB.anim`) asks the same query. Checked by
+  `scripts/motion-check.mjs`.
+- **Loading:** content that comes after the page (a first sample, a
+  widget's first answer, the first log lines) waits as a skeleton on a busy
+  region; a skeleton shows only after 150 ms, so a fast answer never
+  flashes, and keeps the size of what replaces it. Both are switched on by
+  the loaded script (the server marks nothing busy), so with the script off,
+  blocked or failed to load it is a plain word ("—", "Waiting for the first
+  answer…") and a log pane says how to download the lines. A quiet
+  container's live tail says "No lines yet" once connected. A full page
+  load shows a 2 px line after 150 ms, and a page tab or range you click is
+  marked at once; a navigation that does not happen (a dismissed "leave
+  site?") clears it at the next press or after 10 s. Live regions are
+  updated in place, every list item keyed (a container, a rule, a mount), so
+  focus, a text selection, a sideways scroll and an open "Show N bridges"
+  survive an update (the Host page's 3 s poll too); ranked lists (Top CPU,
+  the memory map, the process tables) are re-used by position so a re-sort
+  moves nothing on screen, and a focused row keeps its container. When the
+  live stream stops, a pill at the bottom of the screen (above the tab bar
+  on phones; clicks go through it) says since when; the page keeps
+  reconnecting (5 s, then longer, up to a minute; not while hidden) and the
+  pill goes when the stream is back. A log pane says "Disconnected,
+  retrying" and the line counter adds it.
+- **Empty and error states:** one component (icon, one-line title, one
+  sentence, at most one action), rendered by the server: first use (no
+  containers, widgets, bookmarks, events, rules), no match (the containers
+  filter, the `/logs` list, a log filter that hides every line: "Clear
+  filters"), good news ("Nothing is stopped", "No problems", "Nothing has
+  fired yet"; not while Docker is unreachable, when container alerts cannot
+  be evaluated) and errors. Docker unreachable is one banner on every page,
+  with what to check and the raw error under "Details", that comes and goes
+  with the live updates; Overview then says the state is unknown instead of
+  "all clear". A failing widget says the cause in plain words ("Refused:
+  nothing is listening there", "No answer in time") with the raw error under
+  "Details".
+- **Controls:** every control has hover, pressed (shown at once), disabled
+  (50 %) and the one 2 px focus ring (drawn inside parents that clip). The
+  rule switches, System tiles, Recording and the reorder arrows save on
+  change and show the new state at once (busy, not greyed out); a refusal
+  puts them back, with a message. Too many sign-in attempts: the login says
+  how long to wait, counts down and keeps the button off until then.
+
 `page.columns` and per-group `columns` from v1 no longer have an effect (there is
 no card grid); `layout = "list"` makes the flat table the default view.
 

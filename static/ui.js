@@ -18,6 +18,105 @@
     s.setAttribute("class", "i"); s.setAttribute("aria-hidden", "true"); u.setAttribute("href", "#i-" + name); s.append(u); return s;
   }
   HB.el = el; HB.icon = icon;
+  // A motion token in ms (0 under reduced motion: the tokens are 0 there).
+  HB.dur = (n) => (calm.matches ? 0 : parseFloat(getComputedStyle(root).getPropertyValue("--dur-" + n)) || 0);
+  // A one-off entry motion (Web Animations), from the tokens; never under reduced motion.
+  HB.anim = (e, frames, n) => { const d = HB.dur(n || 2); if (d && e.animate) e.animate(frames, { duration: d, easing: "cubic-bezier(.2,.7,.3,1)" }); };
+  const unfold = [{ opacity: 0, transform: "translateY(-4px)" }, { opacity: 1, transform: "none" }];
+  HB.unfold = (els) => els.forEach((x) => HB.anim(x, unfold));
+  // A <details> the reader opens unfolds (only then: not on load, not when a script opens it).
+  doc.addEventListener("click", (e) => { const s = e.target.closest && e.target.closest("summary"); if (s && s.parentElement.tagName === "DETAILS" && !s.parentElement.open) s.parentElement._hbOpen = 1; });
+  doc.addEventListener("toggle", (e) => { const d = e.target; if (d.tagName !== "DETAILS" || !d._hbOpen) return; d._hbOpen = 0; if (d.open) HB.unfold(Array.from(d.children).filter((c) => c.tagName !== "SUMMARY")); }, true);
+
+  // ---- morph: bring a live region up to date in place (A11Y-02, LG-34) ----
+  // The nodes stay, so focus, text selection, scroll positions and an open
+  // <details> survive a live update; only what changed is written. Children
+  // are matched by key (id, data-key, data-c), else by position and tag. A
+  // keyed child that is new in a list marked data-flash flashes once.
+  // Every repeated item of a live list carries a stable key (data-key: a
+  // container, a rule, a mount...): matched by position, a reordered list
+  // would rewrite the href and text under a focused link.
+  // It writes attributes, not properties: a live region must not contain
+  // form controls (a typed value or a checked box would not be kept in step
+  // with the server). Should one ever appear, a focused one is left alone.
+  const keyOf = (n) => (n.nodeType === 1 ? n.id || n.getAttribute("data-key") || n.getAttribute("data-c") || "" : "");
+  const move = (p, n, ref) => (p.moveBefore && n.isConnected ? p.moveBefore(n, ref) : p.insertBefore(n, ref));
+  // Classes the script adds for a moment (a row's highlight): a morph that
+  // lands meanwhile keeps them, so the flash is not cut short.
+  const TRANSIENT = ["row-new", "moved"];
+  const want = (a, b, name) => {
+    if (name === "open" && a.tagName === "DETAILS") return a.getAttribute("open");
+    let v = b.getAttribute(name);
+    if (name === "class") {
+      const keep = TRANSIENT.filter((c) => a.classList.contains(c) && !b.classList.contains(c));
+      if (keep.length) v = ((v || "") + " " + keep.join(" ")).trim();
+    }
+    return v;
+  };
+  function morph(a, b) {
+    if (a.nodeType !== 1) { if (a.data !== b.data) a.data = b.data; return; }
+    if (a === doc.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
+    for (const x of Array.from(a.attributes)) if (want(a, b, x.name) === null) a.removeAttribute(x.name);
+    for (const x of Array.from(b.attributes).concat(a.hasAttribute("class") && !b.hasAttribute("class") ? [{ name: "class" }] : [])) {
+      const v = want(a, b, x.name);
+      if (v !== null && a.getAttribute(x.name) !== v) a.setAttribute(x.name, v);
+    }
+    const keyed = new Map(), wanted = new Set();
+    for (const n of Array.from(a.childNodes)) { const k = keyOf(n); if (k) keyed.set(k, n); }
+    for (const n of Array.from(b.childNodes)) { const k = keyOf(n); if (k) wanted.add(k); }
+    const flash = a.hasAttribute("data-flash") && a.childElementCount > 0, act = doc.activeElement;
+    // A ranked list (data-rank: re-sorted by every sample, e.g. Top CPU, a
+    // process table) is updated by position, so no row moves (a moved node
+    // is a layout shift); only the item that holds focus keeps its node and
+    // goes to its new place, so focus stays on the same container.
+    const rank = a.hasAttribute("data-rank");
+    const held = rank ? Array.from(a.childNodes).find((n) => keyOf(n) && n.contains(act) && wanted.has(keyOf(n))) : null;
+    // A keyed node already used, or gone from the fresh list: dropped as the
+    // walk reaches it.
+    const spent = (n) => { const k = keyOf(n); return k && (!keyed.has(k) || !wanted.has(k)); };
+    let ref = a.firstChild;
+    for (const y of Array.from(b.childNodes)) {
+      if (!rank) while (ref && spent(ref)) { const n = ref.nextSibling; ref.remove(); ref = n; }
+      const k = keyOf(y), had = k ? keyed.get(k) : null;
+      if (k) keyed.delete(k);
+      if (rank) {
+        while (ref && ref === held) ref = ref.nextSibling;
+        const x = held && k === keyOf(held) ? held : ref && ref.nodeName === y.nodeName ? ref : null;
+        if (!x) { a.insertBefore(y, ref); if (flash && k && !had) HB.flash(y); continue; }
+        if (x === held) { if (x.nextSibling !== ref) move(a, x, ref); } else ref = ref.nextSibling;
+        morph(x, y);
+        if (flash && k && !had) HB.flash(x);
+        continue;
+      }
+      const x = k ? had : ref && !keyOf(ref) && ref.nodeName === y.nodeName ? ref : null;
+      if (x && x.nodeName === y.nodeName) { if (x === ref) ref = ref.nextSibling; else move(a, x, ref); morph(x, y); }
+      else { a.insertBefore(y, ref); if (flash && k) HB.flash(y); }
+    }
+    while (ref) { const n = ref.nextSibling; ref.remove(); ref = n; }
+  }
+  // A region that waits for its first data is marked `data-wait` by the
+  // server; the script makes that `aria-busy` (DESIGN.md §11.9). Without the
+  // script nothing is busy and the plain fallback word shows.
+  HB.busy = (r) => { for (const n of [r, ...r.querySelectorAll("[data-wait]")]) if (n.hasAttribute && n.hasAttribute("data-wait")) n.setAttribute("aria-busy", "true"); };
+  // Replace `old` by `fresh` (same tag: in place). Focus that was in it stays
+  // on its node (or, when that node went, goes to the element with the same
+  // key or link), never to the page top.
+  HB.morph = (old, fresh) => {
+    if (typeof fresh === "string") { const t = doc.createElement("template"); t.innerHTML = fresh; const f = old.cloneNode(false); f.append(t.content); fresh = f; }
+    HB.busy(fresh);
+    const act = doc.activeElement, inside = act && act !== doc.body && old.contains(act);
+    const by = inside && ["id", "data-key", "data-c", "href"].find((n) => act.getAttribute(n));
+    const sel = by ? `[${by}="${CSS.escape(act.getAttribute(by))}"]` : "";
+    if (old.nodeName !== fresh.nodeName) old.replaceWith(fresh); else morph(old, fresh);
+    const live = old.isConnected ? old : fresh;
+    if (inside && doc.activeElement !== act) {
+      // Kept but blurred: insertBefore (no moveBefore: Safari, older
+      // Firefox) drops focus from a node it moves.
+      if (act.isConnected && live.contains(act)) act.focus({ preventScroll: true });
+      else if (sel) { const n = live.querySelector(sel); if (n) n.focus({ preventScroll: true }); }
+    }
+    return live;
+  };
 
   // ---- in-page tabs (role=tablist); page tabs are plain links ----
   function select(tab) {
@@ -255,7 +354,7 @@
       else if (c.landed) history.replaceState(null, "", urlWith(""));
     } catch {}
     if (c.after) c.after();
-    const t = (c.trigger && c.trigger.isConnected && c.trigger) || (c.focusSel && doc.querySelector(c.focusSel)) || (c.key && doc.querySelector(`[data-dlg][data-key="${CSS.escape(c.key)}"]`));
+    const t = (c.trigger && c.trigger.isConnected && !c.trigger.closest("[inert]") && c.trigger) || (c.focusSel && doc.querySelector(c.focusSel)) || (c.key && doc.querySelector(`[data-dlg][data-key="${CSS.escape(c.key)}"]`));
     if (t && t.focus) t.focus({ preventScroll: true });
   }
   // A native close request (cancel) goes through the guard. A dialog closed
@@ -396,7 +495,11 @@
   });
   // Submit buttons are rendered disabled; they work once this script runs.
   $$("[data-ready]").forEach((b) => { b.disabled = false; });
-  root.classList.add("hb-ready"); // hides the "Saving needs JavaScript" notes
+  // hides the "Saving needs JavaScript" notes, and turns a waiting value's
+  // plain word into a skeleton: only once this script has run, so a blocked
+  // or failed /static/app.js leaves the plain text and no busy region.
+  root.classList.add("hb-ready");
+  HB.busy(doc.body);
   // The URL is the dialog: ?add=x / ?edit=x:id opens it on load (a reload, a
   // shared link, Ctrl-click into a new tab). Without script it is the page form.
   setTimeout(() => {
@@ -424,7 +527,7 @@
     const x = el("button", "btn sm icon ghost"); x.type = "button"; x.setAttribute("aria-label", "Dismiss"); x.append(icon("x")); x.onclick = () => gone(); t.append(x);
     let timer = null;
     const arm = () => { if (kind !== "bad" && !o.sticky) timer = setTimeout(gone, o.ms || (o.action ? 8000 : 4500)); };
-    function gone() { clearTimeout(timer); if (!t.isConnected) return; t.classList.add("out"); setTimeout(() => t.remove(), calm.matches ? 0 : 200); }
+    function gone() { clearTimeout(timer); if (!t.isConnected) return; t.classList.add("out"); setTimeout(() => t.remove(), HB.dur(2) + 40); }
     t.addEventListener("pointerenter", () => clearTimeout(timer)); t.addEventListener("pointerleave", arm);
     t.addEventListener("focusin", () => clearTimeout(timer));
     box.append(t);
@@ -554,10 +657,29 @@
     l[j] && l[j].focus();
   });
 
+  // ---- optimistic controls (§11.1): a switch or arrow shows its new state at
+  // once and waits busy (not disabled, so it keeps its look and focus);
+  // while it waits it cannot be pressed again. The page reverts it, with a
+  // message, when the server refuses.
+  HB.hold = (c, on) => { if (on) c.setAttribute("aria-busy", "true"); else c.removeAttribute("aria-busy"); };
+  doc.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('input[aria-busy="true"]')) e.preventDefault(); }, true);
+  // Two neighbouring rows trade places (`up`, the upper one, ends below `down`), sliding
+  // there (transform only, --dur-2); focus stays where it was.
+  HB.swap = (up, down) => {
+    const act = doc.activeElement, y0 = [up.getBoundingClientRect().top, down.getBoundingClientRect().top];
+    move(up.parentNode, up, down.nextSibling);
+    if (act && !act.isConnected) act.focus({ preventScroll: true });
+    if (doc.activeElement !== act && act && act.focus) act.focus({ preventScroll: true });
+    const d = HB.dur(2);
+    if (d && up.animate) [up, down].forEach((r, i) => { const dy = y0[i] - r.getBoundingClientRect().top; r.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: d, easing: "cubic-bezier(.45,0,.25,1)" }); });
+  };
+
   // ---- list changes: a new or changed row flashes once; a removed row folds away ----
-  HB.flash = (row) => { row.classList.remove("row-new"); void row.offsetWidth; row.classList.add("row-new"); setTimeout(() => row.classList.remove("row-new"), 1700); };
+  HB.flash = (row) => { row.classList.remove("row-new"); void row.offsetWidth; row.classList.add("row-new"); setTimeout(() => row.classList.remove("row-new"), HB.dur(4) + 100); };
   HB.remove = (row) => {
-    if (calm.matches || !row.animate) return row.remove();
-    row.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: "ease-in" }).onfinish = () => row.remove();
+    const d = HB.dur(2);
+    if (!d || !row.animate) return row.remove();
+    row.style.pointerEvents = "none"; row.inert = true; // gone for pointer and focus at once; nothing waits for the fade
+    row.animate([{ opacity: 1 }, { opacity: 0 }], { duration: d, easing: "cubic-bezier(.5,0,.75,0)" }).onfinish = () => row.remove();
   };
 })();

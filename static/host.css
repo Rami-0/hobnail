@@ -39,3 +39,17 @@
 .hx-more summary{cursor:pointer;font-size:12px;color:var(--text-3);margin-top:8px}
 .hx-gh{font-size:12px;font-weight:600;color:var(--text-2);margin:6px 0 -2px}
 @media (max-width:599px){.hx-o{display:none}.hx-load{margin-left:0;width:100%}.hx-wide-kv>div{grid-template-columns:1fr;gap:2px}.hx-cmd{max-width:30vw}}
+/* Every row of a live table is one height, logs icon or not (the icon
+   overflows its 20 px line, its hit area unchanged): the 3 s poll re-ranks
+   the rows, and rows of mixed heights moved everything below them. */
+.hx-t .nm-l{height:20px}
+/* The two process tables re-rank every 3 s: fixed column widths (names cut
+   with "…"), the logs icon at the cell's end, the lifetime note's room kept,
+   and figures that do not change width, so nothing moves sideways. */
+.hx-fix{table-layout:fixed;width:100%}
+.hx-fix th,.hx-fix td{overflow:hidden;text-overflow:ellipsis}
+.hx-byc th.num{width:6.5em}.hx-byc th.hx-o{width:5.5em}
+.hx-procs th:nth-child(1){width:5.5em}.hx-procs th:nth-child(3){width:6em}.hx-procs th:nth-child(4){width:5em}.hx-procs th:nth-child(5){width:6.5em}.hx-procs th:nth-child(6){width:30%}
+.hx-fix .nm-l{display:flex;width:100%}.hx-fix .nm-l>a:first-child{flex:1}
+.hx-life.off{visibility:hidden}
+.hx-key b{display:inline-block;min-width:5ch}.hx-big>b{min-width:5ch}

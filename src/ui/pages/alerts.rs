@@ -11,7 +11,7 @@ use crate::ui::alerts::{subject_href, subject_link};
 use crate::ui::fmt::{clock_tag, time_tag};
 use crate::ui::pages::{kind_label, page_sub};
 use crate::ui::shell::{layout, Ctx, Nav};
-use crate::ui::{empty_state, ic, panel_head, pill};
+use crate::ui::{empty, ic, panel_head, pill, Empty};
 
 pub fn page(ctx: &Ctx) -> String {
     let log = ctx.state.db.events(
@@ -24,6 +24,7 @@ pub fn page(ctx: &Ctx) -> String {
     );
     let names = crate::logs::tailable(ctx.state);
     let status = ctx.state.alerts.lock().unwrap().clone();
+    let docker_down = ctx.cfg.docker.enabled && ctx.state.snapshot().error.is_some();
     // Signed in, channels and rules are the Notifications tab's own lists,
     // dialogs and script (Y15: "Add channel", "Add rule", "Send test", the
     // rule switches; the same routes and rules as Settings). Signed out, the
@@ -36,14 +37,19 @@ pub fn page(ctx: &Ctx) -> String {
             (live(&ctx.cfg, &status, &names, embed.is_some()))
             @match &embed {
                 Some(e) => (e.body),
-                None => (public(&ctx.cfg, &status, ctx.now)),
+                // (The password is read only for the empty state's button.)
+                None => (public(&ctx.cfg, &status, ctx.now, no_rules(&ctx.cfg) && crate::auth::password_is_set(ctx.state))),
             }
             section.sec.ghost aria-label="Alert log" {
                 (panel_head("Alert log", None))
                 @if log.is_empty() {
-                    p.muted {
-                        @if ctx.state.db.is_enabled() { "Nothing has fired yet." }
-                        @else { "Fired, resolved and failed notifications are logged here once history is recording." }
+                    @if docker_down {
+                        // No good news while container rules cannot run.
+                        (empty(Empty::First, "inline", "alert", "Nothing has fired yet", html! { "Alerts cannot be evaluated for containers while Docker cannot be reached." }, None))
+                    } @else if ctx.state.db.is_enabled() {
+                        (empty(Empty::Good, "inline", "check", "Nothing has fired yet", html! { "Fired, resolved and failed notifications are listed here." }, None))
+                    } @else {
+                        (empty(Empty::First, "inline", "history", "History is off", html! { "Fired, resolved and failed notifications are logged here once history is recording." }, None))
                     }
                 } @else {
                     ul.events.al-log { @for e in &log { (log_row(&ctx.cfg, e, &names, ctx.user.is_some())) } }
@@ -64,12 +70,22 @@ pub fn page(ctx: &Ctx) -> String {
 /// The live parts (SSE "alerts"): the firing list, and the read-only rules
 /// and channels tables. Rendered without a session, so a signed-in page,
 /// which shows the Settings lists instead, has no `#al-pub` to swap.
+///
+/// With no rules and no channels `#al-pub` is only the empty state, which
+/// changes with the config (that reloads the page) or `set-password`, not
+/// with the alert state: it is left out of the bundle, so a bundle never
+/// reads the database for it.
 pub fn fragment(ctx: &Ctx) -> Markup {
     let status = ctx.state.alerts.lock().unwrap().clone();
     html! {
         (live(&ctx.cfg, &status, &crate::logs::tailable(ctx.state), ctx.user.is_some()))
-        (public(&ctx.cfg, &status, ctx.now))
+        @if !no_rules(&ctx.cfg) { (public(&ctx.cfg, &status, ctx.now, false)) }
     }
+}
+
+/// No rules and no channels: `#al-pub` is the empty state.
+fn no_rules(cfg: &Config) -> bool {
+    cfg.alerts.is_empty() && cfg.channels.is_empty()
 }
 
 /// What is firing now (live region `al-live`).
@@ -83,14 +99,23 @@ fn live(cfg: &Config, status: &Status, names: &HashSet<String>, signed: bool) ->
 }
 
 /// Signed out: rules and channels, read only (live region `al-pub`).
-fn public(cfg: &Config, status: &Status, now: u64) -> Markup {
+fn public(cfg: &Config, status: &Status, now: u64, can_sign_in: bool) -> Markup {
     html! {
         div #al-pub {
-            @if cfg.alerts.is_empty() && cfg.channels.is_empty() {
-                (empty_state("bell", "No alert rules", html! {
-                    "Nothing is watched and nothing is sent. Add " code { "[[alerts]]" } " rules and "
-                    code { "[channels.*]" } " to the config to get notified."
-                }))
+            @if no_rules(cfg) {
+                // ROB-02: plain words and one real action (signed in, this
+                // page has the Notifications lists with "Add rule" instead).
+                @if can_sign_in {
+                    (empty(Empty::First, "", "bell", "No alert rules", html! {
+                        "Nothing is watched and nothing is sent. Rules and notification channels are added here once you sign in."
+                    }, Some(html! { a.btn.primary href="/login?next=%2Falerts%3Fadd%3Drule" { (ic("log-in")) "Sign in to add a rule" } })))
+                } @else {
+                    // No password yet: signing in cannot work, so no button.
+                    (empty(Empty::First, "", "bell", "No alert rules", html! {
+                        "Nothing is watched and nothing is sent. Set a password on the host ("
+                        code { "hobnail set-password" } "), then sign in to add rules here."
+                    }, None))
+                }
             } @else {
                 section.panel aria-label="Rules" {
                     (panel_head("Rules", None))
@@ -103,6 +128,12 @@ fn public(cfg: &Config, status: &Status, now: u64) -> Markup {
             }
         }
     }
+}
+
+/// The signed-out tables of an empty config (for the page tests).
+#[cfg(test)]
+pub fn tests_public(can_sign_in: bool) -> String {
+    public(&Config::default(), &Status::default(), 0, can_sign_in).into_string()
 }
 
 /// One alert log row (LG-55, LG-61): a clock time, what happened in a word,
@@ -207,7 +238,7 @@ fn rules_table(cfg: &Config, status: &Status) -> Markup {
                 tbody {
                     @for r in &cfg.alerts {
                         @let n = status.incidents.iter().filter(|i| i.rule == r.name).count();
-                        tr.stopped[!r.enabled()] {
+                        tr.stopped[!r.enabled()] data-key=(r.name) {
                             td { span.nm { (r.name) } br; span.muted.k { (r.kind.as_str()) } }
                             td.wrap { (describe(r)) }
                             td {
@@ -238,7 +269,7 @@ fn channels_table(cfg: &Config, status: &Status, now: u64) -> Markup {
                 tbody {
                     @for (name, c) in &cfg.channels {
                         @let st: Option<&ChannelStatus> = status.channels.get(name);
-                        tr {
+                        tr data-key=(name) {
                             td { span.nm { (name) } br; span.muted.k { (c.kind.as_str()) } }
                             td {
                                 @match st.map(|s| s.health) {
@@ -296,7 +327,7 @@ expect_status = 200
 
     /// Both live parts, as the SSE bundle and a signed-out page have them.
     fn parts(c: &Config, st: &Status, now: u64, names: &HashSet<String>) -> String {
-        html! { (live(c, st, names, false)) (public(c, st, now)) }.into_string()
+        html! { (live(c, st, names, false)) (public(c, st, now, true)) }.into_string()
     }
 
     #[test]
@@ -360,7 +391,10 @@ above = 90
         );
         // Each incident: a whole-row link to its subject, the rule's name
         // and a clock time on the row (LG-55, LG-56).
-        assert!(html.contains(r#"<li class="incident rl">"#), "{html}");
+        assert!(
+            html.contains(r#"<li class="incident rl" data-key="#),
+            "{html}"
+        );
         assert!(
             html.contains(r#"<a class="inc-subject row-link" href="/containers/web">web</a>"#),
             "{html}"

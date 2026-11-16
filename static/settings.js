@@ -223,8 +223,17 @@
         const old = new Map($$("tr[data-key]", a).map((x) => [x.dataset.key, x]));
         const same = (o, x) => { const c = o.cloneNode(true); c.classList.remove("row-new"); return c.isEqualNode(x); };
         const want = Array.from(b.rows).map((x) => { const o = old.get(x.dataset.key); return o && same(o, x) ? o : x; });
-        want.forEach((w, i) => { if (a.rows[i] !== w) a.insertBefore(w, a.rows[i] || null); });
-        while (a.rows.length > want.length) a.rows[want.length].remove();
+        // A changed row is replaced at once (its new self takes focus back); a
+        // deleted one fades out where it was (HB.remove), out of the way at once.
+        const keep = new Set(want), still = new Set(Array.from(b.rows).map((x) => x.dataset.key));
+        Array.from(a.rows).forEach((x) => {
+          if (keep.has(x) || x._gone) return;
+          if (still.has(x.dataset.key)) { x.remove(); return; }
+          x._gone = 1; x.removeAttribute("data-key"); x.querySelectorAll("[data-key]").forEach((k) => k.removeAttribute("data-key"));
+          HB.remove(x);
+        });
+        const live = () => Array.from(a.rows).filter((x) => !x._gone);
+        want.forEach((w, i) => { const c = live()[i]; if (c !== w) a.insertBefore(w, c || null); });
       }
       const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
       if (row) HB.flash(row);
@@ -463,11 +472,15 @@
     o.moving = true;
     btn.setAttribute("aria-busy", "true");
     const dir = btn.dataset.move, name = o.label(rowItem(tr)), base = box.dataset.hash;
+    // Optimistic: the row takes its new place now; a refusal puts it back.
+    const other = rows[j], flip = () => (dir === "up" ? HB.swap(other, tr) : HB.swap(tr, other));
+    flip();
     (async () => {
       const r = HB.result(await post(o.path, { base_hash: base, action: "reorder", order }));
       btn.removeAttribute("aria-busy");
       o.moving = false;
       if (!r.ok) {
+        if (tr.isConnected && other.isConnected) { dir === "up" ? HB.swap(tr, other) : HB.swap(other, tr); }
         toast(r.note && /changed on disk/.test(r.note[1]) ? "Not moved: the config file changed since this list was loaded. Nothing was changed; the list now shows the current file." : (r.note && r.note[1]) || "Not moved.", "bad");
         refreshList(lists(o));
         return;
@@ -719,11 +732,11 @@
         if (!sw) return;
         const box = $("ru-list"), tr = sw.closest("tr[data-key]"), base = box.dataset.hash, key = tr.dataset.key;
         const v = rowItem(tr), on = sw.checked;
-        sw.disabled = true;
+        HB.hold(sw, true);
         // Only the switch changes: name and type say which rule, nothing else is sent.
         const r = HB.result(await post("alerts", { base_hash: base, action: "edit", id: keyId(key), item: { name: v.name, type: v.type, enabled: on ? null : false } }));
         if (!r.ok) {
-          sw.checked = !on; sw.disabled = false;
+          sw.checked = !on; HB.hold(sw, false); HB.flash(tr);
           toast(r.note && /changed on disk/.test(r.note[1]) ? `Not switched: the config file changed since this list was loaded. Nothing was changed; check the list and try again.` : (r.note && r.note[1]) || Object.values(r.fields || {}).join(" "), "bad");
           refreshList(lists(RULES));
           return;
@@ -897,9 +910,9 @@
       const sys = $("sys-tiles");
       if (sys) sys.addEventListener("change", async () => {
         const on = sys.checked, base = $("w-list").dataset.hash;
-        sys.disabled = true;
+        HB.hold(sys, true);
         const r = HB.result(await post("system", { base_hash: base, enabled: on }));
-        sys.disabled = false;
+        HB.hold(sys, false);
         if (!r.ok) {
           sys.checked = !on;
           toast(r.note && /changed on disk/.test(r.note[1]) ? "Not switched: the config file changed since this page was loaded. Reload to see it, then switch again." : (r.note && r.note[1]) || "Not switched.", "bad");
@@ -1022,9 +1035,11 @@
     if (!c) return;
     c.addEventListener("change", async () => {
       const box = c.closest("[data-hash]"), base = box.dataset.hash, v = o.read();
-      c.disabled = true;
+      // A switch waits busy and keeps its new look; a select is locked.
+      const hold = (on) => (c.type === "checkbox" ? HB.hold(c, on) : (c.disabled = on));
+      hold(true);
       const r = HB.result(await post(o.path, { base_hash: base, ...o.body(v) }));
-      c.disabled = false;
+      hold(false);
       if (!r.ok) {
         o.revert();
         toast(moved(r) ? "Not changed: the config file changed since this page was loaded. Nothing was written; the page now shows the current file." : why(r), "bad");
@@ -1319,6 +1334,8 @@
   }
 
   // ---- history and data ----
+  // Export is a plain download: say that it started (SET-62).
+  doc.addEventListener("click", (e) => { if (e.target.closest && e.target.closest("#db-export")) toast("Export started. Your browser saves the file (JSON).", "info"); });
   const recBox = (box) => {
     const s = box && $("hi-enabled");
     if (!s) return;

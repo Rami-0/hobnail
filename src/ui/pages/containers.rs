@@ -16,7 +16,7 @@ use crate::ui::shell::{layout, Ctx, Nav};
 use crate::ui::view::{
     build_groups, health_strip, stack_strip, window_label, CardView, GroupView, StripStyle,
 };
-use crate::ui::{empty_state, ic, pill, status_dot};
+use crate::ui::{empty, empty_state, ic, pill, status_dot, Empty};
 use crate::util::human_bytes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -383,21 +383,15 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
     let strips = crate::ui::view::strips(ctx.state, ctx.now as i64);
     html! {
         div #ctable.tablewrap data-total=(total) data-sig=(crate::ui::pages::container::live_sig(groups)) {
-            @if let Some(e) = &snap.error {
-                div.banner.bad role="alert" {
-                    (ic("alert"))
-                    div {
-                        strong { "Docker: cannot connect" } " " code.wrap { (e) }
-                        @if !snap.containers.is_empty() { " (showing the last known state)" }
-                    }
-                }
-            }
+            // Docker unreachable: the page's banner says it (shell::docker_banner).
             @if !ctx.cfg.docker.enabled {
                 (empty_state("box", "Docker discovery is off", html! { "Set " code { "docker.enabled = true" } " in the config to list containers." }))
             } @else if snap.fetched_at == 0 && snap.error.is_none() {
                 (empty_state("refresh", "Connecting to Docker…", html! { "The list appears as soon as the first snapshot arrives." }))
+            } @else if total == 0 && snap.error.is_some() {
+                (empty(Empty::Error, "", "alert", "No containers to show", html! { "Docker cannot be reached and no earlier list is known." }, None))
             } @else if total == 0 {
-                (empty_state("box", "No containers", html! { "Nothing to show. Hidden containers and excluded names are not listed." }))
+                (empty_state("box", "No containers yet", html! { "Hobnail lists the containers Docker runs on this host. Hidden containers and excluded names are not listed." }))
             } @else {
                 table.tbl.ctbl.grouped[grouped] {
                     caption.count aria-live="polite" {
@@ -438,8 +432,15 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                             @for (g, cs) in &rows { @for c in cs { (row(c, gi(g), g, show_stats, &strips)) } }
                         }
                     }
-                    tbody.none hidden[shown > 0] {
-                        tr { td colspan=(COLS) { "No containers match this filter. " a href="/containers" data-clear { "Clear filters" } } }
+                    // Nothing shown: good news for a state filter on its own,
+                    // else no match (OV-24); the script keeps `data-why` true.
+                    tbody.none hidden[shown > 0] data-why=(none_why(q)) {
+                        tr { td colspan=(COLS) {
+                            div.why-stopped { (empty(Empty::Good, "compact", "check", "Nothing is stopped", html! { "Every container is running." }, None)) }
+                            div.why-problem { (empty(Empty::Good, "compact", "check", "No problems", html! { "Nothing is unhealthy, restarting or dead." }, None)) }
+                            div.why-filter { (empty(Empty::NoMatch, "compact", "search", "No containers match", html! { "Try another name or state." },
+                                Some(html! { a.btn.sm href="/containers" data-clear { "Clear filters" } }))) }
+                        } }
                     }
                     tbody.pool hidden {
                         @for (i, g, c) in &all {
@@ -455,6 +456,15 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                 }
             }
         }
+    }
+}
+
+/// Why the "nothing shown" row is shown, for the query the page was opened with.
+fn none_why(q: &ListQuery) -> &'static str {
+    match q.state {
+        StateFilter::Stopped if q.q.is_empty() && q.stack.is_none() => "stopped",
+        StateFilter::Problem if q.q.is_empty() && q.stack.is_none() => "problem",
+        _ => "filter",
     }
 }
 

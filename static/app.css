@@ -135,7 +135,7 @@ svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
 .stack>summary{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 4px;border-radius:var(--r-sm);cursor:pointer;list-style:none;color:var(--text-2);font-size:12.5px;font-weight:600;user-select:none}
 .stack>summary::-webkit-details-marker{display:none}
 .stack>summary:hover{background:var(--surface-2);color:var(--text)}
-.stack>summary svg.i{width:12px;height:12px;color:var(--text-3);transition:transform var(--t)}
+.stack>summary svg.i{width:12px;height:12px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-io)}
 .stack[open]>summary svg.i{transform:rotate(90deg)}
 .stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:underline}
@@ -157,6 +157,8 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .side-foot code{font-size:11px;color:var(--text-3)}
 .live{display:flex;align-items:center;gap:6px}
 .scrim{display:none}
+/* the drawer's scrim (phones) and the rail opened over the page (700 to 1100 px) */
+@media (max-width:1100px){.side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25;transition:opacity var(--dur-3) var(--ease-out)}@starting-style{.side-open .scrim{opacity:0}}}
 
 /* rail: collapsed sidebar (remembered), and the default from 700 to 1100 px */
 @media (min-width:1101px){:root[data-side=rail]{--side-w:56px}}
@@ -178,15 +180,13 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
  :root:not(.side-open) .side-foot{justify-content:center;padding:8px 0}
  .side-open .side{position:fixed;left:0;top:0;width:260px;box-shadow:var(--shadow-2)}
  .side-open .rail-toggle{transform:scaleX(-1)}
- .side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25}
  /* NAV-21: the page keeps its column while the sidebar is open over it */
  .col{grid-column:2}
 }
 @media (max-width:699px){
  .app{grid-template-columns:minmax(0,1fr)}
- .side{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--t) ease,visibility 0s linear var(--t);box-shadow:none;visibility:hidden}
- .side-open .side{transform:none;box-shadow:var(--shadow-2);visibility:visible;transition:transform var(--t) ease}
- .side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25}
+ .side{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--dur-2) var(--ease-in),visibility 0s linear var(--dur-2);box-shadow:none;visibility:hidden}
+ .side-open .side{transform:none;box-shadow:var(--shadow-2);visibility:visible;transition:transform var(--dur-3) var(--ease-out)}
  .rail-toggle{display:none}
 }
 
@@ -236,6 +236,8 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .menu-item{display:flex;align-items:center;gap:8px;width:100%;height:32px;padding:0 8px;border:0;border-radius:var(--r-sm);background:none;color:var(--text-2);cursor:pointer;font-size:13px;text-align:left}
 .menu-item:hover,.menu-item:focus-visible{background:var(--surface-2);color:var(--text);text-decoration:none}
 main{padding:20px 24px 48px;min-width:0;outline:none}
+#dk-err>.banner,main>.banner{max-width:1480px;margin:0 auto 16px}
+.dk-raw summary{cursor:pointer;width:fit-content}
 @media (max-width:699px){main{padding:14px 12px 40px}}
 .page{max-width:1480px;margin:0 auto;display:grid;gap:16px;container-type:inline-size}
 .page.narrow{max-width:760px}
@@ -272,8 +274,6 @@ main{padding:20px 24px 48px;min-width:0;outline:none}
 .banner .btn{margin-left:6px;vertical-align:middle}
 pre.cmdline{margin:8px 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg);border:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
 .banner>div{min-width:0;flex:1}
-/* today's empty states put the icon straight in .empty (components.css uses .empty-ic) */
-.empty>svg{width:28px;height:28px;color:var(--text-3);margin-bottom:4px}
 .ok-line{display:flex;align-items:center;gap:8px;color:var(--text-2);font-size:13px;padding:4px 0}
 .ok-line svg{color:var(--ok)}
 .foot-line{margin-top:10px;font-size:12px;color:var(--text-3);display:flex;gap:6px;align-items:center}
@@ -299,6 +299,7 @@ pre.cmdline{margin:8px 0;padding:8px 10px;border-radius:var(--r-sm);background:v
 .pal-list .ps{font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}
 .pal-list .pk{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);width:78px;flex:none}
 .pal-list .mono{font-size:13px}
+.pal-none{margin:0;padding:10px 16px 0;color:var(--text-3);font-size:12px}
 .pal-sec{height:26px!important;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)!important;cursor:default!important;background:none!important;box-shadow:none!important}
 .pal-foot{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--text-3);flex:none;flex-wrap:wrap}
 @media (max-width:699px){.pal{padding-top:8px}.pal-foot{display:none}}
@@ -352,7 +353,7 @@ span.sk{display:inline-block;width:2.6ch;height:.72em;vertical-align:baseline}
 .sk-box{display:flex;align-items:center;justify-content:center}
 .tw.up,.tw.down{transition:color var(--t)}
 .tw.up{color:var(--accent-fg)}
-.upd{font-size:12px;color:var(--text-3);white-space:nowrap}
+.upd{min-height:1.45em;font-size:12px;color:var(--text-3);white-space:nowrap}
 .upd.stale{color:var(--warn-fg)}
 .upd.stale::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;background:var(--warn);vertical-align:1px}
 .since{font-size:13px;color:var(--text-2);margin-top:6px}
@@ -418,7 +419,7 @@ dialog.keys::backdrop{background:var(--scrim)}
 }
 
 /* ---- v3: motion ---- */
-.nav-item,.ctr>a:first-child,.icon-btn,.seg a,.chip,.mark,.hs-cell,.tm{transition:background-color var(--t) var(--ease),color var(--t) var(--ease),border-color var(--t) var(--ease)}
+.nav-item,.ctr>a:first-child,.icon-btn,.seg a,.chip,.mark,.hs-cell,.tm,.lg,.tgl,.cmd,.bb-i,.grp-t,.stack>summary,.port,.menu-item,.more-nav a{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
 
 
 /* ---- /more: the phone drawer's contents as a page (ROB-16) ---- */

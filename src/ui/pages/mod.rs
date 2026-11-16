@@ -95,6 +95,7 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
             let v = overview::Live::new(ctx).with_since(ctx);
             html! {
                 (shell::tree(&ctx.cfg, &v.snap, &v.groups))
+                (shell::docker_banner(&ctx.cfg, &v.snap))
                 (overview::health(&v))
                 (overview::attention(&ctx.cfg, ctx.now, &v))
                 (overview::top(&v, ctx.cfg.page.show_stats))

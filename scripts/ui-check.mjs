@@ -195,6 +195,103 @@ await key("Home"); check((await active()) === "m-a", "Home goes to the first ite
 await key("Escape"); await sleep(200);
 check(!(await ev("document.getElementById('m1').matches(':popover-open')")) && (await active()) === "mt", "Esc closes the menu and returns focus");
 
+// HB.morph (live regions updated in place): for keyed and unkeyed lists,
+// with additions, removals, reorders, attribute and text changes and SVG,
+// the result is exactly what replacing the HTML would give; kept nodes
+// stay the same nodes; focus, an open <details> and a row's highlight
+// survive; a focused input is left alone; and all of it again with
+// Element.prototype.moveBefore deleted (Safari, older Firefox).
+const MORPH = `((noMove) => {
+  const saved = Object.getOwnPropertyDescriptor(Element.prototype, "moveBefore");
+  if (noMove && saved) delete Element.prototype.moveBefore;
+  const out = { hadMoveBefore: !!saved, noMove: typeof Element.prototype.moveBefore !== "function", cases: {} };
+  const host = document.createElement("div"); host.id = "mx-host"; document.body.append(host);
+  // The full-replace result, then the morph; compare.
+  const run = (name, before, after, prep) => {
+    host.innerHTML = '<div id="mx" class="r">' + before + "</div>";
+    const old = document.getElementById("mx"), ctx = prep ? prep(old) || {} : {};
+    const want = old.cloneNode(false); want.innerHTML = after;
+    const live = HB.morph(old, after);
+    const r = { same: live === old, equal: live.outerHTML === (ctx.want ? ctx.want(want) : want).outerHTML };
+    if (!r.equal) r.got = live.outerHTML, r.wanted = (ctx.want ? ctx.want(want) : want).outerHTML;
+    if (ctx.after) Object.assign(r, ctx.after(live));
+    out.cases[name] = r;
+  };
+  const K = (k, t, a) => '<li data-key="' + k + '"' + (a || "") + "><a href=\\"/c/" + k + '">' + t + "</a></li>";
+  run("keyed: add, remove, reorder, text, attribute",
+    "<ul>" + K("a", "A") + K("b", "B") + K("c", "C") + K("d", "D") + "</ul>",
+    "<ul>" + K("d", "D2", ' class="x"') + K("e", "E") + K("b", "B") + K("a", "A", ' title="t"') + "</ul>",
+    // (A node out of its place is replaced, not moved, unless it holds
+    // focus: a moved node counts as a layout shift. "a" stays in place.)
+    (old) => { const was = old.querySelector('[data-key="a"]');
+      return { after: (l) => ({ kept: l.querySelector('[data-key="a"]') === was, gone: !l.querySelector('[data-key="c"]') }) }; });
+  run("keyed: rows in the same order keep their nodes when others go or come",
+    "<ul>" + K("a", "A") + K("b", "B") + K("c", "C") + K("d", "D") + "</ul>",
+    "<ul>" + K("b", "B") + K("x", "X") + K("d", "D!") + K("c", "C") + "</ul>",
+    (old) => { const n = (k) => old.querySelector('[data-key="' + k + '"]'); const was = { b: n("b"), c: n("c") };
+      return { after: (l) => ({ kept: ["b", "c"].every((k) => l.querySelector('[data-key="' + k + '"]') === was[k]) }) }; });
+  // A ranked list (data-rank): re-used by position, nothing moves; the item
+  // holding focus keeps its node and goes to its new rank.
+  const RK = (ks) => "<ol data-rank>" + ks.map((k) => K(k, k.toUpperCase() + "!")).join("") + "</ol>";
+  run("ranked: re-used by position, nothing moves",
+    "<ol data-rank>" + K("a", "A") + K("b", "B") + K("c", "C") + "</ol>", RK(["c", "a", "d", "b"]),
+    (old) => { const was = [...old.querySelectorAll("li")];
+      return { after: (l) => ({ inPlace: [...l.querySelectorAll("li")].slice(0, 3).every((n, i) => n === was[i]) }) }; });
+  run("ranked: the focused item keeps its node at its new rank",
+    "<ol data-rank>" + K("a", "A") + K("b", "B") + K("c", "C") + K("d", "D") + "</ol>", RK(["d", "c", "b", "a"]),
+    (old) => { const f = old.querySelector('[data-key="b"] a'); f.focus();
+      return { after: (l) => ({ focusKept: document.activeElement === f, focusSameRow: f.closest("li").dataset.key === "b" && f.textContent === "B!" }) }; });
+  run("ranked: the focused item moves to the top",
+    "<ol data-rank>" + K("a", "A") + K("b", "B") + K("c", "C") + "</ol>", RK(["c", "a"]),
+    (old) => { const f = old.querySelector('[data-key="c"] a'); f.focus();
+      return { after: (l) => ({ focusKept: document.activeElement === f && l.querySelector("li") === f.parentNode }) }; });
+  run("unkeyed: by position and tag", "<p>one</p><p>two</p><span>s</span>text<!--c--><b>x</b>", "<p>one!</p><div>d</div>more text<b class=\\"y\\">x</b><i>new</i>");
+  run("mixed keyed and unkeyed", '<h3>T</h3><ul><li id="i1">1</li><li>plain</li><li data-c="z">z</li></ul><p>end</p>', '<h3>T2</h3><ul><li data-c="z">z!</li><li id="i1" hidden>1</li><li>plain 2</li><li>more</li></ul>');
+  run("svg: attributes, children, namespace",
+    '<svg viewBox="0 0 10 10" class="i"><rect width="3" height="2"></rect><use href="#i-x"></use></svg>',
+    '<svg viewBox="0 0 20 10" class="i"><rect width="7" height="2" data-key="r"></rect><circle r="2"></circle><use href="#i-y"></use></svg>',
+    () => ({ after: (l) => ({ svgNs: [...l.querySelectorAll("svg, svg *")].every((e) => e.namespaceURI === "http://www.w3.org/2000/svg") }) }));
+  run("focus stays on a link whose row moves",
+    "<ul>" + K("a", "A") + K("b", "B") + K("c", "C") + "</ul>",
+    "<ul>" + K("c", "C") + K("b", "B!") + K("a", "A") + "</ul>",
+    (old) => { const f = old.querySelector('[data-key="b"] a'); f.focus(); return { after: () => ({ focusKept: document.activeElement === f, focusText: document.activeElement.textContent }) }; });
+  run("focus stays on a link whose row is moved to the top",
+    "<ul>" + K("a", "A") + K("b", "B") + K("c", "C") + "</ul>",
+    "<ul>" + K("c", "C") + K("a", "A") + K("b", "B") + "</ul>",
+    (old) => { const f = old.querySelector('[data-key="c"] a'); f.focus(); return { after: () => ({ focusKept: document.activeElement === f }) }; });
+  run("a removed focused row: focus goes to the same link",
+    '<ul><li>' + '<a href="/c/x">X</a></li></ul>',
+    '<ul><li data-key="x"><a href="/c/x">X</a></li></ul>',
+    (old) => { old.querySelector("a").focus(); return { after: (l) => ({ focusSameHref: document.activeElement.getAttribute("href") === "/c/x" && l.contains(document.activeElement) }) }; });
+  run("an open <details> stays open",
+    '<details data-key="d"><summary>S</summary><p>body</p></details>',
+    '<details data-key="d"><summary>S2</summary><p>body</p></details>',
+    (old) => { old.querySelector("details").open = true; return { want: (w) => { w.querySelector("details").setAttribute("open", ""); return w; }, after: (l) => ({ open: l.querySelector("details").open }) }; });
+  run("a row's highlight survives the next morph",
+    '<ul data-flash><li data-key="a" class="rl">A</li></ul>',
+    '<ul data-flash><li data-key="a" class="rl">A2</li></ul>',
+    (old) => { old.querySelector("li").classList.add("row-new"); return { want: (w) => { w.querySelector("li").classList.add("row-new"); return w; }, after: (l) => ({ flash: l.querySelector("li").classList.contains("row-new") }) }; });
+  run("a focused input is left alone",
+    '<p>a</p><input id="mx-in" value="typed">',
+    '<p>b</p><input id="mx-in" value="server" class="z">',
+    (old) => { old.querySelector("input").focus(); return { want: (w) => { const i = w.querySelector("input"); i.setAttribute("value", "typed"); i.removeAttribute("class"); return w; }, after: () => ({ focusKept: document.activeElement.id === "mx-in" }) }; });
+  run("a waiting region is made busy",
+    '<div data-wait="">x</div>', '<div data-wait="">y</div>',
+    () => ({ want: (w) => { w.firstChild.setAttribute("aria-busy", "true"); return w; } }));
+  host.remove();
+  if (noMove && saved) Object.defineProperty(Element.prototype, "moveBefore", saved);
+  return out;
+})`;
+for (const noMove of [false, true]) {
+  const m = await ev(`${MORPH}(${noMove})`);
+  const tag = noMove ? " (moveBefore deleted)" : "";
+  if (noMove) check(m.noMove, "moveBefore is deleted for the second run", m);
+  for (const [name, r] of Object.entries(m.cases)) {
+    const extra = Object.entries(r).filter(([k]) => !["same", "equal", "got", "wanted", "focusText"].includes(k));
+    check(r.same && r.equal && extra.every(([, v]) => v === true), `morph: ${name}${tag}`, r);
+  }
+}
+
 // Reduced motion: every duration token is 0 and the dialog has no transition.
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
 await ev("HB.open('dlg-t')"); await sleep(50);

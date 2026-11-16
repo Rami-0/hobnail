@@ -72,18 +72,20 @@ fn login_needed_in(
     let body = html! {
         div.page.cd {
             @if let Some(h) = head { (h) }
-            (empty_state("lock", "Sign in to read logs", html! {
-                "Container logs often contain secrets, so they are shown only after signing in ("
-                code { "[logs] require_login" } ", on by default). "
-                @if crate::auth::password_is_set(ctx.state) {
-                    a href={"/login?next=" (next)} { "Sign in" }
-                } @else {
-                    "No password is set yet: run "
+            // LG-11: a plain sentence and a real button; the script adds a
+            // `#t=` fragment to `next` (the server never sees it).
+            @if crate::auth::password_is_set(ctx.state) {
+                (crate::ui::empty(crate::ui::Empty::First, "", "lock", "Sign in to read logs", html! {
+                    "Logs often hold passwords and tokens, so they are shown only after signing in."
+                }, Some(html! { a.btn.primary.login-next href={"/login?next=" (next)} { (ic("log-in")) "Sign in" } })))
+            } @else {
+                (empty_state("lock", "Sign in to read logs", html! {
+                    "Logs often hold passwords and tokens, so they are shown only after signing in, and no password is set yet: run "
                     code { "docker exec -it hobnail /hobnail set-password" }
                     " on the host, or set " code { "require_login = false" } " under "
-                    code { "[logs] " } " to make logs open like the rest of the page."
-                }
-            }))
+                    code { "[logs]" } " to open logs like the rest of the page."
+                }))
+            }
         }
     };
     (
@@ -397,7 +399,10 @@ fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
                             }
                         }
                     }
-                    p.lpick-none.muted #lpick-none hidden[shown > 0] { "No container matches. " a href="/logs" { "Show all" } }
+                    div #lpick-none hidden[shown > 0] {
+                        (crate::ui::empty(crate::ui::Empty::NoMatch, "compact", "search", "No container matches", html! { "Try part of a name, an image or a stack." },
+                            Some(html! { a.btn.sm href="/logs" { "Show all" } })))
+                    }
                 }
             }
         }
@@ -534,11 +539,16 @@ fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool, foot: Option<Markup>) -> Mark
                                 span.lph-s data-st="" {}
                             }
                         }
+                        // Served plain: the script replaces this sentence with
+                        // a busy skeleton while it connects, then the lines
+                        // (or what the pane says instead). Without the script
+                        // (off, blocked, failed to load) the sentence stays,
+                        // and nothing is busy; with it, the sentence never
+                        // shows (`js-late`: only after 2 s, if still there).
                         div.lbody tabindex="0" {
                             div.lines role="log" aria-live="off" {}
                             div.lmsg {
-                                noscript { "The log viewer needs JavaScript. You can still " a href={"/api/logs/download?" (p.query) "&tail=5000"} { "download the last 5,000 lines" } "." }
-                                span.js-only { "Connecting…" }
+                                p.js-late { "The log viewer needs JavaScript. You can still " a href={"/api/logs/download?" (p.query) "&tail=5000"} { "download the last 5,000 lines" } "." }
                             }
                         }
                         button.ljump type="button" hidden { (ic("arrow-down")) "Jump to latest" span.ljn.num {} }

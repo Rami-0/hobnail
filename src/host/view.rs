@@ -27,9 +27,11 @@ pub struct LiveView<'a> {
     pub signed_in: bool,
 }
 
-/// Polls the live fragment every 3 s while the tab is visible; replaces the
-/// region only when the response is a fragment (a login redirect is not).
-const POLL_JS: &str = "(function(){var el=document.getElementById('hx-live');if(!el||!window.fetch)return;var busy=0;function go(){if(document.hidden||busy)return;busy=1;fetch('/host?frag=live',{credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(function(t){busy=0;if(t.indexOf('hx-grid')>0)el.innerHTML=t}).catch(function(){busy=0})}setInterval(go,3000);document.addEventListener('visibilitychange',go)})();";
+/// Polls the live fragment every 3 s while the tab is visible; updates the
+/// region only when the response is a fragment (a login redirect is not),
+/// in place (`HB.morph`): an open "Show N bridges", a sideways scroll, a
+/// text selection and focus survive the update (LG-34, A11Y-02).
+const POLL_JS: &str = "(function(){var el=document.getElementById('hx-live');if(!el||!window.fetch)return;var busy=0;function go(){if(document.hidden||busy)return;busy=1;fetch('/host?frag=live',{credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(function(t){busy=0;if(t.indexOf('hx-grid')>0){if(window.HB&&HB.morph)HB.morph(el,t);else el.innerHTML=t}}).catch(function(){busy=0})}setInterval(go,3000);document.addEventListener('visibilitychange',go)})();";
 
 pub fn page(ctx: &Ctx, lv: &LiveView, q: &[(String, String)]) -> String {
     let range = query_get(q, "range")
@@ -157,7 +159,7 @@ fn cpu(h: &Host) -> Markup {
                 ul.hx-cores {
                     @for (n, s) in &h.cores {
                         @let b = s.map(|s: CpuSplit| s.busy);
-                        li { span.hx-l { "cpu" (n) } (meter(b, 70.0, 90.0)) span.hx-v { (opt_pct(b)) } }
+                        li data-key={"cpu" (n)} { span.hx-l { "cpu" (n) } (meter(b, 70.0, 90.0)) span.hx-v { (opt_pct(b)) } }
                     }
                 }
             }
@@ -288,7 +290,7 @@ fn sensors(h: &Host) -> Markup {
                                     (SensorKind::Temp, None, None) if s.value >= 85.0 => "warn",
                                     _ => "",
                                 };
-                                tr {
+                                tr data-key={(s.chip) "/" (s.label)} {
                                     th scope="row" { span.hx-chip { (s.chip) } " " (s.label) }
                                     td.num.(cls) { b { (now) } }
                                     td.num.muted { (hi.unwrap_or_else(|| "—".into())) }
@@ -340,9 +342,13 @@ fn procs(lv: &LiveView) -> Markup {
         section.panel.hx-p.hx-wide aria-label="Processes" {
             div.panel-h {
                 h2 { (ic("server")) "Who is using the host" }
+                // The first render's "average since started" note keeps its
+                // room once live figures replace it (no shift at 3 s).
                 span.muted.hx-h {
                     "CPU: 100% = one core"
-                    @if p.lifetime { " · average since each process started; live figures from the next refresh" }
+                    span.hx-life.off[!p.lifetime] aria-hidden=[(!p.lifetime).then_some("true")] {
+                        " · average since each process started; live figures from the next refresh"
+                    }
                 }
             }
             @if p.total == 0 {
@@ -350,12 +356,15 @@ fn procs(lv: &LiveView) -> Markup {
             } @else {
                 div.hx-two {
                     div.scroll-x {
-                        table.tbl.small.hx-t {
+                        table.tbl.small.hx-t.hx-fix.hx-byc {
                             caption { "By container" }
                             thead { tr { th { "Container" } th.num { "CPU" } th.num { "Memory" } th.num.hx-o { "Procs" } } }
-                            tbody {
+                            // Ranked (HB.morph, data-rank): re-sorted by every
+                            // sample, so rows are re-used by position (none
+                            // moves); the keyed row holding focus keeps it.
+                            tbody data-rank {
                                 @for (cid, cpu, rss, n) in p.groups.iter().take(10) {
-                                    tr {
+                                    tr data-key=(cid.as_deref().unwrap_or("+host")) {
                                         th scope="row" { (ctr_link(cid, lv.names, lv.logs)) }
                                         td.num.(lvl(Some(*cpu), 80.0, 200.0)) { (pct(*cpu)) }
                                         td.num { (human_bytes(*rss)) }
@@ -367,12 +376,12 @@ fn procs(lv: &LiveView) -> Markup {
                         p.hx-note { "Memory is the sum of resident sets; shared pages count once per process." }
                     }
                     div.scroll-x {
-                        table.tbl.small.hx-t.hx-procs {
+                        table.tbl.small.hx-t.hx-fix.hx-procs {
                             caption { "Top processes" }
                             thead { tr { th.hx-o { "PID" } th { "Process" } th.hx-o { "User" } th.num { "CPU" } th.num { "RSS" } th { "Container" } } }
-                            tbody {
+                            tbody data-rank {
                                 @for r in &p.top {
-                                    tr {
+                                    tr data-key=(r.pid) {
                                         td.hx-o.mono.muted { (r.pid) }
                                         td.hx-cmd {
                                             b.mono { (r.comm) }
@@ -407,7 +416,7 @@ fn disks(h: &Host) -> Markup {
                         tbody {
                             @if h.mounts.is_empty() { tr { td.muted colspan="6" { "No real file systems in the host mount table." } } }
                             @for m in &h.mounts {
-                                tr {
+                                tr data-key=(m.mnt) {
                                     th scope="row" { span.mono { (m.mnt) } " " span.muted { (m.fstype) } }
                                     td.hx-o.mono.muted { (m.dev.trim_start_matches("/dev/")) }
                                     @if let Some((total, used, avail)) = m.usage {
@@ -437,7 +446,7 @@ fn disks(h: &Host) -> Markup {
                         tbody {
                             @if h.disks.is_empty() { tr { td.muted colspan="5" { "No block devices in /proc/diskstats." } } }
                             @for d in &h.disks {
-                                tr {
+                                tr data-key=(d.name) {
                                     th scope="row" {
                                         span.mono { (d.name) }
                                         span.muted.hx-o {
@@ -461,12 +470,13 @@ fn disks(h: &Host) -> Markup {
     }
 }
 
-fn net_row(n: &NetView, label: Markup) -> Markup {
+/// One interface row, keyed by `key` (an interface name, or "+bridges").
+fn net_row(n: &NetView, key: &str, label: Markup) -> Markup {
     let c = &n.cur;
     let errs = c.rx_errs + c.tx_errs;
     let drops = c.rx_drop + c.tx_drop;
     html! {
-        tr {
+        tr data-key=(key) {
             th scope="row" { (label) }
             td.num.hx-o.muted { (n.speed_mbps.map(|s| if s >= 1000 { format!("{} Gb/s", s / 1000) } else { format!("{s} Mb/s") }).unwrap_or_else(|| "—".into())) }
             td.num { (rate(n.rx_bps)) }
@@ -513,9 +523,9 @@ fn network(h: &Host) -> Markup {
                     (head)
                     tbody {
                         @if h.nets.is_empty() { tr { td.muted colspan="7" { "No interfaces in /proc/1/net/dev." } } }
-                        @for n in &real { (net_row(n, html! { span.mono { (n.name) } })) }
+                        @for n in &real { (net_row(n, &n.name, html! { span.mono { (n.name) } })) }
                         @if !bridges.is_empty() {
-                            (net_row(&agg, html! { "Bridges " span.muted { "(" (bridges.len()) ")" } }))
+                            (net_row(&agg, "+bridges", html! { "Bridges " span.muted { "(" (bridges.len()) ")" } }))
                         }
                     }
                 }
@@ -526,7 +536,7 @@ fn network(h: &Host) -> Markup {
                     div.scroll-x {
                         table.tbl.small.hx-t {
                             (head)
-                            tbody { @for n in &bridges { (net_row(n, html! { span.mono { (n.name) } })) } }
+                            tbody { @for n in &bridges { (net_row(n, &n.name, html! { span.mono { (n.name) } })) } }
                         }
                     }
                 }

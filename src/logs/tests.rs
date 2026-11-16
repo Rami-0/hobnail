@@ -137,7 +137,7 @@ fn logs_list_groups_by_stack_and_filters() {
     assert!(list.contains(r#"value="SOL""#) || list.contains(r#"value="sol""#));
     let (_, html) = page(&st, "/logs", "q=nothing-matches");
     assert!(
-        html.contains(r#"<p class="lpick-none muted" id="lpick-none">"#),
+        html.contains(r#"<div id="lpick-none"><div class="empty compact">"#),
         "no-match state shown"
     );
 }
@@ -672,4 +672,22 @@ fn hidden_and_excluded_containers_have_no_logs() {
         !members.iter().any(|m| m == "secret-db" || m == "web"),
         "{members:?}"
     );
+}
+
+/// The pane is served plain: no busy region and no skeleton (the script
+/// sets both while it connects), and a sentence that works without the
+/// script, also when it is blocked or fails to load (not a `<noscript>`,
+/// which then shows nothing; §11.9).
+#[test]
+fn pane_is_served_plain_and_the_script_makes_it_busy() {
+    let st = state_with(sample(), OPEN);
+    let (s, html) = page(&st, "/containers/web/logs", "");
+    assert_eq!(s, 200);
+    assert!(
+        html.contains(r#"<div class="lbody" tabindex="0"><div class="lines""#),
+        "{html}"
+    );
+    assert!(!html.contains(r#"aria-busy=""#) && !html.contains(r#"<span class="sk""#));
+    assert!(html.contains(r#"<p class="js-late">The log viewer needs JavaScript. You can still <a href="/api/logs/download?"#));
+    assert!(crate::http::server::LOGS_JS.contains(r#"this.body.setAttribute("aria-busy""#));
 }

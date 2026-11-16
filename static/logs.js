@@ -321,10 +321,34 @@
     this.st.dataset.st = cls || "";
   };
 
-  Pane.prototype.message = function (t) {
-    this.msg.textContent = t || "";
-    this.msg.hidden = !t;
+  // What the pane says instead of lines: `wait` a skeleton on a busy pane
+  // (it shows after 150 ms, so a fast start shows nothing), else the empty
+  // state (title, one sentence, at most one action). `msg.dataset.t` is
+  // the title, for the checks below.
+  Pane.prototype.message = function (t, o) {
+    o = o || {};
+    var m = this.msg;
+    m.textContent = "";
+    m.dataset.t = t || "";
+    m.hidden = !t;
+    this.body.setAttribute("aria-busy", t && o.wait ? "true" : "false");
+    if (!t) return;
+    if (o.wait) {
+      var r = el("div", "sk-rows");
+      for (var i = 0; i < 5; i++) r.appendChild(el("span", "sk"));
+      m.appendChild(r);
+      m.appendChild(el("span", "sk-t", t));
+      return;
+    }
+    var e = el("div", "empty compact" + (o.tone ? " " + o.tone : "")), ic = el("span", "empty-ic");
+    var s = document.createElementNS("http://www.w3.org/2000/svg", "svg"), u = document.createElementNS(s.namespaceURI, "use");
+    s.setAttribute("class", "i"); s.setAttribute("aria-hidden", "true"); u.setAttribute("href", "#i-" + (o.icon || "logs")); s.appendChild(u); ic.appendChild(s);
+    e.appendChild(ic); e.appendChild(el("h3", "", t));
+    if (o.body) e.appendChild(el("p", "", o.body));
+    if (o.act) { var a = el("div", "acts"), b = el("button", "btn sm", o.act[0]); b.type = "button"; b.addEventListener("click", o.act[1]); a.appendChild(b); e.appendChild(a); }
+    m.appendChild(e);
   };
+  Pane.prototype.waiting = function () { return /^(Connecting…|Waiting for lines…)$/.test(this.msg.dataset.t || ""); };
 
   Pane.prototype.url = function (resume) {
     var u = "/api/logs/stream?" + this.q, now = Date.now() / 1000;
@@ -342,12 +366,13 @@
   Pane.prototype.connect = function (resume) {
     var self = this;
     if (this.es) this.es.close();
-    if (!resume) this.message("Connecting…");
+    if (!resume) this.message("Connecting…", { wait: true });
     var es = new EventSource(this.url(resume));
     this.es = es;
     var done = false;
     es.addEventListener("meta", function (e) {
       var m = JSON.parse(e.data);
+      self.down = false;
       self.names[m.c] = m.name;
       if (!MERGED) self.status(m.running ? "live" : "stopped", m.running ? "ok" : "off");
       else self.status("live", "ok");
@@ -358,7 +383,7 @@
       var t = m.kind === "notfound" ? "Container not found." :
         m.kind === "unreachable" ? "Docker is unreachable. " + m.msg : m.msg;
       self.status(m.kind === "notfound" ? "not found" : "error", "bad");
-      if (!self.lines.length) self.message(t);
+      if (!self.lines.length) self.message(m.kind === "notfound" ? "Container not found" : "Could not read the logs", { tone: "bad", icon: "alert", body: m.kind === "notfound" ? "It may have been removed or renamed." : t });
     });
     es.addEventListener("end", function (e) {
       var m = JSON.parse(e.data);
@@ -367,27 +392,46 @@
     es.addEventListener("done", function () {
       done = true;
       es.close();
-      if (!self.lines.length && !self.msg.hidden && self.msg.textContent === "Connecting…") self.message("No lines in this range.");
       var live = S.range !== "custom" || !S.to;
       self.status(live && !MERGED ? "stopped" : "complete", "off");
-      if (!self.lines.length && self.msg.textContent === "Connecting…") self.message("No lines in this range.");
+      // LG-15: a range without lines says so, whatever the pane said before.
+      if (!self.lines.length && !self.pending.length && (self.waiting() || self.msg.hidden || self.msg.dataset.t === "No lines yet")) self.message("No lines in this range", { icon: "history", body: "Pick a longer range, or Start for everything Docker kept." });
+      counter();
     });
     es.addEventListener("hello", function () {
-      if (self.msg.textContent === "Connecting…") self.message("Waiting for lines…");
-      if (S.range === "custom" && S.to) return;
+      self.retryMs = 2000;
+      if (self.down) { self.down = false; counter(); }
+      if (/^(Connecting…|Disconnected, retrying)$/.test(self.msg.dataset.t)) self.message("Waiting for lines…", { wait: true });
+      // Connected: what Docker kept arrives right behind `hello`. A quiet
+      // container has none, so after a moment the pane says so plainly,
+      // not busy, instead of a skeleton that never ends.
+      clearTimeout(self.quiet);
+      self.quiet = setTimeout(function () {
+        if (self.es === es && !done && !self.lines.length && !self.pending.length && self.waiting()) self.message("No lines yet", { icon: "logs", body: "Waiting for the container to log." });
+      }, 1200);
     });
     es.onerror = function () {
       if (done) return;
       es.close();
       self.status("reconnecting", "warn");
+      // ROB-13: the tail stopped; the counter says so on every pane layout,
+      // and an empty pane says it instead of waiting.
+      self.down = true;
+      counter();
+      if (!self.lines.length) self.message("Disconnected, retrying", { tone: "bad", icon: "alert", body: "The log stream stopped. It starts again by itself when the server answers." });
       clearTimeout(self.retry);
-      self.retry = setTimeout(function () { self.connect(true); }, 2000);
+      // 2 s, then twice as long each time, up to 30 s (a connection that
+      // says hello starts again from 2 s): no tight loop on a refusing proxy.
+      var wait = self.retryMs || 2000;
+      self.retryMs = Math.min(30000, wait * 2);
+      self.retry = setTimeout(function () { self.connect(true); }, wait);
     };
   };
 
   Pane.prototype.reset = function () {
     if (this.es) this.es.close();
     clearTimeout(this.retry);
+    clearTimeout(this.quiet);
     this.lines = [];
     this.pending = [];
     this.box.textContent = "";
@@ -397,6 +441,7 @@
     this.unseen = 0;
     this.pill();
     this.connect(false);
+    counter();
   };
 
   Pane.prototype.add = function (arr) {
@@ -420,7 +465,7 @@
     var batch = this.pending;
     if (!batch.length || S.paused) return;
     this.pending = [];
-    this.message("");
+    if (this.msg.dataset.t !== "No lines match") this.message("");
     var frag = document.createDocumentFragment(), tail = [];
     var last = this.lines.length ? this.lines[this.lines.length - 1].t : -Infinity;
     for (var k = 0; k < batch.length; k++) {
@@ -635,15 +680,28 @@
     counter();
   }
 
+  // Back to every line: search cleared, every level on, "only matching" off.
+  function clearFilters() {
+    S.q = ""; $("lq").value = ""; S.only = false;
+    LV.forEach(function (l) { S.lv[l] = 1; });
+    [].forEach.call(root.querySelectorAll(".lchip"), function (b) { b.setAttribute("aria-pressed", "true"); });
+    applyView(); refilterAll();
+  }
   function counter() {
-    var all = 0, shown = 0, pend = 0, c = { e: 0, w: 0, i: 0, d: 0, o: 0 };
+    var all = 0, shown = 0, pend = 0, down = false, c = { e: 0, w: 0, i: 0, d: 0, o: 0 };
+    var filtered = S.q || S.only || LV.some(function (l) { return !S.lv[l]; });
     panes.forEach(function (p) {
       all += p.lines.length;
       pend += p.pending.length;
+      down = down || p.down;
       for (var k = 0; k < LV.length; k++) c[LV[k]] += p.counts[LV[k]];
-      if (S.q || S.only || LV.some(function (l) { return !S.lv[l]; })) {
-        for (var i = 0; i < p.lines.length; i++) if (!p.lines[i].e.hidden) shown++;
-      } else shown += p.lines.length;
+      var n = p.lines.length;
+      if (filtered) { n = 0; for (var i = 0; i < p.lines.length; i++) if (!p.lines[i].e.hidden) n++; }
+      shown += n;
+      // LG-14: lines there, all hidden by the filters: say so, with the way back.
+      var none = p.msg.dataset.t === "No lines match";
+      if (p.lines.length && !n && !none) p.message("No lines match", { icon: "search", body: "The search or the level filters hide every line.", act: ["Clear filters", clearFilters] });
+      else if (none && (n || !p.lines.length)) p.message("");
     });
     var t = (shown === all ? all.toLocaleString() : shown.toLocaleString() + " of " + all.toLocaleString()) + (all === 1 ? " line" : " lines");
     if (S.q && test) {
@@ -652,6 +710,7 @@
       t += " · " + hits.toLocaleString() + " match" + (hits === 1 ? "" : "es");
     }
     if (S.paused) t += " · paused" + (pend ? ", " + pend + " waiting" : "");
+    if (down) t += " · disconnected, retrying";
     $("lcount").textContent = t;
     for (var k = 0; k < LV.length; k++) {
       var b = root.querySelector('[data-n="' + LV[k] + '"]');
@@ -684,7 +743,13 @@
   tog("lre", "re"); tog("lcase", "cs"); tog("lonly", "only");
   tog("lwrap", "wrap", function () { store("wrap", S.wrap ? "1" : "0"); });
   tog("ltime", "time", function () { store("time", S.time ? "1" : "0"); });
+  // LG-29: a paused pane says so in its header, not "live".
   tog("lpause", "paused", function () {
+    panes.forEach(function (p) {
+      if (!p.st) return;
+      if (S.paused) { p.stWas = [p.st.textContent, p.st.dataset.st]; if (p.stWas[1] === "ok") p.status("paused", "warn"); }
+      else if (p.stWas && p.st.textContent === "paused") p.status(p.stWas[0], p.stWas[1]);
+    });
     if (!S.paused) panes.forEach(function (p) { p.flush(); });
     counter();
   });

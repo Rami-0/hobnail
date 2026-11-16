@@ -492,6 +492,12 @@
     }
     pool.append(...miss);
     none.hidden = hit.length > 0;
+    // Nothing matches: the hidden rows stay laid out but collapsed (no
+    // height, not focusable, not read), so the columns keep their widths
+    // and the header does not re-flow around the empty state.
+    pool.hidden = hit.length > 0; pool.classList.toggle("sizer", !hit.length);
+    // Nothing shown: good news for an empty state filter on its own, else "no match" (OV-24).
+    none.dataset.why = !view.q && !view.stack && (view.state === "stopped" || view.state === "problem") ? view.state : "filter";
     table.classList.toggle("grouped", g);
     const shown = table.querySelector("caption .shown"); shown && (shown.textContent = hit.length);
     // controls
@@ -540,6 +546,7 @@
       if (gt) {
         const tb = gt.closest("tbody"), closed = !tb.classList.contains("closed");
         tb.classList.toggle("closed", closed); gt.setAttribute("aria-expanded", String(!closed));
+        if (!closed) HB.unfold($$("tr.row", tb));
         const c = store.get(COLL, {}); c[tb.dataset.k] = closed; store.set(COLL, c);
         return;
       }
@@ -643,10 +650,14 @@
       li.addEventListener("pointermove", () => { if (palSel !== i) { palSel = i; palMark(); } });
       palList.append(li);
     });
+    // Nothing in Hobnail matches: say so above the list (the web row stays).
+    let none = $("pal-none");
+    if (!none) { none = el("p", "pal-none", "No page, container, bookmark or action matches. Arrow down, then Enter, searches the web."); none.id = "pal-none"; none.setAttribute("role", "status"); palList.before(none); }
+    none.hidden = !(q && palItems.length === 1);
     palMark();
   }
   function palMark() {
-    $$("li", palList).forEach((li, i) => li.setAttribute("aria-selected", String(i === palSel)));
+    $$("li[role=option]", palList).forEach((li, i) => li.setAttribute("aria-selected", String(i === palSel)));
     const cur = $("pal-" + palSel);
     palQ.setAttribute("aria-activedescendant", cur ? cur.id : "");
     cur && cur.scrollIntoView({ block: "nearest" });
@@ -772,6 +783,8 @@
     if (!ok(n) || !ok(dec) || n.length > 512) return "/";
     try { const u = new URL(n, location.origin); return u.origin === location.origin ? u.pathname + u.search + u.hash : "/"; } catch { return "/"; }
   }
+  // A sign-in link carries the page's #t= fragment through the login (LG-11).
+  if (location.hash) $$("a.login-next, .acct-in").forEach((a) => { if (a.href.includes("?next=")) a.href += encodeURIComponent(location.hash); });
   const login = $("login");
   if (login) {
     login.addEventListener("submit", async (e) => {
@@ -791,18 +804,45 @@
           location.replace(safeNext(new URLSearchParams(location.search).get("next") || "/"));
           return;
         }
-        msg.textContent = j.error || (r.status === 429 ? "Too many attempts. Wait a moment and try again." : r.status === 401 ? "Wrong password." : `Sign-in failed (HTTP ${r.status}).`);
-      } catch { msg.textContent = "Could not reach the server."; }
+        $("pw").setAttribute("aria-invalid", "true");
+        // Too many attempts: the wait the server asks for, counted down, and
+        // the button off until then (ROB-18).
+        if (r.status === 429) {
+          let left = Math.max(1, Math.ceil(Number(j.retry_after || r.headers.get("retry-after")) || 1));
+          const say = () => { msg.textContent = `Too many attempts. Try again in ${left} s.`; };
+          say(); $("pw").select();
+          const t = setInterval(() => { if (--left > 0) return say(); clearInterval(t); msg.textContent = "You can try again now."; btn.disabled = false; }, 1000);
+          return;
+        }
+        msg.textContent = r.status === 401 ? "Wrong password." : `Sign-in failed (HTTP ${r.status}).`;
+      } catch { msg.textContent = "Could not reach the server. Your password was not sent; try again."; }
       btn.disabled = false; $("pw").select();
     });
+    $("pw").addEventListener("input", () => $("pw").removeAttribute("aria-invalid"));
   }
 
   // ---- live updates over SSE ----
   const live = $("live");
+  // Live updates that stop (stream refused, server gone) say so on every
+  // page, phones included, after a grace period that hides quick reconnects;
+  // the pill goes when the stream is back (ROB-13). A paused hidden tab is
+  // not stale. The stream is retried for as long as the page is open (see
+  // connect), so the pill says it is trying, and goes away by itself.
+  let offT = null, offPill = null;
   function setLive(on, text) {
-    if (!live) return;
-    live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
-    live.querySelector(".live-t").textContent = text;
+    if (live) {
+      live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
+      live.querySelector(".live-t").textContent = text;
+    }
+    if (on || text !== "reconnecting") { clearTimeout(offT); offT = null; if (offPill) { offPill.remove(); offPill = null; root.classList.remove("stale"); } return; }
+    if (offT || offPill) return; // retries keep failing: the first one starts the clock
+    offT = setTimeout(() => {
+      offT = null;
+      const at = new Date(lastLive).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+      offPill = el("div", "live-off"); offPill.setAttribute("role", "status");
+      offPill.append(el("span", "dot"), el("span", "", `Live updates stopped at ${at}. Trying to reconnect; this page may be out of date.`));
+      body.append(offPill); root.classList.add("stale");
+    }, 4000);
   }
   // ---- keep the reader's place while live data changes the page ----
   // Live updates replace whole sections every few seconds. When a section
@@ -869,12 +909,15 @@
         a.href = "/alerts?edit=rule:" + encodeURIComponent(b.dataset.rule);
         b.replaceWith(a);
       });
-      old.replaceWith(fresh);
-      tween(fresh, before);
-      if (fresh.id === "tree") { treeApply(); fresh.scrollTop = treeTop; }
-      else if (fresh.id === "ctable") applyView(false);
-      else if (fresh.id === "ctr-live") { detailLive(); tableLive(); }
-      else { sparks(fresh); times(fresh); localTicks(fresh); }
+      // In place (HB.morph): focus, selection, scroll and open <details>
+      // stay. The table is rebuilt by the script from its rows, so it is
+      // swapped whole (it is skipped above while it holds focus).
+      const now = fresh.id === "ctable" ? (old.replaceWith(fresh), fresh) : HB.morph(old, fresh);
+      tween(now, before);
+      if (now.id === "tree") { treeApply(); now.scrollTop = treeTop; }
+      else if (now.id === "ctable") applyView(false);
+      else if (now.id === "ctr-live") { detailLive(); tableLive(); }
+      else { sparks(now); times(now); localTicks(now); }
     }
     keepAnchor(anchor);
     // Never scroll to restore focus (it used to pull the page to whatever
@@ -991,12 +1034,19 @@
   // HTTP/1.1 connections (6 per host), which stalled later navigations, and
   // a background tab would keep the server's refresh loop running.
   let es = null, hiddenAt = 0, hideTimer = null;
+  // A stream the server refused (a proxy's 502 while Hobnail restarts, a
+  // 401) is closed for good by the browser, which retries only dropped
+  // connections: so it is opened again here, after 5 s, then twice as long
+  // each time up to a minute, and never while the tab is hidden (showing it
+  // again connects at once). A stream that opens resets the wait.
+  let retryT = null, retryMs = 5000;
   // Every logs page: a viewer (#lv) or the /logs list (#lpick).
   const logsPage = !!($("lv") || $("lpick"));
   function connect() {
     if (!window.EventSource) { setLive(false, "no live updates"); return; }
     if (es) return;
-    es = new EventSource("/api/stream");
+    clearTimeout(retryT); retryT = null;
+    const s = (es = new EventSource("/api/stream"));
     es.addEventListener("hello", (e) => {
       if (e.data && e.data !== body.dataset.sha) { location.reload(); return; }
       setLive(true, "live");
@@ -1009,10 +1059,18 @@
     // A config change reloads the page, but never a log viewer: it would lose
     // its search, filters, pause, range and scroll (owner decision Y12, LG-03).
     es.addEventListener("reload", () => { if (!logsPage) location.reload(); });
-    es.onerror = () => setLive(false, "reconnecting");
-    es.onopen = () => setLive(true, "live");
+    es.onerror = () => {
+      if (es !== s) return;
+      setLive(false, "reconnecting");
+      if (s.readyState !== 2) return; // the browser retries this one itself
+      s.close(); es = null;
+      clearTimeout(retryT);
+      retryT = setTimeout(() => { retryT = null; if (!doc.hidden) connect(); }, retryMs);
+      retryMs = Math.min(60000, retryMs * 2);
+    };
+    es.onopen = () => { retryMs = 5000; setLive(true, "live"); };
   }
-  function disconnect(text) { if (es) { es.close(); es = null; } setLive(false, text); }
+  function disconnect(text) { clearTimeout(retryT); retryT = null; if (es) { es.close(); es = null; } setLive(false, text); }
   function resume() {
     clearTimeout(hideTimer);
     // Paused for over a minute: reload for fresh data (widgets refresh slowly),
@@ -1027,6 +1085,27 @@
   });
   window.addEventListener("pagehide", () => { clearTimeout(hideTimer); hiddenAt = Date.now(); disconnect("paused"); });
   window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
+
+  // ---- navigation feedback (ROB-12): a full page load shows a 2 px line
+  // after 150 ms (the CSS delay, so a fast load shows nothing), and a page
+  // tab or range that was clicked is marked at once. Runs after every other
+  // click handler: a click one of them took over is not a navigation.
+  const navbar = el("div", "navbar"); navbar.setAttribute("aria-hidden", "true"); body.append(navbar);
+  doc.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || a.target || a.hasAttribute("download")) return;
+    const u = new URL(a.href, location.href);
+    if (u.origin !== location.origin || u.pathname.startsWith("/api/") || (u.pathname === location.pathname && u.search === location.search)) return;
+    navbar.classList.add("on"); clearTimeout(navT); navT = setTimeout(navOff, 10000);
+    if (a.matches(".tabs .tab, .cd-tabs a, .seg a")) a.setAttribute("data-pending", "");
+  });
+  // A navigation that does not happen (the "leave site?" prompt dismissed,
+  // a slow server given up on) must not leave the line on: the next press
+  // in this page, coming back from the cache, or 10 s end it.
+  let navT = null;
+  const navOff = () => { clearTimeout(navT); navT = null; navbar.classList.remove("on"); $$("[data-pending]").forEach((x) => x.removeAttribute("data-pending")); };
+  ["pointerdown", "keydown"].forEach((t) => doc.addEventListener(t, () => { if (navbar.classList.contains("on")) navOff(); }, true));
+  window.addEventListener("pageshow", navOff);
 
   sparks(doc);
   times(doc);

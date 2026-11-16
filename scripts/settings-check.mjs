@@ -239,6 +239,8 @@ try {
   await ev(`${rowSel("ui-check-a")}.querySelector('[data-move=down]').click()`);
   await until(`[...document.querySelectorAll('#bm-list tr[data-key]')].map((r) => r.querySelector('.linkbtn').textContent).indexOf('ui-check-a') === ${i + 1}`);
   check((await rows()).indexOf("ui-check-a") === i + 1, "↓ moves the row one step at once", await rows());
+  // The row moves before the save answers (optimistic, wave 4): wait for it.
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Moved “ui-check-a” down/.test(t.textContent))");
   check((await toasts()).some((x) => /^Moved “ui-check-a” down · revision #/.test(x)), "the move is saved as a revision", await toasts());
   check(await ev(`document.activeElement.closest('tr') === ${rowSel("ui-check-a")}`), "focus follows the moved row");
 

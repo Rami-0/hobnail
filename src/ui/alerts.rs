@@ -97,7 +97,7 @@ pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>, signed
                                 Health::Idle => ("", "not used yet"),
                             };
                             @let title = chan_title(name, c, label);
-                            span class={"badge chan " (hc)} title=(title) {
+                            span class={"badge chan " (hc)} data-key=(name) title=(title) {
                                 span class={"dot " (hc)} {}
                                 (name)
                                 @if c.health != Health::Ok && c.health != Health::Idle {
@@ -116,7 +116,9 @@ pub fn render_with(cfg: &Config, status: &Status, logs: &HashSet<String>, signed
                         // LG-56); a container subject has its logs from the
                         // moment it went bad.
                         @let href = subject_href(cfg, &i.rule, &i.subject);
-                        li.incident.rl[href.is_some()] {
+                        // Keyed by rule and subject (HB.morph): incidents
+                        // come and go, and a focused row must stay its own.
+                        li.incident.rl[href.is_some()] data-key={(i.rule) "/" (i.subject)} {
                             span.dot.bad {}
                             (subject_link(href, &i.subject, "inc-subject"))
                             span.inc-state { (i.state) }
