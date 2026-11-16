@@ -74,4 +74,4 @@ td .k,.k{font-size:11px}
 .incident .inc-rule a{pointer-events:auto;font:500 12px var(--mono)}
 /* The read-only rules and channels tables fit 390 px (LG-58): tighter
    cells, headers and figures that wrap. */
-@media (max-width:599px){.al-t th,.al-t td{padding-inline:4px;white-space:normal;overflow-wrap:break-word}.al-t th{line-height:1.2}.al-t .pill{white-space:nowrap}.al-t td.wrap{max-width:none}}
+@media (max-width:599px){.al-t th,.al-t td{padding-inline:4px;white-space:normal;overflow-wrap:break-word}.al-t th{line-height:1.2;hyphens:manual}.al-t .pill{white-space:nowrap}.al-t td.wrap{max-width:none}}

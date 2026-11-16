@@ -316,7 +316,7 @@ fn channels_table(cfg: &Config, status: &Status, now: u64) -> Markup {
     html! {
         div.scroll-x {
             table.tbl.small.al-t {
-                thead { tr { th { "Channel" } th { "Delivery" } th.num { "Sent" } th.num { "Undelivered" } th { "Last ok" } } }
+                thead { tr { th { "Channel" } th { "Delivery" } th.num { "Sent" } th.num { "Un\u{ad}delivered" } th { "Last ok" } } }
                 tbody {
                     @for (name, c) in &cfg.channels {
                         @let st: Option<&ChannelStatus> = status.channels.get(name);
@@ -492,7 +492,7 @@ above = 90
             html.contains("1 queued<br><span class=\"muted k\">2 failed attempts</span>"),
             "{html}"
         );
-        assert!(html.contains("Undelivered") && !html.contains(">Failed<"));
+        assert!(html.contains("Un\u{ad}delivered") && !html.contains(">Failed<"));
     }
 
     #[test]

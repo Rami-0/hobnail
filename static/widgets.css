@@ -198,8 +198,11 @@
 /* ---- charts: markers, touch zoom; the History toolbar and timeline ---- */
 /* Markers: a 24 px target around the 7 px dot (A11Y-19); one opens its
    timeline row, which is highlighted as the target (LG-44). */
-.mk{width:24px;margin-left:-12px}
-.mk::before{left:12px}.mk::after{left:8.5px}
+.mk{top:-12px;bottom:auto;width:24px;height:24px;margin-left:-12px}
+.mk::before{left:12px;top:12px;bottom:auto;height:400px;pointer-events:none}.mk::after{left:8.5px;top:6px}
+/* Only the dot is a target, so a drag can start anywhere on the plot; the
+   dashed line ends at the plot's bottom. */
+.evm{clip-path:inset(-24px -24px 0 -24px)}
 /* Sideways drags on a zoomable chart are the zoom gesture by touch too;
    vertical drags still scroll the page (LG-46). */
 .chart[data-zoom] .canvas{touch-action:pan-y}
