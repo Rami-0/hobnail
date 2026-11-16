@@ -1249,6 +1249,31 @@ mod tests {
         assert!(js.contains("checkbox|radio|button"));
     }
 
+    /// A11Y-17: brand Accent and Error have the same luminance, so the
+    /// accent is never a status colour: no rule for a status class (ok,
+    /// warn, bad) in the shell or component CSS paints with the accent.
+    #[test]
+    fn accent_is_never_a_status_colour() {
+        for css in [APP_CSS_SRC, include_str!("../../static/components.css")] {
+            let mut rest = css;
+            while let Some(i) = rest.find('{') {
+                let head = rest[..i].rsplit(['}', '\n']).next().unwrap_or("");
+                let end = rest[i..].find('}').map_or(rest.len(), |e| i + e);
+                let body = &rest[i + 1..end];
+                let status = [".ok", ".warn", ".bad"].iter().any(|c| {
+                    head.match_indices(c).any(|(j, _)| {
+                        !matches!(head[j + c.len()..].chars().next(), Some(x) if x.is_ascii_alphanumeric() || x == '-' || x == '_')
+                    })
+                });
+                assert!(
+                    !(status && body.contains("var(--accent")),
+                    "a status painted with the accent: {head}{{{body}}}"
+                );
+                rest = &rest[(end + 1).min(rest.len())..];
+            }
+        }
+    }
+
     /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:
     /// every cell may break anywhere and a row's name wraps inside a bounded
     /// column (a fixed width: a percentage is ignored while the table sizes

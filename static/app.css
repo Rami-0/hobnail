@@ -282,7 +282,7 @@ main{padding:20px 24px 48px;min-width:0;outline:none}
 .banner strong{color:var(--text)}
 .banner.bad{border-color:color-mix(in srgb,var(--bad) 50%,var(--line));background:color-mix(in srgb,var(--bad) 8%,var(--surface))}.banner.bad>svg{color:var(--bad-fg)}
 .banner.warn{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--surface))}.banner.warn>svg{color:var(--warn-fg)}
-.banner.ok>svg,.banner.info>svg{color:var(--accent-fg)}
+.banner.info>svg{color:var(--accent-fg)}.banner.ok>svg{color:var(--ok-fg)}
 .banner .btn{margin-left:6px;vertical-align:middle}
 pre.cmdline{margin:8px 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg);border:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
 .banner>div{min-width:0;flex:1}
