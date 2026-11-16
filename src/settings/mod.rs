@@ -47,6 +47,8 @@ use std::sync::Arc;
 use crate::http::server::Body;
 
 use crate::state::AppState;
+/// The file as JSON (the values exactly as written, for form values).
+pub(crate) use doc::{item_json, parse as parse_doc_text};
 /// The config file on disk with its hash, for the Settings pages that render
 /// their lists on the server (`ui::settings::disk`): the same bytes and hash
 /// the save pipeline checks `base_hash` against.

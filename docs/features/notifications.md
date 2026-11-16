@@ -6,6 +6,36 @@ Dedupe (one message per incident), `for` flap guard, cooldown, recovery
 message, retries with a persisted queue, channel health on the page and in
 Settings → Notifications (with **Send test**).
 
+In Settings → Notifications, channels and rules are lists with an add / edit
+dialog each (see [settings.md](settings.md)):
+
+- **Channel:** Name, Type (Webhook, Slack, Telegram) and where the secret
+  comes from: an environment variable (its name), a file in `data/secrets/`
+  (its path), or, for a webhook only, a plain URL stored in the file (with a
+  warning). Telegram adds the chat id; Timeout is under "More options". Values
+  set in the file that the form does not handle (`chat_id_env`, `api_base`,
+  headers, a body template) are listed read-only by name and kept on save;
+  their values never reach the page. **Save and send test** saves, then sends
+  a test to the saved channel and shows the result in the dialog. Each row
+  has a one-click **Send test** too.
+- **Rule:** the type chooses its condition fields; a new rule notifies every
+  channel (untick to exclude); For, Cooldown and the messages are under "More
+  options". The row's switch turns a rule on or off at once.
+- Renaming a channel that rules send to asks first and then renames it in
+  those rules too; deleting one that a rule uses says which rule.
+
+Server behaviour behind this (`/api/settings/channels`, `/api/settings/alerts`):
+
+- **Delete refused while used:** deleting a channel that a rule's
+  `channels` still names answers HTTP 422 with a plain message ("The channel
+  “x” is used by the rule “y”. …") and `used_by` (the rule names); nothing is
+  written. Before, the save failed on the validator's `unknown channel` text.
+- **Rename follows:** renaming a channel changes it in every rule's
+  `channels` in the same revision (as before; the dialog now asks first).
+- **An edit is a patch:** an edited channel or rule keeps every key the
+  request leaves out; `null` removes one. So the form never sends header
+  values, a body, `api_base` or `chat_id_env`, and they stay as they are.
+
 Secrets live in `secrets.env` next to the compose file; the config and the app
 only hold environment variable **names** (Settings shows set / not set, never
 the value). From the app you can add Slack, Telegram (default API host) and

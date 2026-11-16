@@ -352,8 +352,23 @@ fn bookmarks_add_edit_reorder_delete() {
     let d = ops::list_action(&cur(&d.text), &ops::BOOKMARKS, &req).unwrap();
     let c = parse_ok(&d.text);
     assert_eq!(c.bookmarks[0].name, "Gitea");
-    assert_eq!(c.bookmarks[0].group, None, "missing field is removed");
+    assert!(
+        c.bookmarks[0].group.is_some(),
+        "an edit keeps a field it does not send"
+    );
     assert_eq!(d.note, "bookmarks: renamed gitea to Gitea");
+    let req = list_req(
+        "edit",
+        Some(json!(0)),
+        Some(json!({"name": "Gitea", "url": "https://git.example", "group": null})),
+        None,
+    );
+    let d = ops::list_action(&cur(&d.text), &ops::BOOKMARKS, &req).unwrap();
+    assert_eq!(
+        parse_ok(&d.text).bookmarks[0].group,
+        None,
+        "null removes it"
+    );
     let mut t = d.text;
     for _ in 0..2 {
         let req = list_req("delete", Some(json!(0)), None, None);
@@ -1771,4 +1786,340 @@ fn log_match_rules_can_be_added_from_the_form() {
     let d = ops::list_action(&cur(FIXTURE), &ops::ALERTS, &req).unwrap();
     let c = parse_ok(&d.text);
     assert!(c.alerts.iter().any(|r| r.name == "errs"));
+}
+
+const USED: &str = r#"[[widgets]]
+id = "w1"
+type = "custom-api"
+url = "http://w.example/api"
+[widgets.fields]
+v = "v"
+
+[channels.hook]
+type = "webhook"
+url_env = "RH_HOOK"
+
+[channels.spare]
+type = "webhook"
+url_env = "RH_SPARE"
+
+[[alerts]]
+name = "watch-w1"
+type = "widget"
+widget = "w1"   # keep this comment
+field = "v"
+above = 1
+channels = ["hook"]
+"#;
+
+/// A channel or widget that a rule still uses is not deleted: a 422 in
+/// plain words naming the rules (no raw validator text), with `used_by`.
+#[test]
+fn deleting_what_a_rule_uses_names_the_rules() {
+    parse_ok(USED);
+    let req = list_req("delete", Some(json!("hook")), None, None);
+    let e = ops::channel_action(&cur(USED), &req).unwrap_err();
+    assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(e.body["field"].is_null());
+    assert_eq!(
+        e.body["error"],
+        "The channel “hook” is used by the rule “watch-w1”. Take it out of those rules first (or delete them), then delete the channel."
+    );
+    assert_eq!(e.body["used_by"], json!(["watch-w1"]));
+    // An unused one goes.
+    let req = list_req("delete", Some(json!("spare")), None, None);
+    let d = ops::channel_action(&cur(USED), &req).unwrap();
+    assert!(!d.text.contains("spare") && parse_ok(&d.text).channels.len() == 1);
+    // A widget a rule watches.
+    let req = list_req("delete", Some(json!("w1")), None, None);
+    let e = ops::list_action(&cur(USED), &ops::WIDGETS, &req).unwrap_err();
+    assert_eq!(e.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(e.body["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("The widget “w1” is used by the rule “watch-w1”."));
+    assert!(!e.body.to_string().contains("unknown widget"));
+}
+
+/// Renaming a widget a rule watches (owner decision Y7: ids stay editable):
+/// the rule follows the new id, its formatting kept, and the revision note
+/// says so. Before this, the save was refused with `alert "watch-w1":
+/// unknown widget "w1"`.
+#[test]
+fn renaming_a_widget_moves_the_rules_that_watch_it() {
+    let item = json!({"id": "w2", "type": "custom-api", "url": "http://w.example/api", "fields": {"v": "v"}});
+    let req = list_req("edit", Some(json!("w1")), Some(item), None);
+    let d = ops::list_action(&cur(USED), &ops::WIDGETS, &req)
+        .and_then(ops::precheck)
+        .unwrap();
+    let c = parse_ok(&d.text);
+    assert_eq!(c.widgets[0].id, "w2");
+    assert_eq!(c.alerts[0].widget.as_deref(), Some("w2"));
+    assert!(
+        d.text.contains("widget = \"w2\"   # keep this comment"),
+        "{}",
+        d.text
+    );
+    assert_eq!(d.note, "widgets: renamed w1 to w2 (rules watch-w1)");
+    assert_eq!(changes(USED, &d.text), (2, 2));
+}
+
+/// An entry's check (`alert "x": …`, `channel "x" (…): …`) lands on the
+/// form field in the form's words; the entry's own name is not taken for a
+/// field (SET-55).
+#[test]
+fn entry_checks_are_said_in_the_forms_words() {
+    let host = |name: &str, extra: J| {
+        let mut r = json!({"name": name, "type": "host", "metric": "memory", "channels": []});
+        for (k, v) in extra.as_object().unwrap() {
+            r[k] = v.clone();
+        }
+        let req = list_req("add", None, Some(r), None);
+        ops::list_action(&cur(FIXTURE), &ops::ALERTS, &req).and_then(ops::precheck)
+    };
+    for name in ["m", "disk"] {
+        for extra in [json!({}), json!({"above": 1, "below": 2})] {
+            let e = host(name, extra).unwrap_err();
+            assert_eq!(e.body["field"], "above", "{name}: {}", e.body);
+            assert_eq!(e.body["error"], "Set exactly one of: Above or Below.");
+            assert!(e.body["line"].is_null());
+        }
+    }
+    let req = list_req(
+        "add",
+        None,
+        Some(
+            json!({"name": "s", "type": "slack", "webhook_url_env": "RH_A", "webhook_url_file": "/data/secrets/a"}),
+        ),
+        None,
+    );
+    let e = ops::channel_action(&cur(FIXTURE), &req)
+        .and_then(ops::precheck)
+        .unwrap_err();
+    assert_eq!(e.body["field"], "webhook_url_env", "{}", e.body);
+    assert_eq!(
+        e.body["error"],
+        "Set exactly one of: Webhook URL variable or Webhook URL file."
+    );
+    assert_eq!(
+        ops::strip_owner(r#"alert "a \"b\"": `on` is empty"#),
+        Some("`on` is empty")
+    );
+    assert_eq!(
+        ops::strip_owner(r#"channel "x" (slack): timeout must be between 1s and 60s"#),
+        Some("timeout must be between 1s and 60s")
+    );
+    assert_eq!(ops::strip_owner("duplicate widget id \"x\""), None);
+    assert_eq!(ops::sentence("`on` is empty"), "“Fire on” is empty.");
+    assert_eq!(
+        ops::sentence("timeout must be between 1s and 60s"),
+        "Use a value from 1s to 60s."
+    );
+}
+
+const KEEPS: &str = r#"[[widgets]]
+id = "w-rich"   # rich
+type = "custom-api"
+url = "http://w.example/api"
+method = "post"
+body = '{"q":1}'
+output = "json"
+enabled = true
+template = "{{a}}"
+status = { field = "a", ok = ["200", 1, true] }
+[widgets.headers]
+X-Plain = "plainvalue"
+[widgets.fields]
+a = "ok"
+[[widgets.rows]]
+label = "L"
+value = "{{a}}"
+
+[channels.hook-h]
+type = "webhook"
+url = "http://w.example/hook"
+timeout = "7s"
+body = '{"text": "{{message}}"}'
+[channels.hook-h.headers]
+X-Plain = "plainvalue123"
+
+[channels.tg2]
+type = "telegram"
+token_env = "RH_TG"
+chat_id = "-100999"
+api_base = "http://tg.example"
+
+[[alerts]]
+name = "w-eq"
+type = "widget"
+widget = "w-rich"
+field = "a"
+equals = "200"
+enabled = true
+
+[[alerts]]
+name = "logs"
+type = "log_match"
+pattern = "error"
+containers = ["web-*"]
+exclude = ["web-test"]
+on_error = false
+"#;
+
+/// The edit semantics every dialog relies on (review item 1): an edited
+/// entry is patched with the keys the item has; an absent key is kept as it
+/// is in the file, `null` removes it. So a save that leaves out what the
+/// form does not show (header values, a body, `api_base`, `output`) keeps it.
+#[test]
+fn an_edit_keeps_every_key_it_does_not_send() {
+    // `on_error = false` on a log rule would not load: drop it here.
+    let text = KEEPS.replace("on_error = false\n", "");
+    parse_ok(&text);
+    // Change one field of each kind of entry.
+    let req = list_req(
+        "edit",
+        Some(json!("hook-h")),
+        Some(json!({"name": "hook-h", "type": "webhook", "timeout": "8s"})),
+        None,
+    );
+    let d = ops::channel_action(&cur(&text), &req)
+        .and_then(ops::precheck)
+        .unwrap();
+    assert_eq!(changes(&text, &d.text), (1, 1), "{}", d.text);
+    assert!(
+        d.text.contains("timeout = \"8s\"")
+            && d.text.contains("X-Plain = \"plainvalue123\"")
+            && d.text.contains("body = '{\"text\"")
+    );
+    let req = list_req(
+        "edit",
+        Some(json!("tg2")),
+        Some(json!({"name": "tg2", "type": "telegram", "timeout": "5s"})),
+        None,
+    );
+    let d = ops::channel_action(&cur(&text), &req)
+        .and_then(ops::precheck)
+        .unwrap();
+    assert!(
+        d.text.contains("api_base = \"http://tg.example\"")
+            && d.text.contains("chat_id = \"-100999\"")
+    );
+    let req = list_req(
+        "edit",
+        Some(json!("w-rich")),
+        Some(
+            json!({"id": "w-rich", "type": "custom-api", "url": "http://w.example/api", "title": "T"}),
+        ),
+        None,
+    );
+    let d = ops::list_action(&cur(&text), &ops::WIDGETS, &req)
+        .and_then(ops::precheck)
+        .unwrap();
+    assert_eq!(changes(&text, &d.text), (1, 0), "{}", d.text);
+    for kept in [
+        "method = \"post\"",
+        "body = '{\"q\":1}'",
+        "output = \"json\"",
+        "enabled = true",
+        "ok = [\"200\", 1, true]",
+        "X-Plain = \"plainvalue\"",
+        "[[widgets.rows]]",
+        "template = \"{{a}}\"",
+        "id = \"w-rich\"   # rich",
+    ] {
+        assert!(d.text.contains(kept), "lost {kept}: {}", d.text);
+    }
+    // `null` still removes, and an edit with nothing new writes nothing.
+    let req = list_req(
+        "edit",
+        Some(json!("w-eq")),
+        Some(json!({"name": "w-eq", "type": "widget", "enabled": null})),
+        None,
+    );
+    let d = ops::list_action(&cur(&text), &ops::ALERTS, &req).unwrap();
+    assert_eq!(changes(&text, &d.text), (0, 1));
+    for (spec, id, item) in [
+        (
+            &ops::ALERTS,
+            "w-eq",
+            json!({"name": "w-eq", "type": "widget"}),
+        ),
+        (
+            &ops::ALERTS,
+            "logs",
+            json!({"name": "logs", "type": "log_match"}),
+        ),
+        (
+            &ops::WIDGETS,
+            "w-rich",
+            json!({"id": "w-rich", "type": "custom-api", "url": "http://w.example/api"}),
+        ),
+    ] {
+        let req = list_req("edit", Some(json!(id)), Some(item), None);
+        assert_eq!(
+            ops::list_action(&cur(&text), spec, &req).unwrap().text,
+            text,
+            "{id}"
+        );
+    }
+    for (id, ty) in [("hook-h", "webhook"), ("tg2", "telegram")] {
+        let req = list_req(
+            "edit",
+            Some(json!(id)),
+            Some(json!({"name": id, "type": ty})),
+            None,
+        );
+        assert_eq!(
+            ops::channel_action(&cur(&text), &req).unwrap().text,
+            text,
+            "{id}"
+        );
+    }
+    // An add is still whole: a missing key is simply not written.
+    let req = list_req(
+        "add",
+        None,
+        Some(json!({"name": "n", "type": "slack", "webhook_url_env": "RH_S"})),
+        None,
+    );
+    let d = ops::channel_action(&cur(&text), &req).unwrap();
+    assert!(d.text.contains("[channels.n]"));
+}
+
+/// Review item 6: a widget's field-name error is about the Fields list, in
+/// plain words, on save and on Fetch now alike.
+#[test]
+fn widget_field_errors_land_on_the_fields_list() {
+    let item = json!({"id": "w", "type": "custom-api", "url": "http://w.example/", "fields": {"bad name": "x"}});
+    let req = list_req("add", None, Some(item.clone()), None);
+    let e = ops::list_action(&cur(FIXTURE), &ops::WIDGETS, &req)
+        .and_then(ops::precheck)
+        .unwrap_err();
+    assert_eq!(e.body["field"], "fields", "{}", e.body);
+    assert!(
+        e.body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Field name \"bad name\""),
+        "{}",
+        e.body
+    );
+    let e = ops::preview_widget(&item).unwrap_err();
+    assert_eq!(e.body["field"], "fields", "{}", e.body);
+    assert!(
+        !e.body["error"].as_str().unwrap().contains("widget \""),
+        "{}",
+        e.body
+    );
+    let item = json!({"id": "w", "type": "custom-api", "url": "http://w.example/", "template": "{{nope}}"});
+    let e = ops::preview_widget(&item).unwrap_err();
+    assert_eq!(e.body["field"], "template");
+    assert!(
+        e.body["error"]
+            .as_str()
+            .unwrap()
+            .contains("(add it on the Fields tab)"),
+        "{}",
+        e.body
+    );
 }

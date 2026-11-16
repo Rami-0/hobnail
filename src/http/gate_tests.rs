@@ -394,6 +394,8 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
         "/settings/security",
         "/api/settings/security/password",
         "/settings/bookmarks",
+        "/settings/notifications",
+        "/settings/widgets",
     ] {
         let r = req(
             addr,
@@ -489,4 +491,110 @@ async fn settings_fragments_need_a_session() {
         "{}",
         r.head
     );
+}
+
+/// Notifications and Widgets (wave 2b) behave like Bookmarks: their list
+/// fragments need a session (401, empty, without one); the `?edit=` page
+/// forms show nothing to a visitor; with a session both are `no-store`.
+/// Their writes still go through the unchanged guards: a channel a rule
+/// uses is refused in plain words and nothing is written.
+#[tokio::test]
+async fn channel_rule_widget_lists_need_a_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let cfg = "[[widgets]]\nid = \"wmark\"\ntype = \"custom-api\"\nurl = \"http://w.example/frag-mark\"\n\n\
+               [channels.chmark]\ntype = \"webhook\"\nurl_env = \"RH_FRAG_MARK\"\n\n\
+               [[alerts]]\nname = \"rulemark\"\ntype = \"container\"\nchannels = [\"chmark\"]\n";
+    std::fs::write(st.config.path(), cfg).unwrap();
+    let addr = start(st.clone()).await;
+    let marks = [
+        "frag-mark",
+        "RH_FRAG_MARK",
+        "rulemark",
+        "data-item",
+        "data-hash",
+    ];
+    for path in [
+        "/settings/notifications?frag=list",
+        "/settings/widgets?frag=list",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(r.body.is_empty(), "{path}: {}", r.body);
+    }
+    for path in [
+        "/settings/notifications?edit=channel:chmark",
+        "/settings/notifications?edit=rule:rulemark",
+        "/settings/widgets?edit=widget:wmark",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        // The sign-in link echoes the visitor's own URL (`next=`): not data.
+        let body: String = r
+            .body
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    p
+                } else {
+                    &p[p.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect();
+        for m in marks {
+            assert!(!body.contains(m), "{path}: leaked {m}");
+        }
+    }
+    let (cookie, csrf) = login(addr).await;
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    for (path, mark) in [
+        ("/settings/notifications?frag=list", "RH_FRAG_MARK"),
+        ("/settings/widgets?frag=list", "frag-mark"),
+        (
+            "/settings/notifications?edit=channel:chmark",
+            "RH_FRAG_MARK",
+        ),
+        ("/settings/widgets?edit=widget:wmark", "frag-mark"),
+    ] {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        assert!(r.body.contains(mark), "{path}");
+        assert!(no_store(&r.head), "{path}: {}", r.head);
+    }
+    let origin = format!("http://{addr}");
+    let hash = crate::settings::read_current(&st).unwrap().hash;
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/channels",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+            ("X-RH-CSRF", &csrf),
+        ],
+        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
+    )
+    .await;
+    assert_eq!(r.status, 422, "{}", r.body);
+    assert!(r.body.contains("used by the rule"), "{}", r.body);
+    assert_eq!(std::fs::read_to_string(st.config.path()).unwrap(), cfg);
+    // Without the CSRF header the same delete is refused by the gate.
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/channels",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+        ],
+        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
+    )
+    .await;
+    assert_eq!(r.status, 403);
 }

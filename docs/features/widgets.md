@@ -2,7 +2,20 @@
 
 - **custom-api:** fetch JSON from any URL, pick fields with paths, show them
   with a template or rows, optional status dot. Add and edit them in
-  Settings → Widgets, with a **Fetch now** preview before saving.
+  Settings → Widgets: a dialog with Request, Fields and Display tabs and a
+  **Fetch now** preview before saving, which shows the tile and what each
+  field's path found (never the raw response). Renaming a widget that rules
+  watch asks first and then changes those rules to the new id; a widget a
+  rule watches cannot be deleted until the rule is changed. Header values and
+  a request body set in the file are kept on save and never shown, only the
+  header names. "System tiles" is one switch that saves when switched.
+- Server behaviour (`/api/settings/widgets`): renaming a widget's id changes
+  `widget = "<old id>"` to the new id in every rule that watches it, in the
+  same revision (before, the rename was refused by the validator's `unknown
+  widget`). Deleting a widget a rule watches answers HTTP 422 with a plain
+  message and `used_by` (the rule names); nothing is written. An edited
+  widget keeps every key the request leaves out (`null` removes one), so
+  header values, the body and `output` are never sent and never lost.
 - **command:** run a program in the container and show its JSON. Off unless
   `enabled = true`, and **file-only**: the app can never create, change or enable
   one (it would be remote command execution in a container with the Docker

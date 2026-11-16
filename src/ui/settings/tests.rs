@@ -119,17 +119,25 @@ fn signed_in_tabs_render_editors() {
     ] {
         assert!(html.contains(&format!(r#"name="{f}""#)), "general: {f}");
     }
-    // Every input has a label.
+    // Every input, select and textarea has a label (`<label for>`, or an
+    // `aria-label` on the control, as the rows of a widget's fields have).
     for p in paths() {
-        let (_, html) = get(&st, &p, &h);
-        for id in html.split(r#"<input class="in"#).skip(1).filter_map(|s| {
-            let i = s.find(r#"id=""#)? + 4;
-            Some(s[i..i + s[i..].find('"')?].to_string())
-        }) {
-            assert!(
-                html.contains(&format!(r#"for="{id}""#)),
-                "{p}: no label for {id}"
-            );
+        let (_, page) = get(&st, &p, &h);
+        // The settings part of the page (the shell has its own checks).
+        let html = &page[page.find(r#"class="page set""#).expect("settings page")
+            ..page.find("/static/settings.js").expect("settings script")];
+        for tag in ["input", "select", "textarea"] {
+            for (at, a) in tags(html, tag) {
+                let ty = attr(&a, "type").unwrap_or("text");
+                if matches!(ty, "hidden" | "submit" | "button") {
+                    continue;
+                }
+                let labelled = attr(&a, "aria-label").is_some()
+                    || attr(&a, "id").is_some_and(|id| html.contains(&format!(r#"for="{id}""#)));
+                // Or the <label> around it.
+                let wrapped = html[..at].rfind("<label") > html[..at].rfind("</label>");
+                assert!(labelled || wrapped, "{p}: no label for {a:?}");
+            }
         }
     }
 }
@@ -497,7 +505,9 @@ fn the_no_js_note_tells_the_truth() {
     assert!(html.contains("The current values load with the script too."));
     assert!(!html.contains("You can read the values here."));
     let (_, html) = get(&st, "/settings/notifications", &h);
-    assert!(html.contains("needs-js") && html.contains("Saving needs JavaScript"));
+    assert!(html.contains("needs-js") && html.contains("You can read the values here."));
+    let (_, html) = get(&st, "/settings/widgets", &h);
+    assert!(html.contains("You can read the values here."));
     let (_, html) = get(&st, "/settings/bookmarks?edit=bookmark:0", &h);
     assert!(html.contains("You can read the values here."));
     let (_, html) = get(&st, "/settings/security", &h);
@@ -511,4 +521,396 @@ fn the_no_js_note_tells_the_truth() {
     // not merely because the inline boot script ran (`js`).
     assert!(crate::http::server::APP_CSS.contains(".hb-ready .needs-js{display:none!important}"));
     assert!(!html.contains("warn nojs"), "the old note class");
+}
+
+/// A config for the Channels, Rules and Widgets tabs whose values are easy
+/// to look for. `Sekrit-…` stand for values that must never reach a page:
+/// header values and bodies (the page shows header names only).
+const LISTS: &str = r#"
+[[widgets]]
+id = "w-mark"
+type = "custom-api"
+title = "Widget-mark"
+url = "http://wurl.example/mark"
+refresh = "45s"
+template = "{{v}}"
+headers = { X-Plain = "Sekrit-Header-Value" }
+body = "Sekrit-Body"
+[widgets.fields]
+v = "path.mark"
+
+[[widgets]]
+id = "w-bound"
+type = "custom-api"
+url = "http://bound.example/api"
+headers_env = { Authorization = "RH_W_TOKEN" }
+
+[[widgets]]
+id = "procs"
+type = "command"
+command = ["sh", "-c", "echo 1"]
+
+[channels.hook-mark]
+type = "webhook"
+url_env = "RH_HOOK_MARK"
+headers = { X-Key = "Sekrit-Channel-Header" }
+body = '{"text": "Sekrit-Channel-Body {{message}}"}'
+
+[channels.tg-mark]
+type = "telegram"
+token_file = "/data/secrets/tg-mark"
+chat_id = -1001234
+
+[[alerts]]
+name = "rule-mark"
+type = "http"
+url = "http://rule.example/mark"
+channels = ["hook-mark"]
+
+[[alerts]]
+name = "w-rule"
+type = "widget"
+widget = "w-mark"
+field = "v"
+above = 1
+enabled = false
+"#;
+
+/// Signed out, none of the three lists, their dialogs, `data-item`, the
+/// `?add=` / `?edit=` page forms or the fragments carry settings data.
+#[test]
+fn signed_out_channels_rules_widgets_leak_nothing() {
+    let st = state_with(sample(), LISTS);
+    let h = HeaderMap::new();
+    for (path, qs) in [
+        (
+            "/settings/notifications",
+            &[
+                "",
+                "add=channel",
+                "edit=channel:hook-mark",
+                "add=rule",
+                "edit=rule:rule-mark",
+                "frag=list",
+            ][..],
+        ),
+        (
+            "/settings/widgets",
+            &["", "add=widget", "edit=widget:w-mark", "frag=list"][..],
+        ),
+    ] {
+        for q in qs {
+            let ctx = Ctx::new(&st, "100.1.2.3", path, q, &h);
+            let (status, html) = render(&ctx);
+            assert_eq!(status, StatusCode::OK, "{path}?{q}");
+            // The account menu's sign-in link echoes the visitor's own URL
+            // (`next=`): that is the request, not the file.
+            let html = html
+                .split("/login?next=")
+                .enumerate()
+                .map(|(i, part)| {
+                    if i == 0 {
+                        part
+                    } else {
+                        &part[part.find('"').unwrap_or(0)..]
+                    }
+                })
+                .collect::<String>();
+            for leak in [
+                "hook-mark",
+                "RH_HOOK_MARK",
+                "tg-mark",
+                "rule-mark",
+                "rule.example",
+                "wurl.example",
+                "path.mark",
+                "RH_W_TOKEN",
+                "Sekrit",
+                "data-item",
+                "data-hash",
+                "dlg-channel",
+                "dlg-rule",
+                "dlg-widget",
+                r#"class="dlg-page"#,
+                "sys-tiles",
+                "rh-csrf",
+            ] {
+                if let Some(i) = html.find(leak) {
+                    panic!(
+                        "{path}?{q}: leaked {leak}: …{}…",
+                        &html[i.saturating_sub(200)..(i + 50).min(html.len())]
+                    );
+                }
+            }
+            assert!(html.contains("set-lock"), "{path}?{q}: lock panel");
+        }
+        let (status, body) = frag(&st, path, "frag=list", &h).expect("fragment");
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        assert!(body.is_empty());
+    }
+}
+
+#[test]
+fn channels_and_rules_are_rendered_by_the_server_with_their_dialogs() {
+    let st = state_with(sample(), LISTS);
+    assert!(st.db.is_enabled(), "needs the history database (sessions)");
+    let h = signed_in(&st);
+    let (_, html) = get(&st, "/settings/notifications", &h);
+    let sum = crate::settings::read_current(&st).unwrap().hash;
+    for id in ["ch-list", "ru-list"] {
+        assert!(
+            html.contains(&format!(r#"id="{id}" data-hash="{sum}""#)),
+            "{id} carries the file's hash"
+        );
+    }
+    // Rows: an edit link with the dialog's values, the rules using a channel.
+    assert!(html.contains(r#"href="?edit=channel:hook-mark""#));
+    assert!(html.contains(r#"data-key="channel:hook-mark" data-rules="[&quot;rule-mark&quot;]""#));
+    assert!(html.contains(r#"href="?edit=rule:rule-mark""#));
+    assert!(html.contains("RH_HOOK_MARK") && html.contains("/data/secrets/tg-mark"));
+    // Never a header value or a body, also not in data-item.
+    assert!(
+        !html.contains("Sekrit"),
+        "a secret-ish value reached the page"
+    );
+    assert!(
+        html.contains("Header X-Key"),
+        "the header is named, read-only"
+    );
+    // The channel dialog: the type and source choices, every secret field
+    // of every type, the test as a secondary that does not submit.
+    let d = &html[html.find(r#"id="dlg-channel""#).expect("channel dialog")..];
+    let d = &d[..d.find("</dialog>").unwrap()];
+    for f in [
+        "name",
+        "type",
+        "src",
+        "webhook_url_env",
+        "webhook_url_file",
+        "token_env",
+        "token_file",
+        "chat_id",
+        "url_env",
+        "url_file",
+        "url",
+        "timeout",
+    ] {
+        assert!(d.contains(&format!(r#"name="{f}""#)), "channel dialog: {f}");
+    }
+    assert_eq!(
+        tags(d, "button")
+            .iter()
+            .filter(|(_, a)| attr(a, "type") == Some("submit"))
+            .count(),
+        1
+    );
+    assert!(d.contains(r#"type="button" data-submit="test""#), "{d}");
+    assert!(
+        !d.contains("-mark"),
+        "the dialog itself holds no row values"
+    );
+    // The rule dialog: a new rule notifies every channel.
+    let d = &html[html.find(r#"id="dlg-rule""#).expect("rule dialog")..];
+    let d = &d[..d.find("</dialog>").unwrap()];
+    for c in ["hook-mark", "tg-mark"] {
+        assert!(
+            d.contains(&format!(
+                r#"name="channels" value="{c}" data-t="set" checked"#
+            )),
+            "{c} ticked for a new rule"
+        );
+    }
+    assert!(d.contains(r#"<option value="w-mark">"#) || d.contains(r#"option value="w-mark""#));
+    // A switched-off rule: its row switch is off and disabled until the script.
+    let row = &html[html.find(r#"data-key="rule:w-rule""#).unwrap()..];
+    let sw = tags(row, "input").into_iter().next().unwrap().1;
+    assert!(
+        attr(&sw, "data-toggle").is_some()
+            && attr(&sw, "checked").is_none()
+            && attr(&sw, "disabled").is_some()
+    );
+    // Delete is not offered from the page form; the fragment is both lists
+    // and the rule form's channel choice.
+    let (status, f) = frag(&st, "/settings/notifications", "frag=list", &h).unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        f.contains(r#"id="ch-list""#)
+            && f.contains(r#"id="ru-list""#)
+            && f.contains(r#"id="ru-channels""#)
+    );
+    assert!(!f.contains("Sekrit"));
+}
+
+#[test]
+fn channel_and_rule_page_forms_without_script() {
+    let st = state_with(sample(), LISTS);
+    assert!(st.db.is_enabled());
+    let h = signed_in(&st);
+    let page = |q: &str| {
+        let (_, html) = get(&st, &format!("/settings/notifications?{q}"), &h);
+        let p = html.find(r#"class="dlg-page"#).map(|i| {
+            let p = &html[i..];
+            p[..p.find("</form></section>").unwrap()].to_string()
+        });
+        (html, p)
+    };
+    // A Telegram channel with its token in a file: the choices are checked,
+    // only Telegram's fields are shown, Save is disabled, the note is true.
+    let (_, p) = page("edit=channel:tg-mark");
+    let p = p.expect("page form");
+    assert!(p.contains("Edit channel “tg-mark”"));
+    assert!(p.contains(r#"value="telegram" checked"#) && p.contains(r#"value="file" checked"#));
+    assert!(p.contains(r#"value="/data/secrets/tg-mark""#) && p.contains(r#"value="-1001234""#));
+    assert!(p.contains(r#"<div class="fc" data-for="slack" hidden>"#));
+    assert!(p.contains("You can read the values here."));
+    assert!(tags(&p, "button")
+        .iter()
+        .any(|(_, a)| attr(a, "type") == Some("submit") && attr(a, "disabled").is_some()));
+    // A rule.
+    let (_, p) = page("edit=rule:rule-mark");
+    let p = p.expect("page form");
+    assert!(
+        p.contains(r#"value="http://rule.example/mark""#)
+            && p.contains(r#"<option value="http" selected>"#)
+    );
+    // Edit wins over add, also across the two lists; a gone entry says so.
+    let (_, p) = page("add=channel&edit=rule:rule-mark");
+    assert!(p.unwrap().contains("Edit rule “rule-mark”"));
+    let (html, p) = page("edit=channel:nope");
+    assert!(p.is_none() && html.contains("That channel does not exist"));
+    let (_, p) = page("add=rule");
+    assert!(p.unwrap().contains("Add rule"));
+}
+
+#[test]
+fn widgets_are_rendered_by_the_server_with_their_dialog() {
+    let st = state_with(sample(), LISTS);
+    assert!(st.db.is_enabled());
+    let h = signed_in(&st);
+    let (_, html) = get(&st, "/settings/widgets", &h);
+    // Custom-api rows only, every id in file order for the arrows.
+    let l = &html[html.find(r#"id="w-list""#).unwrap()..];
+    let l = &l[..l.find("</table>").unwrap()];
+    assert!(l.contains(r#"data-key="widget:w-mark" data-rules="[&quot;w-rule&quot;]""#));
+    assert!(l.contains(r#"data-key="widget:w-bound""#) && !l.contains("widget:procs"));
+    assert!(
+        l.contains(r#"data-order="[&quot;w-mark&quot;,&quot;w-bound&quot;,&quot;procs&quot;]""#),
+        "{l}"
+    );
+    assert!(
+        !html.contains("Sekrit"),
+        "no header value or body in the page"
+    );
+    assert!(
+        html.contains("RH_W_TOKEN"),
+        "a header's variable name is shown"
+    );
+    // The dialog: three tabs, Fetch now as a plain button, one submit.
+    let d = &html[html.find(r#"id="dlg-widget""#).expect("dialog")..];
+    let d = &d[..d.find("</dialog>").unwrap()];
+    assert_eq!(d.matches(r#"role="tab""#).count(), 3);
+    assert_eq!(d.matches(r#"role="tabpanel""#).count(), 3);
+    assert!(d.contains(r#"type="button" data-act="wf-preview""#));
+    assert_eq!(
+        tags(d, "button")
+            .iter()
+            .filter(|(_, a)| attr(a, "type") == Some("submit"))
+            .count(),
+        1
+    );
+    for f in [
+        "name=\"command\"",
+        "name=\"env\"",
+        "name=\"headers_env\"",
+        "name=\"headers\"",
+        "name=\"body\"",
+    ] {
+        assert!(!d.contains(f), "widget dialog offers {f}");
+    }
+    // System tiles: one switch, disabled until the script, and the note.
+    assert!(html.contains(r#"id="sys-tiles""#) && !html.contains(r#"id="f-system""#));
+    assert!(html.contains("Saving needs JavaScript"));
+    // The page form: filled, sections instead of tabs.
+    let (_, html) = get(&st, "/settings/widgets?edit=widget:w-mark", &h);
+    let p = &html[html.find(r#"class="dlg-page"#).expect("page form")..];
+    let p = &p[..p.find("</form></section>").unwrap()];
+    assert!(
+        p.contains(r#"value="http://wurl.example/mark""#) && p.contains(r#"value="path.mark""#)
+    );
+    assert!(p.contains(r#"value="45s""#), "{p}");
+    assert!(
+        !p.contains(r#"role="tab""#),
+        "the page form has sections, not tabs"
+    );
+    let (_, html) = get(&st, "/settings/widgets?edit=widget:procs", &h);
+    assert!(
+        !html.contains(r#"class="dlg-page"#) && html.contains("That widget does not exist"),
+        "command widgets are never editable"
+    );
+    let (status, f) = frag(&st, "/settings/widgets", "frag=list", &h).unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert!(f.starts_with(r#"<div id="w-list""#) && f.contains("Widget-mark"));
+}
+
+/// Review fixes: a log rule shows and keeps its Except; a Telegram channel
+/// whose chat id comes from a variable shows no empty required field; the
+/// no-JS page form's choices and switches cannot be changed; rule names
+/// with a comma are kept whole in `data-rules`.
+#[test]
+fn page_forms_and_rows_say_what_is_in_the_file() {
+    let cfg = r#"
+[channels.tg-env]
+type = "telegram"
+token_env = "RH_TG"
+chat_id_env = "RH_TG_CHAT"
+
+[[alerts]]
+name = "logs, odd"
+type = "log_match"
+pattern = "error"
+containers = ["web-*"]
+exclude = ["web-test"]
+channels = ["tg-env"]
+"#;
+    let st = state_with(sample(), cfg);
+    assert!(st.db.is_enabled());
+    let h = signed_in(&st);
+    let (_, html) = get(&st, "/settings/notifications", &h);
+    assert!(
+        html.contains("/error/ in web-* except web-test"),
+        "the row says except"
+    );
+    assert!(html.contains(r#"data-rules="[&quot;logs, odd&quot;]""#));
+    let page = |q: &str| {
+        let (_, html) = get(&st, &format!("/settings/notifications?{q}"), &h);
+        let p = &html[html.find(r#"class="dlg-page"#).expect("page form")..];
+        p[..p.find("</form></section>").unwrap()].to_string()
+    };
+    let p = page("edit=rule:logs, odd");
+    let ex = tags(&p, "input")
+        .into_iter()
+        .find(|(_, a)| attr(a, "name") == Some("exclude"))
+        .expect("Except")
+        .1;
+    assert_eq!(attr(&ex, "value"), Some("web-test"));
+    let fld = &p[..p.find(r#"name="exclude""#).unwrap()];
+    let fld = &fld[fld.rfind("<div class=\"fld").unwrap()..];
+    assert!(
+        fld.contains(r#"data-for="container log_match""#) && !fld.contains(" hidden"),
+        "{fld}"
+    );
+    for (_, a) in tags(&p, "input") {
+        if matches!(attr(&a, "type"), Some("radio" | "checkbox")) {
+            assert!(attr(&a, "disabled").is_some(), "page form control {a:?}");
+        }
+    }
+    for (_, a) in tags(&p, "select") {
+        assert!(attr(&a, "disabled").is_some());
+    }
+    let p = page("edit=channel:tg-env");
+    assert!(
+        !p.contains(r#"name="chat_id""#),
+        "no empty required chat id"
+    );
+    assert!(p.contains("Chat id: read from the variable") && p.contains("RH_TG_CHAT"));
 }

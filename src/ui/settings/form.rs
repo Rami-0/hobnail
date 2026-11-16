@@ -15,21 +15,15 @@ pub struct Form(pub &'static str);
 pub enum T {
     /// Trimmed string; empty means "not set".
     Str,
-    /// Comma-separated list of strings.
-    List,
     /// A number.
     Num,
-    /// A number, `true`/`false`, or else a string.
-    Json,
 }
 
 impl T {
     fn attr(self) -> Option<&'static str> {
         match self {
             T::Str => None,
-            T::List => Some("list"),
             T::Num => Some("num"),
-            T::Json => Some("json"),
         }
     }
 }
@@ -150,31 +144,6 @@ impl Form {
             }
         }
     }
-
-    /// A group of checkboxes with one name (`data-t="set"`: an array of the
-    /// checked values). `opts` may be empty; the script fills `#<id>-opts`.
-    pub fn set(
-        &self,
-        name: &str,
-        label: &str,
-        hint: &str,
-        opts: &[(&str, &str)],
-        for_: Option<&str>,
-    ) -> Markup {
-        let id = self.id(name);
-        html! {
-            fieldset.fld.wide.cset data-for=[for_] aria-describedby=(self.described(name)) {
-                legend { (label) }
-                div.cset-opts id={(id) "-opts"} data-name=(name) {
-                    @for (v, l) in opts {
-                        label.cb { input type="checkbox" name=(name) value=(v) data-t="set"; span { (l) } }
-                    }
-                }
-                @if !hint.is_empty() { p.hint id={(id) "-h"} { (hint) } }
-                p.fld-err id={(id) "-e"} hidden {}
-            }
-        }
-    }
 }
 
 /// Form footer: the submit button (disabled until the script runs, see
@@ -188,19 +157,6 @@ pub fn foot(save: &str, extra: Markup) -> Markup {
             button.btn.primary type="submit" disabled data-ready { (ic("check")) (save) }
             (extra)
             span.sf-msg role="status" aria-live="polite" {}
-        }
-    }
-}
-
-/// A section heading with an optional action button (the script binds
-/// `data-act`).
-pub fn head(title: &str, act: Option<(&str, &str, &str)>) -> Markup {
-    html! {
-        div.panel-h {
-            h2 { (title) }
-            @if let Some((a, icon, label)) = act {
-                button.btn.sm.head-act type="button" data-act=(a) { (ic(icon)) (label) }
-            }
         }
     }
 }

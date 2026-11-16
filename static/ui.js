@@ -103,16 +103,28 @@
     return o;
   }
   function fill(form, v) {
+    // A control a page script locked for one entry (`data-locked`, e.g. the
+    // type of a channel bound to its destination) is free again for the next.
+    $$("[data-locked]", form).forEach((c) => { c.disabled = false; c.removeAttribute("data-locked"); });
     for (const c of fields(form)) {
       const x = v ? v[c.name] : undefined;
       if (c.type === "radio") c.checked = x != null ? c.value === String(x) : c.defaultChecked;
       else if (c.type === "checkbox") c.checked = Array.isArray(x) ? x.includes(c.value) : x != null ? !!x : c.defaultChecked;
+      else if (c.tagName === "SELECT") { const o = Array.from(c.options); c.value = x != null && o.some((y) => y.value === String(x)) ? String(x) : (o.find((y) => y.defaultSelected) || o[0] || {}).value || ""; }
       else { c.value = x != null ? String(x) : c.defaultValue; c._was = c.value; }
       setErr(c, "");
     }
     form.dispatchEvent(new Event("hb-fill"));
   }
   HB.values = values; HB.fill = fill;
+  // An error on one field, shown and revealed (its tab selected, its
+  // <details> opened) as a save's would be; false when the form has no such field.
+  HB.fieldError = (form, name, msg) => {
+    const x = form.elements.namedItem(name), c = x && !x.tagName && x.length ? x[0] : x;
+    if (!c || c.disabled) return false;
+    setErr(c, msg); reveal(c);
+    return true;
+  };
   // Fields that belong to one choice (data-for="name:a b", default name "type").
   function byType(form) {
     $$("[data-for]", form).forEach((w) => {
@@ -120,13 +132,13 @@
       const t = form.querySelector(`[name="${CSS.escape(k)}"]:checked, select[name="${CSS.escape(k)}"]`);
       if (!t) return;
       const on = l.split(" ").includes(t.value) && !w.parentElement.closest("[data-for][hidden]");
-      w.hidden = !on; $$("input,select,textarea", w).forEach((c) => { c.disabled = !on || c.closest("[data-for][hidden]") !== null; });
+      w.hidden = !on; $$("input,select,textarea", w).forEach((c) => { c.disabled = !on || c.closest("[data-for][hidden]") !== null; if (c.disabled) setErr(c, ""); });
     });
     // A chosen option that just disappeared falls back to the first one left.
     const gone = form.querySelector("input[type=radio]:checked:disabled"), alt = gone && form.querySelector(`input[name="${CSS.escape(gone.name)}"]:not(:disabled)`);
     if (alt) { alt.checked = true; byType(form); }
   }
-  doc.addEventListener("change", (e) => { if (e.target.type === "radio" && e.target.form && e.target.form.hasAttribute("data-hb")) byType(e.target.form); });
+  doc.addEventListener("change", (e) => { const t = e.target; if ((t.type === "radio" || t.tagName === "SELECT") && t.form && t.form.hasAttribute("data-hb")) byType(t.form); });
   doc.addEventListener("hb-fill", (e) => byType(e.target), true);
 
   // ---- dialog: opens from what was clicked, Esc / backdrop / Cancel ask before dropping input ----
@@ -268,6 +280,10 @@
     if (!inDlg && form.closest("dialog")) return;
     const c = inDlg ? cur : form._hb || (form._hb = { dlg: form, form, page: true });
     if (c.busy) return;
+    // Save was disabled (an edit that cannot be re-found after a 409): no
+    // way around it, not Enter, not Ctrl/⌘ Enter, not "Save and send test".
+    const prim = form.querySelector("[type=submit]");
+    if (prim && prim.disabled) return;
     // Enter (implicit submission) uses the primary, the form's first submit button.
     c.by = c.pending || (e.submitter && e.submitter.form === form ? e.submitter : form.querySelector("[type=submit]"));
     c.pending = null;
@@ -313,6 +329,21 @@
     else if (nn) nn.focus();
   }
   HB.note = (kind, text, a) => cur && note(cur.dlg, kind, text, a);
+  // After a save that keeps the dialog open ("Save and send test"): the
+  // dialog now edits what was saved. `key` and `base` are that entry and the
+  // file version the save itself wrote (never a version written by anyone
+  // else, see settings.js); `was` the entry's values as the list now has them.
+  HB.edited = (c, key, base, was) => {
+    c.key = key; c.base = base; c.was = was;
+    c.dlg.dataset.mode = "edit";
+    const h = part(c.dlg, ".dlg-h h2");
+    if (h && h.dataset.edit) h.textContent = h.dataset.edit.replace("{}", (was && was[h.dataset.key || "name"]) || "");
+    acts(c.dlg).forEach((b) => { if (!b.dataset.edit) return; if (b === c.by && c.busy) b.dataset.l = b.dataset.edit; else b.lastChild.textContent = b.dataset.edit; });
+    fields(c.form).forEach((x) => { if (x.type !== "checkbox" && x.type !== "radio") x._was = x.value; });
+    // Closing now returns to the saved entry's row, and the URL names it.
+    c.trigger = doc.querySelector(`[data-dlg][data-key="${CSS.escape(key)}"]`) || c.trigger;
+    try { const u = new URL(location.href); u.searchParams.delete("add"); u.searchParams.set("edit", key); history.replaceState(history.state, "", u.href); c.url = u.href; } catch {}
+  };
   // The open dialog's state ({dlg, key, base, trigger}; for actions inside
   // it, such as Delete…). A handler may retarget `key` and `base` only after
   // re-locating the same item in a newer file (see settings.js listDialog).
@@ -330,7 +361,9 @@
     if (e.key === "Escape") { e.preventDefault(); if (cur.busy) return; const g = part(cur.dlg, ".dlg-guard"); if (g && !g.hidden) guard(false); else HB.close(); }
     else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); cur.form.requestSubmit(); }
   }, true);
-  doc.addEventListener("focusin", (e) => { if (cur && cur.form.contains(e.target) && e.target.name) cur.last = e.target; });
+  // (`cur.dlg`, not `cur.form`: a field named "contains" would shadow the
+  // form's own method, as "id", "name" and "method" shadow its properties.)
+  doc.addEventListener("focusin", (e) => { if (cur && cur.dlg.contains(e.target) && e.target.name) cur.last = e.target; });
   // Backdrop: a click that both starts and ends outside the box.
   let downOut = false;
   const outside = (e) => { if (!cur || e.target !== cur.dlg || others()) return false; const r = cur.dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };

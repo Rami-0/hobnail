@@ -1,9 +1,9 @@
 // Settings pages only (loaded by /settings/*). Lists that moved onto the
-// dialog (Bookmarks) are rendered by the server and swapped in from its
-// `?frag=list` after a save; the other tabs load from /api/settings/* and
-// render with createElement/textContent (never innerHTML with API data; the
-// exceptions are the widget preview and the list fragments, both HTML
-// escaped by our own server). Every save is HB.api: X-RH-CSRF, same-origin
+// dialog (Bookmarks, Widgets, Notifications) are rendered by the server and
+// swapped in from its `?frag=list` after a save; the other tabs load from
+// /api/settings/* and render with createElement/textContent (never
+// innerHTML with API data; the exceptions are the widget preview and the
+// list fragments, both HTML escaped by our own server). Every save is HB.api: X-RH-CSRF, same-origin
 // credentials and the base_hash of what was loaded. Runs once window.HB
 // exists: ui.js comes with app.js, which is deferred after this script.
 (() => {
@@ -311,18 +311,9 @@
       else c.value = typeof v === "object" ? JSON.stringify(v) : String(v);
     }
   }
-  function showType(form, type) {
-    $$("[data-for]", form).forEach((w) => { w.hidden = !w.dataset.for.split(" ").includes(type); });
-  }
   const pick = (o, keys) => { const r = {}; for (const k of keys) if (o && o[k] !== undefined) r[k] = o[k]; return r; };
   const dur = (v) => (v != null && /^\d+$/.test(String(v)) ? Number(v) : v);
-  function required(form, names) {
-    let ok = true;
-    for (const n of names) { const c = ctl(form, n); if (c && !c.value.trim()) { if (ok) fieldErr(form, n, "Required."); ok = false; } }
-    if (!ok) note(form, "bad", "Not saved: fill in the required fields.");
-    return ok;
-  }
-  // Entity editors (bookmark, widget, channel, rule, override).
+  // The container override editor (moves onto the dialog with its tab).
   function openEditor(form, title, after) {
     clearErrs(form);
     form._dirty = false;
@@ -349,7 +340,6 @@
     return [up, dn];
   }
   const swap = (a, i, j) => { const r = a.slice(); [r[i], r[j]] = [r[j], r[i]]; return r; };
-  const ENV_RE = /^[A-Z_][A-Z0-9_]*$/;
 
   // =================================================================== tabs
   const TABS = {};
@@ -565,43 +555,56 @@
   };
 
   // ---- lists rendered by the server (the dialog pattern, DESIGN.md §11.6) ----
-  // `refreshList(id, flash)` fetches this tab's `?frag=list` (the same markup
-  // as the page, session only) and swaps rows by data-key: an unchanged row
-  // stays as it is (focus and scroll keep), a changed or new one is put in,
-  // a gone one is removed, and the row named by `flash` flashes once.
-  async function refreshList(id, flash) {
+  // `refreshList(ids, flash)` fetches this tab's `?frag=list` (the same markup
+  // as the page, session only) and puts in each element named by `ids` (the
+  // first one is the list the dialog belongs to; a tab whose lists depend on
+  // each other refreshes them together). Rows are swapped by data-key: an
+  // unchanged row stays as it is (focus and scroll keep), a changed or new
+  // one is put in, a gone one is removed, and the row named by `flash`
+  // flashes once. Any other element (a form's choice list) is replaced.
+  async function refreshList(ids, flash) {
+    ids = [].concat(ids);
     let r;
     try { r = await fetch(location.pathname + "?frag=list", { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
     if (r.status === 401) banner("expired");
     if (!r.ok) return false;
     const t = doc.createElement("template");
     t.innerHTML = await r.text(); // our server's markup: every value escaped there
-    const next = t.content.getElementById(id), box = $(id);
-    if (!next || !box) return false;
-    S.hash = next.dataset.hash;
-    box.dataset.hash = next.dataset.hash;
-    $$("[data-ready]", next).forEach((b) => { b.disabled = false; }); // as ui.js does on load
-    const a = box.querySelector("tbody"), b = next.querySelector("tbody");
-    if (!a || !b) box.replaceChildren(...next.childNodes);
-    else {
-      const old = new Map($$("tr[data-key]", a).map((x) => [x.dataset.key, x]));
-      const same = (o, x) => { const c = o.cloneNode(true); c.classList.remove("row-new"); return c.isEqualNode(x); };
-      const want = Array.from(b.rows).map((x) => { const o = old.get(x.dataset.key); return o && same(o, x) ? o : x; });
-      want.forEach((w, i) => { if (a.rows[i] !== w) a.insertBefore(w, a.rows[i] || null); });
-      while (a.rows.length > want.length) a.rows[want.length].remove();
+    let done = false;
+    for (const id of ids) {
+      const next = t.content.getElementById(id), box = $(id);
+      if (!next || !box) continue;
+      $$("[data-ready]", next).forEach((b) => { b.disabled = false; }); // as ui.js does on load
+      if (!next.dataset.hash) { box.replaceWith(next); continue; }
+      done = true;
+      S.hash = next.dataset.hash;
+      box.dataset.hash = next.dataset.hash;
+      Object.assign(box.dataset, next.dataset); // the hash, a widget list's order and System tiles
+      const a = box.querySelector("tbody"), b = next.querySelector("tbody");
+      if (!a || !b) box.replaceChildren(...next.childNodes);
+      else {
+        const old = new Map($$("tr[data-key]", a).map((x) => [x.dataset.key, x]));
+        const same = (o, x) => { const c = o.cloneNode(true); c.classList.remove("row-new"); return c.isEqualNode(x); };
+        const want = Array.from(b.rows).map((x) => { const o = old.get(x.dataset.key); return o && same(o, x) ? o : x; });
+        want.forEach((w, i) => { if (a.rows[i] !== w) a.insertBefore(w, a.rows[i] || null); });
+        while (a.rows.length > want.length) a.rows[want.length].remove();
+      }
+      const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
+      if (row) HB.flash(row);
     }
-    const row = flash && box.querySelector(`tr[data-key="${CSS.escape(flash)}"]`);
-    if (row) HB.flash(row);
-    return true;
+    return done;
   }
   // THE BASE-HASH RULE (every list form, the next ones included): a write is
   // based on the file version the user was looking at when they started it.
   // A dialog takes its base when it opens (ui.js: the `data-hash` of the
-  // list its trigger sits in), a confirm or an arrow click takes it before
-  // anything is awaited, and that base is sent as base_hash. Nothing adopts
-  // a newer hash on its behalf, so the server answers 409 whenever the file
-  // moved, and an id that is a list position can never hit another entry.
-  // S.hash only says which version the list on screen shows.
+  // list its trigger sits in), a confirm, an arrow click or a row switch
+  // takes it before anything is awaited, and that base is sent as base_hash.
+  // Nothing adopts a newer hash on its behalf, so the server answers 409
+  // whenever the file moved, and an id that is a list position can never
+  // hit another entry. The one hash a dialog may move to without asking is
+  // the one its own save wrote ("Save and send test" stays open on what it
+  // saved: HB.edited). S.hash only says which version the list on screen
+  // shows.
   //
   // A write of a list: counted in S.saving like save() does, so a config
   // change event that arrives meanwhile waits for the answer and then finds
@@ -614,22 +617,37 @@
     if (S.recheck && !S.saving) { S.recheck = false; setTimeout(checkChanged, 0); }
     return r;
   }
-  const rowItem = (tr) => { try { return JSON.parse(tr.querySelector("[data-item]").dataset.item); } catch { return {}; } };
+  const itemOfEl = (x) => { try { return JSON.parse((x && x.dataset && x.dataset.item) || "{}"); } catch { return {}; } };
+  const rowItem = (tr) => itemOfEl(tr.querySelector("[data-item]"));
   const rowOf = (o, key) => $(o.list).querySelector(`tr[data-key="${CSS.escape(key)}"]`);
   const keyId = (key) => key.slice(key.indexOf(":") + 1);
   const revNo = (d) => (d.revision != null ? ` · revision #${d.revision}` : "");
+  const quoted = (names) => names.map((n) => `“${n}”`).join(", ");
+  const lists = (o) => [o.list].concat(o.also || []);
+  // The values a dialog was opened with (or, after "Save and send test",
+  // what it saved): what an edit is re-found by after a 409.
+  const openedWith = (c) => c.was || itemOfEl(c.trigger);
 
-  // A list's add / edit dialog. `o`: {list, path, kind, noun, item(values) →
-  // the API item, id(key) → the API id, newKey(values, rowsBefore),
-  // movedKey(key, newIndex), label(values)}. Saves send the dialog's own
-  // base (ctx.base), never S.hash.
+  // A list's add / edit dialog. `o`: {list, also, path, kind, noun,
+  // item(values, was) → the API item, keep(item, was, base) → the item with
+  // the keys the form does not show (async), id(key) → the API id,
+  // savedKey(values, editKey, rowsBefore), movedKey(key, newIndex),
+  // label(values), ask(values, c) → a note that stops the first Save
+  // (a rename that changes rules), test(values, key, data) → the note of a
+  // "save and …" action}. Saves send the dialog's own base (c.base), never
+  // S.hash.
   function listDialog(dlg, o) {
     if (!dlg) return;
     dlg._submit = async (v, ctx) => {
+      const c = HB.current();
       const edit = ctx.mode === "edit" && ctx.key;
+      const was = openedWith(c);
+      const stop = edit && o.ask && o.ask(v, c, was);
+      if (stop) return stop;
       const before = $$("tr[data-key]", $(o.list)).length;
-      const item = o.item(v);
-      const body = edit ? { base_hash: ctx.base, action: "edit", id: o.id(ctx.key), item } : { base_hash: ctx.base, action: "add", item };
+      // An edit sends only what changed (THE DIFF RULE, above `onlyChanged`).
+      const item = o.item(v, edit ? was : null);
+      const body = edit ? { base_hash: c.base, action: "edit", id: o.id(c.key), item } : { base_hash: c.base, action: "add", item };
       const r = HB.result(await post(o.path, body), {
         // 409, "Reload and keep my input": show the file as it is now and
         // keep every value typed. RETARGET RULE: an add simply moves to the
@@ -640,29 +658,38 @@
         // Discard is offered: the input can be copied from the fields, but it
         // can never be saved onto another entry.
         reload: async () => {
-          await refreshList(o.list);
-          const c = HB.current(), box = $(o.list);
-          if (!c || c.dlg !== dlg) return;
-          if (!edit) { c.base = box.dataset.hash; HB.note("ok", "Reloaded the current file. Save again to add it."); ctx.form.querySelector("[type=submit]").focus(); return; }
-          let was = {};
-          try { was = JSON.parse((ctx.trigger && ctx.trigger.dataset && ctx.trigger.dataset.item) || "{}"); } catch {}
+          await refreshList(lists(o));
+          const cc = HB.current(), box = $(o.list);
+          if (!cc || cc.dlg !== dlg) return;
+          if (!edit) { cc.base = box.dataset.hash; HB.note("ok", "Reloaded the current file. Save again to add it."); ctx.form.querySelector("[type=submit]").focus(); return; }
           const same = $$("tr[data-key]", box).filter((tr) => JSON.stringify(rowItem(tr)) === JSON.stringify(was));
           if (same.length === 1) {
-            c.key = same[0].dataset.key; c.base = box.dataset.hash;
+            cc.key = same[0].dataset.key; cc.base = box.dataset.hash;
             HB.note("ok", "Reloaded the current file. Save again to apply your input on top of it.");
             ctx.form.querySelector("[type=submit]").focus();
           } else {
-            $$("[type=submit],[data-act=dlg-delete]", dlg).forEach((b) => { b.disabled = true; });
+            $$("[type=submit],[data-submit],[data-act=dlg-delete]", dlg).forEach((b) => { b.disabled = true; });
             HB.note("bad", `This ${o.noun} was changed, moved or removed in the file meanwhile, so your input cannot be saved onto it. Copy what you need, discard, and open it again from the list.`, [{ label: "Discard my input", run: () => HB.close(true) }]);
           }
         },
-        discard: () => { HB.close(true); refreshList(o.list); },
+        discard: () => { HB.close(true); refreshList(lists(o)); },
       });
-      if (!r.ok) return r;
-      const key = edit ? ctx.key : o.newKey(v, before), d = r.data;
-      await refreshList(o.list, d.unchanged ? null : key);
+      if (!r.ok) return o.fields ? o.fields(r) : r;
+      const key = o.savedKey(v, edit && c.key, before), d = r.data;
+      await refreshList(lists(o), d.unchanged ? null : key);
       $$('#set-banners [data-b="changed"], #set-banners [data-b="stale"]').forEach((b) => b.remove());
       const warn = (d.warnings || []).join(" ");
+      if (ctx.action !== "save" && o.test) {
+        // Saved; the dialog stays open on what it saved (see the rule above).
+        // The row is what was saved only if the list shows the file this
+        // save wrote; if someone wrote after it, the dialog keeps nothing to
+        // re-find (a later 409 then cannot be retargeted: fail closed).
+        const row = rowOf(o, key), mine = row && $(o.list).dataset.hash === d.hash;
+        HB.edited(c, key, d.hash, mine ? rowItem(row) : {});
+        const saved = d.unchanged ? "No changes to save." : `Saved${revNo(d).replace(" · ", " (") + (d.revision != null ? ")" : "")}.`;
+        const t = await o.test(v, key, d);
+        return { ok: true, stay: true, note: [t[0], `${saved} ${t[1]}${warn ? " " + warn : ""}`] };
+      }
       return {
         ok: true,
         toast: d.unchanged ? "No changes" : `${edit ? "Saved" : "Added"} “${o.label(v)}”${revNo(d)}`,
@@ -676,19 +703,31 @@
   // file moved while the confirm was open, the delete is refused (409), never
   // applied to whatever sits at that position now. The toast's Undo restores
   // the revision the delete was made on, refused (409) if the file changed
-  // since.
+  // since. An entry that rules still use is not offered for deleting: the
+  // message names the rules (the server refuses it the same way).
   const confirmDelete = (o, name) => HB.confirm({ title: `Delete the ${o.noun} “${name}”?`, body: "It is removed from the config file. You can undo this from the message that follows, or restore it later under Config file.", ok: `Delete ${o.noun}` });
+  // `data-rules` of a row: the names of the rules that use it, as JSON (a
+  // rule name may hold a comma).
+  const rulesOf = (tr) => { try { return JSON.parse((tr && tr.dataset.rules) || "[]"); } catch { return []; } };
+  function usedBy(o, tr, name) {
+    const rules = rulesOf(tr);
+    if (!rules.length) return false;
+    toast(`The ${o.noun} “${name}” is used by the rule${rules.length > 1 ? "s" : ""} ${quoted(rules)}. ${o.inUse}`, "bad");
+    return true;
+  }
   async function deleteRow(o, key, base, name) {
     const before = base;
-    const r = HB.result(await post(o.path, { base_hash: base, action: "delete", id: o.id(key) }));
+    const res = await post(o.path, { base_hash: base, action: "delete", id: o.id(key) });
+    const r = HB.result(res);
     if (!r.ok) {
-      toast(r.note && /changed on disk/.test(r.note[1]) ? `Not deleted: the config file changed since you asked. Nothing was removed; check the list and try again.` : (r.note && r.note[1]) || Object.values(r.fields || {}).join(" "), "bad");
-      refreshList(o.list);
+      const d = res.data || {};
+      toast(d.used_by ? d.error : r.note && /changed on disk/.test(r.note[1]) ? `Not deleted: the config file changed since you asked. Nothing was removed; check the list and try again.` : (r.note && r.note[1]) || Object.values(r.fields || {}).join(" "), "bad");
+      refreshList(lists(o));
       return;
     }
     const row = rowOf(o, key);
     if (row) { HB.remove(row); await new Promise((res) => setTimeout(res, 170)); }
-    await refreshList(o.list);
+    await refreshList(lists(o));
     const d = r.data, after = d.hash, rev = d.revision;
     const undo = async () => {
       // The revision just before the delete holds the file as it was; its
@@ -700,30 +739,41 @@
       if (u.status === 409) { toast("Not undone: the config file changed since the delete. Its revisions are under Config file.", "bad"); return; }
       const ur = HB.result(u);
       if (!ur.ok) { toast(ur.note ? ur.note[1] : "Not undone.", "bad"); return; }
-      await refreshList(o.list, key);
+      await refreshList(lists(o), key);
       toast(`Restored “${name}”${revNo(ur.data)}`);
     };
     HB.toast(`Deleted “${name}”${revNo(d)}`, rev != null ? { action: { label: "Undo", run: undo } } : {});
     const add = $(o.add);
     if (add && (doc.activeElement === doc.body || !doc.activeElement)) add.focus();
   }
-  // One-click up / down (owner decision Y13: one revision per step).
+  // One-click up / down (owner decision Y13: one revision per step). A list
+  // that shows only some entries of its array (widgets: not the command
+  // ones) carries every id in file order as `data-order`.
   function moveRow(o, btn) {
-    const tr = btn.closest("tr[data-key]"), rows = $$("tr[data-key]", $(o.list));
+    const box = $(o.list), tr = btn.closest("tr[data-key]"), rows = $$("tr[data-key]", box);
     const i = rows.indexOf(tr), j = i + (btn.dataset.move === "up" ? -1 : 1);
     if (i < 0 || j < 0 || j >= rows.length || o.moving) return;
-    const order = rows.map((r) => o.id(r.dataset.key));
-    [order[i], order[j]] = [order[j], order[i]];
+    let order = rows.map((r) => o.id(r.dataset.key));
+    if (box.dataset.order) {
+      try { order = JSON.parse(box.dataset.order); } catch { return; }
+      const a = order.indexOf(o.id(rows[i].dataset.key)), b = order.indexOf(o.id(rows[j].dataset.key));
+      if (a < 0 || b < 0) return;
+      [order[a], order[b]] = [order[b], order[a]];
+    } else [order[i], order[j]] = [order[j], order[i]];
     o.moving = true;
     btn.setAttribute("aria-busy", "true");
-    const dir = btn.dataset.move, name = o.label(rowItem(tr)), base = $(o.list).dataset.hash;
+    const dir = btn.dataset.move, name = o.label(rowItem(tr)), base = box.dataset.hash;
     (async () => {
       const r = HB.result(await post(o.path, { base_hash: base, action: "reorder", order }));
       btn.removeAttribute("aria-busy");
       o.moving = false;
-      if (!r.ok) { toast((r.note && r.note[1]) || "Not moved.", "bad"); refreshList(o.list); return; }
+      if (!r.ok) {
+        toast(r.note && /changed on disk/.test(r.note[1]) ? "Not moved: the config file changed since this list was loaded. Nothing was changed; the list now shows the current file." : (r.note && r.note[1]) || "Not moved.", "bad");
+        refreshList(lists(o));
+        return;
+      }
       const key = o.movedKey(tr.dataset.key, j);
-      await refreshList(o.list, key);
+      await refreshList(lists(o), key);
       const nr = rowOf(o, key), same = nr && nr.querySelector(`[data-move="${dir}"]`);
       const f = same && !same.disabled ? same : nr && nr.querySelector("[data-move]:not([disabled])");
       if (f) f.focus();
@@ -745,19 +795,31 @@
         else {
           // Taken now, before the confirm is awaited (the base-hash rule).
           const key = tr.dataset.key, base = box.dataset.hash, name = o.label(rowItem(tr));
-          confirmDelete(o, name).then((ok) => ok && deleteRow(o, key, base, name));
+          if (!usedBy(o, tr, name)) confirmDelete(o, name).then((ok) => ok && deleteRow(o, key, base, name));
         }
       }
       const del = e.target.closest("[data-act=dlg-delete]"), c = HB.current();
       if (del && c && c.dlg.id === o.dlg && c.key) {
         // The dialog's own key and base, and the name it was opened on.
-        const key = c.key, base = c.base;
-        let name = "";
-        try { name = o.label(JSON.parse(c.trigger.dataset.item)); } catch {}
+        const key = c.key, base = c.base, name = o.label(openedWith(c));
+        if (usedBy(o, rowOf(o, key), name)) return;
         confirmDelete(o, name).then((ok) => { if (ok) { HB.close(true); deleteRow(o, key, base, name); } });
       }
     });
   }
+  // A rename that rules follow (owner decision Y7: names stay editable). The
+  // first Save names the rules that change with it and stops; Save again
+  // with the same new name goes ahead. `field`: the name field; `how(old, many)`:
+  // what the rules do with the old name.
+  const renameAsk = (list, field, how) => (v, c, was) => {
+    const nv = v[field], ov = was[field];
+    if (!ov || !nv || nv === ov || c.ack === nv) return null;
+    const rules = rulesOf($(list).querySelector(`tr[data-key="${CSS.escape(c.key)}"]`));
+    if (!rules.length) return null;
+    c.ack = nv;
+    const many = rules.length > 1;
+    return { ok: false, note: ["warn", `The rule${many ? "s" : ""} ${quoted(rules)} ${how(ov, many)}. Saving renames it to “${nv}” and changes ${many ? "those rules" : "that rule"} to match. Press Save again to do both.`] };
+  };
 
   // ---- bookmarks: the reference list ----
   const BOOKMARKS = {
@@ -765,7 +827,7 @@
     // The API sends a whole item; an emptied optional field removes the key.
     item: (v) => { const it = {}; for (const k of ["name", "url", "group", "icon", "description"]) it[k] = v[k] ? v[k] : null; return it; },
     id: (key) => Number(keyId(key)),
-    newKey: (v, before) => `bookmark:${before}`, // appended at the end
+    savedKey: (v, editKey, before) => editKey || `bookmark:${before}`, // appended at the end
     movedKey: (key, j) => `bookmark:${j}`, // keys are positions
     label: (v) => v.name || "(no name)",
   };
@@ -775,303 +837,367 @@
     load() { return refreshList(BOOKMARKS.list); },
   };
 
-  // ---- widgets ----
-  const WIDGET_KEYS = ["id", "type", "title", "icon", "link", "url", "method", "body", "headers", "headers_env", "headers_file", "refresh", "timeout", "enabled", "output", "template", "status", "fields", "rows"];
-  TABS.widgets = {
-    init() {
-      const fs = $("f-system"), f = $("f-widget");
-      onSubmit(fs, () => {
-        const v = ctl(fs, "enabled").checked;
-        if (v === this.sys) { setMsg(fs, "No changes"); toast("No changes"); return; }
-        save(fs, "system", { base_hash: S.hash, enabled: v }, () => this.load());
-      });
-      onAct("w-new", () => this.edit(null));
-      onAct("wf-field-add", () => { $("wf-fields").append(this.kvRow("field", "", "")); f._dirty = true; $("wf-fields").lastChild.querySelector("input").focus(); });
-      onAct("wf-row-add", () => { $("wf-rows").append(this.kvRow("row", "", "")); f._dirty = true; $("wf-rows").lastChild.querySelector("input").focus(); });
-      $$("input[name=wf-mode]", f).forEach((r) => r.addEventListener("change", () => this.mode(r.value)));
-      onAct("wf-preview", () => this.preview());
-      onSubmit(f, () => {
-        clearErrs(f);
-        if (!required(f, ["id", "url"])) return;
-        const item = this.item();
-        const body = f._orig ? { base_hash: S.hash, action: "edit", id: f._orig.id, item } : { base_hash: S.hash, action: "add", item };
-        save(f, "widgets", body, () => { closeEditor(f); return this.load(); });
-      });
-    },
-    async load() {
-      const [d, env] = await Promise.all([get("widgets"), call("GET", "env")]);
-      if (!d) return;
-      S.hash = d.hash;
-      this.env = {};
-      if (env.status === 200) for (const v of env.data.vars || []) this.env[v.name] = v.set;
-      this.sys = !!d.system.enabled;
-      ctl($("f-system"), "enabled").checked = this.sys;
-      $("f-system")._dirty = false;
-      this.all = d.widgets || [];
-      const onPage = new Set($$("#w-locked [data-id]").map((x) => x.dataset.id));
-      const shown = this.all.filter((w) => !w.locked || !onPage.has(w.id));
-      const tb = $("w-list"), sec = tb.closest("section");
-      if (!shown.length) { emptyRow(tb, 5, "No custom-api widgets yet."); return; }
-      const editable = this.all.filter((w) => !w.locked);
-      const reorder = (i, j) => {
-        if (j < 0 || j >= editable.length) return;
-        const ids = this.all.map((w) => w.id);
-        const a = ids.indexOf(editable[i].id), b = ids.indexOf(editable[j].id);
-        save(sec, "widgets", { base_hash: S.hash, action: "reorder", order: swap(ids, a, b) }, () => this.load());
-      };
-      tb.replaceChildren(...shown.map((w) => {
-        const it = w.item || {};
-        const title = el("td", null, el("span", { class: "nm-t", text: it.title || w.id }), " ", code(w.id, "sub-c"));
-        if (w.locked) {
-          return el("tr", { class: "locked-row" }, title, el("td", { colspan: 3 }, el("span", { class: "lock-note" }, icon("lock"), "Defined in the config file on the host — command widgets can't be created, changed or enabled from the app.")), el("td"));
-        }
-        const i = editable.indexOf(w);
-        const secret = it.headers_env || it.headers_file;
-        return el("tr", null, title,
-          el("td", { class: "url-c" }, code(it.url || "", "wrap")),
-          el("td", { class: "num" }, code(it.refresh != null ? String(it.refresh) : "30s")),
-          el("td", null, w.enabled ? pill("ok", "enabled") : pill("off", "disabled"), secret ? el("span", { title: "Has secret headers (set on the host)" }, " ", pill("", "secret headers")) : null),
-          el("td", { class: "act" }, moveBtns(editable, i, reorder),
-            ibtn("edit", `Edit ${w.id}`, () => this.edit(w)),
-            ibtn("x", `Delete ${w.id}`, () => { if (confirm(`Delete the widget "${w.id}"?`)) save(sec, "widgets", { base_hash: S.hash, action: "delete", id: w.id }, () => { closeEditor($("f-widget")); return this.load(); }); }, "danger")));
-      }));
-      labelCells(tb);
-    },
-    kvRow(kind, a, b) {
-      const [la, lb, pa, pb] = kind === "field" ? ["Field name", "Path in the response", "name", "path.to.value"] : ["Label", "Value (template)", "Label", "{{field | number}}"];
-      const f = $("f-widget");
-      const row = el("div", { class: "row kv-row", "data-kind": kind },
-        el("input", { class: "in mono", type: "text", value: a, placeholder: pa, "aria-label": la, autocomplete: "off", spellcheck: "false" }),
-        el("input", { class: "in mono", type: "text", value: b, placeholder: pb, "aria-label": lb, autocomplete: "off", spellcheck: "false" }),
-        ibtn("x", kind === "field" ? "Remove field" : "Remove row", () => { row.remove(); f._dirty = true; }, "danger"));
-      return row;
-    },
-    mode(m) {
-      $("wf-mode-template").hidden = m !== "template";
-      $("wf-mode-rows").hidden = m !== "rows";
-      $$("input[name=wf-mode]").forEach((r) => { r.checked = r.value === m; });
-    },
-    edit(w) {
-      const f = $("f-widget"), it = w ? w.item : { type: "custom-api" };
-      f._orig = w ? it : null;
-      fill(f, it);
-      ctl(f, "enabled").checked = it.enabled !== false;
-      ctl(f, "method").value = String(it.method || "").toUpperCase() === "POST" ? "POST" : "";
-      ctl(f, "status.field").value = (it.status && it.status.field) || "";
-      ctl(f, "status.ok").value = it.status && it.status.ok ? it.status.ok.map(String).join(", ") : "";
-      $("wf-fields").replaceChildren(...Object.entries(it.fields || {}).map(([k, v]) => this.kvRow("field", k, v)));
-      $("wf-rows").replaceChildren(...(it.rows || []).map((r) => this.kvRow("row", r.label || "", r.value || "")));
-      this.mode(it.rows && it.rows.length && !it.template ? "rows" : "template");
-      // Secret headers: read-only, and they pin the URL (guard.rs secret binding).
-      const sec = [], url = ctl(f, "url");
-      for (const [h, n] of Object.entries(it.headers_env || {})) sec.push(el("li", null, code(h), " from env ", code(n), " ", this.env[n] ? pill("ok", "set") : pill("bad", "not set")));
-      for (const [h, p] of Object.entries(it.headers_file || {})) sec.push(el("li", null, code(h), " from file ", code(p)));
-      for (const h of Object.keys(it.headers || {})) sec.push(el("li", null, code(h), " plain header (value in the file)"));
-      $("wf-secrets-list").replaceChildren(...sec);
-      $("wf-secrets").hidden = !sec.length;
-      const bound = !!(Object.keys(it.headers_env || {}).length || Object.keys(it.headers_file || {}).length);
-      url.readOnly = bound;
-      url.title = bound ? "Bound to its secret headers: change it in the config file on the host" : "";
-      $("wf-preview").hidden = true;
-      $("wf-preview").replaceChildren();
-      openEditor(f, w ? `Edit widget: ${w.id}` : "Add custom-api widget", $("w-list").closest(".tbl-wrap"));
-    },
-    item() {
-      const f = $("f-widget"), v = collect(f, null, { enabled: true });
-      const item = { ...pick(f._orig, WIDGET_KEYS), ...v, type: "custom-api" };
-      delete item["status.field"]; delete item["status.ok"];
-      item.refresh = dur(item.refresh); item.timeout = dur(item.timeout);
-      const kv = (box) => $$(".kv-row", box).map((r) => $$("input", r).map((i) => i.value.trim())).filter(([a, b]) => a || b);
-      const fields = {};
-      for (const [a, b] of kv($("wf-fields"))) if (a) fields[a] = b;
-      item.fields = Object.keys(fields).length ? fields : null;
-      if ($("wf-mode-rows").hidden) item.rows = null;
-      else {
-        item.template = null;
-        const rows = kv($("wf-rows")).map(([label, value]) => ({ label, value }));
-        item.rows = rows.length ? rows : null;
-      }
-      const sf = ctl(f, "status.field").value.trim();
-      const okv = ctl(f, "status.ok").value.split(",").map((s) => s.trim()).filter(Boolean).map(parseJ);
-      item.status = sf ? (okv.length ? { field: sf, ok: okv } : { field: sf }) : null;
-      return item;
-    },
-    async preview() {
-      const f = $("f-widget"), out = $("wf-preview"), b = f.querySelector("[data-act=wf-preview]");
-      clearErrs(f);
-      if (!required(f, ["id", "url"])) return;
-      out.hidden = false;
-      out.replaceChildren(muted("Fetching…"));
-      b.disabled = true;
-      const res = await call("POST", "widgets/preview", { item: this.item() });
-      b.disabled = false;
-      const d = res.data || {};
-      if (res.status !== 200) {
-        if (res.status === 422 && d.field && fieldErr(f, d.field, d.error)) out.replaceChildren(el("p", { class: "err-line", text: "Fix the highlighted field, then fetch again." }));
-        else out.replaceChildren(el("p", { class: "err-line" }, res.status === 403 ? icon("lock") : null, " ", d.error || `HTTP ${res.status}`));
-        if (res.status === 401) banner("expired");
-        return;
-      }
-      const head = el("div", { class: "pv-head" }, d.ok ? pill("ok", "OK") : pill("bad", "Error"), muted(` ${d.duration_ms} ms`));
-      const tile = el("div", { class: "tile widget pv-tile" + (d.ok ? "" : " is-err") }, el("div", { class: "tile-title" }, el("span", { class: "w-title", text: ctl(f, "title").value.trim() || ctl(f, "id").value.trim() })));
-      if (d.html) {
-        // Server-rendered by our widget renderer, every value escaped there.
-        const t = doc.createElement("template");
-        t.innerHTML = d.html;
-        tile.append(t.content);
-      }
-      if (d.error) tile.append(el("div", { class: "err-line", text: d.error }));
-      const vals = Object.entries(d.values || {});
-      const table = vals.length ? el("table", { class: "tbl small pv-vals" }, el("thead", null, el("tr", null, el("th", { text: "Value" }), el("th", { text: "Got" }))),
-        el("tbody", null, vals.map(([k, v]) => el("tr", null, el("td", null, code(k)), el("td", null, code(typeof v === "string" ? v : JSON.stringify(v), "wrap")))))) : null;
-      out.replaceChildren(head, el("div", { class: "pv-body" }, tile, table));
+  // ---- notifications: channels and alert rules (server-rendered lists) ----
+  const listOf = (s) => { const a = String(s || "").split(",").map((x) => x.trim()).filter(Boolean); return a.length ? a : null; };
+  // Every key a channel can have (an add sends them all; null: not set).
+  const CH_KEYS = ["type", "url", "url_env", "url_file", "webhook_url_env", "webhook_url_file", "token_env", "token_file", "chat_id", "chat_id_env", "api_base", "headers", "headers_env", "body", "timeout"];
+  // Kept as they are in the file (not in the form; never put in the page).
+  // Not in the form, but they only apply to one type: removed with it.
+  const CH_TYPED = ["chat_id_env", "api_base", "headers", "headers_env", "body"];
+  const CH_SECRET = { slack: { env: "webhook_url_env", file: "webhook_url_file" }, telegram: { env: "token_env", file: "token_file" }, webhook: { env: "url_env", file: "url_file", plain: "url" } };
+  // THE DIFF RULE (every list edit): the server patches an edited entry
+  // with the keys the item has (null removes one) and leaves every absent
+  // key exactly as it is in the file (settings/ops.rs). So an edit sends
+  // only the keys whose field the user changed, plus `always` (what the
+  // server needs to know the entry). A key the form does not show can then
+  // never be removed by a save, and a field left as it was is never
+  // rewritten ("200" stays a string, `post` stays lower case, an explicit
+  // default stays). A field that is not shown any more (another type or
+  // source) and had a value is sent as null. `was`: the values the dialog
+  // was opened with; null for an add, which sends the whole item.
+  const blank = (x) => x == null || x === "" || x === false || (Array.isArray(x) && !x.length);
+  const sameVal = (a, b, set) => {
+    if (blank(a) && blank(b)) return true;
+    if (set) return JSON.stringify([...(a || [])].sort()) === JSON.stringify([...(b || [])].sort());
+    return JSON.stringify(a) === JSON.stringify(b);
+  };
+  function onlyChanged(item, v, was, always, sets) {
+    if (!was) return item;
+    const out = {};
+    for (const k of Object.keys(item)) {
+      const touched = always.includes(k) || (k in v ? !sameVal(v[k], was[k], (sets || []).includes(k)) : !blank(was[k]));
+      if (touched) out[k] = item[k];
+    }
+    return out;
+  }
+  function channelItem(v, was) {
+    const it = { name: v.name };
+    for (const k of CH_KEYS) it[k] = null;
+    it.type = v.type;
+    const k = (CH_SECRET[v.type] || {})[v.src];
+    if (k && v[k]) it[k] = v[k];
+    if (v.type === "telegram" && v.chat_id) it.chat_id = /^-?\d+$/.test(v.chat_id) && Number.isSafeInteger(Number(v.chat_id)) ? Number(v.chat_id) : v.chat_id;
+    it.timeout = v.timeout ? dur(v.timeout) : null;
+    if (!was) return it;
+    for (const x of CH_TYPED) delete it[x];
+    const out = onlyChanged(it, v, was, ["name", "type"]);
+    // Another type: what only the old one had goes too (else the file
+    // would not load); the same type keeps them, untouched.
+    if (was.type !== v.type) for (const x of CH_TYPED) out[x] = null;
+    return out;
+  }
+  const CHANNELS = {
+    list: "ch-list", also: ["ru-list", "ru-channels"], add: "ch-add", dlg: "dlg-channel", menu: "m-ch", path: "channels", kind: "channel", noun: "channel",
+    inUse: "Take it out of those rules first (or delete them), then delete the channel.",
+    item: channelItem,
+    id: keyId,
+    savedKey: (v) => `channel:${v.name}`,
+    label: (v) => v.name,
+    ask: renameAsk("ch-list", "name", (old, many) => `${many ? "send" : "sends"} to “${old}”`),
+    // "Save and send test" (owner decision Y14: the test runs on the saved
+    // channel, with the existing route).
+    test: async (v) => {
+      const r = await call("POST", "channels/test", { name: v.name });
+      const ok = r.status === 200 && r.data.ok;
+      return ok ? ["ok", `Test sent to “${v.name}”. Check that it arrived.`] : ["bad", `The test to “${v.name}” failed: ${(r.data && r.data.error) || "HTTP " + r.status}.`];
     },
   };
-
-  // ---- notifications ----
-  const CHANNEL_FIELDS = ["name", "type", "url", "url_env", "url_file", "webhook_url_env", "webhook_url_file", "token_env", "token_file", "chat_id", "chat_id_env", "api_base", "headers", "headers_env", "body", "timeout"];
-  const RULE_KEYS = ["name", "type", "containers", "exclude", "on", "restarts", "window", "url", "interval", "timeout", "expect_status", "contains", "failures", "pattern", "stack", "count", "metric", "disk", "widget", "field", "above", "below", "equals", "not_equals", "on_error", "for", "cooldown", "channels", "message", "recovery", "enabled"];
-  const HEALTH = { ok: ["ok", "ok"], failing: ["bad", "failing"], misconfigured: ["warn", "misconfigured"], idle: ["off", "idle"] };
+  const DEFAULT_ON = ["stopped", "unhealthy", "restarting"];
+  // The condition keys of each rule type (as `alerts::rules::validate`).
+  const RULE_FOR = {
+    container: ["containers", "exclude", "on", "restarts", "window"],
+    http: ["url", "interval", "timeout", "expect_status", "contains", "failures"],
+    host: ["metric", "disk", "above", "below", "interval"],
+    widget: ["widget", "field", "above", "below", "equals", "not_equals", "on_error"],
+    log_match: ["pattern", "containers", "exclude", "stack", "count", "window"],
+  };
+  // The dialog's values as the API item: the whole rule for an add, only
+  // what changed for an edit (the diff rule).
+  function ruleItem(v, was) {
+    const it = { name: v.name, type: v.type }, cond = RULE_FOR[v.type] || [];
+    const val = (k) => (cond.includes(k) && v[k] != null && v[k] !== "" ? v[k] : null);
+    for (const k of ["url", "contains", "pattern", "stack", "metric", "widget", "field", "disk"]) it[k] = val(k);
+    if (v.metric !== "disk") it.disk = null;
+    for (const k of ["containers", "exclude"]) it[k] = val(k) && listOf(v[k]);
+    for (const k of ["restarts", "expect_status", "failures", "count", "above", "below"]) it[k] = val(k) == null ? null : Number(v[k]);
+    for (const k of ["equals", "not_equals"]) it[k] = val(k) == null ? null : parseJ(v[k]);
+    for (const k of ["window", "interval", "timeout"]) it[k] = val(k) == null ? null : dur(v[k]);
+    it.on = cond.includes("on") && Array.isArray(v.on) ? v.on : null;
+    it.on_error = cond.includes("on_error") && v.on_error ? true : null;
+    for (const k of ["for", "cooldown"]) it[k] = v[k] ? dur(v[k]) : null;
+    for (const k of ["message", "recovery"]) it[k] = v[k] || null;
+    it.channels = Array.isArray(v.channels) ? v.channels : [];
+    it.enabled = v.enabled === false ? false : null;
+    // A new rule that fires on the default conditions leaves `on` out.
+    if (!was && it.on && it.on.length === DEFAULT_ON.length && DEFAULT_ON.every((x) => it.on.includes(x))) it.on = null;
+    return onlyChanged(it, v, was, ["name", "type"], ["on", "channels"]);
+  }
+  const RULES = {
+    list: "ru-list", also: ["ch-list"], add: "ru-add", dlg: "dlg-rule", menu: "m-ru", path: "alerts", kind: "rule", noun: "rule",
+    item: ruleItem,
+    id: keyId,
+    savedKey: (v) => `rule:${v.name}`,
+    label: (v) => v.name,
+  };
+  // Checks across fields, shown with the others (ui.js HB.validate).
+  function ruleCheck(v) {
+    const e = {}, n = (k) => v[k] != null && v[k] !== "";
+    const one = (keys, labels) => { if (keys.filter(n).length !== 1) e[keys[0]] = `Set exactly one of: ${labels}.`; };
+    if (v.type === "host") one(["above", "below"], "Above or Below");
+    if (v.type === "widget") one(["above", "below", "equals", "not_equals"], "Above, Below, Equals or Not equals");
+    if (v.type === "log_match" && !n("containers") && !n("stack")) e.containers = "Set Containers, Stack or both.";
+    if (v.type === "container" && Array.isArray(v.on) && !v.on.length) e.on = "Pick at least one.";
+    return e;
+  }
   TABS.notifications = {
+    ssr: true,
     init() {
-      const fc = $("f-channel"), fr = $("f-rule");
-      ctl(fc, "type").addEventListener("change", (e) => showType(fc, e.target.value));
-      ctl(fr, "type").addEventListener("change", (e) => showType(fr, e.target.value));
-      onAct("ch-new", () => this.editChannel(null));
-      onAct("ru-new", () => this.editRule(null));
-      onSubmit(fc, () => {
-        clearErrs(fc);
-        if (!required(fc, ["name"])) return;
-        const type = ctl(fc, "type").value, v = collect(fc, type);
-        for (const k of ["webhook_url_env", "token_env", "url_env"]) {
-          if (v[k] && !ENV_RE.test(v[k])) { fieldErr(fc, k, "Use the NAME of an environment variable: A-Z, 0-9 and _ (e.g. RH_SLACK_WEBHOOK_URL), not the secret itself."); return; }
+      const dc = $("dlg-channel"), dr = $("dlg-rule");
+      listDialog(dc, CHANNELS); listActions(CHANNELS);
+      listDialog(dr, RULES); listActions(RULES);
+      dr.querySelector("form")._check = ruleCheck;
+      // Opening a channel: the read-only lines, the set / found state of the
+      // saved secret, and a channel bound to its destination locked.
+      dc.addEventListener("hb-open", (e) => {
+        const v = e.detail.values || {}, f = dc.querySelector("form");
+        const ro = dc.querySelector("[data-ro]");
+        ro.querySelector("ul").replaceChildren(...(v._ro || []).map(([a, b]) => el("li", null, a + ": ", code(b, "wrap"))));
+        ro.hidden = !(v._ro || []).length;
+        const bound = !!v._bound;
+        for (const k of ["url", "url_env", "url_file", "token_env", "token_file", "webhook_url_env", "webhook_url_file"]) {
+          const x = ctl(f, k);
+          x.readOnly = bound;
+          x.title = bound ? "Bound to this channel's destination: change it in the config file on the host" : "";
         }
-        const orig = fc._orig ? fc._orig.item : null;
-        const item = { ...pick(orig, CHANNEL_FIELDS), ...v };
-        // Fields of another type go when the type changes.
-        if (orig && orig.type !== type) for (const k of ["url_file", "webhook_url_file", "token_file", "chat_id_env", "api_base", "headers", "headers_env", "body"]) item[k] = null;
-        const body = fc._orig ? { base_hash: S.hash, action: "edit", id: fc._orig.id, item } : { base_hash: S.hash, action: "add", item };
-        save(fc, "channels", body, () => { closeEditor(fc); return this.load(); });
+        $$("input[name=type], input[name=src]", f).forEach((r) => { if (bound && !r.checked) { r.disabled = true; r.setAttribute("data-locked", ""); } });
+        // A chat id read from a variable (in the file) replaces the field:
+        // without a name it is neither checked nor sent.
+        const chat = f.querySelector("#ch-chat-id");
+        chat.closest(".fld").classList.toggle("ro-off", !!v._chat_env);
+        chat.name = v._chat_env ? "" : "chat_id";
+        if (!v._chat_env) { chat.value = v.chat_id || ""; chat._was = chat.value; }
+        $$(".envst", f).forEach((x) => x.remove());
+        for (const [k, ok] of Object.entries(v._st || {})) {
+          const x = ctl(f, k);
+          const hint = x && x.closest(".fld").querySelector(".hint");
+          if (hint) hint.append(el("span", { class: "envst" }, " ", ok ? pill("ok", k.endsWith("_file") ? "file found" : "set") : pill("bad", k.endsWith("_file") ? "no file" : "not set in the container")));
+        }
       });
-      onSubmit(fr, () => {
-        clearErrs(fr);
-        if (!required(fr, ["name"])) return;
-        const type = ctl(fr, "type").value;
-        const item = { ...pick(fr._orig, RULE_KEYS), ...collect(fr, type, { enabled: true, on_error: false }) };
-        for (const k of ["window", "interval", "timeout", "for", "cooldown"]) item[k] = dur(item[k]);
-        const body = fr._orig ? { base_hash: S.hash, action: "edit", id: fr._orig.name, item } : { base_hash: S.hash, action: "add", item };
-        save(fr, "alerts", body, () => { closeEditor(fr); return this.load(); });
+      // Send test from the row: one click, the result in the row and a toast.
+      $("ch-list").addEventListener("click", async (e) => {
+        const b = e.target.closest("[data-test]");
+        if (!b || b.getAttribute("aria-busy") === "true") return;
+        const name = b.dataset.test, cell = b.closest("tr").querySelector(".test-res");
+        b.setAttribute("aria-busy", "true"); b.setAttribute("aria-disabled", "true");
+        const t = b.lastChild, label = t.textContent; t.textContent = "Sending…";
+        const r = await call("POST", "channels/test", { name });
+        b.removeAttribute("aria-busy"); b.removeAttribute("aria-disabled"); t.textContent = label;
+        const ok = r.status === 200 && r.data.ok;
+        const msg = ok ? "Test sent" : (r.data && r.data.error) || `HTTP ${r.status}`;
+        if (cell) { cell.className = "sub test-res " + (ok ? "ok-t" : "err-line"); cell.textContent = (ok ? "✓ " : "✗ ") + msg; }
+        toast(ok ? `Test sent to “${name}”` : `Test to “${name}” failed: ${msg}`, ok ? "ok" : "bad");
+        if (r.status === 401) banner("expired");
+      });
+      // A rule's on / off switch saves on change (owner decision Y21), based
+      // on the list's version at the click (the base-hash rule).
+      $("ru-list").addEventListener("change", async (e) => {
+        const sw = e.target.closest("[data-toggle]");
+        if (!sw) return;
+        const box = $("ru-list"), tr = sw.closest("tr[data-key]"), base = box.dataset.hash, key = tr.dataset.key;
+        const v = rowItem(tr), on = sw.checked;
+        sw.disabled = true;
+        // Only the switch changes: name and type say which rule, nothing else is sent.
+        const r = HB.result(await post("alerts", { base_hash: base, action: "edit", id: keyId(key), item: { name: v.name, type: v.type, enabled: on ? null : false } }));
+        if (!r.ok) {
+          sw.checked = !on; sw.disabled = false;
+          toast(r.note && /changed on disk/.test(r.note[1]) ? `Not switched: the config file changed since this list was loaded. Nothing was changed; check the list and try again.` : (r.note && r.note[1]) || Object.values(r.fields || {}).join(" "), "bad");
+          refreshList(lists(RULES));
+          return;
+        }
+        await refreshList(lists(RULES), key);
+        const n = rowOf(RULES, key), s2 = n && n.querySelector("[data-toggle]");
+        if (s2) s2.focus();
+        toast(`Rule “${v.name}” switched ${on ? "on" : "off"}${revNo(r.data)}`);
       });
     },
-    async load() {
-      const d = await get("notifications");
-      if (!d) return;
-      S.hash = d.hash;
-      this.channels = d.channels || [];
-      this.rules = d.rules || [];
-      this.renderChannels();
-      this.renderRules();
+    load() { return refreshList(lists(CHANNELS)); },
+  };
+
+  // ---- widgets: custom-api widgets (server-rendered list) ----
+  // Field and display rows, in order: [[a, b], …] without empty rows.
+  const kvRows = (form, kind) => $$(`[data-rows="${kind}"] .kv-row`, form).map((r) => $$("input", r).map((i) => i.value.trim())).filter(([a, b]) => a || b);
+  const W_FIELD = { fields: "fk.0", rows: "rl.0", status: "status_field" };
+  // The dialog as the API item: whole for an add (and for Fetch now), only
+  // what changed for an edit (the diff rule, above `onlyChanged`). Header
+  // values, the body and `output` are never in it: an edit leaves them as
+  // they are in the file.
+  function widgetItem(v, form, was, whole) {
+    const it = { id: v.id, type: "custom-api", url: v.url };
+    for (const k of ["title", "icon", "link"]) it[k] = v[k] || null;
+    for (const k of ["refresh", "timeout"]) it[k] = v[k] ? dur(v[k]) : null;
+    it.method = v.method === "POST" ? "POST" : null;
+    it.enabled = v.enabled === false ? false : null;
+    const fl = kvRows(form, "field"), rl = kvRows(form, "row");
+    const fields = {};
+    for (const [a, b] of fl) if (a) fields[a] = b;
+    it.fields = Object.keys(fields).length ? fields : null;
+    const rows = rl.map(([label, value]) => ({ label, value }));
+    if (v.mode === "rows") { it.rows = rows.length ? rows : null; it.template = null; } else { it.template = v.template || null; it.rows = null; }
+    // OK values as typed in the file while their text is unchanged.
+    const okSame = was && v.status_ok === was.status_ok && Array.isArray(was._status_ok);
+    const ok = okSame ? was._status_ok : (listOf(v.status_ok) || []).map(parseJ);
+    it.status = v.status_field ? (ok.length ? { field: v.status_field, ok } : { field: v.status_field }) : null;
+    if (!was || whole) return it;
+    const out = { id: it.id, type: it.type, url: it.url };
+    for (const k of ["title", "icon", "link", "refresh", "timeout", "method"]) if (!sameVal(v[k], was[k])) out[k] = it[k];
+    if (v.enabled !== was.enabled) out.enabled = it.enabled;
+    if (JSON.stringify(fl) !== JSON.stringify(was.fields || [])) out.fields = it.fields;
+    if (v.mode !== was.mode) { out.template = it.template; out.rows = it.rows; } // the display choice changed
+    else if (v.mode === "rows") { if (JSON.stringify(rl) !== JSON.stringify(was.rows || [])) out.rows = it.rows; }
+    else if (!sameVal(v.template, was.template)) out.template = it.template;
+    if (!sameVal(v.status_field, was.status_field) || !sameVal(v.status_ok, was.status_ok)) out.status = it.status;
+    return out;
+  }
+  // Fetch now runs the whole widget, so an existing one needs the keys the
+  // page never holds (header values, the body): read from the settings API,
+  // used only if that read is the file the dialog was opened on. Otherwise
+  // nothing is fetched (never a request without its headers).
+  async function previewItem(v, form, c) {
+    const was = c.key ? openedWith(c) : null, item = widgetItem(v, form, was, true);
+    const keep = (was && was._keep) || [];
+    if (!keep.length) return { item };
+    const r = await call("GET", "widgets");
+    const orig = r.status === 200 && r.data.hash === c.base && ((r.data.widgets || []).find((w) => w.id === was.id && !w.locked) || {}).item;
+    if (!orig) return { error: r.status === 401 ? "Not fetched: your session expired." : "Not fetched: the widget's headers or body could not be read from the file this dialog was opened on (it may have changed since). Close and open the widget again." };
+    for (const k of keep) item[k] = orig[k] === undefined ? null : orig[k];
+    return { item };
+  }
+  const WIDGETS = {
+    list: "w-list", add: "w-add", dlg: "dlg-widget", menu: "m-w", path: "widgets", kind: "widget", noun: "widget",
+    inUse: "Change or delete those rules first, then delete the widget.",
+    item: (v, was) => widgetItem(v, $("dlg-widget").querySelector("form"), was),
+    id: keyId,
+    savedKey: (v) => `widget:${v.id}`,
+    movedKey: (key) => key, // keys are ids
+    label: (v) => v.id,
+    ask: renameAsk("w-list", "id", (old, many) => `${many ? "watch" : "watches"} the widget “${old}”`),
+    // A server error about the rows lands on their first input.
+    fields: (r) => {
+      const f = r.fields || {}, out = {};
+      for (const [k, m] of Object.entries(f)) out[W_FIELD[k] || k] = m;
+      return { ...r, fields: out };
     },
-    secretCell(c) {
-      const refs = (c.secrets || []).map((r) => el("div", { class: "sec-ref" }, r.kind === "env" ? [code(r.name), " ", r.set ? pill("ok", "set") : pill("bad", "not set")] : [code(r.path, "wrap"), " ", r.exists ? pill("ok", "file found") : pill("bad", "no file")]));
-      const it = c.item || {};
-      if (it.url) refs.push(el("div", { class: "sec-ref" }, pill("warn", "plain URL"), muted(" url in the file")));
-      if (it.chat_id != null) refs.push(el("div", { class: "sec-ref muted" }, "chat ", code(String(it.chat_id))));
-      return refs.length ? refs : muted("—");
-    },
-    renderChannels() {
-      const tb = $("ch-list"), sec = tb.closest("section");
-      if (!this.channels.length) { emptyRow(tb, 5, "No channels. Alerts are shown on the page only until you add one and name it in a rule."); return; }
-      tb.replaceChildren(...this.channels.map((c) => {
-        const st = c.status || {}, h = HEALTH[st.health] || ["off", st.health || "not loaded"];
-        const stCell = el("td", { class: "ch-st" }, pill(h[0], h[1]), st.error ? el("div", { class: "sub err-line", text: st.error }) : null,
-          st.sent || st.failed ? el("div", { class: "sub muted", text: `${st.sent || 0} sent, ${st.failed || 0} failed` }) : null);
-        const test = btn("Send test", async () => {
-          test.disabled = true;
-          const res = await call("POST", "channels/test", { name: c.id });
-          test.disabled = false;
-          const ok = res.status === 200 && res.data.ok;
-          const msg = ok ? "Test notification sent" : (res.data && res.data.error) || `HTTP ${res.status}`;
-          stCell.querySelectorAll(".test-res").forEach((x) => x.remove());
-          stCell.append(el("div", { class: "sub test-res " + (ok ? "ok-t" : "err-line"), text: (ok ? "✓ " : "✗ ") + msg }));
-          toast(ok ? `Test sent to ${c.id}` : `Test failed: ${msg}`, ok ? "ok" : "bad");
+  };
+  TABS.widgets = {
+    ssr: true,
+    init() {
+      const dlg = $("dlg-widget"), form = dlg.querySelector("form");
+      listDialog(dlg, WIDGETS); listActions(WIDGETS);
+      // Rows of name / value pairs: built from the item when the dialog
+      // opens, renumbered (fk.0, fk.1, …) after every change.
+      const renumber = (box) => $$(".kv-row", box).forEach((r, i) => { const [a, b] = $$("input", r); a.name = a.name.replace(/\.\d+$/, "." + i); b.name = b.name.replace(/\.\d+$/, "." + i); });
+      const kvRow = (kind, a, b) => {
+        const [la, lb, pa, pb, ka, kb] = kind === "field" ? ["Field name", "Path in the response", "name", "path.to.value", "fk", "fv"] : ["Label", "Value (template)", "Label", "{{field | number}}", "rl", "rv"];
+        return el("div", { class: "row kv-row", "data-kind": kind },
+          el("input", { class: "in mono", type: "text", name: ka + ".0", value: a, placeholder: pa, "aria-label": la, autocomplete: "off", spellcheck: "false" }),
+          el("input", { class: "in mono", type: "text", name: kb + ".0", value: b, placeholder: pb, "aria-label": lb, autocomplete: "off", spellcheck: "false" }),
+          el("button", { class: "ia", type: "button", "data-kv-del": "", "aria-label": kind === "field" ? "Remove this field" : "Remove this row", "data-tip": "Remove" }, icon("x")),
+          el("span", { class: "kv-got muted" }));
+      };
+      const fillRows = (kind, list) => { const box = form.querySelector(`[data-rows="${kind}"]`); box.replaceChildren(...list.map(([a, b]) => kvRow(kind, a, b))); renumber(box); };
+      dlg.addEventListener("hb-open", (e) => {
+        const v = e.detail.values || {};
+        fillRows("field", v.fields && v.fields.length ? v.fields : [["", ""]]);
+        fillRows("row", v.rows || []);
+        $$(".kv-got", form).forEach((x) => { x.textContent = ""; });
+        const ro = dlg.querySelector("[data-ro]");
+        ro.querySelector("ul").replaceChildren(...(v._ro || []).map(([a, b]) => el("li", null, code(a), ": " + b)));
+        ro.hidden = !(v._ro || []).length;
+        const url = ctl(form, "url"), bound = !!v._bound;
+        url.readOnly = bound;
+        url.title = bound ? "Bound to its secret headers: change it in the config file on the host" : "";
+        const out = $("wf-preview"); out.hidden = true; out.replaceChildren();
+        const first = dlg.querySelector("[role=tab]"); if (first && first.getAttribute("aria-selected") !== "true") first.click();
+      });
+      form.addEventListener("click", (e) => {
+        const add = e.target.closest("[data-kv-add]"), del = e.target.closest("[data-kv-del]");
+        if (add) {
+          const box = form.querySelector(`[data-rows="${add.dataset.kvAdd}"]`);
+          box.append(kvRow(add.dataset.kvAdd, "", "")); renumber(box);
+          box.lastChild.querySelector("input").focus();
+        } else if (del) {
+          const r = del.closest(".kv-row"), box = r.parentElement, next = r.nextElementSibling || r.previousElementSibling;
+          r.remove(); renumber(box);
+          (next ? next.querySelector("input") : form.querySelector(`[data-kv-add="${box.dataset.rows}"]`)).focus();
+        }
+      });
+      // Fetch now: the unsaved form, run once by the server; the result
+      // (the tile and the values it extracted, never the raw response) is
+      // shown in the dialog.
+      const fetchBtn = dlg.querySelector("[data-act=wf-preview]");
+      fetchBtn.addEventListener("click", async () => {
+        const c = HB.current();
+        if (!c || c.dlg !== dlg || c.busy || fetchBtn.getAttribute("aria-busy") === "true") return;
+        const { n, first } = HB.validate(form);
+        const out = $("wf-preview");
+        if (n) { out.hidden = false; out.replaceChildren(el("p", { class: "err-line", text: `Fix ${n === 1 ? "the highlighted field" : n + " highlighted fields"} first, then fetch again.` })); first.closest("[role=tabpanel]") && dlg.querySelector(`[aria-controls="${first.closest("[role=tabpanel]").id}"]`).click(); first.focus(); return; }
+        fetchBtn.setAttribute("aria-busy", "true"); fetchBtn.setAttribute("aria-disabled", "true");
+        const t = fetchBtn.lastChild, label = t.textContent; t.textContent = "Fetching…";
+        out.hidden = false; out.replaceChildren(muted("Fetching…"));
+        const v = HB.values(form);
+        const pi = await previewItem(v, form, c);
+        const res = pi.item ? await call("POST", "widgets/preview", { item: pi.item }) : { status: 0, data: { error: pi.error } };
+        fetchBtn.removeAttribute("aria-busy"); fetchBtn.removeAttribute("aria-disabled"); t.textContent = label;
+        const d = res.data || {};
+        if (res.status !== 200) {
+          // A field's error goes on that field (its tab selected), as a save's would.
+          const f = res.status === 422 && d.field && (W_FIELD[d.field] || d.field);
+          if (f && HB.fieldError(form, f, d.error)) out.replaceChildren(el("p", { class: "err-line", text: "Not fetched: fix the highlighted field, then fetch again." }));
+          else out.replaceChildren(el("p", { class: "err-line" }, res.status === 403 ? [icon("lock"), " "] : null, d.error || (res.status ? `HTTP ${res.status}` : "The server did not answer.")));
           if (res.status === 401) banner("expired");
-        }, "", "zap");
-        return el("tr", null,
-          el("td", null, code(c.id, "nm")), el("td", null, pill("", c.type || "?")),
-          el("td", null, this.secretCell(c)), stCell,
-          el("td", { class: "act" }, test, ibtn("edit", `Edit ${c.id}`, () => this.editChannel(c)),
-            ibtn("x", `Delete ${c.id}`, () => { if (confirm(`Delete the channel "${c.id}"? Rules that send to it must be changed first.`)) save(sec, "channels", { base_hash: S.hash, action: "delete", id: c.id }, () => { closeEditor($("f-channel")); return this.load(); }); }, "danger")));
-      }));
-      labelCells(tb);
-      if (this.channels.some((c) => c.warnings && c.warnings.length)) note(sec, "warn", this.channels.flatMap((c) => (c.warnings || []).map((w) => `${c.id}: ${w}`)));
+          return;
+        }
+        const head = el("div", { class: "pv-head" }, d.ok ? pill("ok", "OK") : pill("bad", "Error"), muted(` ${d.duration_ms} ms`));
+        const tile = el("div", { class: "tile widget pv-tile" + (d.ok ? "" : " is-err") }, el("div", { class: "tile-title" }, el("span", { class: "w-title", text: v.title || v.id })));
+        if (d.html) {
+          // Server-rendered by our widget renderer, every value escaped there.
+          const tp = doc.createElement("template");
+          tp.innerHTML = d.html;
+          tile.append(tp.content);
+        }
+        if (d.error) tile.append(el("div", { class: "err-line", text: d.error }));
+        const vals = d.values || {};
+        const show = (x) => (typeof x === "string" ? x : JSON.stringify(x));
+        // Next to each field row: what its path found.
+        $$('[data-rows="field"] .kv-row', form).forEach((r) => {
+          const name = r.querySelector("input").value.trim(), got = r.querySelector(".kv-got");
+          got.textContent = !name ? "" : name in vals ? "→ " + show(vals[name]) : "→ not found";
+        });
+        const list = Object.entries(vals);
+        const table = list.length ? el("table", { class: "tbl small pv-vals" }, el("thead", null, el("tr", null, el("th", { text: "Field" }), el("th", { text: "Got" }))),
+          el("tbody", null, list.map(([k, x]) => el("tr", null, el("td", null, code(k)), el("td", null, code(show(x), "wrap")))))) : null;
+        out.replaceChildren(head, el("div", { class: "pv-body" }, tile, table));
+      });
+      // System tiles: a single switch that saves on change (owner decision
+      // Y21), based on the version of the list on screen at the click.
+      const sys = $("sys-tiles");
+      sys.addEventListener("change", async () => {
+        const on = sys.checked, base = $("w-list").dataset.hash;
+        sys.disabled = true;
+        const r = HB.result(await post("system", { base_hash: base, enabled: on }));
+        sys.disabled = false;
+        if (!r.ok) {
+          sys.checked = !on;
+          toast(r.note && /changed on disk/.test(r.note[1]) ? "Not switched: the config file changed since this page was loaded. Reload to see it, then switch again." : (r.note && r.note[1]) || "Not switched.", "bad");
+          return;
+        }
+        await refreshList(WIDGETS.list);
+        sys.focus();
+        toast(`System tiles ${on ? "shown" : "hidden"}${revNo(r.data)}`);
+      });
     },
-    editChannel(c) {
-      const f = $("f-channel"), it = c ? c.item : { type: "slack" };
-      f._orig = c;
-      fill(f, { ...it, name: c ? c.id : "" });
-      const type = it.type || "slack";
-      ctl(f, "type").value = type;
-      showType(f, type);
-      // Read-only: secret files, api_base and header secrets (set on the host; bound to the destination).
-      const ro = [];
-      for (const k of ["url_file", "webhook_url_file", "token_file", "chat_id_env", "api_base", "body"]) if (it[k] != null) ro.push(el("li", null, code(k), " = ", code(String(it[k]), "wrap")));
-      for (const [h, n] of Object.entries(it.headers_env || {})) ro.push(el("li", null, "header ", code(h), " from env ", code(n)));
-      for (const h of Object.keys(it.headers || {})) ro.push(el("li", null, "header ", code(h), " (plain, in the file)"));
-      $("ch-ro-list").replaceChildren(...ro);
-      $("ch-ro").hidden = !ro.length;
-      const bound = (it.type === "telegram" && it.api_base != null) || (it.type === "webhook" && Object.keys(it.headers_env || {}).length > 0);
-      for (const k of ["token_env", "url_env", "url"]) { const x = ctl(f, k); x.readOnly = bound; x.title = bound ? "Bound to this channel's destination: change it in the config file on the host" : ""; }
-      // set / not set next to the saved env names
-      $$(".envst", f).forEach((x) => x.remove());
-      for (const r of (c && c.secrets) || []) {
-        const x = r.kind === "env" && ctl(f, r.field);
-        if (x) x.after(el("span", { class: "envst" }, r.set ? pill("ok", "set") : pill("bad", "not set in the container")));
-      }
-      openEditor(f, c ? `Edit channel: ${c.id}` : "Add channel", $("ch-list").closest(".tbl-wrap"));
-    },
-    summary(r) {
-      const j = (a) => (Array.isArray(a) ? a.join(", ") : a);
-      switch (r.type) {
-        case "container": return `${j(r.containers) || "*"}${r.exclude ? " except " + j(r.exclude) : ""} on ${j(r.on) || "stopped, unhealthy, restarting"}${r.restarts ? `, ${r.restarts} restarts` : ""}`;
-        case "http": return `${r.url || "?"}${r.expect_status ? " → " + r.expect_status : ""}${r.contains ? ` contains "${r.contains}"` : ""}`;
-        case "host": return `${r.metric || "?"}${r.disk ? " " + r.disk : ""}${r.above != null ? " > " + r.above : ""}${r.below != null ? " < " + r.below : ""}`;
-        case "widget": return `${r.widget || "?"}.${r.field || "?"}${r.above != null ? " > " + r.above : ""}${r.below != null ? " < " + r.below : ""}${r.equals != null ? " = " + r.equals : ""}${r.not_equals != null ? " ≠ " + r.not_equals : ""}${r.on_error ? ", on error" : ""}`;
-        case "log_match": return `/${r.pattern || "?"}/ in ${r.stack ? "stack " + r.stack : j(r.containers) || "?"}${r.count ? `, ${r.count}×` : ""}${r.window ? " in " + r.window : ""}`;
-        default: return "";
-      }
-    },
-    renderRules() {
-      const tb = $("ru-list"), sec = tb.closest("section");
-      if (!this.rules.length) { emptyRow(tb, 6, "No alert rules."); return; }
-      tb.replaceChildren(...this.rules.map((x) => {
-        const r = x.item || {}, chans = r.channels || [];
-        return el("tr", { class: r.enabled === false ? "stopped" : "" },
-          el("td", null, code(r.name, "nm"), r.enabled === false ? [" ", pill("off", "disabled")] : null),
-          el("td", null, pill("", r.type)),
-          el("td", { class: "wrap" }, el("span", { class: "mono-s", text: this.summary(r) })),
-          el("td", null, chans.length ? chans.map((c) => el("span", { class: "chip-s", text: c })) : muted("page only")),
-          el("td", { class: "muted" }, `for ${r.for ?? (r.type === "container" ? "30s" : "0s")}, cooldown ${r.cooldown ?? "15m"}`),
-          el("td", { class: "act" }, ibtn("edit", `Edit ${r.name}`, () => this.editRule(x)),
-            ibtn("x", `Delete ${r.name}`, () => { if (confirm(`Delete the rule "${r.name}"?`)) save(sec, "alerts", { base_hash: S.hash, action: "delete", id: r.name }, () => { closeEditor($("f-rule")); return this.load(); }); }, "danger")));
-      }));
-      labelCells(tb);
-    },
-    editRule(x) {
-      const f = $("f-rule"), it = x ? x.item : { type: "container" };
-      f._orig = x ? it : null;
-      // Channel choices: the saved channels plus any the rule names.
-      const names = Array.from(new Set([...this.channels.map((c) => c.id), ...(it.channels || [])]));
-      const box = $("ru-channels-opts");
-      box.replaceChildren(...(names.length ? names.map((n) => el("label", { class: "cb" }, el("input", { type: "checkbox", name: "channels", value: n, "data-t": "set" }), el("span", { class: "mono", text: n }))) : [muted("No channels yet (add one above).")]));
-      fill(f, it);
-      ctl(f, "enabled").checked = it.enabled !== false;
-      const type = it.type || "container";
-      ctl(f, "type").value = type;
-      if (!it.metric) ctl(f, "metric").value = "disk";
-      showType(f, type);
-      openEditor(f, x ? `Edit rule: ${it.name}` : "Add rule", $("ru-list").closest(".tbl-wrap"));
-    },
+    // An outside change: the list and the System tiles switch follow it.
+    async load() { const ok = await refreshList(WIDGETS.list); const b = $(WIDGETS.list); if (b && b.dataset.sys) $("sys-tiles").checked = b.dataset.sys === "1"; return ok; },
   };
 
   // ---- appearance ----

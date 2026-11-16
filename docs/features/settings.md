@@ -25,11 +25,12 @@ atomically (temp file + rename, same mode) → add a revision → record a
   the browser checks required fields, links, numbers and lengths first and
   shows every problem at once.
 
-**Forms** (the ux-pass dialog, DESIGN.md §11.6; Bookmarks so far, the other
-tabs follow):
+**Forms** (the ux-pass dialog, DESIGN.md §11.6; Bookmarks, Widgets and
+Notifications so far, the other tabs follow):
 
 - Add and edit open in a dialog from the row or button you clicked; the URL
-  says which (`?add=bookmark`, `?edit=bookmark:2`), so a reload or a link opens
+  says which (`?add=bookmark`, `?edit=bookmark:2`, `?edit=channel:ops-hook`,
+  `?edit=rule:disk-full`, `?edit=widget:mailpit`), so a reload or a link opens
   the same dialog. Esc, ×, Cancel or the backdrop close it, and ask first when
   something was typed. Enter saves; the button shows progress; the list behind
   updates in place and the changed row flashes.
@@ -38,7 +39,18 @@ tabs follow):
   without a session). Signed out nothing of it is in the page.
 - Delete asks in one confirm dialog; the message after it has **Undo**, which
   restores the revision from before the delete (refused if the file changed
-  since). Up / down arrows move an entry one step, one revision per step.
+  since). Up / down arrows (bookmarks, widgets) move an entry one step, one
+  revision per step. A channel or widget that alert rules still use is not
+  offered for deleting: the message names the rules.
+- An edit sends only the fields you changed; the server keeps every key the
+  request leaves out (`null` removes one). A save therefore never removes
+  something the form does not show, and Save with no change writes nothing
+  ("No changes").
+- Channel names and widget ids stay editable. Renaming one that rules refer
+  to asks first, naming the rules; saving again renames it and changes those
+  rules to match (one revision).
+- A setting that is one switch saves when switched: a rule's on / off in its
+  row, System tiles.
 - Every dialog, confirm and arrow click saves against the file version it
   was started from; nothing is refreshed under an open dialog. If the file
   changed meanwhile the save is refused and the dialog says so, with "Reload

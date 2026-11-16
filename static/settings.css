@@ -82,16 +82,17 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent);width:15px;hei
 .sw:checked::after{transform:translateX(14px);background:var(--on-accent)}
 .sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 fieldset{margin:0;padding:0;border:0;min-width:0}
-.sub-f{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
-.sub-f>legend{float:left;width:100%;padding:0;margin-bottom:2px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
 .cset{display:grid;gap:5px}
 .cset>legend{float:left;width:100%;padding:0;margin-bottom:5px}
 .cset-opts{display:flex;flex-wrap:wrap;gap:4px 16px;clear:both}
-.seg-r{display:flex;flex-wrap:wrap;gap:4px 18px}
 .sf-foot{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
 .sf-msg{font-size:12.5px;color:var(--text-3)}
 .btn.danger{color:var(--bad-fg)}
 .btn.danger:hover{border-color:var(--bad)}
+.btn.ghost.danger:hover{border-color:transparent}
+/* While a message is shown (bottom right; full width above the bottom bar
+   on phones), the page can scroll its last rows clear of it. */
+body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
 .set-main .btn.ghost:not(.icon){background:none;border:0;padding:0;color:var(--text-3)}
 .set-main .btn.ghost:not(.icon):hover{color:var(--text);border-color:var(--border)}
 .fld .req{color:var(--text-3);font-weight:500;text-decoration:none}
@@ -206,27 +207,28 @@ fieldset{margin:0;padding:0;border:0;min-width:0}
 .ov-edit-h code{color:var(--text)}
 @media (max-width:699px){.ov-edit{margin:0;padding:0;border:0}}
 
-/* entity editor (widget, channel, rule; bookmarks use the dialog) */
-.editor{margin-top:12px;padding:16px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);box-shadow:inset 3px 0 0 var(--accent)}
-.editor .sub-f{background:var(--surface)}
-.editor .in{background-color:var(--surface)}
-.editor .in[readonly]{background-color:var(--surface-2)}
-.ed-h{font-size:14px}
+/* read-only lines in a dialog (set in the file on the host) */
 .ro-box{display:grid;gap:6px;padding:10px 12px;border:1px dashed var(--border);border-radius:var(--r-sm);font-size:12.5px;color:var(--text-2)}
 .ro-box>p{display:flex;gap:6px;align-items:flex-start}
 .ro-box svg{color:var(--warn-fg);flex:none;margin-top:1px}
 .kv{list-style:none;margin:0;padding:0 0 0 22px;display:grid;gap:3px}
 .kv code{font-size:12px;color:var(--text)}
-.envst{display:inline-flex;margin-top:2px}
-.preview{display:grid;gap:10px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
-.preview-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px}
-.preview-out{display:grid;gap:8px}
+.envst{display:inline-flex;margin-left:4px;vertical-align:middle}
+/* widget dialog: field and display rows, Fetch now */
+.kv-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr) var(--ia);gap:8px;font:600 var(--fs-micro)/1.2 var(--font);letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
+.kv-row .kv-got{grid-column:1/-1;font:var(--fs-xs)/1.3 var(--mono);overflow-wrap:anywhere}
+.kv-row .kv-got:empty{display:none}
+.preview-out{display:grid;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 .pv-head{display:flex;align-items:center;gap:6px;font-size:12px}
 .pv-body{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:14px;align-items:start}
 .pv-tile{margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
-.sub-f>.btn,.sub-f>div>.btn{justify-self:start}
 .pv-vals td{height:28px}
-@media (max-width:699px){.pv-body{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:699px){.pv-body{grid-template-columns:minmax(0,1fr)}.kv-head{display:none}}
+/* rule rows: the on / off switch; a switched-off rule is muted */
+.rsw{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:12.5px;color:var(--text-2);cursor:pointer}
+.tbl tr.off td:not(.act){color:var(--text-3)}
+.tbl tr.off .linkbtn{color:var(--text-2)}
+.sys-tg{max-width:70ch}
 
 /* locked (command) widgets */
 .lock-note{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text-2)}

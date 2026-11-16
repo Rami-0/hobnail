@@ -16,7 +16,7 @@ use crate::ui::shell::Ctx;
 const ACTION: &str = "/settings/bookmarks";
 
 /// Today's fields, in the order of DESIGN.md §11.6.
-const FIELDS: &[Field] = &[
+const FIELDS: &[Field<'static>] = &[
     Field {
         name: "name",
         label: "Name",
@@ -72,6 +72,7 @@ pub const SPEC: Spec = Spec {
     delete: Some("Delete…"),
     back: ("Bookmarks", ACTION),
     list: "bm-list",
+    wide: false,
 };
 
 /// The values the dialog is filled with (`data-item`): every field, "" for
@@ -166,7 +167,7 @@ pub fn list_markup(disk: &Disk) -> Markup {
 
 fn row(i: usize, n: usize, b: &Bookmark) -> Markup {
     let key = format!("{}:{i}", SPEC.kind);
-    let href = dlg::edit_href(SPEC.kind, &i.to_string());
+    let href = dlg::edit_link(SPEC.kind, &i.to_string());
     let data = J::Object(item(b)).to_string();
     let name = if b.name.is_empty() {
         "(no name)"

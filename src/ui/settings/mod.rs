@@ -1,9 +1,10 @@
 //! The settings pages: `/settings` (overview of the tabs) and
 //! `/settings/<tab>` (DESIGN.md section 5), in the shell.
 //!
-//! Forms that moved onto the dialog (DESIGN.md §11.6; Bookmarks so far, see
-//! the recipe in `dlg.rs`) are rendered with their values by the server,
-//! from the file on disk, for a session only; the add / edit dialog and the
+//! Forms that moved onto the dialog (DESIGN.md §11.6; Bookmarks, Widgets and
+//! Notifications so far, see the recipe in `dlg.rs`) are rendered with their
+//! values by the server, from the file on disk, for a session only; the add
+//! / edit dialog and the
 //! `?add=` / `?edit=` page form come from `dlg.rs`, and `?frag=list` serves
 //! a list again for in-place updates ([`fragment`]). The other tabs still
 //! render their structure only: `static/settings.js` loads their values
@@ -85,8 +86,8 @@ pub fn page(ctx: &Ctx, slug: Option<&str>) -> Option<String> {
                 bookmarks::dialogs(),
                 Some(bookmarks::head_actions()),
             ),
-            "widgets" => (widgets::body(ctx), none, None),
-            "notifications" => (notifications::body(ctx), none, None),
+            "widgets" => (widgets::body(ctx), widgets::dialogs(), None),
+            "notifications" => (notifications::body(ctx), notifications::dialogs(ctx), None),
             "appearance" => (appearance::body(), none, None),
             "history" => (history::body(), none, None),
             "config" => (config::body(), none, None),
@@ -114,6 +115,11 @@ pub fn fragment(ctx: &Ctx) -> Option<(StatusCode, String)> {
             StatusCode::OK,
             bookmarks::list_markup(&disk::Disk::read(ctx.state)).into_string(),
         ),
+        ("widgets", "list") => (
+            StatusCode::OK,
+            widgets::list_markup(&disk::Disk::read(ctx.state)).into_string(),
+        ),
+        ("notifications", "list") => (StatusCode::OK, notifications::fragment(ctx).into_string()),
         _ => (StatusCode::NOT_FOUND, String::new()),
     })
 }

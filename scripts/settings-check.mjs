@@ -1,9 +1,15 @@
 // Settings dialog check (DESIGN.md §11.6, wave 2): drives the real
-// Bookmarks list and its dialog on a running test instance, signed in, and
-// the Change password form, with real key and pointer events. It adds,
-// edits, moves and deletes bookmarks named "ui-check-*" and removes every
-// one of them again at the end, also when a check fails. Signs in once
-// (the login is rate limited: never run it in a loop with a wrong password).
+// Bookmarks, Notifications (channels and rules) and Widgets lists and their
+// dialogs on a running test instance, signed in, and the Change password
+// form, with real key and pointer events. It adds, edits, moves and deletes
+// entries named "ui-check-*" and puts the config file back byte for byte at
+// the end, also when a check fails. Signs in once (the login is rate
+// limited: never run it in a loop with a wrong password). Channel tests go
+// to a mock receiver only (scripts/mock-receiver): MOCK_RECEIVER is its
+// address from here, MOCK_FROM_APP its address from the instance. With
+// CONFIG_FILE (the instance's config file, on this machine) and RICH_CONFIG
+// (a config with every kind of entry) it also saves every entry of that
+// config unchanged and checks that nothing is written.
 //   HB_PASSWORD=... node scripts/settings-check.mjs http://127.0.0.1:3210/
 // CHECK_WRONG_PASSWORD=1 also sends one wrong current password to Change
 // password (it counts as a failed login).
@@ -11,11 +17,14 @@
 // Playwright cache (override with CH=/path/to/chrome).
 import { spawn } from "node:child_process";
 import os from "node:os";
+import fs from "node:fs";
 
 const url = (process.argv[2] || "").replace(/\/+$/, "");
-const PW = process.env.HB_PASSWORD || process.argv[3];
+const PW = process.env.HB_PASSWORD;
+const MOCK = (process.env.MOCK_RECEIVER || "http://127.0.0.1:3299").replace(/\/+$/, "");
+const MOCK_IN = (process.env.MOCK_FROM_APP || "http://hobnail-dev-mock:9999").replace(/\/+$/, "");
 if (!/^https?:\/\//.test(url) || !PW) {
-  console.error("usage: HB_PASSWORD=<password> node scripts/settings-check.mjs <base URL of a test instance>");
+  console.error("usage: HB_PASSWORD=<password> [MOCK_RECEIVER=…] [MOCK_FROM_APP=…] node scripts/settings-check.mjs <base URL of a test instance>");
   process.exit(2);
 }
 const ORIGIN = new URL(url).origin;
@@ -320,6 +329,343 @@ try {
   await until("!document.getElementById('dlg-bookmark').open");
   check((await itemOf("ui-check-files")).description === "hand-written" && (await itemOf("ui-check-files")).url === "/files", "a bookmark with an unchanged non-http URL can be edited");
 
+  // =================================================================
+  // ---- Notifications: channels (wave 2b) ----
+  const notif = async () => (await api("GET", "notifications")).data;
+  const chItem = async (n) => { const c = (await notif()).channels.find((x) => x.id === n); return c && c.item; };
+  const ruItem = async (n) => { const r = (await notif()).rules.find((x) => x.id === n); return r && r.item; };
+  async function outsideApi(path, body) {
+    const what = path === "widgets" ? "widgets" : "notifications";
+    const d = (await api("GET", what)).data;
+    const r = await api("POST", path, { base_hash: d.hash, ...body });
+    if (r.status !== 200) throw new Error(`outside ${path} ${body.action}: HTTP ${r.status} ${JSON.stringify(r.data)}`);
+  }
+  const vis = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); return !!e && !e.closest('[hidden]') && e.offsetParent !== null; })()`;
+  const note = (dlg) => ev(`document.querySelector('#${dlg} .dlg-note').textContent`);
+  const noteShown = (dlg) => `!document.querySelector('#${dlg} .dlg-note').hidden`;
+  const chRows = () => ev("[...document.querySelectorAll('#ch-list tr[data-key]')].map((r) => r.dataset.key.slice(8))");
+  const ruRows = () => ev("[...document.querySelectorAll('#ru-list tr[data-key]')].map((r) => r.dataset.key.slice(5))");
+  const mock = async () => { try { return await (await fetch(MOCK + "/_received")).json(); } catch { return null; } };
+  await load("/settings/notifications");
+  check(JSON.stringify(await chRows()) === JSON.stringify((await notif()).channels.map((c) => c.id)), "channels: the list is rendered by the server, as in the file", await chRows());
+  check(JSON.stringify(await ruRows()) === JSON.stringify((await notif()).rules.map((c) => c.id)), "rules: the list is rendered by the server, as in the file", await ruRows());
+  await click("#ch-add");
+  check(await isOpen("dlg-channel") && (await active()) === "ch-name" && await ev("location.search === '?add=channel'"), "Add channel opens the dialog on Name, at ?add=channel");
+  await key("Enter"); await sleep(100);
+  let es = await ev("[...document.querySelectorAll('#dlg-channel .fld-err:not([hidden])')].map((e) => e.closest('.fld').querySelector('input').name)");
+  check(JSON.stringify(es) === JSON.stringify(["name", "url_env"]), "channel: Enter on an empty form shows both errors at once", es);
+  await typeText("ui-check-hook");
+  await click("#ch-url-env"); await typeText("lower_case");
+  await click("#dlg-channel details summary"); await click("#ch-timeout"); await typeText("abc");
+  await click("#dlg-channel details summary"); // closed again: its error must still be found
+  await click("#ch-name"); await key("Enter"); await sleep(100);
+  es = await ev("[...document.querySelectorAll('#dlg-channel .fld-err:not([hidden])')].map((e) => e.textContent)");
+  check(es.length === 2 && es.includes("Capital letters, digits and _ only, like RH_WEBHOOK_URL.") && es.includes("Use a duration like 30s, 5m or 2h."), "channel: a variable name and a duration are checked together, in plain words", es);
+  // Only the timeout wrong, in the closed More options: it is opened.
+  await clear("#ch-url-env"); await typeText("RH_WEBHOOK_URL");
+  if (await ev("document.querySelector('#dlg-channel details').open")) await click("#dlg-channel details summary");
+  await click("#ch-name"); await key("Enter"); await sleep(100);
+  check(await ev("document.querySelector('#dlg-channel details').open") && (await active()) === "ch-timeout", "an error in the closed More options opens it and focuses the field", await active());
+  await clear("#ch-timeout");
+  // Slack, then Telegram: the fields follow the type; Plain URL goes away.
+  await click("#dlg-channel input[name=src][value=plain]");
+  check(await ev(vis("#ch-url")) && !(await ev(vis("#ch-url-env"))), "Plain URL shows the URL field instead of the variable");
+  await click("#dlg-channel input[name=type][value=slack]");
+  check(await ev(vis("#ch-webhook-url-env")) && !(await ev(vis("#ch-url"))) && !(await ev(vis("#dlg-channel input[name=src][value=plain]"))) && await ev("document.querySelector('#dlg-channel input[name=src][value=env]').checked"), "Slack: no Plain URL, the source falls back to a variable");
+  await click("#dlg-channel input[name=src][value=file]");
+  await click("#ch-webhook-url-file"); await typeText("/etc/passwd"); await key("Enter"); await sleep(100);
+  check(/^A file inside .*secrets\//.test(await ev("document.getElementById('ch-webhook-url-file-e').textContent")), "a file outside data/secrets/ is caught on its field", await ev("document.getElementById('ch-webhook-url-file-e').textContent"));
+  await click("#dlg-channel input[name=type][value=telegram]");
+  check(await ev(vis("#ch-token-file")) && await ev(vis("#ch-chat-id")), "Telegram: token (same source) and chat id");
+  // Back to a webhook with a plain URL at the mock receiver: save and test.
+  await click("#dlg-channel input[name=type][value=webhook]");
+  await click("#dlg-channel input[name=src][value=plain]");
+  await click("#ch-url"); await typeText(MOCK_IN + "/webhook");
+  const mockBefore = (await mock() || []).length;
+  await click("#dlg-channel [data-submit=test]");
+  await until(noteShown("dlg-channel"), 8000);
+  const tn = await note("dlg-channel");
+  check(/^Saved \(revision #\d+\)\. Test sent to “ui-check-hook”/.test(tn), "Save and send test: saved, then tested, the result in the dialog note", tn);
+  check(await isOpen("dlg-channel") && await ev("document.querySelector('#dlg-channel h2').textContent") === "Edit channel “ui-check-hook”" && await ev("document.querySelector('#dlg-channel [type=submit]').textContent.trim()") === "Save changes", "the dialog stays open, now editing the saved channel");
+  check((await chRows()).includes("ui-check-hook"), "the new channel is in the list behind");
+  check(((await mock()) || []).length > mockBefore, "the mock receiver got the test");
+  check((await chItem("ui-check-hook")).url === MOCK_IN + "/webhook" && !("url_env" in (await chItem("ui-check-hook"))), "only the chosen source is in the file");
+  check(await ev("document.querySelectorAll('#dlg-channel [type=submit]').length") === 1 && await ev("document.querySelector('#dlg-channel [data-submit]').type") === "button", "the primary is the only submit button (Enter never tests)");
+  await click("#ch-name"); await key("Enter");
+  await until("!document.getElementById('dlg-channel').open");
+  check((await active()) === "channel:ui-check-hook", "Enter saves (no changes) and focus returns to the row", await active());
+  // A duplicate name: the server's 422 lands on Name.
+  await click("#ch-add"); await typeText("slack");
+  await click("#ch-url-env"); await typeText("RH_X"); await key("Enter");
+  await until("document.getElementById('ch-name-e').textContent !== ''");
+  check(/already exists/.test(await ev("document.getElementById('ch-name-e').textContent")), "a duplicate name is refused on the Name field");
+  await key("Escape"); await sleep(100); await click("#dlg-channel [data-discard]"); await sleep(250);
+  // Send test from the row: one click.
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  await click('#ch-list tr[data-key="channel:ui-check-hook"] [data-test]');
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Test sent to “ui-check-hook”/.test(t.textContent))", 8000);
+  check(/Test sent/.test(await ev("document.querySelector('#ch-list tr[data-key=\"channel:ui-check-hook\"] .test-res').textContent")), "Send test in the row: one click, the result in the row and a toast");
+
+  // ---- rules: add (every channel ticked), checks across fields, switch ----
+  await click("#ru-add");
+  check(await ev("[...document.querySelectorAll('#dlg-rule input[name=channels]')].every((c) => c.checked)") && await ev("document.querySelectorAll('#dlg-rule input[name=channels]').length") === (await notif()).channels.length, "a new rule notifies every channel");
+  await typeText("ui-check-rule");
+  await ev("(() => { const s = document.getElementById('ru-type'); s.value = 'host'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  check(await ev(vis("#ru-metric")) && await ev(vis("#ru-disk")) && !(await ev(vis("#ru-containers"))), "type Host metric shows Metric and Disk, hides Containers");
+  await ev("(() => { const s = document.getElementById('ru-metric'); s.value = 'memory'; s.dispatchEvent(new Event('change', { bubbles: true })); })()");
+  check(!(await ev(vis("#ru-disk"))), "Disk only for the disk metric");
+  await click("#ru-name"); await key("Enter"); await sleep(100);
+  check(await ev("document.getElementById('ru-above-e').textContent") === "Set exactly one of: Above or Below.", "exactly one of Above or Below, in plain words", await ev("document.getElementById('ru-above-e').textContent"));
+  await click("#ru-above"); await typeText("95");
+  await ev("[...document.querySelectorAll('#dlg-rule input[name=channels]')].forEach((c) => { c.checked = c.value === 'ui-check-hook'; })");
+  await key("Enter");
+  await until("!document.getElementById('dlg-rule').open");
+  check((await ruRows()).includes("ui-check-rule") && JSON.stringify((await ruItem("ui-check-rule")).channels) === '["ui-check-hook"]' && (await ruItem("ui-check-rule")).above === 95, "the rule is added with the ticked channel", await ruItem("ui-check-rule"));
+  check((await active()) === "ru-add", "focus returns to Add rule", await active());
+  const swSel = '#ru-list tr[data-key="rule:ui-check-rule"] [data-toggle]';
+  await sleep(400); // the dialog's closing transition
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())"); // they sit over the last rows
+  await click(swSel);
+  await until(`!document.querySelector('${swSel}').checked && [...document.querySelectorAll('body>.toasts>.toast')].some((t) => /switched off/.test(t.textContent))`);
+  check((await ruItem("ui-check-rule")).enabled === false, "the row switch turns the rule off at once (saved)");
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  await click(swSel);
+  await until(`document.querySelector('${swSel}').checked`);
+  await sleep(300);
+  check(!("enabled" in (await ruItem("ui-check-rule"))), "and on again (the key goes: on is the default)");
+
+  // ---- a channel rename that rules follow; a delete a rule blocks ----
+  await ev(`document.querySelector('#ch-list tr[data-key="channel:ui-check-hook"] .linkbtn').click()`); await sleep(250);
+  await clear("#ch-name"); await typeText("ui-check-hook2"); await key("Enter");
+  await until(noteShown("dlg-channel"));
+  check(/The rule “ui-check-rule” sends to “ui-check-hook”\. Saving renames it to “ui-check-hook2”/.test(await note("dlg-channel")) && await isOpen("dlg-channel"), "a rename warns first and names the rule", await note("dlg-channel"));
+  await click("#dlg-channel [type=submit]");
+  await until("!document.getElementById('dlg-channel').open");
+  check(!!(await chItem("ui-check-hook2")) && JSON.stringify((await ruItem("ui-check-rule")).channels) === '["ui-check-hook2"]', "Save again: the channel is renamed and the rule follows it");
+  check(await ev(`!!document.querySelector('#ru-list tr[data-key="rule:ui-check-rule"]') && document.querySelector('#ru-list tr[data-key="rule:ui-check-rule"]').textContent.includes('ui-check-hook2')`), "the rule list behind shows the new name");
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  await click('#ch-list tr[data-key="channel:ui-check-hook2"] [data-menu]'); await sleep(200);
+  await click("#m-ch [data-row-act=delete]"); await sleep(250);
+  check(!(await isOpen("dlg-confirm")) && (await toasts()).some((x) => /^The channel “ui-check-hook2” is used by the rule “ui-check-rule”\./.test(x)), "deleting a channel a rule uses says which rule, without asking", await toasts());
+
+  // ---- the base-hash rule, channels ----
+  await outsideApi("channels", { action: "add", item: { name: "ui-check-c2", type: "webhook", url: MOCK_IN + "/webhook" } });
+  await load("/settings/notifications");
+  // 1. An outside change while an edit dialog is open.
+  await ev(`document.querySelector('#ch-list tr[data-key="channel:ui-check-c2"] .linkbtn').click()`); await sleep(250);
+  await outsideApi("channels", { action: "add", item: { name: "ui-check-c3", type: "webhook", url: MOCK_IN + "/webhook" } }); await sleep(1200);
+  check(await ev(noteShown("dlg-channel")) === false && !(await chRows()).includes("ui-check-c3"), "channels: an outside change does not refresh the list under an open dialog");
+  await click("#dlg-channel details summary"); await click("#ch-timeout"); await typeText("20s"); await key("Enter");
+  await until(noteShown("dlg-channel"));
+  check(/changed on disk/.test(await note("dlg-channel")), "channels: the save is refused (409)");
+  await click("#dlg-channel .dlg-note .btn.primary");
+  await until("/Reloaded/.test(document.querySelector('#dlg-channel .dlg-note').textContent)");
+  check(await ev("document.getElementById('ch-timeout').value") === "20s", "channels: Reload and keep keeps the input");
+  await key("Enter");
+  await until("!document.getElementById('dlg-channel').open");
+  check((await chItem("ui-check-c2")).timeout === "20s" && !("timeout" in (await chItem("ui-check-c3"))), "channels: re-found and saved onto the same channel only");
+  // The entry changed meanwhile: cannot be saved onto.
+  await ev(`document.querySelector('#ch-list tr[data-key="channel:ui-check-c2"] .linkbtn').click()`); await sleep(250);
+  await outsideApi("channels", { action: "edit", id: "ui-check-c2", item: { name: "ui-check-c2", type: "webhook", url: MOCK_IN + "/webhook", timeout: "30s" } }); await sleep(800);
+  await click("#ch-url"); await typeText("x"); await key("Enter");
+  await until(noteShown("dlg-channel"));
+  await click("#dlg-channel .dlg-note .btn.primary");
+  await until("/cannot be saved/.test(document.querySelector('#dlg-channel .dlg-note').textContent)");
+  check(await ev("document.querySelector('#dlg-channel [type=submit]').disabled && document.querySelector('#dlg-channel [data-submit]').disabled"), "channels: a channel changed meanwhile cannot be saved onto (Save and Save and send test disabled)");
+  await click("#ch-url");
+  for (const type of ["rawKeyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
+  await sleep(600);
+  check((await chItem("ui-check-c2")).timeout === "30s" && /cannot be saved/.test(await note("dlg-channel")), "Ctrl+Enter does not save past a disabled Save");
+  await click("#dlg-channel .dlg-note .btn"); await sleep(300);
+  check((await chItem("ui-check-c2")).timeout === "30s", "channels: Discard leaves the outside change alone");
+  // 2. An outside change while the delete confirm is open.
+  await click('#ch-list tr[data-key="channel:ui-check-c3"] [data-menu]'); await sleep(200);
+  await click("#m-ch [data-row-act=delete]"); await sleep(250);
+  await outsideApi("channels", { action: "edit", id: "ui-check-c2", item: { name: "ui-check-c2", type: "webhook", url: MOCK_IN + "/webhook", timeout: null } }); await sleep(800);
+  await click("#dlg-confirm [data-ok]");
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Not deleted/.test(t.textContent))");
+  check(!!(await chItem("ui-check-c3")), "channels: a delete confirmed after an outside change is refused");
+  // Delete with Undo.
+  await load("/settings/notifications");
+  await click('#ch-list tr[data-key="channel:ui-check-c3"] [data-menu]'); await sleep(200);
+  await click("#m-ch [data-row-act=delete]"); await sleep(250);
+  await click("#dlg-confirm [data-ok]");
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Deleted “ui-check-c3”/.test(t.textContent))");
+  check(!(await chRows()).includes("ui-check-c3"), "channels: delete through the confirm removes the row");
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].find((t) => /Deleted “ui-check-c3”/.test(t.textContent)).querySelector('button').click()");
+  await until("[...document.querySelectorAll('#ch-list tr[data-key]')].some((r) => r.dataset.key === 'channel:ui-check-c3')");
+  check(!!(await chItem("ui-check-c3")), "channels: Undo restores it");
+
+  // ---- the base-hash rule, rules ----
+  await outsideApi("alerts", { action: "add", item: { name: "ui-check-r2", type: "host", metric: "disk", above: 99, channels: [] } });
+  await load("/settings/notifications");
+  // 1. Edit dialog open, outside change, reload and keep.
+  await ev(`document.querySelector('#ru-list tr[data-key="rule:ui-check-r2"] .linkbtn').click()`); await sleep(250);
+  await outsideApi("alerts", { action: "add", item: { name: "ui-check-r3", type: "host", metric: "disk", above: 98, channels: [] } }); await sleep(1000);
+  await clear("#ru-above"); await typeText("97"); await key("Enter");
+  await until(noteShown("dlg-rule"));
+  check(/changed on disk/.test(await note("dlg-rule")), "rules: a save after an outside change is refused (409)");
+  await click("#dlg-rule .dlg-note .btn.primary");
+  await until("/Reloaded/.test(document.querySelector('#dlg-rule .dlg-note').textContent)");
+  await key("Enter");
+  await until("!document.getElementById('dlg-rule').open");
+  check((await ruItem("ui-check-r2")).above === 97 && (await ruItem("ui-check-r3")).above === 98, "rules: reload-and-keep saves onto the same rule only");
+  // 2. Confirm open, outside change.
+  await click('#ru-list tr[data-key="rule:ui-check-r3"] [data-menu]'); await sleep(200);
+  await click("#m-ru [data-row-act=delete]"); await sleep(250);
+  await outsideApi("alerts", { action: "edit", id: "ui-check-r2", item: { name: "ui-check-r2", type: "host", metric: "disk", above: 96, channels: [] } }); await sleep(800);
+  await click("#dlg-confirm [data-ok]");
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Not deleted/.test(t.textContent))");
+  check(!!(await ruItem("ui-check-r3")), "rules: a delete confirmed after an outside change is refused");
+  // 3. The row switch: its base is taken at the click; an outside change
+  //    that lands before its write is answered 409 (the write is held back
+  //    here so the outside change comes first).
+  await load("/settings/notifications");
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  await ev("(() => { const f = window.fetch; window.fetch = (u, o) => (window.__hold && o && o.method === 'POST' ? new Promise((r) => setTimeout(r, 1500)).then(() => f(u, o)) : f(u, o)); window.__hold = true; })()");
+  await ev(`document.querySelector('#ru-list tr[data-key="rule:ui-check-r3"] [data-toggle]').click()`);
+  await outsideApi("alerts", { action: "edit", id: "ui-check-r2", item: { name: "ui-check-r2", type: "host", metric: "disk", above: 95, channels: [] } });
+  await ev("window.__hold = false");
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Not switched/.test(t.textContent))");
+  check(!("enabled" in (await ruItem("ui-check-r3"))) && await ev(`document.querySelector('#ru-list tr[data-key="rule:ui-check-r3"] [data-toggle]').checked`), "rules: a switch based on an older file is refused and flips back");
+
+  // =================================================================
+  // ---- Widgets (wave 2b) ----
+  const wdata = async () => (await api("GET", "widgets")).data;
+  const wItem = async (id) => { const w = (await wdata()).widgets.find((x) => x.id === id); return w && w.item; };
+  const wRows = () => ev("[...document.querySelectorAll('#w-list tr[data-key]')].map((r) => r.dataset.key.slice(7))");
+  await load("/settings/widgets");
+  check(JSON.stringify(await wRows()) === JSON.stringify((await wdata()).widgets.filter((w) => !w.locked).map((w) => w.id)), "widgets: the list is rendered by the server (custom-api only)", await wRows());
+  check(await ev("!document.querySelector('#w-locked button, #w-locked input, #w-locked a[data-dlg]')"), "command widgets stay read-only (no controls)");
+  await click("#w-add");
+  check(await isOpen("dlg-widget") && (await active()) === "wf-id", "Add widget opens on Id");
+  await click("#wf-t-display"); await sleep(100);
+  await click("#wf-template"); await key("Enter"); await sleep(150);
+  es = await ev("[...document.querySelectorAll('#dlg-widget .fld-err:not([hidden])')].map((e) => e.id)");
+  check(es.length === 2 && es.includes("wf-id-e") && es.includes("wf-url-e"), "widget: both errors at once, found in a tab that was not shown", es);
+  check(await ev("document.getElementById('wf-t-req').getAttribute('aria-selected')") === "true" && (await active()) === "wf-id", "the tab with the first error is selected and its field focused");
+  await typeText("ui-check-w");
+  await click("#wf-url"); await typeText(MOCK_IN + "/_received");
+  await click("#wf-t-fields"); await sleep(100);
+  await click('#dlg-widget [name="fk.0"]'); await typeText("count");
+  await click('#dlg-widget [name="fv.0"]'); await typeText("length");
+  await click("#dlg-widget [data-kv-add=field]");
+  check(await ev("document.activeElement.name") === "fk.1", "Add field adds a row and focuses it");
+  await typeText("first"); await click('#dlg-widget [name="fv.1"]'); await typeText("0.kind");
+  await click("#dlg-widget [data-act=wf-preview]");
+  await until("!document.getElementById('wf-preview').hidden && !/Fetching/.test(document.getElementById('wf-preview').textContent)", 8000);
+  const pv = await ev("({ text: document.getElementById('wf-preview').textContent, got: [...document.querySelectorAll('#dlg-widget .kv-got')].map((g) => g.textContent) })");
+  check(/OK/.test(pv.text) && pv.got.every((g) => g.startsWith("→ ")), "Fetch now shows the result and what each path found, in the dialog", pv);
+  check(!/"kind"\s*:/.test(pv.text), "Fetch now shows extracted values only, never the raw response");
+  await click("#wf-t-display"); await sleep(100);
+  await click("#wf-template"); await typeText("{{count}} received");
+  await key("Enter");
+  await until("!document.getElementById('dlg-widget').open");
+  const wi = await wItem("ui-check-w");
+  check(!!wi && wi.fields.count === "length" && wi.fields.first === "0.kind" && wi.template === "{{count}} received", "the widget is added with its fields and template", wi);
+  check((await wRows()).at(-1) === "ui-check-w" && (await active()) === "w-add", "the row is in the list; focus returns to Add widget", await active());
+  // Reorder with a command widget in between: the full order is sent.
+  const allBefore = (await wdata()).widgets.map((w) => w.id);
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-w"] [data-move=up]').click()`);
+  await until(`[...document.querySelectorAll('#w-list tr[data-key]')].map((r) => r.dataset.key).indexOf('widget:ui-check-w') === ${(await wRows()).length - 2}`);
+  const allAfter = (await wdata()).widgets.map((w) => w.id);
+  check(allAfter.length === allBefore.length && allAfter.includes("procs") && allAfter.indexOf("ui-check-w") < allBefore.indexOf("ui-check-w"), "↑ moves the widget past its neighbour; the command widget stays", [allBefore, allAfter]);
+  // A rule that watches it: rename warns and the rule follows; delete is blocked.
+  await outsideApi("alerts", { action: "add", item: { name: "ui-check-wr", type: "widget", widget: "ui-check-w", field: "count", above: 1000, channels: [] } });
+  await load("/settings/widgets");
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-w"] .linkbtn').click()`); await sleep(250);
+  await clear("#wf-id"); await typeText("ui-check-w2"); await key("Enter");
+  await until(noteShown("dlg-widget"));
+  check(/The rule “ui-check-wr” watches the widget “ui-check-w”/.test(await note("dlg-widget")), "widget rename warns first and names the rule", await note("dlg-widget"));
+  await click("#dlg-widget [type=submit]");
+  await until("!document.getElementById('dlg-widget').open");
+  check(!!(await wItem("ui-check-w2")) && (await ruItem("ui-check-wr")).widget === "ui-check-w2", "Save again: renamed, and the rule watches the new id");
+  await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+  await click('#w-list tr[data-key="widget:ui-check-w2"] [data-menu]'); await sleep(200);
+  await click("#m-w [data-row-act=delete]"); await sleep(250);
+  check(!(await isOpen("dlg-confirm")) && (await toasts()).some((x) => /^The widget “ui-check-w2” is used by the rule “ui-check-wr”\./.test(x)), "deleting a widget a rule watches says which rule", await toasts());
+  // The base-hash rule, widgets.
+  await outsideApi("widgets", { action: "add", item: { id: "ui-check-w3", type: "custom-api", url: MOCK_IN + "/_received" } });
+  await load("/settings/widgets");
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-w3"] .linkbtn').click()`); await sleep(250);
+  await outsideApi("widgets", { action: "add", item: { id: "ui-check-w4", type: "custom-api", url: MOCK_IN + "/_received" } }); await sleep(1000);
+  check(!(await wRows()).includes("ui-check-w4"), "widgets: nothing refreshes under an open dialog");
+  await click("#wf-title"); await typeText("W3"); await key("Enter");
+  await until(noteShown("dlg-widget"));
+  check(/changed on disk/.test(await note("dlg-widget")), "widgets: the save is refused (409)");
+  await click("#dlg-widget .dlg-note .btn.primary");
+  await until("/Reloaded/.test(document.querySelector('#dlg-widget .dlg-note').textContent)");
+  await key("Enter");
+  await until("!document.getElementById('dlg-widget').open");
+  check((await wItem("ui-check-w3")).title === "W3" && !(await wItem("ui-check-w4")).title, "widgets: reload-and-keep saves onto the same widget only");
+  await click('#w-list tr[data-key="widget:ui-check-w4"] [data-menu]'); await sleep(200);
+  await click("#m-w [data-row-act=delete]"); await sleep(250);
+  await outsideApi("widgets", { action: "edit", id: "ui-check-w3", item: { id: "ui-check-w3", type: "custom-api", url: MOCK_IN + "/_received", title: null } }); await sleep(800);
+  await click("#dlg-confirm [data-ok]");
+  await until("[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /Not deleted/.test(t.textContent))");
+  check(!!(await wItem("ui-check-w4")), "widgets: a delete confirmed after an outside change is refused");
+  // System tiles: one switch that saves.
+  await load("/settings/widgets");
+  const sysWas = (await wdata()).system.enabled;
+  await click("#sys-tiles");
+  await until(`[...document.querySelectorAll('body>.toasts>.toast')].some((t) => /System tiles/.test(t.textContent))`);
+  check((await wdata()).system.enabled === !sysWas, "System tiles saves when switched");
+  await click("#sys-tiles"); await sleep(600);
+  check((await wdata()).system.enabled === sysWas, "and back");
+
+  // ---- review fixes: an edit never removes what the form does not show ----
+  await outsideApi("channels", { action: "add", item: { name: "ui-check-keep", type: "webhook", url: MOCK_IN + "/webhook", timeout: "7s", headers: { "X-Plain": "keepvalue-1" }, body: '{"text": "{{message}}"}' } });
+  await outsideApi("widgets", { action: "add", item: { id: "ui-check-wk", type: "custom-api", url: MOCK_IN + "/_received", method: "post", body: '{"q":1}', output: "json", headers: { "X-Plain": "keepvalue-2" }, template: "{{_status}}" } });
+  await load("/settings/notifications");
+  check(!(await ev("document.documentElement.outerHTML.includes('keepvalue')")), "header values are never in the page");
+  // Every settings read fails from here: a save does not need one.
+  await ev("(() => { const f = window.fetch; window.__reads = 0; window.fetch = (u, o) => { if (window.__failReads && String(u).includes('/api/settings/') && (!o || !o.method || o.method === 'GET')) { window.__reads++; return Promise.resolve(new Response('{}', { status: 500 })); } if (o && o.method === 'POST' && String(u).includes('widgets/preview')) window.__previews = (window.__previews || 0) + 1; return f(u, o); }; window.__failReads = true; })()");
+  await ev(`document.querySelector('#ch-list tr[data-key="channel:ui-check-keep"] .linkbtn').click()`); await sleep(250);
+  await click("#dlg-channel details summary"); await clear("#ch-timeout"); await typeText("8s"); await key("Enter");
+  await until("!document.getElementById('dlg-channel').open");
+  let ki = await chItem("ui-check-keep");
+  check(ki.timeout === "8s" && ki.headers && ki.headers["X-Plain"] === "keepvalue-1" && /message/.test(ki.body || ""), "kept keys survive an edit (headers and body stay), with every settings read failing", ki);
+  await load("/settings/widgets");
+  await ev("(() => { const f = window.fetch; window.__previews = 0; window.fetch = (u, o) => { if (String(u).includes('/api/settings/widgets') && (!o || !o.method || o.method === 'GET')) return Promise.resolve(new Response('{}', { status: 500 })); if (o && o.method === 'POST' && String(u).includes('widgets/preview')) window.__previews++; return f(u, o); }; })()");
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-wk"] .linkbtn').click()`); await sleep(250);
+  await click("#wf-title"); await typeText("Kept"); await key("Enter");
+  await until("!document.getElementById('dlg-widget').open");
+  ki = await wItem("ui-check-wk");
+  check(ki.title === "Kept" && ki.method === "post" && ki.body === '{"q":1}' && ki.output === "json" && ki.headers["X-Plain"] === "keepvalue-2", "a widget edit keeps method as typed, body, output and headers", ki);
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-wk"] .linkbtn').click()`); await sleep(250);
+  await click("#dlg-widget [data-act=wf-preview]");
+  await until("!document.getElementById('wf-preview').hidden && !/Fetching/.test(document.getElementById('wf-preview').textContent)");
+  check(/^Not fetched: the widget's headers or body could not be read/.test(await ev("document.getElementById('wf-preview').textContent")) && await ev("window.__previews") === 0, "a failed read: Fetch now says so and fetches nothing (never without the headers)", await ev("document.getElementById('wf-preview').textContent"));
+  await key("Escape"); await sleep(250);
+  // A field-name error from the server lands on the Fields list (its tab selected).
+  await load("/settings/widgets");
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-wk"] .linkbtn').click()`); await sleep(250);
+  await click("#wf-t-fields");
+  await click('#dlg-widget [name="fk.0"]'); await typeText("bad name");
+  await click('#dlg-widget [name="fv.0"]'); await typeText("x");
+  await click("#wf-t-req"); await click("#wf-title"); await key("Enter");
+  await until("document.getElementById('wf-fields-e').textContent !== ''");
+  check(/^Field name "bad name"/.test(await ev("document.getElementById('wf-fields-e').textContent")) && await ev("document.getElementById('wf-t-fields').getAttribute('aria-selected')") === "true", "a bad field name is shown under the fields, the Fields tab selected", await ev("document.getElementById('wf-fields-e').textContent"));
+  await click("#dlg-widget [data-act=wf-preview]");
+  await until("!document.getElementById('wf-preview').hidden && !/Fetching/.test(document.getElementById('wf-preview').textContent)");
+  check(/fix the highlighted field/.test(await ev("document.getElementById('wf-preview').textContent")), "Fetch now reports the same error on the field, not raw text", await ev("document.getElementById('wf-preview').textContent"));
+  await key("Escape"); await sleep(100);
+  if (await ev("!document.querySelector('#dlg-widget .dlg-guard').hidden")) await click("#dlg-widget [data-discard]");
+  await sleep(250);
+
+  // ---- the new dialogs on a phone ----
+  await load("/settings/notifications", 390, true);
+  await ev("document.querySelector('#ch-add').click()"); await sleep(400);
+  const pm = await ev("(() => { const r = document.getElementById('dlg-channel').getBoundingClientRect(), i = document.getElementById('ch-name'), s = document.querySelector('#dlg-channel [type=submit]').getBoundingClientRect(), t = document.querySelector('#dlg-channel [data-submit]').getBoundingClientRect(), c = document.querySelector('#dlg-channel .choice label').getBoundingClientRect(); return { w: Math.round(r.width), bottom: Math.round(r.bottom), vh: innerHeight, inH: i.offsetHeight, fs: Math.round(parseFloat(getComputedStyle(i).fontSize)), saveH: Math.round(s.height), saveBottom: Math.round(s.bottom), testH: Math.round(t.height), choiceH: Math.round(c.height) }; })()");
+  check(pm.w === 390 && pm.bottom === pm.vh && pm.saveBottom <= pm.vh, "phone: the channel dialog is a bottom sheet with Save in view", pm);
+  check(pm.inH === 44 && pm.fs === 16 && pm.saveH === 44 && pm.testH === 44 && pm.choiceH >= 38, "phone: 16 px inputs, 44 px buttons", pm);
+  await key("Escape"); await sleep(250);
+  await load("/settings/widgets", 390, true);
+  await ev(`document.querySelector('#w-list tr[data-key="widget:ui-check-w3"] .linkbtn').click()`); await sleep(400);
+  const wm = await ev("(() => { const s = document.querySelector('#dlg-widget [type=submit]').getBoundingClientRect(); return { saveBottom: Math.round(s.bottom), vh: innerHeight, sx: document.getElementById('dlg-widget').scrollWidth <= 390 }; })()");
+  check(wm.saveBottom <= wm.vh && wm.sx, "phone: the widget dialog keeps Save in view and does not scroll sideways", wm);
+  await key("Escape"); await sleep(250);
+
   // ---- app.js failed to load: the no-JavaScript presentation, no errors ----
   await send("Network.setBlockedURLs", { urls: ["*/static/app.js*"] });
   errors.length = 0;
@@ -389,9 +735,61 @@ try {
   const nj = await ev("(() => { const p = document.querySelector('.dlg-page'); return { shown: getComputedStyle(p).display !== 'none', name: p.querySelector('[name=name]').value, save: p.querySelector('[type=submit]').disabled, note: /Saving needs JavaScript/.test(p.textContent), post: p.querySelector('form').method }; })()").catch(() => null);
   // Script execution is off for the page, but Runtime.evaluate still runs.
   check(nj && nj.shown && nj.name === "ui-check-b" && nj.save && nj.note && nj.post === "post", "no JS: ?edit= is a filled page form, Save disabled, with the reason", nj);
+  for (const [path, field, value] of [["/settings/notifications?edit=channel:ui-check-c2", "url", MOCK_IN + "/webhook"], ["/settings/notifications?edit=rule:ui-check-r2", "above", "95"], ["/settings/widgets?edit=widget:ui-check-w3", "url", MOCK_IN + "/_received"]]) {
+    await load(path);
+    const pj = await ev(`(() => { const p = document.querySelector('.dlg-page'); return { shown: getComputedStyle(p).display !== 'none', value: p.querySelector('[name=${field}]').value, save: p.querySelector('[type=submit]').disabled, note: /Saving needs JavaScript\. .*You can read the values here/.test(p.textContent), post: p.querySelector('form').getAttribute('method') }; })()`).catch((e) => String(e));
+    check(pj && pj.shown && pj.value === value && pj.save && pj.note && pj.post === "post", `no JS: ${path.split("?")[1]} is a filled page form, Save disabled, with the reason`, pj);
+  }
   await load("/settings/security");
   check(await ev("document.querySelector('#f-password').method === 'post' && document.querySelector('#f-password [type=submit]').disabled && getComputedStyle(document.querySelector('#f-password .needs-js')).display !== 'none'"), "no JS: Change password posts, is disabled and says why");
   await send("Emulation.setScriptExecutionDisabled", { value: false });
+
+  // ---- round trip: Save with no change writes nothing, for every entry ----
+  // Optional: with CONFIG_FILE (the test instance's config file on this
+  // machine) and RICH_CONFIG (a config with every kind of entry: bound
+  // channels and widgets, headers, bodies, every rule type), that file is
+  // put in place as a hand edit, every entry is opened and saved unchanged,
+  // and the run's clean-up writes the starting file back.
+  if (process.env.CONFIG_FILE && process.env.RICH_CONFIG) {
+    const rich = fs.readFileSync(process.env.RICH_CONFIG, "utf8");
+    fs.writeFileSync(process.env.CONFIG_FILE, rich);
+    const richHash = (await api("GET", "config")).data.hash;
+    let bad = [];
+    for (const [path, list, dlg] of [["/settings/notifications", "ch-list", "dlg-channel"], ["/settings/notifications", "ru-list", "dlg-rule"], ["/settings/widgets", "w-list", "dlg-widget"]]) {
+      await load(path);
+      const n = await ev(`document.querySelectorAll('#${list} tr[data-key]').length`);
+      for (let i = 0; i < n; i++) {
+        await ev("[...document.querySelectorAll('body>.toasts>.toast')].forEach((t) => t.remove())");
+        const k = await ev(`document.querySelectorAll('#${list} tr[data-key]')[${i}].dataset.key`);
+        await ev(`document.querySelectorAll('#${list} tr[data-key]')[${i}].querySelector('.linkbtn').click()`); await sleep(250);
+        await click(`#${dlg} [type=submit]`);
+        await until(`!document.getElementById('${dlg}').open`, 3000);
+        const t = await toasts(), h = (await api("GET", "config")).data.hash;
+        if (await isOpen(dlg) || h !== richHash || !t.includes("No changes")) {
+          bad.push({ k, open: await isOpen(dlg), note: await note(dlg), toast: t, changed: h !== richHash });
+          if (await isOpen(dlg)) { await key("Escape"); await sleep(100); }
+          if (h !== richHash) fs.writeFileSync(process.env.CONFIG_FILE, rich);
+          await load(path);
+        }
+      }
+    }
+    check(!bad.length, "round trip: every channel, rule and widget of the rich config saves unchanged with \"No changes\"", bad);
+    // One field changed: only that line changes.
+    await load("/settings/notifications");
+    const keyOf = async (list, name) => ev(`[...document.querySelectorAll('#${list} tr[data-key]')].find((r) => r.dataset.key.endsWith(':' + ${JSON.stringify(name)})).dataset.key`);
+    for (const [list, dlg, name, sel, val] of [["ch-list", "dlg-channel", "tg2", "#ch-timeout", "9s"], ["ru-list", "dlg-rule", "logs", "#ru-count", "4"]]) {
+      const k = await keyOf(list, name);
+      await ev(`document.querySelector('#${list} tr[data-key="${k}"] .linkbtn').click()`); await sleep(250);
+      if (sel === "#ch-timeout") await click(`#${dlg} details summary`);
+      await clear(sel); await typeText(val); await key("Enter");
+      await until(`!document.getElementById('${dlg}').open`);
+      const now = (await api("GET", "config")).data.text;
+      const a = rich.split("\n"), b = now.split("\n");
+      const gone = a.filter((l) => !b.includes(l)), added = b.filter((l) => !a.includes(l));
+      check(gone.length <= 1 && added.length === 1 && added[0].includes(val), `one field changed on ${name}: only its line changes`, { gone, added });
+      fs.writeFileSync(process.env.CONFIG_FILE, rich); await load("/settings/notifications");
+    }
+  }
 
   check(errors.length === 0, "no script errors on the page", errors);
 } catch (e) {
