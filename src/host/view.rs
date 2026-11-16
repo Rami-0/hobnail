@@ -40,7 +40,7 @@ pub fn page(ctx: &Ctx, lv: &LiveView, q: &[(String, String)]) -> String {
     let body = html! {
         div.page.hx {
             (crate::ui::pages::page_sub(html! {
-                "Everything the kernel reports about this machine. Live numbers refresh every 3 s while this tab is visible."
+                "Everything the kernel reports about this machine. Live numbers refresh every 3 s while this tab is visible; rates are averages since the previous reading."
             }))
             div #hx-live aria-live="off" { (live_region(lv)) }
             (history(ctx, lv.h, range))
@@ -73,6 +73,18 @@ fn rate(v: Option<f64>) -> String {
         .unwrap_or_else(|| "—".into())
 }
 
+/// A rate as table text: the number, then its unit in a span that a phone
+/// puts on a line of its own, on every row alike (LG-36: "144 KiB/s" in
+/// five columns does not fit 390 px; one height for every row keeps the
+/// 3 s poll from moving anything).
+fn rate_cell(v: Option<f64>) -> Markup {
+    let s = rate(v);
+    match s.split_once(' ') {
+        Some((n, u)) => html! { (n) span.hx-u { " " (u) } },
+        None => html! { (s) },
+    }
+}
+
 fn meter(v: Option<f64>, warn: f64, bad: f64) -> Markup {
     let w = v.unwrap_or(0.0).clamp(0.0, 100.0);
     html! {
@@ -96,13 +108,10 @@ pub fn live_region(lv: &LiveView) -> Markup {
             (extras(h))
         }
         p.foot-line {
+            // One statement of the averaging window, in the intro (LG-42).
             (ic("clock"))
-            @if h.window > 0.0 {
-                "Rates over the last " (format!("{:.0}", h.window.max(1.0))) " s"
-            } @else {
-                "Rates appear on the next refresh"
-            }
-            " · process scan " (format!("{:.1}", lv.p.scan_ms)) " ms over " (lv.p.total) " processes"
+            @if h.window <= 0.0 { "Rates appear on the next refresh · " }
+            "Process scan " (format!("{:.1}", lv.p.scan_ms)) " ms over " (lv.p.total) " processes"
             " · up " (crate::util::human_duration(h.uptime))
         }
     }
@@ -418,7 +427,7 @@ fn disks(h: &Host) -> Markup {
                             @for m in &h.mounts {
                                 tr data-key=(m.mnt) {
                                     th scope="row" { span.mono { (m.mnt) } " " span.muted { (m.fstype) } }
-                                    td.hx-o.mono.muted { (m.dev.trim_start_matches("/dev/")) }
+                                    td.hx-o.hx-dev.mono.muted { (m.dev.trim_start_matches("/dev/")) }
                                     @if let Some((total, used, avail)) = m.usage {
                                         @let p = used as f64 * 100.0 / (used + avail).max(1) as f64;
                                         td.num { (human_bytes(used)) }
@@ -455,8 +464,8 @@ fn disks(h: &Host) -> Markup {
                                             @match d.rotational { Some(true) => " · HDD", Some(false) => " · SSD", None => "" }
                                         }
                                     }
-                                    td.num { (rate(d.rd_bps)) }
-                                    td.num { (rate(d.wr_bps)) }
+                                    td.num { (rate_cell(d.rd_bps)) }
+                                    td.num { (rate_cell(d.wr_bps)) }
                                     td.num.hx-o { (d.iops.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into())) }
                                     td.hx-m { (meter(d.util, 60.0, 90.0)) span.hx-v { (opt_pct(d.util)) } }
                                 }
@@ -479,8 +488,8 @@ fn net_row(n: &NetView, key: &str, label: Markup) -> Markup {
         tr data-key=(key) {
             th scope="row" { (label) }
             td.num.hx-o.muted { (n.speed_mbps.map(|s| if s >= 1000 { format!("{} Gb/s", s / 1000) } else { format!("{s} Mb/s") }).unwrap_or_else(|| "—".into())) }
-            td.num { (rate(n.rx_bps)) }
-            td.num { (rate(n.tx_bps)) }
+            td.num { (rate_cell(n.rx_bps)) }
+            td.num { (rate_cell(n.tx_bps)) }
             td.num.(if n.new_errs > 0 { "warn" } else { "" }) title={"rx " (c.rx_errs) " / tx " (c.tx_errs)} { (errs) }
             td.num.(if n.new_errs > 0 { "warn" } else { "" }) title={"rx " (c.rx_drop) " / tx " (c.tx_drop)} { (drops) }
             td.num.hx-o.muted { (human_bytes(c.rx_bytes)) " / " (human_bytes(c.tx_bytes)) }
@@ -546,24 +555,21 @@ fn network(h: &Host) -> Markup {
     }
 }
 
+/// GPUs, only when the kernel lists one (LG-38): what is not shown and why
+/// (S.M.A.R.T., systemd) is in `docs/features/host.md`, not on the page.
 fn extras(h: &Host) -> Markup {
+    if h.gpus.is_empty() {
+        return html! {};
+    }
     html! {
-        section.panel.hx-p.hx-wide aria-label="Other hardware" {
-            div.panel-h { h2 { (ic("monitor")) "GPU, S.M.A.R.T., systemd" } }
-            dl.hx-kv.hx-wide-kv {
-                div {
-                    dt { "GPU" }
-                    dd {
-                        @if h.gpus.is_empty() { span.muted { "No DRM devices." } }
-                        @for g in &h.gpus {
-                            span.hx-gpu { span.mono { (g.card) } " " (g.driver) " "
-                                @if let Some(b) = g.busy { b { (pct(b)) } " busy" } @else { span.muted { "(no busy % exported)" } }
-                            }
-                        }
+        section.panel.hx-p.hx-wide aria-label="GPU" {
+            div.panel-h { h2 { (ic("monitor")) "GPU" } }
+            p.hx-gpus {
+                @for g in &h.gpus {
+                    span.hx-gpu { span.mono { (g.card) } " " (g.driver) " "
+                        @if let Some(b) = g.busy { b { (pct(b)) } " busy" } @else { span.muted { "(no busy % exported)" } }
                     }
                 }
-                div { dt { "S.M.A.R.T." } dd.muted { "Not shown: it needs raw access to the disks under /dev, which this container does not get. Drive temperatures appear under Sensors when the kernel exposes them (NVMe, drivetemp)." } }
-                div { dt { "systemd" } dd.muted { "Failed units are not shown: reading them needs the system D-Bus socket, which is not mounted." } }
             }
         }
     }
@@ -770,5 +776,31 @@ mod view_tests {
         let excluded = ctr_link(&Some("def".into()), &names, &logs).into_string();
         assert!(excluded.contains("secret-db"), "{excluded}");
         assert!(!excluded.contains("/logs"), "{excluded}");
+    }
+
+    /// A rate's unit is its own span, so a phone can put it on a second
+    /// line on every row (LG-36).
+    #[test]
+    fn rates_keep_their_unit_apart() {
+        assert_eq!(
+            rate_cell(Some(2048.0)).into_string(),
+            r#"2.0<span class="hx-u"> KiB/s</span>"#
+        );
+        assert_eq!(rate_cell(None).into_string(), "—");
+    }
+
+    /// No GPU: no panel (LG-38); the "not shown" rows are gone for good.
+    #[test]
+    fn hardware_panel_only_for_a_gpu() {
+        let mut h = Host::default();
+        assert_eq!(extras(&h).into_string(), "");
+        h.gpus.push(super::super::collect::Gpu {
+            card: "card0".into(),
+            driver: "i915".into(),
+            busy: None,
+        });
+        let html = extras(&h).into_string();
+        assert!(html.contains("card0") && html.contains("i915"), "{html}");
+        assert!(!html.contains("S.M.A.R.T") && !html.contains("systemd"));
     }
 }
