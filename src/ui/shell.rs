@@ -299,14 +299,16 @@ fn keys_dialog() -> Markup {
                 (row(&["g", "c"], "Containers"))
                 (row(&["g", "h"], "Host"))
                 (row(&["g", "l"], "Logs"))
+                (row(&["g", "y"], "History"))
                 (row(&["g", "a"], "Alerts"))
                 (row(&["g", "s"], "Settings"))
-                (row(&["j"], "Next row"))
+                (row(&["j"], "Next row that opens something"))
                 (row(&["k"], "Previous row"))
                 (row(&["↵"], "Open the row"))
                 (row(&["l"], "Logs of the focused or open container"))
-                (row(&["/"], "Filter this page (Containers, Logs), elsewhere search"))
-                (row(&["Ctrl", "K"], "Search and commands"))
+                // The script names this page's filter (NAV-62).
+                div.kr { dt { kbd { "/" } } dd data-k="slash" { "This page's filter, or search and commands" } }
+                div.kr { dt { kbd.mod { "Ctrl" } " " kbd { "K" } } dd { "Search and commands" } }
                 (row(&["?"], "This list"))
                 (row(&["Esc"], "Close"))
             }
@@ -1224,6 +1226,27 @@ mod tests {
             );
         }
         assert!(!css.contains("inset:-6px -13px -21px"));
+    }
+
+    /// NAV-56, NAV-60 to NAV-64: the shortcut sheet lists History (`g y`)
+    /// and lets the script say what `/` does here; the script's keys match.
+    #[test]
+    fn keyboard_sheet_and_map_agree() {
+        let sheet = keys_dialog().into_string();
+        assert!(
+            sheet.contains("<kbd>g</kbd> <kbd>y</kbd></dt><dd>History"),
+            "{sheet}"
+        );
+        assert!(sheet.contains(r#"<dd data-k="slash">"#));
+        assert!(sheet.contains(r#"<kbd class="mod">Ctrl</kbd>"#));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"y: "/history""#) && js.contains(r#"h: "/host""#));
+        // `/` never means the sidebar filter (NAV-56).
+        let slash = &js[js.find("const slashTarget").unwrap()..];
+        assert!(!slash[..slash.find('\n').unwrap()].contains("tree-filter"));
+        // j / k only over rows with a link (NAV-60); a checkbox keeps the keys (NAV-64).
+        assert!(js.contains(r#"shown(r) && r.querySelector("a[href]")"#));
+        assert!(js.contains("checkbox|radio|button"));
     }
 
     /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:

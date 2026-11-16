@@ -212,6 +212,33 @@ check(await until("document.getElementById('keys').open", 1000), "? opens the sh
 await key("Escape");
 check(await until("!document.getElementById('keys').open", 1000), "Esc closes it");
 
+// ---- shortcuts (NAV-56, NAV-60 to NAV-64) ----
+// "/" on Overview opens the palette (the sidebar filter is not "this page's");
+// on Containers it focuses the table filter, and the sheet says so.
+await load("/");
+await key("/", 0, "/");
+check(await until("!document.getElementById('palette').hidden", 1000), "/ on Overview opens the palette, not the sidebar filter");
+await key("Escape");
+await load("/containers");
+await key("/", 0, "/");
+check(await ev("document.activeElement.id") === "cq", "/ on Containers focuses the table filter");
+await ev("document.activeElement.blur()");
+await key("?", 8, "?");
+check(/filter/i.test(await ev("document.querySelector('#keys [data-k=slash]').textContent")), "the sheet says / is this page's filter");
+await key("Escape");
+// j / k only over rows that open something; Enter follows the row's link.
+await load("/settings/config");
+await key("j");
+check(await ev("!document.querySelector('.kfocus')"), "j selects nothing on Config file (its rows open nothing)");
+await load("/host");
+await key("j");
+check(await ev("(() => { const r = document.querySelector('.kfocus'); return !!r && !!r.querySelector('a[href]') && r.contains(document.activeElement); })()"), "j on Host selects a row with a link and focuses it");
+// A ticked checkbox does not switch the keys off; g y is History.
+await load("/settings/general");
+await ev("(() => { const c = document.querySelector('main input[type=checkbox]'); c && c.focus(); })()");
+await key("g"); await key("y");
+check(await until("location.pathname === '/history'", 4000), "g y from a focused checkbox opens History");
+
 // ---- keyboard: phone drawer ----
 await view(390, true);
 await load("/");
