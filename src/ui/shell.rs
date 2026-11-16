@@ -167,10 +167,10 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                 (logo())
                                 span.brand-name { "Hobnail" span.brand-site { (site) } }
                             }
-                            button.icon-btn.rail-toggle type="button" #rail-toggle
+                            button.icon-btn.rail-toggle.js-only type="button" #rail-toggle
                                 aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false" { (ic("panel")) }
                             // The phone drawer's own close control (NAV-34).
-                            button.icon-btn.side-close type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
+                            button.icon-btn.side-close.js-only type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
                         }
                         nav.nav aria-label="Main" {
                             @for (n, href, label, icon) in NAV {
@@ -203,7 +203,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                         }
                         div.side-foot {
                             span.live #live title="Live updates" { span.dot.off {} span.live-t { "connecting" } }
-                            button.linklike.keys-btn type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
+                            button.linklike.keys-btn.js-only type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
                             span.ver title={"built " (ctx.state.build.time)} {
                                 "v" (ctx.state.build.version) " · " code { (sha) }
                             }
@@ -213,13 +213,13 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                     div.col {
                         header.top {
                             div.crumbs { (heading) }
-                            button.cmd type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
+                            button.cmd.js-only type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
                                 (ic("search"))
                                 span.cmd-t { "Search or jump to…" }
                                 kbd.cmd-k { "Ctrl K" }
                             }
                             (vitals(&ctx.cfg, sys.as_ref(), Some((&ctx.state.db, now))))
-                            button.icon-btn #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
+                            button.icon-btn.js-only #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
                                 span.th.th-auto { (ic("monitor")) }
                                 span.th.th-dark { (ic("moon")) }
                                 span.th.th-light { (ic("sun")) }
@@ -362,7 +362,7 @@ fn account(ctx: &Ctx) -> Markup {
     };
     html! {
         div.acct #account {
-            button.icon-btn.menu-btn-acct type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
+            button.icon-btn.menu-btn-acct.js-only type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
                 aria-label={"Account: " (u)} title=(u) {
                 (ic("user"))
                 span.signed {}
@@ -1270,6 +1270,28 @@ mod tests {
         assert!(js.contains(r#"? "/" : location.pathname + location.search"#));
         assert!(js.contains(r#"HB.toast("Signed out""#));
         assert!(!js.contains(r#"location.href = "/";"#));
+    }
+
+    /// ROB-17: the shell's controls that only the script can run are not
+    /// shown with JavaScript off (`.js-only`); their links keep working.
+    #[test]
+    fn script_only_shell_controls_hide_without_script() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let mut ctx = Ctx::new(&st, "h", "/", "", &h);
+        ctx.user = Some("admin".into());
+        let html = layout(&ctx, Nav::Overview, "t", html! {}, html! {});
+        for c in [
+            r#"class="icon-btn rail-toggle js-only""#,
+            r#"class="icon-btn side-close js-only""#,
+            r#"class="linklike keys-btn js-only""#,
+            r#"class="cmd js-only""#,
+            r#"class="icon-btn js-only" id="theme""#,
+            r#"class="icon-btn menu-btn-acct js-only""#,
+        ] {
+            assert!(html.contains(c), "{c}");
+        }
+        assert!(APP_CSS_SRC.contains("html:not(.js) .js-only{display:none!important}"));
     }
 
     /// A11Y-20: the shell, component and Settings CSS size text in rem, so
