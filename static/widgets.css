@@ -218,3 +218,11 @@
    min / max line (OV-07); a marker under the crosshair adds its line. */
 .canvas .tip{top:4px;transform:translateX(-50%);max-width:min(320px,90%);white-space:normal}
 .tip .tip-mk{display:block;margin-top:2px;color:var(--bad-fg);font-family:var(--font)}
+/* The x axis starts where the plot starts, whatever the y labels' width
+   (both in the axis font, so `--yw` in ch is the same length): the "0"
+   no longer sits on the first time label (OV-15). */
+.chart .plot{font:10.5px var(--mono)}
+.chart .xaxis,.chart.compact .xaxis{margin-left:calc(var(--yw,6ch) + 12px)}
+.chart-since{flex-basis:100%;order:9;margin-top:-4px;font-size:11px;color:var(--text-3)}
+/* A phone: min / max on its own line under the title, never cut (OV-52). */
+@media (max-width:699px){.chart figcaption{flex-wrap:wrap;row-gap:2px}.chart:not(.compact) .chart-mm{flex-basis:100%;margin-left:0;order:8}}

@@ -29,7 +29,7 @@
       case "b": return bytes(v);
       case "bps": return bytes(v) + "/s";
       case "c": return v.toFixed(0) + " °C";
-      default: return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
+      default: return Number.isInteger(v) ? String(v) : Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
     }
   }
   function dur(s) {

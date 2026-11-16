@@ -49,6 +49,8 @@ impl Unit {
             Unit::Bytes => human_bytes(v.max(0.0) as u64),
             Unit::BytesPerSec => format!("{}/s", human_bytes(v.max(0.0) as u64)),
             Unit::Celsius => format!("{v:.0} °C"),
+            // Counts (PIDs, OOM kills, pages) are whole numbers (OV-49).
+            Unit::Plain if v.fract() == 0.0 => format!("{v:.0}"),
             Unit::Plain if v.abs() < 10.0 => format!("{v:.2}"),
             Unit::Plain => format!("{v:.1}"),
         }
@@ -581,6 +583,10 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
         unit.fmt(p.max)
     );
     let (y_hi, y_mid, y_lo) = (unit.axis(p.y_hi), unit.axis(mid), unit.axis(p.y_lo));
+    // Data covering only the last part of the window (a young database, a
+    // container started minutes ago): say from when (LG-40, OV-43).
+    let first = window_points(spec, series).first().map(|q| q.0 as i64);
+    let since = first.filter(|&t| t > spec.now - spec.range_secs + spec.range_secs / 5);
     // Y-axis column sized to its widest label (mono font: `ch` is exact), so
     // "20.0 KiB/s" is never clipped and "50%" does not waste space.
     let y_width = [&y_hi, &y_mid, &y_lo]
@@ -590,7 +596,7 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
         .unwrap_or(4)
         .max(3);
     html! {
-        figure.chart.compact[spec.compact] style={"--s:var(" (spec.color) ")"}
+        figure.chart.compact[spec.compact] style={"--s:var(" (spec.color) ");--yw:" (y_width) "ch"}
             data-t0=(spec.now - spec.range_secs) data-t1=(spec.now) data-step=(step)
             data-u=(unit.tag()) data-v=[hover.as_deref()] data-zoom=[x.zoom.then_some("1")] {
             figcaption {
@@ -598,6 +604,11 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                 span.chart-now { (unit.fmt(p.last)) }
                 span.chart-mm title="minimum and maximum in this window" {
                     "min " (unit.fmt(p.min)) " · max " (unit.fmt(p.max))
+                }
+                @if let Some(t) = since {
+                    span.chart-since title="The history database has nothing earlier in this window" {
+                        "data from " time datetime=(fmt_utc(t.max(0) as u64)) data-t=(t) data-abs="1" { (crate::ui::fmt::short_utc(t.max(0) as u64)) }
+                    }
                 }
                 @if legend {
                     span.legend {
@@ -607,7 +618,7 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
                     }
                 }
             }
-            div.plot style={"--yw:" (y_width) "ch"} {
+            div.plot {
                 div.yaxis aria-hidden="true" {
                     span style="top:0" { (y_hi) }
                     span style="top:50%" { (y_mid) }
@@ -907,6 +918,17 @@ mod tests {
         assert!(slots[..58].iter().all(|s| s.is_empty()));
         assert!(html.contains("class=\"yaxis\""));
         assert!(html.contains("min 10% · max 30%"));
+        // The y column's width is on the figure, for the x axis too (OV-15).
+        assert!(
+            html.contains(r#"style="--s:var(--ch-cpu);--yw:3ch""#),
+            "{html}"
+        );
+        // Data from the last 2 minutes of an hour: says from when (LG-40).
+        assert!(html.contains("data from <time"), "{html}");
+        let full = series(60, &[(NOW - 3500, 1.0), (NOW, 2.0)]);
+        assert!(!line_chart(&spec(Unit::Percent), &full, true)
+            .into_string()
+            .contains("data from"));
         assert_eq!(html.matches("class=\"tick").count(), 5);
         // Title text is escaped.
         let mut sp = spec(Unit::Percent);
@@ -923,6 +945,8 @@ mod tests {
         assert_eq!(Unit::BytesPerSec.fmt(2048.0), "2.0 KiB/s");
         assert_eq!(Unit::Celsius.fmt(61.2), "61 °C");
         assert_eq!(Unit::Plain.fmt(f64::NAN), "—");
+        assert_eq!(Unit::Plain.fmt(3.0), "3");
+        assert_eq!(Unit::Plain.fmt(1.25), "1.25");
         assert_eq!(Unit::Percent.axis(0.0), "0");
         assert_eq!(Unit::Percent.axis(2.5), "2.5%");
         assert_eq!(Unit::Percent.axis(50.0), "50%");
