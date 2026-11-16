@@ -244,6 +244,17 @@ await load("/settings/appearance");
 await ev(`(() => { const t = document.getElementById("css-text"); t.value = "a{color:red}\\n}}} not css"; t.dispatchEvent(new Event("input", { bubbles: true })); })()`);
 check(await until(`/line 2: a \\} without/.test((document.getElementById("css-syntax") || {}).textContent || "")`, 2000), "custom.css: a stray } is named with its line before saving", await ev(`(document.getElementById("css-syntax") || {}).textContent`));
 
+// Bookmarks: a name another row has is said under the field (SET-43); the
+// dialog is closed without saving.
+await load("/settings/bookmarks");
+const bmName = await ev(`(() => { const tr = document.querySelector("#bm-list tr[data-key]"); return tr ? JSON.parse(tr.querySelector("[data-item]").dataset.item).name : null; })()`);
+if (bmName) {
+  await ev(`document.getElementById("bm-add").click()`); await sleep(400);
+  await ev(`(() => { const i = document.querySelector("#dlg-bookmark input[name=name]"); i.value = ${JSON.stringify(bmName)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+  check(await until(`/already called/.test(document.querySelector("#dlg-bookmark input[name=name]").nextElementSibling.textContent)`, 2000), "a bookmark name that exists already is pointed out while typing");
+  await ev("HB.close(true)");
+} else console.log("note no bookmark to compare with");
+
 // ---- keyboard: phone drawer ----
 await view(390, true);
 await load("/");

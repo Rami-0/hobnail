@@ -552,9 +552,24 @@
   };
   TABS.bookmarks = {
     ssr: true,
-    init() { listDialog($("dlg-bookmark"), BOOKMARKS); listActions(BOOKMARKS); },
+    init() { listDialog($("dlg-bookmark"), BOOKMARKS); listActions(BOOKMARKS); dupWarn($("dlg-bookmark"), BOOKMARKS); },
     load() { return refreshList(BOOKMARKS.list); },
   };
+  // A name another row already has: said under the field while typing
+  // (SET-43). A warning: two entries may share a name.
+  function dupWarn(dlg, o) {
+    const inp = dlg && dlg.querySelector("input[name=name]");
+    if (!inp) return;
+    const out = el("p", { class: "hint", role: "status", "aria-live": "polite" });
+    inp.after(out);
+    const check = () => {
+      const v = inp.value.trim().toLowerCase(), c = HB.current(), mine = c && c.key;
+      const hit = v && $$("tr[data-key]", $(o.list)).find((tr) => tr.dataset.key !== mine && String((rowItem(tr) || {}).name || "").trim().toLowerCase() === v);
+      out.textContent = hit ? `Another ${o.noun} is already called “${inp.value.trim()}”; both will be listed.` : "";
+    };
+    inp.addEventListener("input", check);
+    dlg.addEventListener("hb-open", () => setTimeout(check, 0));
+  }
 
   // ---- notifications: channels and alert rules (server-rendered lists) ----
   const listOf = (s) => { const a = String(s || "").split(",").map((x) => x.trim()).filter(Boolean); return a.length ? a : null; };
