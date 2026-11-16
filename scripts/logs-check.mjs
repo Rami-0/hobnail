@@ -20,7 +20,10 @@
 // reuses a session instead. CPU_SECONDS (default 15, 0 to skip) samples the
 // page's main-thread cost while following, with the default tail and with a
 // full ring; WIDTHS=1440 or WIDTHS=390 runs one width only; PARTS=views,
-// reload,hits,cpu (the default: all) runs some parts only.
+// reload,hits,features,cpu (the default: all) runs some parts only. "features":
+// search steps (Enter / Shift+Enter), line actions by keyboard and tap, the
+// phone toolbar and pane height, custom range checks, Load older, closing a
+// pane of the split view.
 // Exits 1 when a check fails, 2 on bad usage. Headless Chromium (no
 // back/forward cache, so Back restores the form the way a reload does) from the
 // Playwright cache (override with CH=/path/to/chrome).
@@ -32,7 +35,7 @@ const NAME = process.argv[3];
 const OTHER = process.argv[4];
 const PW = process.env.HB_PASSWORD;
 const CPU_SECONDS = +(process.env.CPU_SECONDS ?? 15);
-const PARTS = (process.env.PARTS || "views,reload,hits,cpu").split(",");
+const PARTS = (process.env.PARTS || "views,reload,hits,features,cpu").split(",");
 const SLACK = 2; // px from the bottom that still counts as "at the newest line"
 if (!/^https?:\/\//.test(url) || !NAME) {
   console.error("usage: [HB_PASSWORD=<password>] node scripts/logs-check.mjs <base URL of a test instance> <busy container> [<second container>]");
@@ -361,6 +364,112 @@ if (widths.includes(390) && PARTS.includes("hits")) {
   await sleep(600);
   const r = await ev(`${HIT}("#tree li.ctr, #tree details.stack > summary")`);
   check(r.rows > 0 && r.bad.length === 0, `390 px, touch: the sidebar tree (drawer open): ${r.rows} rows, no hit area reaches another row or covers its row's own link`, r.bad);
+}
+
+// ---- wave 5: search steps, line actions, phone layout, split view ----
+const tap = async (x, y) => {
+  await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(300);
+};
+const typeIn = async (sel, text) => { await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); e.focus(); e.value = ${JSON.stringify(text)}; e.dispatchEvent(new Event("input")); })()`); await sleep(500); };
+const press = async (k, shift) => {
+  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: k, code: k, modifiers: shift ? 8 : 0, windowsVirtualKeyCode: { Enter: 13, Escape: 27, ArrowUp: 38, ArrowDown: 40 }[k] || 0, text: type === "keyDown" && k === "Enter" ? "\r" : undefined });
+  await sleep(300);
+};
+const CUR = "(() => { const c = window.__rhLogs.current(), p = window.__rhLogs.panes[0]; if (!c) return null; const b = p.body.getBoundingClientRect(), r = c.e.getBoundingClientRect(); return { n: c.n, inView: r.top >= b.top - 1 && r.bottom <= b.bottom + 1, follow: p.follow, qn: document.getElementById('lqn').textContent }; })()";
+if (PARTS.includes("features")) {
+  // LG-13: Enter / Shift+Enter step through the matches; the view moves to
+  // each; the search is kept in the address and survives a reload.
+  await load(single);
+  await until("window.__rhLogs.panes[0].lines.length > 50");
+  await sleep(800);
+  await typeIn("#lq", "short");
+  const s0 = await ev(CUR);
+  check(s0 && /^\d+\/\d+$/.test(s0.qn) && s0.inView, "search: the newest match is current, in view, counted (x/n)", s0);
+  await ev("document.getElementById('lq').focus()");
+  await press("Enter"); await press("Enter"); await press("Enter");
+  const s1 = await ev(CUR);
+  check(s1 && s1.n < s0.n && s1.inView && !s1.follow, "search: Enter steps to older matches, brings each into view and stops following", s1);
+  await press("Enter", true);
+  const s2 = await ev(CUR);
+  check(s2 && s2.n > s1.n && s2.inView, "search: Shift+Enter steps to a newer match", s2);
+  check(/[?&]search=short/.test(await ev("location.search")), "search: kept in the address");
+  await send("Page.reload");
+  await until("document.readyState === 'complete' && !!window.__rhLogs && window.__rhLogs.panes[0].lines.length > 0");
+  await sleep(2000);
+  const s3 = await ev("({ v: document.getElementById('lq').value, qn: document.getElementById('lqn').textContent })");
+  check(s3.v === "short" && /\d+\/\d+/.test(s3.qn), "search: a reload keeps it and counts its matches", s3);
+  await ev("(() => { const q = document.getElementById('lq'); q.value = ''; q.dispatchEvent(new Event('input')); })()"); await sleep(400);
+  // LG-20: keyboard: Enter in a pane picks a line and focuses "Copy";
+  // arrows move it; Esc goes back to the pane.
+  await toBottom();
+  await ev("window.__rhLogs.panes[0].body.focus()");
+  await press("Enter");
+  const k1 = await ev("(() => { const a = document.activeElement, l = document.querySelector('.ll.lsel'); return { focus: a && a.textContent, sel: !!l, shown: !!(a && a.getBoundingClientRect().width) , t: l && l.dataset.t }; })()");
+  check(k1.focus === "Copy" && k1.sel && k1.shown, "line actions: Enter in a pane picks a line and focuses a visible Copy button", k1);
+  await press("ArrowUp");
+  const k2 = await ev("(() => { const l = document.querySelector('.ll.lsel'); return { t: l && l.dataset.t, focus: document.activeElement.textContent }; })()");
+  check(k2.t && k2.t !== k1.t && k2.focus === "Copy", "line actions: Arrow Up moves to the line above, focus stays on Copy", k2);
+  await press("Escape");
+  check(await ev("document.activeElement === window.__rhLogs.panes[0].body"), "line actions: Esc returns to the pane");
+  // LG-16: a To before From is refused on the field.
+  await ev("(() => { const s = document.getElementById('lrange'); s.value = 'custom'; s.dispatchEvent(new Event('change')); })()");
+  await ev("(() => { document.getElementById('lfrom').value = '2030-01-02T10:00'; document.getElementById('lto').value = '2030-01-01T10:00'; document.getElementById('lapply').click(); })()");
+  const e1 = await ev("({ err: !document.getElementById('lrerr').hidden && document.getElementById('lrerr').textContent, inv: document.getElementById('lfrom').getAttribute('aria-invalid') })");
+  check(e1.err && e1.inv === "true", "custom range: a From in the future is refused on its field", e1);
+  // LG-33: the single page does not scroll at 1440.
+  await load(single); await sleep(1500);
+  const over = await ev("document.documentElement.scrollHeight - innerHeight");
+  check(over <= 1, `1440 px: the single log page does not scroll (${over} px)`, over);
+  // LG-21: "Load older lines" puts older lines in front, the reader stays.
+  await until("window.__rhLogs.panes[0].lines.length > 50");
+  await sleep(1000);
+  const o0 = await ev("(() => { const p = window.__rhLogs.panes[0]; p.follow = false; p.body.scrollTop = 0; return { n: p.lines.length, first: p.lines[0].t, btn: !p.older.hidden }; })()");
+  await sleep(400);
+  check(o0.btn, "load older: offered at the top of a live tail", o0);
+  if (o0.btn) {
+    const m0 = await ev(MARK());
+    await ev("window.__rhLogs.panes[0].older.click()");
+    await until(`window.__rhLogs.panes[0].lines[0].t < ${o0.first}`, 10000);
+    await sleep(500);
+    const o1 = await ev("({ n: window.__rhLogs.panes[0].lines.length, first: window.__rhLogs.panes[0].lines[0].t })");
+    const m1 = await ev(MARK(m0.n));
+    check(o1.n > o0.n && o1.first < o0.first && Math.abs(m1.off - m0.off) <= 2, "load older: older lines added in front, the reader's line stays put", { o0, o1, m0, m1 });
+  }
+  // LG-07: closing a pane of a split view keeps the other one going.
+  if (OTHER) {
+    await load("/logs?c=" + enc(NAME) + "," + enc(OTHER));
+    await until("window.__rhLogs.panes.every((p) => p.lines.length > 0)", 10000);
+    await click(".lpane:nth-child(2) .lclose");
+    await sleep(800);
+    const c1 = await ev("({ panes: window.__rhLogs.panes.length, dom: document.querySelectorAll('.lpane').length, url: location.pathname + location.search, lines: window.__rhLogs.panes[0].lines.length, add: !document.getElementById('ladd').hidden })");
+    check(c1.panes === 1 && c1.dom === 1 && c1.url === "/logs?c=" + enc(NAME) && c1.lines > 0 && c1.add, "split view: closing a pane removes it in place, the address follows, the other keeps its lines", c1);
+    const d = await dist();
+    check(d[0] <= SLACK, `split view: the remaining pane still rests on the newest line (${d[0]} px)`, d);
+  }
+  // LG-19 / LG-20 on a phone: one toolbar row, the pane ends above the
+  // bottom bar, Filters opens the rest, a tap shows Copy and Link.
+  if (widths.includes(390)) {
+    for (const path of [single].concat(stackHref ? [stackHref] : [])) {
+      await load(path, { width: 390, mobile: true });
+      await until("window.__rhLogs.panes[0].lines.length > 0");
+      await sleep(1200);
+      const g = await ev("(() => { const t = document.querySelector('.ltool').getBoundingClientRect(), b = window.__rhLogs.panes[0].body.getBoundingClientRect(), bb = document.querySelector('.bbar').getBoundingClientRect(); return { tool: Math.round(t.height), top: Math.round(b.top), bottom: Math.round(b.bottom), bar: Math.round(bb.top), h: Math.round(b.height), wide: document.documentElement.scrollWidth }; })()");
+      check(g.tool <= 48 && g.bottom <= g.bar && g.h >= 844 * 0.5 && g.wide <= 390, `390 px ${path}: one toolbar row (${g.tool} px), the pane ${g.top}..${g.bottom} px ends above the bottom bar (${g.bar}) and takes over half the screen`, g);
+      await click("#lfilt");
+      const f = await ev("(() => { const m = document.getElementById('lmore').getBoundingClientRect(); return { h: Math.round(m.height), exp: document.getElementById('lfilt').getAttribute('aria-expanded'), wide: document.documentElement.scrollWidth, other: document.querySelector('.lchip[data-lv=o]').getBoundingClientRect().right }; })()");
+      check(f.h > 40 && f.exp === "true" && f.wide <= 390 && f.other <= 390, `390 px ${path}: Filters opens the rest, no chip cut off, no sideways scroll`, f);
+      await click("#lfilt");
+    }
+    await load(single, { width: 390, mobile: true });
+    await until("window.__rhLogs.panes[0].lines.length > 5");
+    await sleep(800);
+    const at = await ev("(() => { const p = window.__rhLogs.panes[0], b = p.body.getBoundingClientRect(); return [Math.round(b.left + 40), Math.round(b.top + b.height / 2)]; })()");
+    await tap(at[0], at[1]);
+    const t1 = await ev("(() => { const l = document.querySelector('.ll.lsel'), bs = l ? [...l.querySelectorAll('.lact button')] : []; return { sel: !!l, buttons: bs.map((b) => Math.round(b.getBoundingClientRect().height)) }; })()");
+    check(t1.sel && t1.buttons.length === 2 && t1.buttons.every((h) => h >= 24), "390 px, touch: a tap on a line shows Copy and Link", t1);
+  }
 }
 
 // ---- CPU while following a busy stream ----
