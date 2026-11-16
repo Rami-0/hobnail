@@ -10,7 +10,7 @@ use super::{logs_url, split_url, stack_logs_url, stack_members};
 use crate::db::Range;
 use crate::model::Container;
 use crate::state::AppState;
-use crate::ui::fmt::{parse_query, url_encode};
+use crate::ui::fmt::{parse_query, query_get, url_encode};
 use crate::ui::shell::{layout, Ctx, Nav};
 use crate::ui::view::{CardView, GroupView};
 use crate::ui::{empty_state, ic};
@@ -194,7 +194,7 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
                 }
             }
             (watch_banner())
-            (viewer(ctx, &[pane], false, Some(chart)))
+            (viewer(ctx, &[pane], Kind::Container, Some(chart)))
         }
     };
     (
@@ -240,7 +240,11 @@ pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
     };
     let pane = Pane {
         query: format!("stack={}", url_encode(stack)),
-        title: format!("{} containers, merged by time", names.len()),
+        title: format!(
+            "{} container{}, merged by time",
+            names.len(),
+            if names.len() == 1 { "" } else { "s" }
+        ),
         names,
         stack: Some(stack.to_string()),
         href: None,
@@ -250,7 +254,7 @@ pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
         div.page.lpage {
             (docker_banner(ctx))
             (watch_banner())
-            (viewer(ctx, &[pane], true, None))
+            (viewer(ctx, &[pane], Kind::Stack, None))
         }
     };
     (
@@ -259,60 +263,137 @@ pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
     )
 }
 
-/// `/logs?c=a,b`: 2 to 4 containers side by side (one is fine too).
+/// Names from every `key=a,b` in the query, trimmed, in order, without
+/// repeats or empties (as asked: not yet checked against the containers).
+fn names_in(q: &[(String, String)], key: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for (k, v) in q {
+        if k != key {
+            continue;
+        }
+        for n in v.split(',').map(str::trim) {
+            if !n.is_empty() && !out.iter().any(|x| x == n) {
+                out.push(n.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Asked-for names that are not shown containers, for "Not found: …"
+/// (LG-08). Excluded and hidden containers read the same as names that do
+/// not exist. At most four, each cut to 64 characters: it echoes the URL.
+fn not_found_names(ctx: &Ctx, asked: &[String]) -> Vec<String> {
+    asked
+        .iter()
+        .filter(|n| !super::may_tail(ctx.state, n))
+        .take(4)
+        .map(|n| n.chars().take(64).collect())
+        .collect()
+}
+
+fn note_banner(kind: &str, msg: Markup) -> Markup {
+    html! {
+        div.banner.(kind).lnote role="status" { (ic("alert")) div { (msg) } }
+    }
+}
+
+/// `/logs?c=a,b`: one to four containers side by side (LG-06, LG-07). Each
+/// pane is named, can be closed (a link to the view without it) and the
+/// toolbar adds one (the list with these ticked, `?sel=`). Names that are not
+/// shown containers are named in a banner, never tailed (LG-08). `go=1`
+/// (sent by the list's "Side by side" form) with nothing ticked, or only
+/// names that do not exist, shows the list again with a note (LG-05).
 pub fn split(ctx: &Ctx) -> (StatusCode, String) {
     let title = "Logs";
     if ctx.cfg.logs.require_login && ctx.user.is_none() {
         return login_needed(ctx, title);
     }
     let q = parse_query(ctx.query);
-    let mut names: Vec<String> = vec![];
-    for (k, v) in &q {
-        if k != "c" {
-            continue;
-        }
-        for n in v.split(',').map(str::trim) {
-            if super::may_tail(ctx.state, n) && !names.iter().any(|x| x == n) && names.len() < 4 {
-                names.push(n.to_string());
-            }
-        }
-    }
+    let asked = names_in(&q, "c");
+    let ok: Vec<String> = asked
+        .iter()
+        .filter(|n| super::may_tail(ctx.state, n))
+        .cloned()
+        .collect();
+    let missing = not_found_names(ctx, &asked);
+    let over: Vec<String> = ok.iter().skip(4).cloned().collect();
+    let names: Vec<String> = ok.into_iter().take(4).collect();
     let snap = ctx.state.snapshot();
-    let heading = crate::ui::pages::crumb_title("Logs");
-    let body = if names.is_empty() {
-        picker(ctx, &snap)
-    } else {
-        let panes: Vec<Pane> = names
-            .iter()
-            .map(|n| Pane {
-                query: format!("c={}", url_encode(n)),
-                title: n.clone(),
-                names: vec![n.clone()],
-                stack: None,
-                href: Some(logs_url(n)),
-            })
-            .collect();
-        let missing: Vec<&String> = if snap.fetched_at != 0 && snap.error.is_none() {
-            names.iter().filter(|n| find(&snap, n).is_none()).collect()
-        } else {
-            vec![]
+    let notes = html! {
+        @if !missing.is_empty() {
+            (note_banner("warn", html! {
+                "Not found: " span.mono { @for (i, m) in missing.iter().enumerate() { @if i > 0 { ", " } (m) } }
+                ". It may have been removed or renamed, or its logs are not shown."
+            }))
+        }
+        @if !over.is_empty() {
+            (note_banner("warn", html! {
+                "Four at a time: not shown " span.mono { (over.join(", ")) } "."
+            }))
+        }
+    };
+    if names.is_empty() {
+        let tick = query_get(&q, "go").is_some() && asked.is_empty();
+        let notes = html! {
+            (notes)
+            @if tick { (note_banner("info", html! { "Tick one to four containers first." })) }
         };
-        html! {
-            (assets(ctx))
-            div.page.lpage.lsplit {
-                (docker_banner(ctx))
-                @if !missing.is_empty() {
-                    div.banner.warn {
-                        (ic("alert"))
-                        div { "Not found: " span.mono { @for (i, m) in missing.iter().enumerate() { @if i > 0 { ", " } (m) } } }
-                    }
-                }
-                (watch_banner())
-                (viewer(ctx, &panes, false, None))
-            }
+        let sel = names_in(&q, "sel");
+        let heading = crate::ui::pages::crumb_title("Logs");
+        let body = picker(ctx, &snap, &sel, notes);
+        return (StatusCode::OK, layout(ctx, Nav::Logs, title, heading, body));
+    }
+    let heading = html! {
+        nav.crumb aria-label="Breadcrumb" {
+            a href="/logs" { "Logs" }
+            (ic("chev-r"))
+            h1.title { @if names.len() == 1 { span.mono { (names[0]) } } @else { "Side by side" } }
+        }
+    };
+    let panes: Vec<Pane> = names
+        .iter()
+        .map(|n| Pane {
+            query: format!("c={}", url_encode(n)),
+            title: n.clone(),
+            names: vec![n.clone()],
+            stack: find(&snap, n)
+                .and_then(|c| c.project.clone())
+                .filter(|s| super::is_project(&ctx.cfg, &snap, s)),
+            href: Some(logs_url(n)),
+        })
+        .collect();
+    let body = html! {
+        (assets(ctx))
+        div.page.lpage.lsplit {
+            (docker_banner(ctx))
+            (notes)
+            (watch_banner())
+            (viewer(ctx, &panes, Kind::Split, None))
         }
     };
     (StatusCode::OK, layout(ctx, Nav::Logs, title, heading, body))
+}
+
+/// The split view without `name` (what a pane's close link opens): the
+/// others side by side, or the list when it was the last one.
+fn split_without(names: &[String], name: &str) -> String {
+    let rest: Vec<&str> = names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| *n != name)
+        .collect();
+    if rest.is_empty() {
+        "/logs".into()
+    } else {
+        split_url(&rest)
+    }
+}
+
+/// The list with `names` ticked, to add one more to the split view.
+fn pick_url(names: &[String]) -> String {
+    let list: Vec<String> = names.iter().map(|n| url_encode(n)).collect();
+    format!("/logs?sel={}", list.join(","))
 }
 
 /// `/logs` without a choice: every container the dashboard lists, stopped
@@ -323,7 +404,7 @@ pub fn split(ctx: &Ctx) -> (StatusCode, String) {
 /// type); ticking two to four opens them side by side. The filter and the
 /// ticks are two forms, so Enter in the filter only filters. Stack logs only
 /// for compose projects (LG-09).
-fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
+fn picker(ctx: &Ctx, snap: &crate::model::Snapshot, sel: &[String], notes: Markup) -> Markup {
     let mut cfg = (*ctx.cfg).clone();
     cfg.page.show_stopped = true;
     let groups = crate::ui::view::build_groups(&cfg, snap, &Default::default(), ctx.host);
@@ -353,6 +434,7 @@ fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
         (assets(ctx))
         div.page.lpage {
             (docker_banner(ctx))
+            (notes)
             @if total == 0 {
                 (empty_state("box", "No containers", html! { "Logs appear here once Docker lists a container." }))
             } @else {
@@ -369,10 +451,11 @@ fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
                         span.lpick-n.muted #lpick-n aria-live="polite" {
                             @if shown == total { (total) " containers" } @else { (shown) " of " (total) " containers" }
                         }
-                        button.btn.primary #lpick-go type="submit" form="lpick-c" title="Tick two to four containers" { (ic("logs")) "Side by side" }
+                        button.btn.primary #lpick-go type="submit" form="lpick-c" title="Tick two to four containers" { (ic("logs")) "Side by side" span.lpick-k #lpick-k {} }
                     }
-                    p.muted.lpick-hint { "A name opens its logs. Tick two to four to see them side by side (on a phone they stack)." }
+                    p.muted.lpick-hint #lpick-hint { "A name opens its logs. Tick two to four to see them side by side (on a phone they stack)." }
                     form.lpick #lpick-c method="get" action="/logs" {
+                        input type="hidden" name="go" value="1";
                         @for (g, cs, project) in &stacks {
                             @let any = cs.iter().any(|c| hit(c, g));
                             section.lpick-g data-k=(g.name) hidden[!any] {
@@ -386,7 +469,7 @@ fn picker(ctx: &Ctx, snap: &crate::model::Snapshot) -> Markup {
                                 ul.lpick-list {
                                     @for c in cs {
                                         li.rl.stopped[!c.running] data-c=(c.name) data-s=(format!("{} {} {}", c.search, c.title, g.title).to_lowercase()) hidden[!hit(c, g)] {
-                                            input type="checkbox" name="c" value=(c.name) aria-label={"Side by side: " (c.title)};
+                                            input type="checkbox" name="c" value=(c.name) checked[sel.contains(&c.name)] aria-label={"Side by side: " (c.title)};
                                             (crate::ui::status_dot(c))
                                             a.row-link href=(logs_url(&c.name)) title={"Logs of " (c.name)} {
                                                 span.lpick-nm { (c.title) }
@@ -468,75 +551,120 @@ fn toggle(id: &str, label: &str, icon: Option<&str>, pressed: bool, title: &str)
     }
 }
 
-fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool, foot: Option<Markup>) -> Markup {
+/// Which page a viewer is on: it decides the pane headers and the footer.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    /// `/containers/<name>/logs`: the container's header is above; no pane
+    /// header, a footer with the other views and the level chart.
+    Container,
+    /// `/stacks/<name>/logs`: one merged pane, its containers as chips.
+    Stack,
+    /// `/logs?c=…`: every pane named, each with a close link (LG-06, LG-07).
+    Split,
+}
+
+fn viewer(ctx: &Ctx, panes: &[Pane], kind: Kind, foot: Option<Markup>) -> Markup {
     let cfg = &ctx.cfg.logs;
     let first = panes.first().map(|p| p.query.as_str()).unwrap_or("");
+    let merged = kind == Kind::Stack;
     let multi = panes.len() > 1;
+    let names: Vec<String> = panes.iter().map(|p| p.title.clone()).collect();
     html! {
         div.lv #lv data-ring=(cfg.ring()) data-tail=(cfg.tail()) data-merged=[merged.then_some("1")]
-            data-stack=[panes.first().and_then(|p| p.stack.as_deref())] {
+            data-stack=[if merged { panes.first().and_then(|p| p.stack.as_deref()) } else { None }] {
+            // One row: search (with the match stepper) and, on a phone, a
+            // "Filters" button that opens the rest (LG-19, LG-31). On wide
+            // screens `.lmore` is `display:contents`: the same row.
             div.ltool role="toolbar" aria-label="Log tools" {
                 div.lsearch {
                     (ic("search"))
-                    input #lq type="search" placeholder="Search logs" aria-label="Search logs (press / to focus)"
-                        autocomplete="off" spellcheck="false";
+                    input #lq type="search" placeholder="Search logs" aria-label="Search logs (press / to focus; Enter: older match, Shift+Enter: newer)"
+                        autocomplete="off" spellcheck="false" enterkeyhint="search";
+                    span.lqn.num #lqn aria-live="polite" {}
+                    button.ltog.lre.lstep type="button" #lprev title="Older match (Enter)" aria-label="Older match" disabled { (ic("arrow-up")) }
+                    button.ltog.lre.lstep type="button" #lnext title="Newer match (Shift+Enter)" aria-label="Newer match" disabled { (ic("arrow-down")) }
                     button.ltog.lre type="button" #lre aria-pressed="false" title="Regular expression" aria-label="Regular expression" { ".*" }
                     button.ltog.lre type="button" #lcase aria-pressed="false" title="Match case" aria-label="Match case" { "Aa" }
                 }
-                (toggle("lonly", "Only matching", Some("filter"), false, "Show only lines that match the search"))
-                label.lctl title="Lines of context around each match" {
-                    span.sr { "Context lines" }
-                    select #lctx {
-                        option value="0" { "No context" }
-                        option value="1" { "±1 line" }
-                        option value="3" { "±3 lines" }
-                        option value="10" { "±10 lines" }
+                button.btn.sm.lfilt #lfilt type="button" aria-expanded="false" aria-controls="lmore" {
+                    (ic("sliders")) span { "Filters" } b.lfn.num #lfn hidden {}
+                }
+                @if kind == Kind::Split {
+                    a.btn.sm #ladd href=(pick_url(&names)) hidden[names.len() >= 4] title="Add a container to this view" aria-label="Add a container" {
+                        (ic("plus")) span { "Add" }
                     }
                 }
-                div.llevels role="group" aria-label="Levels" {
-                    @for (code, name) in [("e", "Error"), ("w", "Warn"), ("i", "Info"), ("d", "Debug"), ("o", "Other")] {
-                        button.lchip type="button" data-lv=(code) aria-pressed="true" title={"Show " (name.to_lowercase()) " lines"} {
-                            span.lg {} (name) " " b.num data-n=(code) { "0" }
+                div.lmore #lmore {
+                    label.lctl title="Which lines to show" {
+                        span.sr { "Show" }
+                        select #lshow {
+                            option value="" { "All lines" }
+                            option value="0" { "Only matching" }
+                            option value="1" { "Matching ±1 line" }
+                            option value="3" { "Matching ±3 lines" }
+                            option value="10" { "Matching ±10 lines" }
                         }
                     }
-                }
-                span.lsp {}
-                label.lctl {
-                    span.sr { "Time range" }
-                    select #lrange {
-                        @for (v, l) in RANGES { option value=(v) { (l) } }
+                    div.llevels role="group" aria-label="Levels" {
+                        @for (code, name) in [("e", "Error"), ("w", "Warn"), ("i", "Info"), ("d", "Debug"), ("o", "Other")] {
+                            button.lchip type="button" data-lv=(code) aria-pressed="true" title={"Show " (name.to_lowercase()) " lines"} {
+                                span.ldot {} (name) " " b.num data-n=(code) { "0" }
+                            }
+                        }
                     }
+                    span.lsp {}
+                    label.lctl {
+                        span.sr { "Time range" }
+                        select #lrange {
+                            @for (v, l) in RANGES { option value=(v) { (l) } }
+                        }
+                    }
+                    (toggle("lwrap", "Wrap", None, true, "Wrap long lines"))
+                    (toggle("ltime", "Time", Some("clock"), true, "Show timestamps (your local time)"))
+                    (toggle("lpause", "Pause", None, false, "Pause or resume the live tail"))
+                    a.btn.sm #ldl href={"/api/logs/download?" (first) "&since=1h"} title="Download the selected range as text" download {
+                        (ic("arrow-down")) span { "Download" }
+                    }
+                    span.lcount.num #lcount aria-live="polite" { "0 lines" }
                 }
-                span.lcustom #lcustom hidden {
-                    label { span.sr { "From" } input #lfrom type="datetime-local" step="1"; }
-                    "–"
-                    label { span.sr { "To (empty: now, live)" } input #lto type="datetime-local" step="1"; }
-                    button.btn.sm #lapply type="button" { "Apply" }
-                }
-                (toggle("lwrap", "Wrap", None, true, "Wrap long lines"))
-                (toggle("ltime", "Time", Some("clock"), true, "Show timestamps (your local time)"))
-                (toggle("lpause", "Pause", None, false, "Pause or resume the live tail"))
-                a.btn.sm #ldl href={"/api/logs/download?" (first) "&since=1h"} title="Download the selected range as text" download {
-                    (ic("arrow-down")) span { "Download" }
-                }
-                span.lcount.num #lcount aria-live="polite" { "0 lines" }
+            }
+            // A fixed place under the toolbar, labelled, minute precision
+            // (LG-17); checked on Apply (LG-16).
+            div.lcustom #lcustom role="group" aria-label="Custom range" hidden {
+                label.lcf { span { "From" } input #lfrom type="datetime-local" step="60" aria-describedby="lrerr"; }
+                label.lcf { span { "To" } input #lto type="datetime-local" step="60" aria-describedby="lrerr lthint"; }
+                span.muted.lchint #lthint { "Empty To: up to now, then live." }
+                button.btn.sm #lapply type="button" { "Apply" }
+                p.lerr #lrerr role="alert" hidden {}
             }
             div.lpanes.(if multi { "multi" } else { "one" }) style={"--n:" (panes.len())} {
                 @for (i, p) in panes.iter().enumerate() {
-                    section.lpane data-q=(p.query) data-i=(i) aria-label={"Logs of " (p.title)} {
-                        @if multi || merged {
-                            header.lph {
-                                @if merged {
-                                    span.lph-t { (p.title) }
+                    section.lpane data-q=(p.query) data-i=(i) data-c=[(kind == Kind::Split).then_some(p.title.as_str())] aria-label={"Logs of " (p.title)} {
+                        @if kind == Kind::Stack {
+                            header.lph.lph-m {
+                                // Closed in the HTML (a phone keeps the
+                                // pane's room); the script opens it on
+                                // wide screens (LG-19, LG-24).
+                                details.lchipd {
+                                    summary { span.lph-t { (p.title) } }
                                     span.lchips {
                                         @for n in &p.names {
                                             span.lcn style={"--h:" (hue(n))} data-name=(n) title=(n) { (short_name(n, p.stack.as_deref())) }
                                         }
                                     }
-                                } @else if let Some(h) = &p.href {
-                                    a.mono.lph-t href=(h) { span.lcn style={"--h:" (hue(&p.title))} { (p.title) } }
                                 }
                                 span.lph-s data-st="" {}
+                            }
+                        } @else if kind == Kind::Split {
+                            header.lph {
+                                @if let Some(h) = &p.href {
+                                    a.mono.lph-t href=(h) title={"Logs of " (p.title)} { span.lcn style={"--h:" (hue(&p.title))} { (p.title) } }
+                                }
+                                @if let Some(s) = &p.stack {
+                                    a.ia.lph-a href=(stack_logs_url(s)) title={"Whole stack " (s)} aria-label={"Logs of the whole stack " (s)} { (ic("layers")) }
+                                }
+                                span.lph-s data-st="" {}
+                                a.ia.lclose href=(split_without(&names, &p.title)) title="Close this pane" aria-label={"Close " (p.title)} { (ic("x")) }
                             }
                         }
                         // Served plain: the script replaces this sentence with
@@ -545,7 +673,8 @@ fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool, foot: Option<Markup>) -> Mark
                         // (off, blocked, failed to load) the sentence stays,
                         // and nothing is busy; with it, the sentence never
                         // shows (`js-late`: only after 2 s, if still there).
-                        div.lbody tabindex="0" {
+                        div.lbody tabindex="0" aria-label={"Lines of " (p.title) ". Enter picks a line to copy or link."} {
+                            button.btn.sm.lolder type="button" hidden { (ic("arrow-up")) "Load older lines" }
                             div.lines role="log" aria-live="off" {}
                             div.lmsg {
                                 p.js-late { "The log viewer needs JavaScript. You can still " a href={"/api/logs/download?" (p.query) "&tail=5000"} { "download the last 5,000 lines" } "." }
@@ -555,19 +684,17 @@ fn viewer(ctx: &Ctx, panes: &[Pane], merged: bool, foot: Option<Markup>) -> Mark
                     }
                 }
             }
-            @if !multi && !merged {
-                @if let Some(p) = panes.first() {
-                    @if let Some(n) = p.names.first() {
-                        div.lfoot {
-                            p.muted {
-                                "Open side by side: "
-                                a href=(split_url(&[n.as_str()])) { "split view" }
-                                @if let Some(stack) = ctx.state.snapshot().containers.iter().find(|c| &c.name == n).and_then(|c| c.project.clone()) {
-                                    " · " a href=(stack_logs_url(&stack)) { "whole stack " span.mono { (stack) } }
-                                }
+            @if kind == Kind::Container {
+                @if let Some(n) = panes.first().and_then(|p| p.names.first()) {
+                    div.lfoot {
+                        p.muted {
+                            "Next to others: "
+                            a href=(pick_url(std::slice::from_ref(n))) { "side by side" }
+                            @if let Some(stack) = ctx.state.snapshot().containers.iter().find(|c| &c.name == n).and_then(|c| c.project.clone()) {
+                                " · " a href=(stack_logs_url(&stack)) { "whole stack " span.mono { (stack) } }
                             }
-                            @if let Some(f) = foot { (f) }
                         }
+                        @if let Some(f) = foot { (f) }
                     }
                 }
             }
@@ -595,8 +722,9 @@ pub fn level_chart(state: &AppState, name: &str, range: Range) -> Markup {
                 p.muted {
                     @if watched { "No log lines counted in this range yet." }
                     @else {
-                        "Error and warning counts are recorded for containers watched by a "
-                        code { "log_match" } " alert or listed in " code { "[logs] count" } "."
+                        // OV-51: plain words, and where to change it.
+                        "Errors and warnings are counted only for containers that a log alert watches. "
+                        a href="/alerts" { "Add a log alert" } " to count them for this one."
                     }
                 }
             }

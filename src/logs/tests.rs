@@ -222,7 +222,12 @@ fn require_login_hides_logs() {
 fn level_chart_states() {
     let st = state_with(sample(), OPEN);
     let html = super::level_chart(&st, "web", crate::db::Range::H1).into_string();
-    assert!(html.contains("log_match"), "empty state explains: {html}");
+    // OV-51: plain words and a way to change it, no config syntax.
+    assert!(
+        html.contains("a log alert watches") && html.contains(r#"href="/alerts""#),
+        "empty state explains: {html}"
+    );
+    assert!(!html.contains("log_match") && !html.contains("[logs]"));
     let now = crate::util::unix_now() as i64 / 60 * 60;
     st.db
         .record_log_counts(&[("web".into(), now - 120, [3, 2, 10, 0, 0])]);
@@ -399,6 +404,160 @@ fn logs_list_filter_and_ticks_are_separate_forms() {
     assert!(
         list.contains(r#"id="lpick-go" type="submit" form="lpick-c""#),
         "{list}"
+    );
+}
+
+/// The split view names every pane (LG-06), links back to the list
+/// (NAV-44), and each pane can be closed or another added (LG-07): plain
+/// links, so it works without the script. A pane of a compose project links
+/// to its stack (LG-10).
+#[test]
+fn split_view_names_closes_and_adds_panes() {
+    let st = state_with(sample(), OPEN);
+    let (s, html) = page(&st, "/logs", "c=web");
+    assert_eq!(s, 200);
+    let crumb = &html[html.find(r#"<nav class="crumb""#).expect("crumb")..];
+    assert!(crumb.contains(r#"<a href="/logs">Logs</a>"#), "{crumb}");
+    let pane = &html[html.find(r#"<section class="lpane""#).expect("pane")..];
+    let head = &pane[..pane.find("</header>").expect("a pane header for one pane")];
+    assert!(head.contains(r#"href="/containers/web/logs""#), "{head}");
+    assert!(head.contains(">web</span>"), "{head}");
+    assert!(head.contains(r#"href="/stacks/shop/logs""#), "{head}");
+    assert!(
+        head.contains(r#"class="ia lclose" href="/logs""#),
+        "closing the last pane goes back to the list: {head}"
+    );
+    assert!(html.contains(r#"id="ladd" href="/logs?sel=web""#), "{html}");
+    let (_, html) = page(&st, "/logs", "c=web,solo");
+    assert!(html.contains(r#"<h1 class="title">Side by side</h1>"#));
+    assert!(html.contains(r#"class="ia lclose" href="/logs?c=solo" title="Close this pane" aria-label="Close web""#), "{html}");
+    assert!(html.contains(
+        r#"class="ia lclose" href="/logs?c=web" title="Close this pane" aria-label="Close solo""#
+    ));
+    assert!(html.contains(r#"href="/logs?sel=web,solo""#));
+    assert_eq!(
+        html.matches("/stacks/").count() - html.matches("/stacks/shop/logs").count(),
+        0
+    );
+    let four = state_with(
+        vec![
+            ctr("a1", None, "running"),
+            ctr("a2", None, "running"),
+            ctr("a3", None, "running"),
+            ctr("a4", None, "running"),
+            ctr("a5", None, "running"),
+        ],
+        OPEN,
+    );
+    let (_, html) = page(&four, "/logs", "c=a1,a2,a3,a4,a5");
+    assert_eq!(html.matches("class=\"lpane\"").count(), 4);
+    assert!(
+        html.contains(r#"id="ladd" href="/logs?sel=a1,a2,a3,a4" hidden"#),
+        "no fifth"
+    );
+    assert!(html.contains("Four at a time: not shown"), "{html}");
+    // The container's page offers the list with it ticked.
+    let (_, html) = page(&st, "/containers/web/logs", "");
+    assert!(html.contains(r#"href="/logs?sel=web""#), "{html}");
+}
+
+/// `sel=` ticks names on the list (the "Add" and "side by side" links);
+/// unknown names are said (LG-08); "Side by side" with nothing ticked says
+/// what to do (LG-05). Names that are not shown containers are never tailed
+/// and an excluded one reads as "not found".
+#[test]
+fn list_preticks_and_says_what_is_missing() {
+    let st = state_with(
+        sample(),
+        "[logs]\nrequire_login = false\n[docker]\nexclude = [\"solo\"]\n",
+    );
+    let (_, html) = page(&st, "/logs", "sel=web,ghost");
+    assert!(html.contains(r#"name="c" value="web" checked"#), "{html}");
+    assert!(!html.contains(r#"value="db" checked"#));
+    assert!(html.contains(r#"<input type="hidden" name="go" value="1">"#));
+    let (_, html) = page(&st, "/logs", "c=web,nope");
+    assert_eq!(html.matches("class=\"lpane\"").count(), 1);
+    assert!(
+        html.contains("Not found: <span class=\"mono\">nope</span>"),
+        "{html}"
+    );
+    let (s, html) = page(&st, "/logs", "c=nope,%3Cb%3E");
+    assert_eq!(s, 200);
+    assert!(html.contains(r#"id="lpick""#), "the list again");
+    assert!(html.contains("nope, &lt;b&gt;"), "{html}");
+    let (_, html) = page(&st, "/logs", "c=solo");
+    assert!(html.contains("Not found: <span class=\"mono\">solo</span>"));
+    assert!(!html.contains(r#"data-q="c=solo""#) && !html.contains(r#"value="solo""#));
+    let (_, html) = page(&st, "/logs", "go=1");
+    assert!(
+        html.contains("Tick one to four containers first."),
+        "{html}"
+    );
+    let (_, html) = page(&st, "/logs", "");
+    assert!(!html.contains("Tick one to four") && !html.contains("Not found"));
+    // Signed out, none of it is shown.
+    let st = state_with(sample(), "");
+    for q in ["c=web", "sel=web", "c=nope", "go=1"] {
+        let (s, html) = page(&st, "/logs", q);
+        assert_eq!(s, 401, "{q}");
+        assert!(
+            !html.contains("Not found") && !html.contains(r#"value="web""#),
+            "{q}"
+        );
+    }
+}
+
+/// The toolbar is one row (LG-19, LG-31): search with the match stepper
+/// (LG-13), "Filters" for phones, one "Show" control instead of "Only
+/// matching" plus context; the custom range has visible labels and minute
+/// precision (LG-17); a stack's chips are behind a summary (LG-24).
+#[test]
+fn toolbar_shape() {
+    let st = state_with(sample(), OPEN);
+    let (_, html) = page(&st, "/containers/web/logs", "");
+    for id in [
+        "lq", "lqn", "lprev", "lnext", "lfilt", "lmore", "lshow", "lrange", "lcustom", "lrerr",
+    ] {
+        assert!(html.contains(&format!(r#"id="{id}""#)), "{id}");
+    }
+    assert!(!html.contains(r#"id="lonly""#) && !html.contains(r#"id="lctx""#));
+    assert!(html.contains(r#"aria-controls="lmore""#));
+    assert!(html.contains("<span>From</span>") && html.contains("<span>To</span>"));
+    assert_eq!(
+        html.matches(r#"type="datetime-local" step="60""#).count(),
+        2
+    );
+    assert!(
+        html.contains(r#"class="btn sm lolder""#),
+        "load older (LG-21)"
+    );
+    assert!(
+        !html.contains(r#"class="lg""#),
+        "LG-22: no chart-legend class"
+    );
+    let (_, html) = page(&st, "/stacks/shop/logs", "");
+    assert!(html.contains(r#"<details class="lchipd"><summary><span class="lph-t">2 containers, merged by time</span></summary>"#), "{html}");
+}
+
+/// Browser-side rules the static files must keep; the behaviour itself is
+/// checked by `scripts/logs-check.mjs`.
+#[test]
+fn viewer_script_and_styles() {
+    let js = crate::http::server::LOGS_JS;
+    let css = crate::http::server::LOGS_CSS;
+    // LG-20: the line actions show on a picked line and while focused, also
+    // on touch screens.
+    assert!(css.contains(".ll.lsel>.lact") && css.contains(".lact:focus-within"));
+    assert!(js.contains(r#"e.key !== "Enter" || e.target !== p.body"#));
+    // LG-13: the search is kept in the address; Enter steps.
+    assert!(js.contains("search=") && js.contains("step(e.shiftKey ? 1 : -1)"));
+    // LG-22: the gutter has its own class; A11Y-08: and a name.
+    assert!(js.contains(r#"el("span", "lgut")"#) && js.contains(r#""aria-label", lw"#));
+    // A11Y-14: no faded milliseconds.
+    assert!(css.contains(".lms{color:var(--text-3)}"));
+    // LG-26: narrow panes put the time above the message.
+    assert!(
+        css.contains("container-type:inline-size") && css.contains("@container (max-width:340px)")
     );
 }
 
@@ -684,7 +843,8 @@ fn pane_is_served_plain_and_the_script_makes_it_busy() {
     let (s, html) = page(&st, "/containers/web/logs", "");
     assert_eq!(s, 200);
     assert!(
-        html.contains(r#"<div class="lbody" tabindex="0"><div class="lines""#),
+        html.contains(r#"<div class="lbody" tabindex="0" aria-label="Lines of web. Enter picks a line to copy or link."><button class="btn sm lolder" type="button" hidden>"#)
+            && html.contains(r#"Load older lines</button><div class="lines""#),
         "{html}"
     );
     assert!(!html.contains(r#"aria-busy=""#) && !html.contains(r#"<span class="sk""#));
