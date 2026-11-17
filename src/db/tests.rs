@@ -1027,3 +1027,16 @@ fn event_reads_use_the_v6_indexes() {
     let ret = plan("SELECT COUNT(*) FROM events WHERE ts < 5");
     assert!(ret.contains("events_ts"), "{ret}");
 }
+
+/// Giving the page cache back keeps the data and the next reads working.
+#[test]
+fn release_memory_keeps_reads_working() {
+    let db = Db::open_in_memory().unwrap();
+    db.record_system(T0, &sys(10.0, 1 << 30));
+    db.record_event(T0, "container.start", "info", "web", "");
+    db.release_memory();
+    db.record_system(T0 + 15, &sys(20.0, 1 << 30));
+    db.release_memory();
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM sys_samples"), 2);
+    assert_eq!(db.restart_counts(0), vec![("web".to_string(), 1)]);
+}

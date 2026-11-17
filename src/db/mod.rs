@@ -1026,6 +1026,17 @@ impl Db {
     /// Roll up, prune, optimize. Safe to call often; does the work at most hourly.
     pub fn maintain(&self, now: i64) {
         maintain::run_once(self, now);
+        self.release_memory();
+    }
+
+    /// Give the page cache back (`sqlite3_db_release_memory`). Called after
+    /// each sampler tick and after maintenance: the cache is only worth
+    /// something while a page is being read, and with nobody viewing it is
+    /// most of the process's heap (about 2 MiB on a real database). The
+    /// pages stay in the kernel's file cache, so the next read is a copy, not
+    /// a disk read.
+    pub fn release_memory(&self) {
+        self.with((), |i| i.conn.release_memory());
     }
 
     /// True when `maintain(now)` would do its work (not run in the last hour).

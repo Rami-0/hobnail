@@ -58,6 +58,7 @@ impl Samplers {
         // Wave 1 hooks (each owned by its own module).
         super::ctrx::on_tick(state, now, &cgroups);
         crate::host::on_tick(state, now);
+        state.db.release_memory();
     }
 }
 
