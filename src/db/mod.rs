@@ -183,6 +183,14 @@ pub struct EventFilter {
     /// `auth.` excluded: login history (with client IPs) is not dashboard
     /// data. See [`EventFilter::for_viewer`].
     pub exclude_kind_prefix: Option<String>,
+    /// Only events with `ts >= since` / `ts <= until` (unix seconds).
+    /// There is no index on `ts` (schema v1 has the rowid and
+    /// `(subject, id)`), so these bounds filter rows the query walks in id
+    /// order; they do not narrow the walk. A window with fewer matching
+    /// events than `limit` is read back to the table's first row: a long
+    /// table needs an `events (ts)` index before a caller relies on them.
+    pub since: Option<i64>,
+    pub until: Option<i64>,
 }
 
 impl EventFilter {
@@ -759,6 +767,14 @@ impl Db {
             if let Some(b) = f.before_id {
                 args.push(b.into());
                 sql.push_str(&format!(" AND id < ?{}", args.len()));
+            }
+            if let Some(t) = f.since {
+                args.push(t.into());
+                sql.push_str(&format!(" AND ts >= ?{}", args.len()));
+            }
+            if let Some(t) = f.until {
+                args.push(t.into());
+                sql.push_str(&format!(" AND ts <= ?{}", args.len()));
             }
             args.push(limit.into());
             sql.push_str(&format!(" ORDER BY id DESC LIMIT ?{}", args.len()));

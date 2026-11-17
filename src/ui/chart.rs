@@ -576,7 +576,7 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
     let mid = (p.y_lo + p.y_hi) / 2.0;
     let ticks = x_ticks(spec, 5);
     let summary = format!(
-        "{}: now {}, min {}, max {}",
+        "{}: last {}, min {}, max {}",
         spec.title,
         unit.fmt(p.last),
         unit.fmt(p.min),
@@ -601,7 +601,9 @@ pub fn line_chart_ex(spec: &ChartSpec, series: &Series, db_enabled: bool, x: &Ex
             data-u=(unit.tag()) data-v=[hover.as_deref()] data-zoom=[x.zoom.then_some("1")] {
             figcaption {
                 span.chart-title { (spec.title) }
-                span.chart-now { (unit.fmt(p.last)) }
+                // The newest stored point, said as such: next to a live tile
+                // it is not "now" (OV-41).
+                span.chart-now title="The newest recorded value in this window" { span.chart-lw { "last " } (unit.fmt(p.last)) }
                 span.chart-mm title="minimum and maximum in this window" {
                     "min " (unit.fmt(p.min)) " · max " (unit.fmt(p.max))
                 }
@@ -904,7 +906,12 @@ mod tests {
         assert!(html.contains("data-u=\"pct\""));
         assert!(html.contains("data-step=\"60\""));
         assert!(
-            html.contains("aria-label=\"CPU: now 20%, min 10%, max 30%\""),
+            html.contains("aria-label=\"CPU: last 20%, min 10%, max 30%\""),
+            "{html}"
+        );
+        // OV-41: the header value is the newest stored point, labelled so.
+        assert!(
+            html.contains(r#"<span class="chart-lw">last </span>20%</span>"#),
             "{html}"
         );
         // 61 slots, the last three filled.

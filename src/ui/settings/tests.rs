@@ -1356,9 +1356,9 @@ fn alerts_page_signed_out_carries_no_settings() {
     ] {
         let (status, page) = get(&st, &format!("/alerts?{q}"), &h);
         assert_eq!(status, StatusCode::OK, "{q}");
-        // After the inlined CSS (it names the classes), and without the
+        // After the head, and without the
         // visitor's own URL echoed in the sign-in link (`next=`).
-        let html = &page[page.find("</style>").unwrap()..];
+        let html = &page[page.find("</head>").unwrap()..];
         let html = html
             .split("/login?next=")
             .enumerate()
@@ -1459,7 +1459,7 @@ fn alerts_page_signed_in_carries_the_notifications_lists() {
 fn overview_add_links_are_for_a_session_only() {
     let st = state_with(sample(), LISTS);
     let (_, page) = get(&st, "/", &HeaderMap::new());
-    let html = &page[page.find("</style>").unwrap()..];
+    let html = &page[page.find("</head>").unwrap()..];
     for leak in [
         "head-add",
         "data-hash",
@@ -1553,4 +1553,17 @@ fn revisions_are_paged() {
     assert!(!f.contains("note-"));
     let (_, out) = get(&st, "/settings/config?rp=2", &HeaderMap::new());
     assert!(!out.contains("note-") && !out.contains("rev-pager"));
+}
+
+/// SET-57: a channel test that fails says the receiver's message, not its
+/// raw JSON body, in the toast and the Status cell, cut when long.
+#[test]
+fn channel_test_failures_are_plain_words() {
+    let js = crate::http::server::SETTINGS_JS;
+    let f = &js[js.find("function failText(s)").expect("failText")..];
+    let f = &f[..f.find("\n  }\n").unwrap()];
+    for k in ["j.description", "j.message", "j.error", "s.length > 160"] {
+        assert!(f.contains(k), "{k}");
+    }
+    assert_eq!(js.matches("failText((r.data && r.data.error)").count(), 2);
 }

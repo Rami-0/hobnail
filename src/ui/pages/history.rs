@@ -246,6 +246,12 @@ struct Scan {
     cut: Option<i64>,
 }
 
+/// The events inside `from..=to`, newest first, as the History page reads
+/// them (the same bounded scan), for other charts' markers (Host, LG-39).
+pub fn window_events(db: &crate::db::Db, signed: bool, from: i64, to: i64) -> Vec<Event> {
+    scan(db, signed, from, to, None).events
+}
+
 fn scan(db: &crate::db::Db, signed: bool, from: i64, to: i64, before: Option<i64>) -> Scan {
     let mut out = Scan::default();
     let mut cursor = before;
@@ -513,7 +519,13 @@ fn restarts_table(
                 thead {
                     tr {
                         th { "Container" }
-                        @for i in (0..DAYS).rev() { th.num scope="col" { (day_label(i)) } }
+                        // On a phone only the day's number shows, so the
+                        // week fits the screen (the month is in the title).
+                        @for i in (0..DAYS).rev() {
+                            @let l = day_label(i);
+                            @let (d, m) = l.split_once(' ').unwrap_or((l.as_str(), ""));
+                            th.num scope="col" title=(l) { (d) span.hm { " " (m) } }
+                        }
                         th.num { "Total" }
                     }
                 }
@@ -808,5 +820,15 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("/containers/gone/logs"), "no dead logs link");
+        // The week fits a phone: the day's number, the month hidden there
+        // and in the title (History at 390 px).
+        assert!(
+            html.contains(
+                r#"<th class="num" scope="col" title="15 Jan">15<span class="hm"> Jan</span></th>"#
+            ),
+            "{html}"
+        );
+        assert!(include_str!("../../../static/alerts.css")
+            .contains("@media (max-width:699px){.heat .hm{display:none}"));
     }
 }

@@ -62,3 +62,5 @@
 .cd .strip.facts.n4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @container (max-width:1000px){.cd .strip.facts.n4{grid-template-columns:repeat(2,minmax(0,1fr))}.cd .strip.facts:not(.n4)>.cell:last-child{grid-column:span 2}}
 @container (max-width:560px){.cd .strip.facts:not(.n4)>.cell:last-child{grid-column:1/-1}}
+@media (pointer:coarse),(max-width:699px){.cd-procs th a{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse),(max-width:699px){.cd-stack td>a.mono{display:inline-flex;align-items:center;min-height:44px}.cd-labels>summary{display:flex;align-items:center;min-height:44px;padding-block:0}}

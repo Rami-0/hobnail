@@ -205,9 +205,10 @@
     });
   }
   treeApply();
-  // The open container's item is in view (NAV-24).
-  const curItem = doc.querySelector('#tree a[aria-current="page"]'), treeBox = $("tree");
-  if (curItem && treeBox) { const r = curItem.getBoundingClientRect(), b = treeBox.getBoundingClientRect(); if (r.top < b.top || r.bottom > b.bottom) treeBox.scrollTop += r.top - b.top - b.height / 3; }
+  // The tree's scroll position carries over to the next page, where the
+  // shell's inline script restores it before first paint and keeps the open
+  // container's item in view (NAV-24); nothing here moves it after paint.
+  window.addEventListener("pagehide", () => { const t = $("tree"); try { sessionStorage.setItem("rh-tree-y", String(t ? Math.round(t.scrollTop) : 0)); } catch {} });
 
   // "Last 5 checks" under "Why is this red?" starts closed on a phone (it
   // makes the page long there); without the script it stays open.
@@ -372,7 +373,9 @@
     const at = (x) => Math.round(t0 + Math.min(1, Math.max(0, (x - r.left) / r.width)) * (t1 - t0));
     const p = new URLSearchParams(location.search);
     p.delete("range"); p.set("from", at(Math.min(d.x, e.clientX))); p.set("to", at(Math.max(d.x, e.clientX)));
-    location.href = location.pathname + "?" + p.toString();
+    // Charts lower on a page (Host's history, LG-39) come back into view.
+    const sec = d.fig.closest("[data-zoom-hash][id]");
+    location.href = location.pathname + "?" + p.toString() + (sec ? "#" + sec.id : "");
   });
 
   // Legend buttons toggle a layer (avg, max band, yesterday) on every chart
@@ -896,6 +899,7 @@
   // connect), so the pill says it is trying, and goes away by itself.
   let offT = null, offPill = null;
   function setLive(on, text) {
+    window.HB_LIVE = 1; // the shell's "connecting" fallback stands down
     if (live) {
       live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
       live.querySelector(".live-t").textContent = text;
@@ -1137,7 +1141,10 @@
     };
     es.onopen = () => { retryMs = 5000; setLive(true, "live"); };
   }
-  function disconnect(text) { clearTimeout(retryT); retryT = null; if (es) { es.close(); es = null; } setLive(false, text); }
+  // Leaving the page (or into the back/forward cache) closes the stream
+  // without a word: the indicator keeps saying "live", so neither the last
+  // frame of this page nor its return from the cache flips it.
+  function disconnect(text) { clearTimeout(retryT); retryT = null; if (es) { es.close(); es = null; } if (text) setLive(false, text); }
   function resume() {
     clearTimeout(hideTimer);
     // Paused for over a minute: reload for fresh data (widgets refresh slowly),
@@ -1150,7 +1157,7 @@
     if (doc.hidden) hideTimer = setTimeout(() => { hiddenAt = Date.now(); disconnect("paused"); alarmPoll = setInterval(pollAlarm, 60000); }, 10000);
     else { clearInterval(alarmPoll); resume(); }
   });
-  window.addEventListener("pagehide", () => { clearTimeout(hideTimer); hiddenAt = Date.now(); disconnect("paused"); });
+  window.addEventListener("pagehide", () => { clearTimeout(hideTimer); hiddenAt = Date.now(); disconnect(); });
   window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
 
   // ---- navigation feedback (ROB-12): a full page load shows a 2 px line

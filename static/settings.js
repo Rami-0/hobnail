@@ -633,9 +633,18 @@
     test: async (v) => {
       const r = await call("POST", "channels/test", { name: v.name });
       const ok = r.status === 200 && r.data.ok;
-      return ok ? ["ok", `Test sent to “${v.name}”. Check that it arrived.`] : ["bad", `The test to “${v.name}” failed: ${(r.data && r.data.error) || "HTTP " + r.status}.`];
+      return ok ? ["ok", `Test sent to “${v.name}”. Check that it arrived.`] : ["bad", `The test to “${v.name}” failed: ${failText((r.data && r.data.error) || "HTTP " + r.status)}.`];
     },
   };
+  // A delivery error in plain words (SET-57): a receiver's JSON body
+  // ("HTTP 500: {"ok":false,"description":"mock failure"}") gives its
+  // message ("HTTP 500: mock failure"); anything long is cut.
+  function failText(s) {
+    s = String(s || "");
+    const m = s.match(/^(HTTP \d+): *(\{[\s\S]*\})\s*$/);
+    if (m) { try { const j = JSON.parse(m[2]), w = j.description || j.message || j.error || j.detail || j.text; if (typeof w === "string" && w) s = m[1] + ": " + w; } catch {} }
+    return s.length > 160 ? s.slice(0, 157) + "…" : s;
+  }
   const DEFAULT_ON = ["stopped", "unhealthy", "restarting"];
   // The condition keys of each rule type (as `alerts::rules::validate`).
   const RULE_FOR = {
@@ -732,7 +741,7 @@
         const r = await call("POST", "channels/test", { name });
         b.removeAttribute("aria-busy"); b.removeAttribute("aria-disabled"); t.textContent = label;
         const ok = r.status === 200 && r.data.ok;
-        const msg = ok ? "Test sent" : (r.data && r.data.error) || `HTTP ${r.status}`;
+        const msg = ok ? "Test sent" : failText((r.data && r.data.error) || `HTTP ${r.status}`);
         if (cell) { cell.className = "sub test-res " + (ok ? "ok-t" : "err-line"); cell.textContent = (ok ? "✓ " : "✗ ") + msg; }
         toast(ok ? `Test sent to “${name}”` : `Test to “${name}” failed: ${msg}`, ok ? "ok" : "bad");
         if (r.status === 401) banner("expired");

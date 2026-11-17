@@ -9,7 +9,7 @@ use maud::{html, Markup, PreEscaped};
 use super::collect::{CpuSplit, Host, NetView, ProcReport, PSI_RES};
 use super::parse::SensorKind;
 use crate::db::{Agg, Range};
-use crate::ui::chart::{line_chart, ChartSpec, Unit};
+use crate::ui::chart::{line_chart_ex, markers_from_events, ChartSpec, Extras, Unit};
 use crate::ui::fmt::{pct, query_get, url_encode};
 use crate::ui::ic;
 use crate::ui::shell::{layout, Ctx, Nav};
@@ -34,16 +34,13 @@ pub struct LiveView<'a> {
 const POLL_JS: &str = "(function(){var el=document.getElementById('hx-live');if(!el||!window.fetch)return;var busy=0;function go(){if(document.hidden||busy)return;busy=1;fetch('/host?frag=live',{credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(function(t){busy=0;if(t.indexOf('hx-grid')>0){if(window.HB&&HB.morph)HB.morph(el,t);else el.innerHTML=t}}).catch(function(){busy=0})}setInterval(go,3000);document.addEventListener('visibilitychange',go)})();";
 
 pub fn page(ctx: &Ctx, lv: &LiveView, q: &[(String, String)]) -> String {
-    let range = query_get(q, "range")
-        .and_then(Range::parse)
-        .unwrap_or(Range::H1);
     let body = html! {
         div.page.hx {
             (crate::ui::pages::page_sub(html! {
                 "Everything the kernel reports about this machine. Live numbers refresh every 3 s while this tab is visible; rates are averages since the previous reading."
             }))
             div #hx-live aria-live="off" { (live_region(lv)) }
-            (history(ctx, lv.h, range))
+            (history(ctx, lv.h, q))
             script { (PreEscaped(POLL_JS)) }
         }
     };
@@ -709,18 +706,59 @@ fn groups(h: &Host) -> Vec<(&'static str, Vec<C>)> {
     ]
 }
 
-fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
+/// The history charts (LG-39): the same window as History (a preset range
+/// or a zoomed `from`/`to`), moved and zoomed with plain links or a drag
+/// across a chart, with the window's incidents as markers that open them in
+/// the History timeline. Read on a page load only.
+fn history(ctx: &Ctx, h: &Host, q: &[(String, String)]) -> Markup {
+    use crate::ui::pages::history::{window_events, Window};
     let db = &ctx.state.db;
     let en = db.is_enabled();
     let now = ctx.now as i64;
+    let preset = query_get(q, "range")
+        .and_then(Range::parse)
+        .unwrap_or(Range::H1);
+    let w = Window::parse(q, preset, now);
+    let evs = if en {
+        window_events(db, ctx.user.is_some(), w.from(), w.to)
+    } else {
+        Vec::new()
+    };
+    let marks = markers_from_events(&evs);
+    let steps = w.steps(now);
+    let step = |label: &str, to: Option<&str>, hint: &str| {
+        html! {
+            @match to {
+                Some(q) => a.btn.sm href={"/host?" (q) "#history"} title=(hint) { (label) },
+                None => span.btn.sm aria-disabled="true" title=(hint) { (label) },
+            }
+        }
+    };
     html! {
-        section.sec #history aria-label="History" {
+        section.sec #history aria-label="History" data-zoom-hash {
             div.panel-h {
                 h2 { "History" }
                 nav.seg aria-label="Range" {
                     @for r in Range::ALL {
-                        a href={"/host?range=" (r.as_str()) "#history"} aria-current=[(r == range).then_some("true")] { (r.as_str()) }
+                        a href={"/host?range=" (r.as_str()) "#history"} aria-current=[(!w.zoomed && r == preset).then_some("true")] { (r.as_str()) }
                     }
+                }
+            }
+            div.toolbar.hist-bar {
+                nav.zoom-nav aria-label="Move or zoom the window" {
+                    (step("‹ Earlier", Some(&steps.earlier), "The half window before this one"))
+                    (step("Zoom in", steps.zoom_in.as_deref(), "Half this window around its middle (5 min at least)"))
+                    (step("Zoom out", Some(&steps.zoom_out), "Twice this window"))
+                    (step("Later ›", steps.later.as_deref(), "The half window after this one"))
+                }
+                @if w.zoomed {
+                    span.zoomed {
+                        (ic("search")) "Zoomed: " time.num data-t=(w.from()) data-abs="1" { (crate::ui::fmt::short_utc(w.from().max(0) as u64)) }
+                        " – " time.num data-t=(w.to) data-abs="1" { (crate::ui::fmt::short_utc(w.to.max(0) as u64)) }
+                        a.btn.sm href={"/host?range=" (preset.as_str()) "#history"} { "Reset zoom" }
+                    }
+                } @else {
+                    span.hint.muted.js-only { "Drag across a chart to zoom in" }
                 }
             }
             @if !en { (crate::ui::pages::history_off_banner()) }
@@ -733,13 +771,14 @@ fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
                                 title: &ch.title,
                                 unit: ch.unit,
                                 color: ch.color,
-                                range_secs: range.secs(),
-                                now,
+                                range_secs: w.secs,
+                                now: w.to,
                                 cap: ch.cap,
                                 zero_based: ch.unit != Unit::Celsius,
                                 compact: true,
                             };
-                            (line_chart(&spec, &db.hostx_series(&ch.key, range, now, Agg::Avg), en))
+                            @let x = Extras { max: None, compare: None, markers: &marks, zoom: true };
+                            (line_chart_ex(&spec, &db.hostx_series(&ch.key, w.range, w.to, Agg::Avg), en, &x))
                         }
                     }
                 }
@@ -751,6 +790,46 @@ fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
 #[cfg(test)]
 mod view_tests {
     use super::*;
+
+    /// LG-39: Host's history charts move and zoom like History's: range
+    /// links, the four steps and "Reset zoom" as plain links that come back
+    /// to the section, and a drag (the section names itself for the script).
+    #[test]
+    fn host_history_moves_and_zooms_like_history() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let hm = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/host", "", &hm);
+        let now = ctx.now as i64;
+        let q = vec![
+            ("from".to_string(), (now - 7200).to_string()),
+            ("to".to_string(), (now - 3600).to_string()),
+        ];
+        let html = history(&ctx, &Host::default(), &q).into_string();
+        assert!(
+            html.contains(
+                r#"<section class="sec" id="history" aria-label="History" data-zoom-hash>"#
+            ),
+            "{html}"
+        );
+        assert!(html.contains("Reset zoom") && html.contains(r##"href="/host?range=1h#history""##));
+        assert!(
+            !html.contains(r#"aria-current="true""#),
+            "no preset is current when zoomed"
+        );
+        assert!(
+            html.contains(&format!(
+                r##"href="/host?from={}&amp;to={}#history""##,
+                now - 3600 - 1800,
+                now - 1800
+            )),
+            "Later: {html}"
+        );
+        let html = history(&ctx, &Host::default(), &[]).into_string();
+        assert!(html.contains(r##"<a href="/host?range=1h#history" aria-current="true">"##));
+        assert!(html.contains("Drag across a chart to zoom in"));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"d.fig.closest("[data-zoom-hash][id]")"#));
+    }
 
     /// A process row that belongs to a container: the name opens it and a
     /// sibling icon opens its logs (one click, never a link in a link).

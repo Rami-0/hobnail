@@ -232,7 +232,7 @@ for (const path of SKPAGES) {
 // The log pane: served plain (nothing busy, no skeleton: the script makes
 // it busy while it connects), not busy once its first lines are in.
 await load(url, `/containers/${encodeURIComponent(CTR)}/logs`, 50);
-const served = await ev(`fetch(location.href, { credentials: "same-origin" }).then((r) => r.text()).then((t) => [/aria-busy="/.test(t), /<span class="sk"/.test(t), /<div class="lbody" tabindex="0">/.test(t)])`);
+const served = await ev(`fetch(location.href, { credentials: "same-origin" }).then((r) => r.text()).then((t) => [/aria-busy="/.test(t), /<span class="sk"/.test(t), /<div class="lbody" tabindex="0"[ >]/.test(t)])`);
 check(!served[0] && !served[1] && served[2], "the server marks nothing busy and serves no skeleton (the log page)", served);
 await until("document.querySelector('.lines .ll')", 8000);
 const busy1 = await ev("document.querySelector('.lbody').getAttribute('aria-busy')");

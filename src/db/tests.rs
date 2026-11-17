@@ -553,6 +553,37 @@ fn event_cap_and_filters() {
         50,
         "default limit"
     );
+    // Time bounds: only events inside [since, until], newest first.
+    let win = db.events(&EventFilter {
+        limit: 500,
+        since: Some(T0 + 2450),
+        until: Some(T0 + 2459),
+        ..Default::default()
+    });
+    assert_eq!(
+        win.iter().map(|e| e.ts - T0).collect::<Vec<_>>(),
+        (2450..=2459).rev().collect::<Vec<_>>()
+    );
+    let open_end = db.events(&EventFilter {
+        limit: 500,
+        since: Some(T0 + 2490),
+        ..Default::default()
+    });
+    assert_eq!(open_end.len(), 10);
+    // The bounded query walks the rowid (no index on `ts`, and no new one
+    // without a migration): SQLite's plan says so. A History window is
+    // therefore still read with the paged loop (`ui::pages::history::scan`).
+    let plan: Vec<String> = db.with(Vec::new(), |i| {
+        let mut st = i.conn.prepare(
+            "EXPLAIN QUERY PLAN SELECT id FROM events WHERE ts >= 1 AND ts <= 2 ORDER BY id DESC LIMIT 5",
+        )?;
+        let rows = st.query_map([], |r| r.get::<_, String>(3))?;
+        rows.collect()
+    });
+    assert!(
+        plan.iter().all(|p| !p.contains("USING INDEX")),
+        "an index on ts appeared: use it for History ({plan:?})"
+    );
     // Restart counts.
     let rc = db.restart_counts(0);
     assert_eq!(rc.iter().map(|(_, n)| n).sum::<u32>(), 50);

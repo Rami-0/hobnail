@@ -47,7 +47,11 @@ fn assert_shell(html: &str) {
     assert!(html.contains(r#"id="palette""#));
     assert!(html.contains(r#"<symbol id="i-box""#), "sprite present");
     assert!(html.contains("/static/app.js?v="));
-    assert!(html.contains("<style>"), "CSS is inlined");
+    assert!(
+        html.contains(r#"<link rel="stylesheet" href="/static/app.css?v="#)
+            && !html.contains("<style>"),
+        "the stylesheet is one cached file"
+    );
     assert!(html.contains(" · Hobnail</title>"), "product in tab title");
     assert!(
         html.contains("Hobnail<span class=\"brand-site\">"),
@@ -493,4 +497,83 @@ fn loading_states_are_skeletons_on_busy_regions() {
         !lg.contains("[logs] require_login"),
         "no config syntax quoted as a reason (LG-11)"
     );
+}
+
+/// Page changes are one swap (ux-pass, "flicker"): on every route, signed
+/// in and out, error pages included, the icon sprite comes before the first
+/// icon that uses it; the head asks Chromium to hold the first paint until
+/// `#hb-end`, the document's last element, is parsed; and the live
+/// indicator starts as "live" (no flip on every load).
+#[test]
+fn every_route_paints_once_with_its_icons() {
+    let st = state_with(sample(), CFG);
+    let h = HeaderMap::new();
+    for signed in [false, true] {
+        for (path, query) in [
+            ("/", ""),
+            ("/containers", ""),
+            ("/containers/web", ""),
+            ("/containers/web", "tab=metrics&range=24h"),
+            ("/containers/web/logs", ""),
+            ("/stacks/shop/logs", ""),
+            ("/logs", ""),
+            ("/host", ""),
+            ("/history", ""),
+            ("/alerts", ""),
+            ("/login", ""),
+            ("/more", ""),
+            ("/settings", ""),
+            ("/settings/notifications", ""),
+            ("/settings/nope", ""),
+            ("/containers/missing", ""),
+            ("/nope", ""),
+        ] {
+            let mut ctx = Ctx::new(&st, "100.1.2.3", path, query, &h);
+            if signed {
+                ctx.user = Some("admin".into());
+                ctx.csrf = Some("t".into());
+            }
+            let (status, html) = render(&ctx);
+            let at = format!("{path}?{query} signed={signed} ({status})");
+            let head_end = html.find("</head>").expect("head");
+            let head = &html[..head_end];
+            assert!(
+                head.contains(r##"<link rel="expect" href="#hb-end" blocking="render">"##),
+                "{at}"
+            );
+            // The app script is deferred and never holds the paint (a slow
+            // or failing script must not keep a page blank); it comes after
+            // the pages' own scripts, which settings.js relies on (it wraps
+            // EventSource before app.js opens the stream).
+            assert_eq!(html.matches(r#"blocking="render""#).count(), 1, "{at}");
+            let app = html.find("/static/app.js?v=").expect("app script");
+            assert!(
+                app > head_end && html[app..].contains(r#"" defer></script><div id="hb-end""#),
+                "{at}"
+            );
+            for own in ["/static/settings.js", "/static/logs.js"] {
+                if let Some(i) = html.find(own) {
+                    assert!(i < app, "{at}: {own} runs before app.js");
+                }
+            }
+            assert_eq!(html.matches(r#"id="hb-end""#).count(), 1, "{at}");
+            assert!(
+                html.ends_with(r#"<div id="hb-end" hidden></div></body></html>"#),
+                "{at}: #hb-end is the last element"
+            );
+            let body = html.find("<body ").expect("body");
+            let sprite = html.find("<svg xmlns=").expect("sprite");
+            let first_use = html.find("<use href=").expect("an icon");
+            assert!(body < sprite && sprite < first_use, "{at}: sprite first");
+            assert!(
+                html[body..sprite].matches('<').count() == 1,
+                "{at}: the sprite is the body's first child"
+            );
+            assert!(
+                html.contains(r#"<span class="dot ok"></span><span class="live-t">live</span>"#),
+                "{at}"
+            );
+            assert!(!html.contains(">connecting<"), "{at}");
+        }
+    }
 }

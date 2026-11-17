@@ -469,7 +469,8 @@ fn picker(ctx: &Ctx, snap: &crate::model::Snapshot, sel: &[String], notes: Marku
                                 ul.lpick-list {
                                     @for c in cs {
                                         li.rl.stopped[!c.running] data-c=(c.name) data-s=(format!("{} {} {}", c.search, c.title, g.title).to_lowercase()) hidden[!hit(c, g)] {
-                                            input type="checkbox" name="c" value=(c.name) checked[sel.contains(&c.name)] aria-label={"Side by side: " (c.title)};
+                                            // The label is the checkbox's 44 px target on touch.
+                                            label.lpick-cb { input type="checkbox" name="c" value=(c.name) checked[sel.contains(&c.name)] aria-label={"Side by side: " (c.title)}; }
                                             (crate::ui::status_dot(c))
                                             a.row-link href=(logs_url(&c.name)) title={"Logs of " (c.name)} {
                                                 span.lpick-nm { (c.title) }

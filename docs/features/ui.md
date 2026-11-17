@@ -144,8 +144,8 @@ OS, the ◐ button overrides it per browser.
     retired names (or `--border` without `--line`) and names the token to set
     instead.
 - **Components:** buttons, form fields, dialog, toast, menu, tabs, empty
-  states and skeletons are one shared layer (`static/components.css` inlined
-  in every page, `static/ui.js` as the first part of `/static/app.js`,
+  states and skeletons are one shared layer (`static/components.css`, part of
+  the one page stylesheet `/static/app.css?v=<build>`, `static/ui.js` as the first part of `/static/app.js`,
   `window.HB`). DESIGN.md §11.4 to §11.9. Until each form moves onto the
   dialog, the field styles (inputs, checkboxes, switches) apply only inside a
   dialog, and the Settings pages keep their own fields and toasts.
@@ -164,6 +164,24 @@ OS, the ◐ button overrides it per browser.
   (spinners and skeletons stand still), and the
   script's own motion (`HB.dur`, `HB.anim`) asks the same query. Checked by
   `scripts/motion-check.mjs`.
+- **Page changes:** every navigation is a full page load, painted once.
+  The page's `<head>` holds the first paint (`<link rel="expect"
+  href="#hb-end" blocking="render">`), so Chromium keeps the previous page
+  on screen until the new one is parsed to its last element, then swaps;
+  the deferred app script (still last in the body, after a page's own
+  scripts) makes its start-up changes before that paint. The icon sprite is the body's first child,
+  so icons are in that paint. Shell state is set before it too: theme and
+  rail by the boot script in the head; folded stacks, the tree filter and
+  the tree's scroll position (carried over from the last page, with the open
+  container kept in view) by a small inline script right after the
+  sidebar. The stylesheet (tokens, components, page parts) is one file
+  cached for a year per build, linked in the head before `custom.css`, so
+  a page no longer carries ~110 KB of CSS. The live indicator starts as "live" and says "connecting" only
+  when the stream has not opened within 1.5 s; leaving a page does not
+  change it. Browsers without render blocking render as the HTML arrives;
+  nothing waits for the script, so a blocked or failing script never keeps
+  a page blank. Checked by
+  `scripts/smooth-check.mjs`.
 - **Loading:** content that comes after the page (a first sample, a
   widget's first answer, the first log lines) waits as a skeleton on a busy
   region; a skeleton shows only after 150 ms, so a fast answer never

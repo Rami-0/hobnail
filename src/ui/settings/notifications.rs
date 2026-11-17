@@ -602,14 +602,20 @@ fn summary(t: &Map<String, J>) -> String {
             } else {
                 out += &format!("{}.{}", s("widget"), s("field"));
             }
-            for (k, op) in [
-                ("above", ">"),
-                ("below", "<"),
-                ("equals", "="),
-                ("not_equals", "≠"),
+            // Host thresholds are percentages, temperatures degrees (LG-60).
+            let unit = match (str_of(t, "type"), str_of(t, "metric")) {
+                (Some("host"), Some("temp")) => " °C",
+                (Some("host"), _) => "%",
+                _ => "",
+            };
+            for (k, op, u) in [
+                ("above", ">", unit),
+                ("below", "<", unit),
+                ("equals", "=", ""),
+                ("not_equals", "≠", ""),
             ] {
                 if has(k) {
-                    out += &format!(" {op} {}", s(k));
+                    out += &format!(" {op} {}{u}", s(k));
                 }
             }
             if t.get("on_error").and_then(J::as_bool) == Some(true) {
@@ -655,7 +661,11 @@ fn rule_row(t: &Map<String, J>) -> Markup {
     } else {
         "0s"
     };
-    let timing = format!(
+    // When it fires and how often it repeats, in the words the Alerts page
+    // uses (LG-60); the config's own words if the rule does not parse.
+    let timing = serde_json::from_value::<crate::alerts::RuleConfig>(J::Object(t.clone()))
+        .map(|r| crate::ui::pages::alerts::timing(&r));
+    let raw = format!(
         "for {}, cooldown {}",
         if t.contains_key("for") {
             sval(Some(t), "for")
@@ -672,9 +682,12 @@ fn rule_row(t: &Map<String, J>) -> Markup {
         tr.off[!on] data-key=(key) {
             td data-l="Rule" {
                 a.linkbtn.mono href=(href) data-dlg=(RU.id) data-key=(key) data-item=(data) { (name) }
-                span.sub.muted { (ty) " · " (timing) }
+                span.sub.muted { (ty) @if timing.is_err() { " · " (raw) } }
             }
-            td.wrap data-l="Condition" { span.mono-s { (summary(t)) } }
+            td.wrap data-l="Condition" {
+                span.mono-s { (summary(t)) }
+                @if let Ok(tm) = &timing { br; span.muted.k { (tm) } }
+            }
             td data-l="Channels" {
                 @if chans.is_empty() { span.muted { "page only" } }
                 @for c in &chans { span.chip-s.mono { (c) } " " }
@@ -944,5 +957,39 @@ pub fn fragment(ctx: &Ctx) -> Markup {
         (channel_list(ctx, &disk))
         (rule_list(&disk))
         (rule_channels("ru", &disk, None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(toml: &str) -> String {
+        let v: toml::Value = toml::from_str(toml).unwrap();
+        let J::Object(t) = serde_json::to_value(v).unwrap() else {
+            panic!()
+        };
+        rule_row(&t).into_string()
+    }
+
+    /// LG-60: host thresholds carry their unit and the rule says when it
+    /// fires and how often it repeats, in the Alerts page's words.
+    #[test]
+    fn rule_rows_say_units_and_timing() {
+        let disk = row("name='d'\ntype='host'\nmetric='disk'\nabove=90\nfor='5m'");
+        assert!(disk.contains("disk &gt; 90%"), "{disk}");
+        assert!(
+            disk.contains("fires after 5 min · repeats after 15 min"),
+            "{disk}"
+        );
+        assert!(
+            disk.contains(r#"<span class="sub muted">Host metric</span>"#),
+            "{disk}"
+        );
+        let temp = row("name='t'\ntype='host'\nmetric='temp'\nbelow=20");
+        assert!(temp.contains("temp &lt; 20 °C"), "{temp}");
+        assert!(temp.contains("fires at once"), "{temp}");
+        let w = row("name='w'\ntype='widget'\nwidget='x'\nfield='f'\nabove=3");
+        assert!(w.contains("x.f &gt; 3<"), "widgets have no unit: {w}");
     }
 }

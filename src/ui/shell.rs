@@ -24,6 +24,16 @@ use crate::util::human_bytes;
 /// styles that only make sense with scripting.
 const BOOT_JS: &str = "var d=document.documentElement;d.classList.add('js');try{var t=localStorage.getItem('rh-theme');if(t)d.dataset.theme=t;if(localStorage.getItem('rh-side')==='rail')d.dataset.side='rail'}catch(e){}";
 
+/// Runs right after the sidebar is parsed, before first paint (rendering
+/// waits for `#hb-end`): the stacks this browser folded, the remembered tree
+/// filter, the tree's scroll position from the last page with the open
+/// container's item kept in view (NAV-24), and the live indicator, which the
+/// server renders as "live" and which says "connecting" only when the
+/// script has not reported the stream within 1.5 s (`app.js` sets
+/// `window.HB_LIVE` on its first word about the stream). `app.js` repeats
+/// the tree part after live updates; the two must agree.
+const SHELL_JS: &str = "(function(){var d=document,t=d.getElementById('tree'),f=d.getElementById('tree-filter');setTimeout(function(){var l=d.getElementById('live');if(window.HB_LIVE||!l)return;l.firstChild.className='dot off';l.lastChild.textContent='connecting';l.title='Live updates: connecting'},1500);if(!t)return;var S=t.querySelectorAll('details.stack');try{var c=JSON.parse(localStorage.getItem('rh-tree')||'{}')||{};S.forEach(function(s){if(c[s.dataset.k]&&!s.querySelector('a[aria-current]'))s.open=false})}catch(e){}try{var q=sessionStorage.getItem('rh-tree-q')||'',v=q.trim().toLowerCase(),any=false;if(f&&v){f.value=q;S.forEach(function(s){var k=s.dataset.k.toLowerCase().indexOf(v)>=0,hit=false;s.querySelectorAll('li.ctr').forEach(function(li){var ok=k||li.dataset.s.indexOf(v)>=0;li.hidden=!ok;hit=hit||ok});s.hidden=!hit;any=any||hit;if(hit)s.open=true});var n=t.querySelector('.tree-none');if(n)n.hidden=any}}catch(e){}try{var y=+sessionStorage.getItem('rh-tree-y')||0;if(y)t.scrollTop=y;var a=t.querySelector('a[aria-current]');if(a&&t.clientHeight){var r=a.getBoundingClientRect(),b=t.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)t.scrollTop+=r.top-b.top-b.height/3}}catch(e){}})()";
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Nav {
     Overview,
@@ -152,13 +162,25 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 @if let Some(t) = &ctx.csrf { meta name="rh-csrf" content=(t); }
                 title { (doc_title) " · " (site) " · Hobnail" }
                 link rel="icon" href=(crate::ui::FAVICON);
-                // Inlined: one render-blocking request fewer.
-                style { (PreEscaped(crate::http::server::APP_CSS)) }
+                // One cached file (immutable, by build), not ~110 KB inlined
+                // in every page: each navigation parses that much less HTML
+                // (measured: no slower on a first visit, no unstyled frame,
+                // since a stylesheet in the head holds the first paint).
+                link rel="stylesheet" href={"/static/app.css?v=" (sha)};
                 @if has_custom_css { link rel="stylesheet" href="/custom.css"; }
                 script { (PreEscaped(BOOT_JS)) }
+                // One swap per page change: Chromium keeps the previous page
+                // on screen until the whole document is parsed (`#hb-end`),
+                // then paints once; the deferred app script runs before that
+                // paint in practice (scripts/smooth-check.mjs; holding the
+                // paint for it measured no better). Without support pages
+                // render as they arrive, as before.
+                link rel="expect" href="#hb-end" blocking="render";
             }
             body data-started=(ctx.state.started_unix) data-now=(ctx.now) data-sha=(sha)
                  data-search-url=(ctx.cfg.page.search_url) data-path=(ctx.path) data-refresh=(refresh) {
+                // Before the first icon that uses it: icons are in the first paint.
+                (sheet())
                 a.skip href="#main" { "Skip to content" }
                 div.app {
                     aside #side.side aria-label="Sidebar" {
@@ -202,12 +224,15 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                             (tree_inner(&ctx.cfg, &snap, &groups, active_ctr.as_deref(), Some(&strips)))
                         }
                         div.side-foot {
-                            span.live #live title="Live updates" { span.dot.off {} span.live-t { "connecting" } }
+                            // "live" from the start (no flip on every page
+                            // load); SHELL_JS and app.js say otherwise.
+                            span.live.js-only #live title="Live updates: live" { span.dot.ok {} span.live-t { "live" } }
                             button.linklike.keys-btn.js-only type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
                             span.ver title={"built " (ctx.state.build.time)} {
                                 "v" (ctx.state.build.version) " · " code { (sha) }
                             }
                         }
+                        script { (PreEscaped(SHELL_JS)) }
                     }
                     div.scrim #scrim {}
                     div.col {
@@ -246,8 +271,11 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 (bottom_bar(nav, firing))
                 (palette_shell())
                 (keys_dialog())
-                (sheet())
+                // After the pages' own deferred scripts (settings.js wraps
+                // EventSource before this one opens the stream).
                 script src={"/static/app.js?v=" (sha)} defer {}
+                // The last element: first paint waits for it (see the head).
+                div #hb-end hidden {}
             }
         }
     };
@@ -1334,7 +1362,9 @@ mod tests {
     /// warn, bad) in the shell or component CSS paints with the accent.
     #[test]
     fn accent_is_never_a_status_colour() {
-        for css in [APP_CSS_SRC, include_str!("../../static/components.css")] {
+        use crate::http::server::{APP_CSS, LOGS_CSS, SETTINGS_CSS};
+        // Every stylesheet the app ships (shell, components and page parts).
+        for css in [APP_CSS, LOGS_CSS, SETTINGS_CSS] {
             let mut rest = css;
             while let Some(i) = rest.find('{') {
                 let head = rest[..i].rsplit(['}', '\n']).next().unwrap_or("");
@@ -1352,6 +1382,10 @@ mod tests {
                 rest = &rest[(end + 1).min(rest.len())..];
             }
         }
+        // The Overview's "alert firing 10m" is a status in words: it is
+        // drawn in the error colour, not as an accent-coloured link.
+        let w = include_str!("../../static/widgets.css");
+        assert!(w.contains("\n.attn .when a.bad{color:var(--bad-fg)}"));
     }
 
     /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:
@@ -1452,6 +1486,49 @@ mod tests {
                 && !a.contains("/settings"),
             "{a}"
         );
+    }
+
+    /// The shell's state is in the first paint (ux-pass, "flicker"): the
+    /// inline script that folds stacks, restores the tree filter and scroll
+    /// and backs the live indicator runs right after the sidebar, before the
+    /// top bar and the content; it reads the keys `app.js` writes, and
+    /// `app.js` no longer moves the tree or says "paused" on leaving.
+    #[test]
+    fn shell_state_is_set_before_first_paint() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/containers/web", "", &h);
+        let html = layout(&ctx, Nav::Containers, "t", html! {}, html! { p { "x" } });
+        let tree = html.find(r#"id="tree""#).unwrap();
+        let script = html.find(SHELL_JS).expect("inline shell script");
+        let top = html.find(r#"<header class="top">"#).unwrap();
+        assert!(tree < script && script < top && top < html.find("<main").unwrap());
+        assert_eq!(
+            html.matches("<script>").count(),
+            2,
+            "boot and shell scripts"
+        );
+        let js = crate::http::server::APP_JS;
+        for k in ["'rh-tree'", "'rh-tree-q'", "'rh-tree-y'", "window.HB_LIVE"] {
+            assert!(SHELL_JS.contains(k), "{k}");
+        }
+        for k in [
+            r#"const TREE = "rh-tree""#,
+            r#"TF = "rh-tree-q""#,
+            r#"sessionStorage.setItem("rh-tree-y""#,
+            "window.HB_LIVE = 1",
+        ] {
+            assert!(js.contains(k), "{k}");
+        }
+        assert!(
+            !js.contains(r#"disconnect("paused"); });"#),
+            "leaving keeps the indicator"
+        );
+        assert!(
+            !js.contains("treeBox.scrollTop +="),
+            "the tree is not moved after paint"
+        );
+        assert!(BOOT_JS.contains("d.dataset.side='rail'") && BOOT_JS.contains("d.dataset.theme=t"));
     }
 
     #[test]

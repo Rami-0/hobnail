@@ -12,7 +12,7 @@ use crate::model::{Snapshot, SystemStats};
 use crate::ui::alerts::{subject_href, subject_link};
 pub use crate::ui::chart::live_spark;
 use crate::ui::chart::{line_chart, line_chart_ex, seed, ChartSpec, Unit};
-use crate::ui::fmt::{time_tag, url_encode};
+use crate::ui::fmt::{clock_tag, url_encode};
 use crate::ui::pages::{crumb_title, event_label};
 use crate::ui::shell::{disk_percent, layout, level, mem_percent, Ctx, Nav};
 use crate::ui::view::{build_groups, CardView, GroupView, Sev};
@@ -313,7 +313,8 @@ pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
                         }
                     }
                     @if let Some(i) = inc {
-                        span.when.num { a href="/alerts" { "alert firing " (human_duration(now.saturating_sub(i.since))) } }
+                        // A status in words, in the status colour (never the accent, A11Y-17).
+                        span.when.num { a.bad href="/alerts" { "alert firing " (human_duration(now.saturating_sub(i.since))) } }
                     } @else {
                         span.when { (c.state_text.as_deref().unwrap_or("")) }
                     }
@@ -913,7 +914,7 @@ fn recent_events(ctx: &Ctx) -> Markup {
                 // Identical rows in a row (five "Hobnail started" after a few
                 // restarts) are one row with a count (OV-05).
                 ul.events.recent {
-                    @for (e, n) in collapse(&evs) { (event_row_n(ctx.now, e, true, Some(&names), n)) }
+                    @for (e, n) in collapse(&evs) { (event_row_n(ctx.now, e, true, Some(&names), n, Some(&ctx.cfg))) }
                 }
             }
         }
@@ -929,7 +930,7 @@ pub fn event_row(
     link: bool,
     logs: Option<&std::collections::HashSet<String>>,
 ) -> Markup {
-    event_row_n(now, e, link, logs, 1)
+    event_row_n(now, e, link, logs, 1, None)
 }
 
 /// Consecutive events with the same kind, subject and detail, newest first,
@@ -948,13 +949,16 @@ fn collapse(evs: &[crate::db::Event]) -> Vec<(&crate::db::Event, usize)> {
 }
 
 /// `event_row` for `n` identical events in a row ("× 5"). The kind reads in
-/// plain words (OV-05); an alert row links to the Alerts page (OV-06).
+/// plain words (OV-05); the time is a clock time (LG-47); a row links to its
+/// subject the way the History timeline does (LG-48): a container to its
+/// page, an alert to what it watches (`cfg`; the Alerts page without it).
 fn event_row_n(
-    now: u64,
+    _now: u64,
     e: &crate::db::Event,
     link: bool,
     logs: Option<&std::collections::HashSet<String>>,
     n: usize,
+    cfg: Option<&Config>,
 ) -> Markup {
     let logs = logs.filter(|n| n.contains(&e.subject));
     let kind = match e.level.as_str() {
@@ -962,19 +966,28 @@ fn event_row_n(
         "warn" => "warn",
         _ => "",
     };
+    let href: Option<(String, bool)> = if !link || e.subject.is_empty() {
+        None
+    } else if e.kind.starts_with("container.") {
+        Some((format!("/containers/{}", url_encode(&e.subject)), false))
+    } else if e.kind.starts_with("alert.") {
+        e.detail
+            .split_once(": ")
+            .zip(cfg)
+            .and_then(|((rule, _), cfg)| subject_href(cfg, rule, &e.subject))
+            .or_else(|| Some(("/alerts".into(), false)))
+    } else {
+        None
+    };
     html! {
         li.ev {
-            span.when { (time_tag(now, e.ts.max(0) as u64)) }
+            span.when { (clock_tag(e.ts.max(0) as u64)) }
             (pill(kind, event_label(&e.kind)))
             @if n > 1 { span.muted.num.ev-n { "× " (n) } }
-            @if !e.subject.is_empty() {
-                @if link && e.kind.starts_with("container.") {
-                    a.nm href={"/containers/" (url_encode(&e.subject))} { (e.subject) }
-                } @else if link && e.kind.starts_with("alert.") {
-                    a.nm href="/alerts" { (e.subject) }
-                } @else {
-                    span.nm { (e.subject) }
-                }
+            @match href {
+                Some((u, true)) => a.nm href=(u) target="_blank" rel="noopener noreferrer" { (e.subject) " ↗" },
+                Some((u, false)) => a.nm href=(u) { (e.subject) },
+                None => @if !e.subject.is_empty() { span.nm { (e.subject) } },
             }
             @if !e.detail.is_empty() { span.muted.detail { (e.detail) } }
             @if logs.is_some() {
@@ -1281,6 +1294,21 @@ mod tests {
             "{html}"
         );
         assert!(html.contains(" · rule mem"), "{html}");
+        // A container with a firing alert: "alert firing" in the error
+        // colour (a status class), never the accent of a plain link.
+        v.status.incidents.push(crate::alerts::Incident {
+            rule: "mem".into(),
+            subject: "sick".into(),
+            state: "x".into(),
+            value: "1".into(),
+            since: 9_400,
+            notified: true,
+        });
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<a class="bad" href="/alerts">alert firing 10m</a>"#),
+            "{html}"
+        );
     }
 
     #[test]
@@ -1457,8 +1485,30 @@ mod tests {
             .collect();
         assert_eq!(collapse(&five).len(), 1);
         assert_eq!(collapse(&five)[0].1, 5);
-        let n = event_row_n(1, &e, true, None, 5).into_string();
+        let n = event_row_n(1, &e, true, None, 5, None).into_string();
         assert!(n.contains(">× 5<"), "{n}");
+        // LG-47: a clock time, not "N ago"; LG-48: an alert row links to
+        // what its rule watches, as the History timeline does.
+        assert!(
+            html.contains(r#"data-abs="1""#) && !html.contains(" ago<"),
+            "{html}"
+        );
+        let cfg = crate::config::parse(
+            "[[alerts]]\nname = \"disk\"\ntype = \"host\"\nmetric = \"disk\"\nabove = 90\n",
+            "c.toml",
+        )
+        .unwrap();
+        let al = crate::db::Event {
+            kind: "alert.fired".into(),
+            level: "warn".into(),
+            subject: "/".into(),
+            detail: "disk: 93%".into(),
+            ..e.clone()
+        };
+        let a = event_row_n(1, &al, true, None, 1, Some(&cfg)).into_string();
+        assert!(a.contains(r#"<a class="nm" href="/host">/</a>"#), "{a}");
+        let a = event_row_n(1, &al, true, None, 1, None).into_string();
+        assert!(a.contains(r#"href="/alerts""#), "{a}");
         assert_eq!(event_label("app.start"), "Hobnail started");
         assert_eq!(event_label("something.new"), "new");
         let other: std::collections::HashSet<String> = ["db".to_string()].into();

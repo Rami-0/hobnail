@@ -430,12 +430,15 @@ mod tests {
         assert!(!APP_JS.contains("serviceWorker"));
     }
 
-    /// The component CSS is inlined after the tokens, in every page and in
-    /// `/static/app.css`; a page costs no extra request for it.
+    /// The page CSS (tokens, then components, then the page parts) is one
+    /// cached file, `/static/app.css?v=<build>`, linked in every page's head
+    /// before `custom.css` (which loads last); nothing is inlined.
     #[tokio::test]
-    async fn every_page_inlines_tokens_and_components() {
-        let (status, _, css) = get("/static/app.css?v=x").await;
+    async fn every_page_links_tokens_and_components() {
+        let (status, head, css) = get("/static/app.css?v=x").await;
         assert_eq!(status, 200);
+        assert!(head.contains("content-type: text/css"), "{head}");
+        assert!(head.contains("max-age=31536000, immutable"), "{head}");
         assert_eq!(css, APP_CSS);
         let tokens = css.find("\n:root,[data-theme=dark]{").expect("dark tokens");
         let comp = css.find("dialog.dlg{").expect("dialog");
@@ -465,16 +468,17 @@ mod tests {
         );
         let (status, _, html) = get("/").await;
         assert_eq!(status, 200);
-        assert!(html.contains(APP_CSS), "inlined whole");
-        assert_eq!(html.matches("<style>").count(), 1, "one style element");
+        let head = &html[..html.find("</head>").unwrap()];
+        assert!(!html.contains("<style>"), "nothing inlined");
+        assert_eq!(
+            head.matches(r#"<link rel="stylesheet" href="/static/app.css?v="#)
+                .count(),
+            1
+        );
         assert_eq!(
             html.matches("<script src=").count(),
             1,
             "one script request"
-        );
-        assert!(
-            !html.contains("rel=\"stylesheet\""),
-            "no stylesheet request"
         );
     }
 }

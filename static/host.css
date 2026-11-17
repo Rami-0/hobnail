@@ -41,6 +41,8 @@
    overflows its 20 px line, its hit area unchanged): the 3 s poll re-ranks
    the rows, and rows of mixed heights moved everything below them. */
 .hx-t .nm-l{height:20px}
+/* On touch the 44 px logs icon sets the row's height (no overlap with the next row). */
+@media (pointer:coarse),(max-width:699px){.hx-t .nm-l{height:auto;min-height:44px}.hx-more>summary{display:flex;align-items:center;min-height:44px}}
 /* The two process tables re-rank every 3 s: fixed column widths (names cut
    with "…"), the logs icon at the cell's end, the lifetime note's room kept,
    and figures that do not change width, so nothing moves sideways. */

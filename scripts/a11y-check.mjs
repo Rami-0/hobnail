@@ -9,10 +9,12 @@
 // elementFromPoint: a control whose own box, or the hit area its ::after
 // adds, answers at all four points is a 44 px target; one that loses a point
 // to a neighbour is not (an overlapping hit area counts against both). Inline
-// links inside a sentence are exempt (WCAG 2.5.8) and left out. Fails when
-// the shell (top bar, bottom bar, drawer, palette) has a control under 44 px,
-// or when a page's share of controls under 44 px is over its limit (LIMITS
-// below, set from what wave 5 reached; tighten them as pages improve).
+// links inside a sentence are exempt (WCAG 2.5.8) and left out, and so are
+// chart markers (24 px by design). A stretched row link passes when some
+// 44 px square of its row answers for it. Fails when the shell (top bar,
+// bottom bar, drawer, palette) has a control under 44 px, or when a page's
+// share of controls under 44 px is over its limit (LIMITS below: none on
+// most pages since the wave 5 leftovers).
 // REPORT=1 prints every control under 44 px.
 // Overflow (ROB-03): every page's document is as tall as its content (no
 // blank area below it) and, on the shell's own pages, as wide as the screen.
@@ -106,23 +108,34 @@ const MEASURE = `((scope) => {
   const fits = (el, cx, cy, d) => mine(el, cx - d, cy) && mine(el, cx + d, cy) && mine(el, cx, cy - d) && mine(el, cx, cy + d);
   const x0 = scrollX, y0 = scrollY, out = [];
   for (const el of root.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=tab],[role=switch],[tabindex]:not([tabindex="-1"])')) {
-    if (el.classList.contains("skip") || !vis(el) || inline(el)) continue;
+    // Chart markers (.mk) are 24 px by design: a row of them sits on the
+    // chart's top edge, one per event, and a 44 px target would cover its
+    // neighbours and the plot; each also has its timeline row (a 44 px
+    // target) and the crosshair read-out. Left out of the count.
+    if (el.classList.contains("skip") || el.classList.contains("mk") || !vis(el) || inline(el)) continue;
     el.scrollIntoView({ block: "center", inline: "center" });
     // A stretched row link's target is its row (.rl).
     let r = (el.classList.contains("row-link") && el.closest(".rl") || el).getBoundingClientRect();
     if ((el.type === "checkbox" || el.type === "radio") && el.closest("label")) { const lr = el.closest("label").getBoundingClientRect(); if (lr.width * lr.height > r.width * r.height) r = lr; }
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    // A stretched row link is a target when some 44 px (24 px) square of
+    // its row is its own: rows also hold their own 44 px secondary links (a
+    // rule, "alert firing", logs), which take part of the row.
     if (el.classList.contains("row-link") && el.closest(".rl")) { const row = el.closest(".rl"), hit = (x, y) => { const h = document.elementFromPoint(x, y); return !!h && row.contains(h) && !h.closest("a,button,input,select,summary,label") || mine(el, x, y); };
-      out.push({ sel: sel(el), name: name(el), w: Math.round(r.width), h: Math.round(r.height), ok44: [[-21, 0], [21, 0], [0, -21], [0, 21]].every(([dx, dy]) => hit(cx + dx, cy + dy)), ok24: [[-11, 0], [11, 0], [0, -11], [0, 11]].every(([dx, dy]) => hit(cx + dx, cy + dy)), shell: false }); continue; }
+      const square = (d) => { for (let y = r.top + d; y <= r.bottom - d; y += 6) for (let x = r.left + d; x <= r.right - d; x += 8) if ([[0, 0], [-d, 0], [d, 0], [0, -d], [0, d]].every(([dx, dy]) => hit(x + dx, y + dy))) return true; return false; };
+      out.push({ sel: sel(el), name: name(el), w: Math.round(r.width), h: Math.round(r.height), ok44: square(21), ok24: square(11), shell: false }); continue; }
     out.push({ sel: sel(el), name: name(el), w: Math.round(r.width), h: Math.round(r.height), ok44: fits(el, cx, cy, 21), ok24: fits(el, cx, cy, 11),
       shell: !!el.closest("header.top, #bbar, #side, #palette") });
   }
   scrollTo(x0, y0);
   return out;
 })`;
-// The share of controls under 44 px a page may have (wave 5 reached these;
-// the rest belongs to the pages' own rows and is listed in the report).
-const LIMITS = { default: 0.25, "/": 0.40, "/logs": 0.45, "/host": 0.60, "/history": 0.30, [`/containers/${C}?tab=processes`]: 0.30, [`/containers/${C}/logs`]: 0.30 };
+// The share of controls under 44 px a page may have: none, except
+// Overview's memory map (a tile's size is its container's share of memory,
+// so a small one stays small) and a log viewer's four search toggles (26 px
+// wide: four 44 px ones would leave the phone's one-row search box no room
+// to type). Chart markers are left out above.
+const LIMITS = { default: 0, "/": 0.08, [`/containers/${C}/logs`]: 0.15 };
 const PAGES = [
   "/", "/containers", `/containers/${C}`, `/containers/${C}?tab=metrics`, `/containers/${C}?tab=inspect`, `/containers/${C}?tab=processes`, `/containers/${C}?tab=events`,
   `/containers/${C}/logs`, "/logs", "/host", "/history", "/alerts", "/more",

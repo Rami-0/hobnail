@@ -32,6 +32,7 @@ td .k,.k{font-size:11px}
 .heat th[scope=row]{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:500}
 .heat th[scope=row] a{font-family:var(--mono)}
 .heat td,.heat th{white-space:nowrap}
+@media (max-width:699px){.heat .hm{display:none}.heat td,.heat th{padding-inline:3px}.heat th[scope=row]{white-space:normal;overflow-wrap:anywhere;min-width:7em}.heat th[scope=row] .nm-l{display:flex;align-items:center;justify-content:space-between}}
 
 /* login */
 .login{display:grid;gap:12px;padding:22px 24px;max-width:440px;margin:6vh auto 0;width:100%}
@@ -72,6 +73,7 @@ td .k,.k{font-size:11px}
 .incident:not(:has(.ia.logs))::after{content:"";flex:none;width:var(--ia)}
 @media (pointer:coarse){.incident:not(:has(.ia.logs))::after{width:44px}}
 .incident .inc-rule a{pointer-events:auto;font:500 12px var(--mono)}
+@media (pointer:coarse),(max-width:699px){.incident .inc-rule a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}}
 /* The read-only rules and channels tables fit 390 px (LG-58): tighter
    cells, headers and figures that wrap. */
 @media (max-width:599px){.al-t th,.al-t td{padding-inline:4px;white-space:normal;overflow-wrap:break-word}.al-t th{line-height:1.2;hyphens:manual}.al-t .pill{white-space:nowrap}.al-t td.wrap{max-width:none}}
