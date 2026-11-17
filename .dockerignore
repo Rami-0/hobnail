@@ -6,3 +6,9 @@ deploy
 scripts
 *.md
 .claude
+# The client is installed and built inside the image's web stage.
+web/node_modules
+web/dist
+web/*.tsbuildinfo
+# Browser tests run outside the image build (scripts/e2e.sh).
+web/e2e

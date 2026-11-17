@@ -1,0 +1,29 @@
+{
+  "name": "hobnail-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "engines": { "node": ">=26.13.1" },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit && oxlint --deny-warnings src scripts && node scripts/guard.mjs",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
+    "build": "vite build && node scripts/compress.mjs",
+    "size": "node scripts/size.mjs",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "lucide-react": "1.70.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-is": "19.3.1",
+    "recharts": "3.10.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "oxlint": "1.93.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.7"
+  }
+}

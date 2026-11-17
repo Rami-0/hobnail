@@ -1,0 +1,63 @@
+// The session store: GET /api/v1/session held in one place, with
+// subscribe/get for `useSyncExternalStore`. Also creates the app's API
+// client (`api`), which reads its CSRF token from here and asks for a
+// refresh when the server says the token is stale.
+import { useSyncExternalStore } from "react";
+
+import { createClient, type ApiResult } from "./client.ts";
+import type { Session } from "./gen/Session.ts";
+
+export type SessionState =
+  | { status: "loading"; session: null }
+  | { status: "ready"; session: Session }
+  /** The session could not be read; `session` keeps the last good one, if any. */
+  | { status: "error"; session: Session | null; message: string };
+
+let state: SessionState = { status: "loading", session: null };
+const listeners = new Set<() => void>();
+
+function set(next: SessionState): void {
+  state = next;
+  for (const l of listeners) l();
+}
+
+export function getSession(): SessionState {
+  return state;
+}
+
+export function subscribeSession(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+let inflight: Promise<SessionState> | null = null;
+
+/** Re-read the session (after login, logout, a stale CSRF token). Concurrent calls share one request. */
+export function refreshSession(): Promise<SessionState> {
+  inflight ??= (async () => {
+    try {
+      const r: ApiResult<Session> = await api.get<Session>("/api/v1/session");
+      if (r.kind === "ok") set({ status: "ready", session: r.data });
+      else {
+        const message = r.kind === "network" ? r.message : `${r.message} (HTTP ${r.status})`;
+        set({ status: "error", session: state.session, message });
+      }
+      return state;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
+}
+
+export const api = createClient({
+  csrf: () => state.session?.csrf ?? null,
+  refreshCsrf: async () => (await refreshSession()).session?.csrf ?? null,
+});
+
+/** The current session state; re-renders on every change. */
+export function useSession(): SessionState {
+  return useSyncExternalStore(subscribeSession, getSession, getSession);
+}

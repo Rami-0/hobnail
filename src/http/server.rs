@@ -202,6 +202,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         return match path.as_str() {
             "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
             p if p.starts_with("/api/settings/") => crate::settings::route(&state, req).await,
+            p if p.starts_with("/api/v1/") => crate::api::route(&state, req).await,
             _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
         };
     }
@@ -244,6 +245,12 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             crate::db::api::route(&state, &req).await
         }
         p if p.starts_with("/api/settings/") => crate::settings::route(&state, req).await,
+        // The React client (docs/plans/react-port.md): its JSON API, the
+        // embedded build under /assets/ and the app document under /app.
+        p if p.starts_with("/api/v1/") => crate::api::route(&state, req).await,
+        p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
+            crate::http::assets::route(&req)
+        }
         _ => crate::ui::routes::route(&state, &req, &host).await,
     }
 }

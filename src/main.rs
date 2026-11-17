@@ -10,6 +10,7 @@
 //!   version
 
 mod alerts;
+mod api;
 mod auth;
 mod config;
 mod db;
@@ -55,7 +56,13 @@ fn main() {
         "mock-receiver" => rt.block_on(mock::run(rest)),
         "version" | "--version" | "-V" => {
             let b = state::BuildInfo::current();
-            println!("hobnail {} ({} built {})", b.version, b.sha, b.time);
+            println!(
+                "hobnail {} ({} built {}) content {}",
+                b.version,
+                b.sha,
+                b.time,
+                api::CONTENT_HASH
+            );
             0
         }
         _ => {

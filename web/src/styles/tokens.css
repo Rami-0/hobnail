@@ -1,0 +1,111 @@
+/* Design tokens and themes, ported as they are from static/app.css
+   (DESIGN.md §11.2 colour, §11.3 type, space, shape, elevation, motion).
+   Keep the two files in step until the old UI is removed (plan Phase 6):
+   the contrast test `theme_contrast` in src/ui/shell.rs checks app.css.
+
+   Themes are variable sets on <html data-theme>: dark (default), light,
+   ember, contrast (high contrast); "auto" and no attribute follow the OS
+   between dark and light. The bare [data-theme=x] selectors let a preview
+   show another theme inside a page. A user's /custom.css (linked after this
+   file in index.html) can override any token.
+
+   The theme is set before first render by src/app/theme.ts from the same
+   localStorage key the old UI uses ("rh-theme"); before that the
+   `:root:not([data-theme])` rules follow the OS. */
+:root{
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+/* type scale (root = 14 px at the browser default; everything in rem so a larger default font size scales the UI) */
+--fs-micro:calc(11rem/14);--fs-xs:calc(12rem/14);--fs-sm:calc(13rem/14);--fs-body:1rem;--fs-title:calc(15rem/14);--fs-h2:calc(18rem/14);--fs-value:calc(24rem/14);--fs-display:calc(32rem/14);--fs-input:calc(13rem/14);
+--lh:1.45;--lh-tight:1.2;--track-label:.06em;
+/* space: 4 px grid */
+--s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:20px;--s-6:24px;--s-8:32px;--s-10:40px;
+/* control sizes */
+/* A11Y-20: boxes that hold text grow with the root font size (same px at
+   the default 14 px root). */
+--ctl-h:max(32px,calc(32rem/14));--ctl-h-sm:max(28px,calc(28rem/14));--ia:28px;--hit:24px;
+/* radius */
+--r-xs:4px;--r-sm:6px;--r:10px;--r-lg:14px;--r-pill:999px;
+/* motion: four durations, three easings; all become 0 under reduced motion */
+--dur-1:90ms;--dur-2:160ms;--dur-3:240ms;--dur-4:1600ms;
+--ease-out:cubic-bezier(.2,.7,.3,1);--ease-in:cubic-bezier(.5,0,.75,0);--ease-io:cubic-bezier(.45,0,.25,1);
+/* layers */
+--z-top:20;--z-side:30;--z-pop:40;--z-toast:70;
+--side-w:240px;--top-h:max(52px,calc(52rem/14));--row:36px;
+/* older names the page CSS still uses */
+--t:var(--dur-2);--ease:var(--ease-out);--fs-label:var(--fs-micro)}
+/* retired names, kept as aliases so a user custom.css that reads them keeps working (§11.2) */
+:root,[data-theme]{--ctl:var(--ctl-border);--border-2:var(--ctl-border);--accent-bg:var(--accent);--glow:transparent;--pop:var(--shadow-2)}
+
+:root,[data-theme=dark]{color-scheme:dark;
+--bg:#1D1210;--bg-side:#1A100E;--surface:#241714;--surface-2:#35231D;--raised:#281A16;--field:#1A100E;--border:#795245;--line:#4E342C;--ctl-border:#9A7566;
+--text:#FFF0E5;--text-2:#CDB4A8;--text-3:#B09486;
+--accent:#F77848;--accent-hover:#FF956B;--accent-fg:#F77848;--on-accent:#26120B;--focus:#F77848;
+--ok:#83CCA7;--warn:#F4D05E;--bad:#FF678B;--off:#8F7A6F;--ok-fg:#83CCA7;--warn-fg:#F4D05E;--bad-fg:#FF678B;--on-bad:#26120B;
+--ch-cpu:#F77848;--ch-mem:#A99BFF;--ch-rx:#83CCA7;--ch-tx:#F4D05E;--ch-temp:#FFB27A;--ch-load:#7CC4F0;--ch-swap:#D69CF0;--ch-disk:#F28FB8;
+--tint:rgb(255 240 229/.06);--tint-2:rgb(255 240 229/.11);--scrim:rgb(12 6 4/.62);
+--shadow-1:0 1px 0 rgb(255 240 229/.03) inset,0 6px 18px -12px rgb(0 0 0/.7);--shadow-2:0 10px 30px -6px rgb(0 0 0/.6),0 2px 6px rgb(0 0 0/.35);--shadow-3:0 24px 64px -12px rgb(0 0 0/.75),0 4px 14px rgb(0 0 0/.4)}
+[data-theme=light]{color-scheme:light;
+--bg:#FAF0EA;--bg-side:#F7ECE5;--surface:#FFF8F3;--surface-2:#F4E8E0;--raised:#FFFBF8;--field:#FFFDFB;--border:#AD8877;--line:#DAC6BB;--ctl-border:#8E6B5C;
+--text:#2B1912;--text-2:#725448;--text-3:#7E6053;
+--accent:#AC3712;--accent-hover:#922B0A;--accent-fg:#AC3712;--on-accent:#FFFFFF;--focus:#AC3712;
+--ok:#216648;--warn:#806000;--bad:#AD1747;--off:#94796D;--ok-fg:#216648;--warn-fg:#806000;--bad-fg:#AD1747;--on-bad:#FFFFFF;
+--ch-cpu:#AC3712;--ch-mem:#5A48C8;--ch-rx:#216648;--ch-tx:#806000;--ch-temp:#A4520F;--ch-load:#1F6E9E;--ch-swap:#7B3FA0;--ch-disk:#A3245E;
+--tint:rgb(43 25 18/.045);--tint-2:rgb(43 25 18/.09);--scrim:rgb(43 25 18/.38);
+--shadow-1:0 1px 2px rgb(60 30 20/.06);--shadow-2:0 10px 28px -8px rgb(60 30 20/.22),0 2px 6px rgb(60 30 20/.08);--shadow-3:0 24px 60px -14px rgb(60 30 20/.32),0 4px 12px rgb(60 30 20/.1)}
+/* Ember (kept by the owner, §11.13 Y1): deeper, redder surfaces from the mark's
+   dark tone #7A2A12 and the brand's lighter orange #FF956B as the accent */
+[data-theme=ember]{color-scheme:dark;
+--bg:#140A07;--bg-side:#110806;--surface:#1D0F0B;--surface-2:#3A1D14;--raised:#231310;--field:#110806;--border:#8A4A35;--line:#4F271C;--ctl-border:#B0715A;
+--text:#FFF0E5;--text-2:#E3BFAE;--text-3:#C99A86;
+--accent:#FF956B;--accent-hover:#FFB08F;--accent-fg:#FF956B;--on-accent:#26120B;--focus:#FF956B;
+--ok:#83CCA7;--warn:#F4D05E;--bad:#FF678B;--off:#9A7A6C;--ok-fg:#83CCA7;--warn-fg:#F4D05E;--bad-fg:#FF678B;--on-bad:#26120B;
+--ch-cpu:#FF956B;--ch-mem:#A99BFF;--ch-rx:#83CCA7;--ch-tx:#F4D05E;--ch-temp:#FFC08A;--ch-load:#7CC4F0;--ch-swap:#D69CF0;--ch-disk:#F28FB8;
+--tint:rgb(255 240 229/.06);--tint-2:rgb(255 240 229/.11);--scrim:rgb(10 4 2/.66);
+--shadow-1:0 1px 0 rgb(255 149 107/.04) inset,0 6px 18px -12px rgb(0 0 0/.75);--shadow-2:0 10px 30px -6px rgb(0 0 0/.65),0 2px 6px rgb(0 0 0/.4);--shadow-3:0 24px 64px -12px rgb(0 0 0/.8),0 4px 14px rgb(0 0 0/.45)}
+[data-theme=contrast]{color-scheme:dark;
+--bg:#000000;--bg-side:#000000;--surface:#0A0706;--surface-2:#241A16;--raised:#120D0B;--field:#000000;--border:#A08A80;--line:#5A4A44;--ctl-border:#D9C8BF;
+--text:#FFFFFF;--text-2:#FFF0E5;--text-3:#E6D3C9;
+--accent:#FF9F7A;--accent-hover:#FFB89B;--accent-fg:#FFB08F;--on-accent:#000000;--focus:#FFFFFF;
+--ok:#8FF0B9;--warn:#FFE27A;--bad:#FF9AB2;--off:#BFB0A8;--ok-fg:#8FF0B9;--warn-fg:#FFE27A;--bad-fg:#FF9AB2;--on-bad:#000000;
+--ch-cpu:#FF9F7A;--ch-mem:#C4B8FF;--ch-rx:#8FF0B9;--ch-tx:#FFE27A;--ch-temp:#FFC59B;--ch-load:#9AD8FF;--ch-swap:#E9C2FF;--ch-disk:#FFB3D1;
+--tint:rgb(255 255 255/.1);--tint-2:rgb(255 255 255/.18);--scrim:rgb(0 0 0/.8);
+--shadow-1:0 0 0 1px #A08A80;--shadow-2:0 0 0 1px #FFFFFF;--shadow-3:0 0 0 2px #FFFFFF}
+@media (prefers-color-scheme:light){:root:not([data-theme]),[data-theme=auto]{color-scheme:light;
+--bg:#FAF0EA;--bg-side:#F7ECE5;--surface:#FFF8F3;--surface-2:#F4E8E0;--raised:#FFFBF8;--field:#FFFDFB;--border:#AD8877;--line:#DAC6BB;--ctl-border:#8E6B5C;
+--text:#2B1912;--text-2:#725448;--text-3:#7E6053;
+--accent:#AC3712;--accent-hover:#922B0A;--accent-fg:#AC3712;--on-accent:#FFFFFF;--focus:#AC3712;
+--ok:#216648;--warn:#806000;--bad:#AD1747;--off:#94796D;--ok-fg:#216648;--warn-fg:#806000;--bad-fg:#AD1747;--on-bad:#FFFFFF;
+--ch-cpu:#AC3712;--ch-mem:#5A48C8;--ch-rx:#216648;--ch-tx:#806000;--ch-temp:#A4520F;--ch-load:#1F6E9E;--ch-swap:#7B3FA0;--ch-disk:#A3245E;
+--tint:rgb(43 25 18/.045);--tint-2:rgb(43 25 18/.09);--scrim:rgb(43 25 18/.38);
+--shadow-1:0 1px 2px rgb(60 30 20/.06);--shadow-2:0 10px 28px -8px rgb(60 30 20/.22),0 2px 6px rgb(60 30 20/.08);--shadow-3:0 24px 60px -14px rgb(60 30 20/.32),0 4px 12px rgb(60 30 20/.1)}}
+/* phones and touch: 16 px inputs (no iOS zoom), 44 px targets */
+@media (pointer:coarse),(max-width:699px){:root{--fs-input:calc(16rem/14);--ctl-h:max(44px,calc(32rem/14));--ctl-h-sm:max(44px,calc(28rem/14));--ia:44px;--hit:44px}}
+@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms;--dur-4:0ms}
+ *,*::before,*::after{animation-duration:0ms!important;animation-iteration-count:1!important;transition-duration:0ms!important;scroll-behavior:auto!important}}
+
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{font-size:87.5%;background:var(--bg);-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh) var(--font);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+/* headings keep today's weight and height until the pages move (DESIGN.md §11.3: 650) */
+h1,h2,h3{margin:0;font-weight:600;line-height:1.25}
+p{margin:0}
+a{color:var(--accent-fg);text-decoration:none}
+a:hover{text-decoration:underline}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.focus-in:focus-visible,.focus-in :focus-visible{outline-offset:-2px}
+::placeholder{color:var(--text-3);opacity:1}
+.sr{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.mono,code,kbd,pre{font-family:var(--mono);font-size:.92em}
+code{color:var(--text-2)}
+kbd{display:inline-block;min-width:18px;padding:0 4px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--r-xs);font-size:.7857rem;line-height:16px;text-align:center;color:var(--text-2);background:var(--surface)}
+.num{font-variant-numeric:tabular-nums}
+.wrap{overflow-wrap:anywhere;white-space:normal}
+.skip{position:absolute;left:8px;top:-40px;translate:0 -100%;z-index:100;padding:6px 10px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent)}
+.skip:focus{top:8px;translate:none}
+.muted{color:var(--text-3)}
+.label{font-size:var(--fs-micro);font-weight:600;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
+svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
+[hidden]{display:none!important}

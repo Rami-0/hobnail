@@ -5,13 +5,15 @@ set -eu
 cd "$(dirname "$0")/.."
 STACK=${STACK:-/opt/stacks/hobnail}
 sha=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
-git diff --quiet HEAD -- src static Cargo.toml Cargo.lock Dockerfile 2>/dev/null || sha="$sha-dirty"
+git diff --quiet HEAD -- src static web build.rs Cargo.toml Cargo.lock Dockerfile 2>/dev/null || sha="$sha-dirty"
 built=$(date -u +%Y-%m-%dT%H:%MZ)
 
 echo "==> building hobnail $sha"
 DOCKER_BUILDKIT=1 docker build \
   --build-arg RH_GIT_SHA="$sha" --build-arg RH_BUILD_TIME="$built" \
   -t hobnail:latest -t "hobnail:$sha" .
+# The version line carries the content hash the build verified (stale-binary guard).
+echo "==> $(docker run --rm --entrypoint /hobnail "hobnail:$sha" version)"
 
 echo "==> deploying to $STACK"
 mkdir -p "$STACK/data"

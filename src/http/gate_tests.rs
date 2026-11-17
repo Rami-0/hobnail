@@ -43,6 +43,15 @@ const WRITES: &[(&str, &str)] = &[
     ("POST", "/settings/bookmarks"),
     ("POST", "/api/events"),
     ("DELETE", "/api/history/system"),
+    // The React client's API and documents (docs/plans/react-port.md 4.2):
+    // every /api/v1 write route is listed here; non-GET on /app and
+    // /assets/* is refused by the gate like any other write.
+    ("POST", "/api/v1/session"),
+    ("DELETE", "/api/v1/session"),
+    ("POST", "/api/v1/containers"),
+    ("PUT", "/api/v1/containers/x"),
+    ("POST", "/app"),
+    ("POST", "/assets/x.js"),
 ];
 
 /// Every settings read (GET) endpoint.
@@ -786,4 +795,314 @@ async fn pages_rendered_with_a_session_are_no_store() {
         r.body.contains("data-hash"),
         "the signed-in /alerts has the hash"
     );
+}
+
+// ---------------------------------------------------------------------------
+// /api/v1 (docs/plans/react-port.md 4.2): session, access table, errors.
+
+/// The value of a response header (first match, name case-insensitive).
+fn header(head: &str, name: &str) -> Option<String> {
+    head.lines().skip(1).find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| v.trim().to_string())
+    })
+}
+
+/// A JSON response that no cache may store.
+fn assert_json_no_store(r: &Resp, what: &str) {
+    assert_eq!(
+        header(&r.head, "content-type").as_deref(),
+        Some("application/json"),
+        "{what}: {}",
+        r.head
+    );
+    assert_eq!(
+        header(&r.head, "cache-control").as_deref(),
+        Some("no-store"),
+        "{what}: {}",
+        r.head
+    );
+}
+
+/// The `/api/v1` error shape: `{"error":{"code","message"[,"field"]}}` and
+/// nothing else.
+fn assert_api_error(r: &Resp, status: u16, code: &str, what: &str) {
+    assert_eq!(r.status, status, "{what}: {}\n{}", r.head, r.body);
+    assert_json_no_store(r, what);
+    let v: serde_json::Value = serde_json::from_str(&r.body).expect("JSON error body");
+    let top = v.as_object().expect("object");
+    assert_eq!(top.len(), 1, "{what}: only `error`: {}", r.body);
+    let e = top["error"].as_object().expect("error object");
+    assert_eq!(e["code"], code, "{what}: {}", r.body);
+    assert!(
+        e["message"].as_str().is_some_and(|m| !m.is_empty()),
+        "{what}: {}",
+        r.body
+    );
+    assert!(
+        e.keys()
+            .all(|k| k == "code" || k == "message" || k == "field"),
+        "{what}: {}",
+        r.body
+    );
+}
+
+/// True when `s` contains 64 hex digits in a row (a CSRF or session token).
+fn has_token(s: &str) -> bool {
+    let mut run = 0;
+    for b in s.bytes() {
+        run = if b.is_ascii_hexdigit() { run + 1 } else { 0 };
+        if run >= 64 {
+            return true;
+        }
+    }
+    false
+}
+
+async fn get_session(addr: std::net::SocketAddr, headers: &[(&str, &str)]) -> serde_json::Value {
+    let r = req(addr, "GET", "/api/v1/session", headers, "").await;
+    assert_eq!(r.status, 200, "{}\n{}", r.head, r.body);
+    assert_json_no_store(&r, "GET /api/v1/session");
+    let v: serde_json::Value = serde_json::from_str(&r.body).unwrap();
+    if v["csrf"].is_null() {
+        // The build's content hash may itself be a sha256; nothing else in
+        // the body may look like a token.
+        let body = r.body.replace(crate::api::CONTENT_HASH, "");
+        assert!(!has_token(&body), "token-like value without csrf: {body}");
+    }
+    v
+}
+
+/// `GET /api/v1/session`: public, `no-store`; `user` and `csrf` only with a
+/// valid session cookie (never for a forged, expired or revoked one); the
+/// csrf is the one the login returned.
+#[tokio::test]
+async fn api_v1_session_reports_the_session_and_never_a_token_without_one() {
+    // No password yet.
+    let st = state();
+    let addr = start(st.clone()).await;
+    let v = get_session(addr, &[]).await;
+    assert_eq!(v["user"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["password_set"], false, "{v}");
+    assert_eq!(v["logs_require_login"], true, "{v}");
+    assert_eq!(v["api"], 1, "{v}");
+    let b = &v["build"];
+    assert_eq!(b["version"], env!("CARGO_PKG_VERSION"), "{v}");
+    assert_eq!(b["sha"], st.build.sha, "{v}");
+    assert_eq!(b["time"], st.build.time, "{v}");
+    assert_eq!(b["content"], crate::api::CONTENT_HASH, "{v}");
+
+    // Password set, still signed out.
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let v = get_session(addr, &[]).await;
+    assert_eq!(v["password_set"], true, "{v}");
+    assert_eq!(v["user"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+
+    // Signed in.
+    let (cookie, csrf) = login(addr).await;
+    let v = get_session(addr, &[("Cookie", &cookie)]).await;
+    assert_eq!(v["user"], "admin", "{v}");
+    assert_eq!(v["csrf"], csrf.as_str(), "{v}");
+
+    // A forged cookie (well-formed, never issued).
+    let forged = format!("rh_session={}", "ab".repeat(32));
+    let v = get_session(addr, &[("Cookie", &forged)]).await;
+    assert_eq!(v["user"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+    // A malformed one.
+    let v = get_session(addr, &[("Cookie", "rh_session=not-a-token")]).await;
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+
+    // An expired session (issued, then past its expiry).
+    let token = "cd".repeat(32);
+    let hash: String = ring::digest::digest(&ring::digest::SHA256, token.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let now = crate::util::unix_now() as i64;
+    assert!(st.db.create_session(&hash, now - 100, now - 10));
+    let expired = format!("rh_session={token}");
+    let v = get_session(addr, &[("Cookie", &expired)]).await;
+    assert_eq!(v["user"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+
+    // Revoked by logout.
+    let origin = format!("http://{addr}");
+    let r = req(
+        addr,
+        "POST",
+        "/api/logout",
+        &[
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+            ("X-RH-CSRF", &csrf),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let v = get_session(addr, &[("Cookie", &cookie)]).await;
+    assert_eq!(v["user"], serde_json::Value::Null, "{v}");
+    assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
+}
+
+/// `logs_require_login` follows `[logs] require_login`.
+#[tokio::test]
+async fn api_v1_session_reports_the_logs_gate() {
+    let st = crate::ui::testutil::state_with(vec![], "[logs]\nrequire_login = false\n");
+    let addr = start(st).await;
+    let v = get_session(addr, &[]).await;
+    assert_eq!(v["logs_require_login"], false, "{v}");
+}
+
+/// Unknown `/api/v1` paths are a 404 in the JSON error shape; a known path
+/// with the wrong method is a 405 (with `Allow`) once a write has passed the
+/// gate; a write that fails the gate keeps the plain-text refusal.
+#[tokio::test]
+async fn api_v1_errors_are_json_and_no_store() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    for p in [
+        "/api/v1/",
+        "/api/v1/nope",
+        "/api/v1/session/",
+        "/api/v1/session/x",
+        "/api/v1//session",
+        "/api/v1/./session",
+        "/api/v1/x/../session",
+    ] {
+        let r = req(addr, "GET", p, &[], "").await;
+        assert_api_error(&r, 404, "not_found", &format!("GET {p}"));
+    }
+    let (cookie, csrf) = login(addr).await;
+    let origin = format!("http://{addr}");
+    let ok = [
+        ("Content-Type", "application/json"),
+        ("Origin", origin.as_str()),
+        ("Cookie", cookie.as_str()),
+        ("X-RH-CSRF", csrf.as_str()),
+    ];
+    for m in ["POST", "PUT", "DELETE", "PATCH"] {
+        let r = req(addr, m, "/api/v1/session", &ok, "{}").await;
+        assert_api_error(&r, 405, "method_not_allowed", &format!("{m} session"));
+        assert_eq!(header(&r.head, "allow").as_deref(), Some("GET, HEAD"));
+        let r = req(addr, m, "/api/v1/nope", &ok, "{}").await;
+        assert_api_error(&r, 404, "not_found", &format!("{m} nope"));
+    }
+    // Gate failures stay plain text.
+    let r = req(addr, "POST", "/api/v1/session", &[("Origin", &origin)], "").await;
+    assert_eq!(r.status, 401);
+    assert_eq!(r.body, "sign in required\n");
+}
+
+/// The DNS-rebinding guard covers `/api/v1` like every other route.
+#[tokio::test]
+async fn api_v1_refuses_a_foreign_host() {
+    let st = state();
+    let addr = start(st).await;
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(
+        b"GET /api/v1/session HTTP/1.1\r\nHost: rebind.example\r\nConnection: close\r\n\r\n",
+    )
+    .await
+    .unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.starts_with("HTTP/1.1 421"), "{text}");
+    assert!(!text.contains("password_set"), "{text}");
+}
+
+/// A v1 write's same-origin check: a foreign `Origin` is refused; with no
+/// `Origin` a same-origin `Referer` passes the gate (the handler answers);
+/// neither header is refused.
+#[tokio::test]
+async fn api_v1_write_origin_and_referer() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, csrf) = login(addr).await;
+    let base = [("Cookie", cookie.as_str()), ("X-RH-CSRF", csrf.as_str())];
+    let with = |extra: &[(&'static str, String)]| {
+        let mut h: Vec<(&str, String)> = base.iter().map(|(k, v)| (*k, v.to_string())).collect();
+        h.extend(extra.iter().cloned());
+        h
+    };
+    let send = |h: Vec<(&'static str, String)>| async move {
+        let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        req(addr, "POST", "/api/v1/session", &h, "").await
+    };
+    let r = send(with(&[("Origin", "http://evil.example".into())])).await;
+    assert_eq!(r.status, 403);
+    assert_eq!(r.body, "cross-origin write refused\n");
+    // A foreign Origin wins over a same-origin Referer.
+    let r = send(with(&[
+        ("Origin", "http://evil.example".into()),
+        ("Referer", format!("http://{addr}/app")),
+    ]))
+    .await;
+    assert_eq!(r.status, 403);
+    assert_eq!(r.body, "cross-origin write refused\n");
+    let r = send(with(&[("Referer", "http://evil.example/app".into())])).await;
+    assert_eq!(r.status, 403);
+    assert_eq!(r.body, "cross-origin write refused\n");
+    let r = send(with(&[])).await;
+    assert_eq!(r.status, 403);
+    assert_eq!(r.body, "cross-origin write refused\n");
+    // Same-origin Referer, no Origin: through the gate to the API (405).
+    let r = send(with(&[("Referer", format!("http://{addr}/app/settings"))])).await;
+    assert_api_error(&r, 405, "method_not_allowed", "Referer only");
+}
+
+/// The `/api/v1` access table walked as a visitor (password set, `[logs]
+/// require_login` at its default): every `Session` and `LogsGate` read
+/// answers 401 in the error shape with no data, every `Public` one answers
+/// something else. Every write row must be listed in `WRITES` (so the gate
+/// tests above cover it). New rows are covered without touching this test.
+#[tokio::test]
+async fn api_v1_access_table_walked_as_a_visitor() {
+    use crate::api::access::{Access, ROUTES};
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let forged = format!("rh_session={}", "ab".repeat(32));
+    for r in ROUTES {
+        let path: String = r
+            .pattern
+            .split('/')
+            .map(|s| if s.starts_with('<') { "sample-1" } else { s })
+            .collect::<Vec<_>>()
+            .join("/");
+        let what = format!("{} {path} ({:?})", r.method, r.access);
+        if r.method != "GET" {
+            assert!(
+                WRITES.contains(&(r.method, path.as_str())),
+                "{what}: add it to WRITES"
+            );
+            continue;
+        }
+        for cookie in [None, Some(forged.as_str())] {
+            let h: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
+            for m in ["GET", "HEAD"] {
+                let resp = req(addr, m, &path, &h, "").await;
+                match r.access {
+                    Access::Public => assert_ne!(resp.status, 401, "{m} {what}"),
+                    Access::Session | Access::LogsGate if m == "HEAD" => {
+                        assert_eq!(resp.status, 401, "{m} {what}");
+                        assert!(resp.body.is_empty(), "{m} {what}: {}", resp.body);
+                    }
+                    Access::Session => assert_api_error(&resp, 401, "sign_in_required", &what),
+                    Access::LogsGate => {
+                        assert_api_error(&resp, 401, "logs_sign_in_required", &what)
+                    }
+                }
+            }
+        }
+    }
 }

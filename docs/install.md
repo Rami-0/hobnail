@@ -30,7 +30,7 @@ Everything Hobnail stores is in the `data/` folder next to the compose file.
 
 ## Build and redeploy
 
-No Rust toolchain is needed on the host; everything builds in Docker.
+No Rust or Node toolchain is needed on the host; everything builds in Docker. The build needs network access to crates.io and the npm registry.
 
 ```sh
 scripts/deploy.sh        # build (fmt + clippy + tests gate the build), deploy, health-check

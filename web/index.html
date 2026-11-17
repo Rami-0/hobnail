@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#1D1210" />
+    <!-- UI SDK's documented CSP switch: with this tag it styles through
+         constructed style sheets instead of inserting <style> elements, which
+         `style-src 'self'` would block (docs/plans/react-port.md 4.3). UI SDK
+         is not installed yet (release-age rule); the tag stays so installing
+         it cannot break the CSP. -->
+    <meta property="csp-nonce" />
+    <title>Hobnail</title>
+    <link rel="icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- No inline script or style anywhere in this document: the server sends
+         `script-src 'self'; style-src 'self'`. The theme is applied by the
+         entry module (src/app/theme.ts explains the first-paint limit). -->
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div class="nojs">
+        <h1>Hobnail needs JavaScript here</h1>
+        <p>
+          Hobnail is a self-hosted dashboard for the containers and the host it
+          runs on. This page is its new browser client, which runs in your browser
+          and needs JavaScript; it is blocked or turned off.
+        </p>
+        <p>Without JavaScript these still answer:</p>
+        <ul>
+          <li><a href="/">The current interface</a>, until this client replaces it</li>
+          <li><a href="/healthz">/healthz</a>: the health check</li>
+          <li>
+            The JSON API: <a href="/api/v1/session">/api/v1/session</a> and
+            <a href="/api/state">/api/state</a>
+          </li>
+          <li><code>/api/logs/download</code>: log downloads as plain text</li>
+        </ul>
+      </div>
+    </noscript>
+    <!-- The owner's token overrides (Settings, Appearance), served by Rust,
+         empty when unset. In the body on purpose: Vite appends the app's own
+         stylesheet at the end of <head>, and custom.css must come after it to
+         win, as in the old UI. A parser-inserted sheet still holds the entry
+         module (scripts wait for pending style sheets), so the first render
+         already has it. -->
+    <link rel="stylesheet" href="/custom.css" />
+  </body>
+</html>

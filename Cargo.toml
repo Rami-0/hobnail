@@ -4,6 +4,8 @@ version = "0.0.1"
 edition = "2021"
 description = "Hobnail: a tiny home for your homelab"
 publish = false
+# Embeds the React client (web/dist) and the content hash; see build.rs.
+build = "build.rs"
 
 [dependencies]
 bytes = "1.12.1"
@@ -22,6 +24,11 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring
 toml = { version = "1.2.1", default-features = false, features = ["parse", "serde", "std"] }
 toml_edit = { version = "0.25.19", default-features = false, features = ["parse", "display"] }
 webpki-roots = "1.0.12"
+
+# Test-only: generates the TypeScript types of the /api/v1 responses
+# (web/src/api/gen/); a test fails when the committed files drift.
+[dev-dependencies]
+ts-rs = { version = "=12.0.1", default-features = false }
 
 # Size/RAM focused release profile. Revisit after the first measurements.
 [profile.release]
