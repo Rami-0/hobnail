@@ -734,7 +734,21 @@ impl Db {
         let limit = match f.limit {
             0 => 50,
             n => n.min(500),
-        } as i64;
+        };
+        self.events_ordered(f, limit, "id DESC")
+    }
+
+    /// Every event of `f` inside its `since..=until` window, newest first,
+    /// at most `cap` (up to 10,000) rows, in one pass over `events_ts` in
+    /// index order (`ts DESC, id DESC`): no sort and no repeated seek,
+    /// however much of the table the window holds. Ids and timestamps both
+    /// grow, so this is the order of `events` up to events of one second.
+    pub fn window_events(&self, f: &EventFilter, cap: usize) -> Vec<Event> {
+        self.events_ordered(f, cap.clamp(1, 10_000), "ts DESC, id DESC")
+    }
+
+    fn events_ordered(&self, f: &EventFilter, limit: usize, order: &str) -> Vec<Event> {
+        let limit = limit as i64;
         self.with(Vec::new(), |i| {
             let mut sql =
                 String::from("SELECT id, ts, kind, level, subject, detail FROM events WHERE 1 = 1");
@@ -774,7 +788,7 @@ impl Db {
                 sql.push_str(&format!(" AND ts <= ?{}", args.len()));
             }
             args.push(limit.into());
-            sql.push_str(&format!(" ORDER BY id DESC LIMIT ?{}", args.len()));
+            sql.push_str(&format!(" ORDER BY {order} LIMIT ?{}", args.len()));
             let mut st = i.conn.prepare(&sql)?;
             let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
                 Ok(Event {

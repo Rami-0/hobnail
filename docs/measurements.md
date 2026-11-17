@@ -245,12 +245,12 @@ the host, 40 containers and 33 host keys, 100,000 events over 180 d (131.3 MiB).
 | Release binary | 6,039,984 B | 6,621,616 B | 6,633,904 B |
 | Cold start, binary (exec → `/healthz` 200) | 4.4 ms median (3.2-155) | — | **3.5 ms** median (2.9-10.4) |
 | Cold start, container (`docker start` → 200) | — | — | 460 ms median (428-526); `StartedAt` → 200: 365 ms |
-| `/history`, steady DB | 752-768 ms | 782-830 ms | **44-48 ms** |
+| `/history`, steady DB | 752-768 ms | 782-830 ms | **39 ms** (after the correction below) |
 | `/history?range=7d`, steady DB | 845-880 ms | 875-923 ms | **132-137 ms** |
 | `/containers/<name>`, steady DB | 109-111 ms | 109-128 ms | **9-13 ms** |
 | `/containers/<name>?tab=metrics`, steady DB | — | 231-272 ms | **22-33 ms** |
 | `/host`, steady DB | 27-32 ms | 37-44 ms | 22-30 ms |
-| `/history`, busy DB | 47 ms | 71 ms | 44-48 ms (steady DB; busy not re-measured) |
+| `/history`, busy DB (shared instance copy) | 47 ms | 71 ms | 63-71 ms (216-222 ms before the correction below) |
 | `/containers` while `/history` renders in a loop | p90 732 ms, p99 975 ms, 8.8 rps (baseline report) | — | **p90 20 ms, p99 28-30 ms, 73-74 rps** |
 | `/api/state` p99 / slowest while ticks run (c=1, 45 s) | — | 6.8-7.3 / 20-25 ms | 5.0-5.3 / 16-22 ms |
 
@@ -306,6 +306,33 @@ small).
 | 11 | Allocator change | — | — | new crate, RSS risk | **not done**: single reactor thread, no contention measured |
 | 12 | Dockerfile: build into a per-checkout target dir | stale-artefact risk | — | — | proposal only (see report) |
 
+### Correction: a busy 24 h window was slower after `8461d1b` (fixed in the next commit)
+
+The first version of the index change made `/history` **slower** on a database
+whose 24 h window holds most of the table (the shared test instance: 8,716
+events, 7,887 in the last 24 h): 57-76 ms before, 0.20-0.26 s at `7a79581`.
+Cause, from `EXPLAIN QUERY PLAN` on a copy of that database: the History scan
+read the window in batches of 500 ordered by `id` with `ts` bounds, which
+SQLite answered as `SEARCH events USING INDEX events_ts (ts>? AND ts<?)` +
+`USE TEMP B-TREE FOR ORDER BY`, so each of the 16 batches sorted the whole
+remaining window again: 101-126 ms of SQL (Python sqlite3, warm). One query
+in index order (`ORDER BY ts DESC, id DESC`, same bounds, same cap of 10,000
+rows, same `before=<id>` paging and signed-out `auth.*` filter) has the plan
+`SEARCH events USING INDEX events_ts (ts>? AND ts<?)` with no sort: 12-17 ms.
+The page-cache release (`47f31b0`) was not the cause: the Python timings above
+run without it.
+
+Server time (curl TTFB on loopback, median of 9, two rounds, three binaries in
+the same image on copies of the same databases; ms):
+
+| Page | busy DB `49a8421` | busy `7a79581` | busy fix | 90-day `49a8421` | 90-day `7a79581` | 90-day fix |
+|---|---|---|---|---|---|---|
+| `/history` | 71 | 216-222 | 63-71 | 759-774 | 44-46 | 39 |
+| `/history?range=7d` | 59-60 | 233-235 | 50-53 | 860-908 | 132-138 | 123-126 |
+| `/history?range=1h` | 37-53 | 16 | 16-20 | 729-748 | 19-21 | 14-17 |
+| `/host` | 31-53 | 32-35 | 30 | 43-57 | 37-39 | 31-48 |
+| `/containers/<name>` | 9-14 | 9 | 8-12 | 109-119 | 9-13 | 9-10 |
+
 ### Proposed wording for GOALS.md section 1 (for the owner; GOALS.md not edited)
 
 > | Metric | Target | Stretch | Measured 2026-11-17 |
@@ -315,7 +342,7 @@ small).
 > | Idle CPU (sampler, events, alerts) | ~0 % | ~0 % | 0.07-0.10 % of one core |
 > | Cold start, **binary** (exec → first `/healthz` 200, no Docker) | < 200 ms | < 50 ms | 3.5 ms |
 > | Cold start, container (`docker start` → first 200) | reported, no target | — | 460 ms on a loaded host; Docker's share, not the app's |
-> | Page served (server time, busy database) | < 150 ms | < 80 ms | ≤ 48 ms for every page |
+> | Page served (server time) | < 150 ms | < 80 ms | ≤ 71 ms for every page on the test databases (`/history?range=7d` 123-126 ms on 90 days of data) |
 >
 > The cold-start target means the binary: the container figure is runc and
 > Docker networking before `main()` runs, which the app cannot change.

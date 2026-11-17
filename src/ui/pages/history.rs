@@ -230,14 +230,14 @@ fn point_markers(
 
 /// How many events one timeline page shows.
 const TL_PAGE: usize = 60;
-/// Events read per query while walking back through a window, and the most
-/// queries one page load makes. Read on a page load only, never by a poll;
-/// a window with more events than this pages on with "Older events".
+/// The most events one page load reads from a window (`SCAN_BATCH *
+/// SCAN_PAGES`, one query). Read on a page load only, never by a poll; a
+/// window with more events than this pages on with "Older events".
 const SCAN_BATCH: usize = 500;
 const SCAN_PAGES: usize = 20;
 
-/// Events inside a window, newest first, read with the existing paged
-/// query (`before_id`) back to the window's start.
+/// Events inside a window, newest first, read in one pass back to the
+/// window's start (or the cap).
 #[derive(Debug, Clone, Default)]
 struct Scan {
     events: Vec<Event>,
@@ -253,45 +253,27 @@ pub fn window_events(db: &crate::db::Db, signed: bool, from: i64, to: i64) -> Ve
 }
 
 fn scan(db: &crate::db::Db, signed: bool, from: i64, to: i64, before: Option<i64>) -> Scan {
-    let mut out = Scan::default();
-    // Start at the window's end, not at the newest event: one bounded seek
-    // (ids and timestamps both grow) instead of walking every newer event,
-    // which could use up the page limit before the window (no markers, an
-    // empty first page).
-    let Some(end) = db.event_id_at_or_before(to) else {
-        return out;
-    };
-    let mut cursor = Some(before.map_or(end + 1, |b| b.min(end + 1)));
-    for _ in 0..SCAN_PAGES {
-        let page = db.events(
-            &EventFilter {
-                limit: SCAN_BATCH,
-                before_id: cursor,
-                since: Some(from),
-                until: Some(to),
-                ..Default::default()
-            }
-            .for_viewer(signed),
-        );
-        let Some(last) = page.last() else {
-            return out;
-        };
-        cursor = Some(last.id);
-        let full = page.len() == SCAN_BATCH;
-        for e in page {
-            if e.ts < from {
-                return out;
-            }
-            if e.ts <= to {
-                out.events.push(e);
-            }
+    // One pass over the window in `events_ts` order. Paging it in batches
+    // ordered by id made SQLite sort the whole window again for every batch:
+    // a busy 24 h window (7,900 events in 16 batches) took about 100 ms in
+    // the database instead of 12 ms.
+    let cap = SCAN_BATCH * SCAN_PAGES;
+    let events = db.window_events(
+        &EventFilter {
+            before_id: before,
+            since: Some(from),
+            until: Some(to),
+            ..Default::default()
         }
-        if !full {
-            return out;
-        }
-    }
-    out.cut = cursor;
-    out
+        .for_viewer(signed),
+        cap,
+    );
+    // Stopped at the cap before the window's start: the next page starts
+    // below the last id read.
+    let cut = (events.len() == cap)
+        .then(|| events.last().map(|e| e.id))
+        .flatten();
+    Scan { events, cut }
 }
 
 /// One page of the timeline and where the next one starts.
@@ -865,5 +847,49 @@ mod tests {
         );
         assert!(include_str!("../../../static/alerts.css")
             .contains("@media (max-width:699px){.heat .hm{display:none}"));
+    }
+
+    /// A busy window: most of the table is inside it (as on a host whose
+    /// day is full of saves and restarts). One pass in index order reads it
+    /// all, newest first, caps it with the paging cursor, hides `auth.*`
+    /// without a session, and the query needs no sort.
+    #[test]
+    fn busy_window_is_one_pass_in_index_order() {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        // 50 events before the window, then 12,000 inside it.
+        for i in 0..50 {
+            db.record_event(1_000 + i, "container.die", "warn", "old", "");
+        }
+        for i in 0..12_000 {
+            let kind = if i % 4 == 0 {
+                "auth.login"
+            } else {
+                "config.saved"
+            };
+            db.record_event(10_000 + i, kind, "info", "", "");
+        }
+        let all = scan(&db, true, 10_000, 30_000, None);
+        assert_eq!(all.events.len(), SCAN_BATCH * SCAN_PAGES, "capped");
+        assert_eq!(all.events[0].ts, 21_999, "newest first");
+        assert!(all.events.windows(2).all(|w| w[0].id > w[1].id));
+        let cut = all.cut.expect("more events below the cap");
+        assert_eq!(cut, all.events.last().unwrap().id);
+        let next = scan(&db, true, 10_000, 30_000, Some(cut));
+        assert_eq!(next.events.len(), 12_000 - SCAN_BATCH * SCAN_PAGES);
+        assert_eq!(next.cut, None);
+        assert!(next.events.iter().all(|e| e.id < cut && e.ts >= 10_000));
+        let anon = scan(&db, false, 10_000, 30_000, None);
+        assert_eq!(anon.events.len(), 9_000);
+        assert!(anon.events.iter().all(|e| !e.kind.starts_with("auth.")));
+        let plan: Vec<String> = db.with(Vec::new(), |i| {
+            i.conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN SELECT id FROM events WHERE id < 99 AND ts >= 1 AND ts <= 2 ORDER BY ts DESC, id DESC LIMIT 10",
+                )?
+                .query_map([], |r| r.get::<_, String>(3))?
+                .collect()
+        });
+        assert!(plan.iter().any(|p| p.contains("events_ts")), "{plan:?}");
+        assert!(!plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
     }
 }
