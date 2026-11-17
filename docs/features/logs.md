@@ -8,8 +8,8 @@ Code: `src/logs/`, `src/db/logcounts.rs`,
 | Route | What |
 |---|---|
 | `/containers/<name>/logs` | One container: the container's **Logs tab** (its header and tabs above the viewer; `?tab=logs` on the detail page lands here too). Stopped containers show their last lines under a "stopped" banner. Under the viewer: error and warning counts (collapsed) over the range the detail page had (`?range=`; the tabs keep it). |
-| `/stacks/<project>/logs` | Every container of a compose project, merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). Only compose projects have one (a config group has no stack logs). |
-| `/logs` | Every container the dashboard lists, stopped ones too even with `[page] show_stopped = false` (hidden and excluded ones never), grouped by stack, each name one click from its logs; a filter box (`?q=` on the server, as-you-type with the script; Enter opens the first match), "Whole stack" for compose projects, and ticks for side by side. The filter and the ticks are separate forms: without the script Enter in the filter only filters. Coming back to the page recounts the ticks. |
+| `/stacks/<project>/logs` | Every container of a compose project (the first 24 by name), merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). Only compose projects have one (a config group has no stack logs). |
+| `/logs` | Every container the dashboard lists, stopped ones too even with `[page] show_stopped = false` (hidden and excluded ones never), grouped by stack, each name one click from its logs; a filter box (`?q=` on the server, as-you-type with the script; Enter opens the first match), "Whole stack" for compose projects, and ticks for side by side (two to four; at four the other boxes are off). The filter and the ticks are separate forms: without the script Enter in the filter only filters. Coming back to the page recounts the ticks. |
 | `/logs?c=a,b` | Split view, 1 to 4 containers side by side (stacked on phones). Every pane is named, links to the container's own logs (and its stack, for a compose project) and has a close button (in place with the script; without it, a link to the view without that pane). "Add" opens the list with the shown ones ticked. The breadcrumb leads back to `/logs`. Names that are not shown containers (gone, hidden, excluded or mistyped) are named in a "Not found" banner and never tailed; more than four are named too. |
 | `/logs?sel=a,b` | The list with these ticked ("Add", and "side by side" under a container's log). `/logs?go=1` (the list's own form) with nothing ticked shows the list with "Tick one to four containers first." |
 
@@ -19,7 +19,9 @@ on sidebar items (and stacks that are compose projects), Overview ("Needs
 attention", "Top CPU", "Recent events": at that moment), Host, History,
 Alerts and Settings › Containers and groups; only for containers whose logs
 may be read (`logs::tailable`: an excluded container gets no logs link
-anywhere, the public Host page included). Access is unchanged: all of these
+anywhere, the public Host page included). From the keyboard, `l` opens the
+logs of the focused row or of the open container and `g` `l` opens `/logs`;
+the command palette has a "Logs: <name>" row under each container. Access is unchanged: all of these
 pages and `/api/logs/*` need a session unless `require_login = false`. On
 touch screens these icons are 44 px and their rows grow to fit, so no hit
 area reaches into another row or onto the row's own link.
@@ -34,8 +36,8 @@ a clamp after the content shrank do not count. Only a move down into the
 bottom 24 px, "Jump to latest" or End starts it again; the pill counts new
 lines meanwhile. Scrolled up, the reader stays on the same line when heights
 change (Wrap, Time, a filter, a resize): the pane remembers the first line in
-view on each scroll and puts it back after layout, and scroll anchoring is on
-except while following. `scripts/logs-check.mjs` checks all of this in a real
+view on each scroll and puts it back after layout (the browser's own scroll
+anchoring is off in the pane; the script does it). `scripts/logs-check.mjs` checks all of this in a real
 browser (1440 and 390 px, Wrap on and off, single, stack and side by side;
 slow wheels and real touch drags) and reports the page's CPU while following,
 with the default tail and with a full ring.
@@ -57,7 +59,9 @@ the future and a To before From, on the field.
 Enter to the next older one, Shift+Enter to the next newer one (wrapping),
 with "3/17" in the box; the current match is outlined. The search, `.*` and
 `Aa` are kept in the address (`search=`, `re=1`, `case=1`), so a reload or a
-shared link keeps them.
+shared link keeps the search text and `Aa`. A regular expression from the
+address is not run by itself: it is applied as plain text, with a note, until
+`.*` is turned on.
 
 **Line actions.** Copy and Link (a `#t=` permalink) show on hover, on a line
 that was tapped or clicked, and from the keyboard: Enter in a pane picks the
@@ -74,15 +78,18 @@ live tail and says so.
 
 Features: live tail (SSE), pause on scroll-up with a "Jump to latest" pill and a
 new-line count, Pause button, line counter, ANSI colors (SGR: 16/256/truecolor fg and
-bg, bold, dim, italic, underline), JSON lines collapsible with `msg` and the first
-scalar fields in the summary, level gutter and level filter chips with counts, search
+bg, bold, dim, italic, underline), JSON lines collapsible with the message (`msg`,
+`message` or `event`) and the first six scalar fields in the summary, level gutter and level filter chips with counts, search
 (case-insensitive by default, `Aa` for case, `.*` for regex; an invalid regex says so
 and never throws), "Only matching" with ±1/3/10 context lines, time range (live, 15 min,
 1 h, 6 h, 24 h, since container start, custom from/to), wrap and timestamps toggles
 (remembered per browser; times in the viewer's local time, another day as "26 Oct";
 in a pane narrower than 340 px the time sits above the message), download as text, copy
-line and copy a permalink (`#t=<unix ms>`; opening it loads the minutes around that
-line and highlights it). Keys: `/` search, `Enter` / `Shift+Enter` older / newer match, `Esc` clears it,
+line and copy a permalink (`#t=<unix ms>`; opening it loads from two minutes before that
+line and highlights it). A dropped stream reconnects by itself (after 2 s, then
+twice as long each time, up to 30 s) and continues after the last line received;
+the counter says "disconnected, retrying" meanwhile. A range with more lines than
+the server reads at once shows the first ones and says so. Keys: `/` search, `Enter` / `Shift+Enter` older / newer match, `Esc` clears it,
 `End` jumps to the latest; in a pane, `Enter` picks a line. Download says what it
 downloads (the whole range, without the search and level filters).
 
@@ -92,16 +99,24 @@ so it never rewrites the DOM.
 
 ## API (GET only)
 
-- `/api/logs/stream?c=a[,b…]` or `?stack=x`, `&tail=N` (≤ 5000), `&since=<unix s | 15m | 1h | start>`,
+- `/api/logs/stream?c=a[,b…]` (at most 4 names) or `?stack=x` (at most 24 containers), `&tail=N` (≤ 5000;
+  default `[logs] tail`), `&since=<unix s | a duration back such as 15m or 1h | start>`,
   `&until=<unix s>` (no follow). With both `since` and `until` (a closed window: a custom
   range, "Load older lines") the window is read from its start and the server stops after
   `tail` lines (Docker applies `tail` to the whole log before `since`/`until`, which left a
-  window followed by more than `tail` lines empty). SSE events: `meta`, `l` (array of
+  window followed by more than `tail` lines empty). SSE events: `hello` (connected),
+  `meta` (`{c, name, tty, running, status, started, finished, exit}`), `l` (array of
   `{c, t (unix ms), m, s:2 for stderr, l: e|w|i|d, x:1 if cut at 16 KiB}`), `err`
-  (`kind`: notfound, unreachable, error), `end`, `done`.
+  (`{c, msg, kind}`; `kind`: notfound, unreachable, error), `end` (`{c}`, with `cut:true`
+  when a closed window stopped at the line limit), `done`.
 - `/api/logs/download?…` same parameters, plain text without ANSI, `Content-Disposition: attachment`.
-- `/api/logs/levels?c=name&range=1h|6h|24h|7d|30d`: level counts.
-- `/api/logs/status`: background tails (watched, over cap, lines seen, open viewer streams).
+  Without `tail` (or with `tail=all`) it is every line of the range; several containers follow one another.
+- `/api/logs/levels?c=name&range=1h|6h|24h|7d|30d` (default `24h`): level counts,
+  `{range, step, levels, points:[[unix, [error, warn, info, debug, other]], …]}`.
+- `/api/logs/status`: background tails (watched, over cap, the cap, rules whose pattern
+  did not compile, lines seen, open viewer streams).
+
+Without a session (and `require_login = true`) all four answer `401`.
 
 Docker calls: `GET /containers/{name}/json` (TTY? running? started?) and
 `GET /containers/{id}/logs?follow=…&stdout=1&stderr=1&timestamps=1&tail=…&since=…`.
@@ -112,8 +127,8 @@ Container names are checked against Docker's name syntax before they go into a U
 - One Docker connection per viewer per container, opened when the page's
   `EventSource` connects and closed when it goes away (dropped response body, a
   ping every 2 s catches half-open sockets). Tested: closed 53 ms after the client left.
-- No unbounded buffer on the server: lines ≤ 16 KiB, a 128-line queue and a
-  4-event body queue; a slow browser means backpressure on Docker, not memory.
+- No unbounded buffer on the server: lines ≤ 16 KiB, a queue of 8 batches
+  (each at most 256 lines or 64 KiB) and a 4-event body queue; a slow browser means backpressure on Docker, not memory.
 - The browser keeps at most `[logs] ring` lines (default 5,000) per pane.
 
 Measured (release, see docs/measurements.md): one viewer on a 550 MB/h log keeps the
@@ -132,7 +147,8 @@ opens nothing.
 Every tailed line is counted per level per minute into `log_counts` (v3 migration:
 counts only, never text; each write updates the 1-minute and 10-minute rows, kept 7 d
 and 90 d like the other rollups, pruned hourly by the same task; "clear history"
-clears them). Viewers' streams are not counted (a page reload would count lines twice).
+clears them). Counts are written only while `[history] enabled` is true.
+Viewers' streams are not counted (a page reload would count lines twice).
 Cost: ~0.3 MiB and ~3 % of one core for 5 containers at ~280 lines/s together.
 
 `log_match` rule (see `src/alerts/mod.rs` for the full example):
@@ -142,15 +158,16 @@ Cost: ~0.3 MiB and ~3 % of one core for 5 containers at ~280 lines/s together.
 name = "app-errors"
 type = "log_match"
 pattern = '(?i)\b(panic|fatal)\b'
-containers = ["shop-*"]   # and/or stack = "shop"
-count = 3                 # matching lines within
+containers = ["shop-*"]   # and/or stack = "shop"; exclude = ["shop-test"]
+count = 3                 # matching lines (1..10000) within
 window = "5m"             # 10s..1d (default: 1 line in 5m)
 channels = ["telegram"]
 ```
 
 The server-side matcher (`src/logs/matcher.rs`) is a small Pike VM, linear time, no
 `regex` crate: literals, `.`, classes, `\d \w \s \b`, groups, `|`, `* + ? {n,m}`,
-`^ $`, `(?i)`. Backreferences and lookaround are rejected at config validation.
+`^ $`, a leading `(?i)`. Backreferences, lookaround, named groups and `\p{…}` are
+rejected at config validation.
 Alert messages carry the count, never log text.
 
 ## Config

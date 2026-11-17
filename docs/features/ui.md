@@ -9,9 +9,11 @@ OS, the ◐ button overrides it per browser.
   dimmed), each with its logs icon. A stack's name opens it in the table; its
   chevron folds it. Filter box: the text stays while you move between pages
   (until cleared), Enter opens the first match, Down moves into the list. The
-  open container's item is scrolled into view. Over 1100 px it collapses to
-  an icon rail (remembered); from 700 to 1100 px it is a rail that the toggle
-  opens over the page (the page keeps its place under the scrim).
+  open container's item is scrolled into view. Over 1100 px the toggle
+  collapses it to an icon rail (remembered); from 700 to 1100 px it is a rail
+  that the toggle opens over the page (the page keeps its place under the
+  scrim). The rail's "Stacks" item opens the sidebar with the filter focused.
+  The foot has the live indicator, the shortcuts button and the version.
 - **Phones (under 700 px):** a bottom bar (Overview, Containers, Logs,
   Alerts, More). "More" is the only way into the drawer: a real link to
   `/more`, a plain page with every page and every stack's containers (so
@@ -29,9 +31,11 @@ OS, the ◐ button overrides it per browser.
   "Logs: X", "Open service ↗" (when it has a link) and, signed in, "Edit X"
   (its display name, group, icon, link). Signed in, "Add bookmark", "Add
   widget", "Add channel" and "Add alert rule" open those dialogs (in place
-  when the page has them). One action per theme ("Theme: Light", …). A query
+  when the page has them). One action per theme ("Theme: Light", …), plus
+  "Keyboard shortcuts" and "Sign in" or "Sign out". A query
   that matches nothing selects nothing: Enter does not send it to the search
-  engine; arrow down to the "search the web" row (`page.search_url`). Home,
+  engine; arrow down to the "search the web" row (`page.search_url`; a typed
+  `http(s)://` address opens as it is). Home,
   End, Page Up and Page Down move in the list; on touch it has a close
   button.
 - **Overview:** "Needs attention" rows are whole-row links to the cause with
@@ -52,7 +56,8 @@ OS, the ◐ button overrides it per browser.
   The health strip's "problems" is the same count as the table's
   "Problems" filter. Top CPU lists eight rows; a full bar is one whole core.
   "Last 24 h" on a young instance says how much history it has ("running
-  100% of 30m with data").
+  100% of 30m"). A container that runs again after a problem in the last
+  hour stays listed as "recovered after: …".
 - **Alerts:** firing incidents and the alert log link to their subject (the
   container, the Host page, the widget, the URL), name the rule and show a
   clock time ("since …" in one right-aligned column); rows about a container
@@ -93,7 +98,7 @@ OS, the ◐ button overrides it per browser.
   current tab in view and a fade on the edge that has more; tables (ports,
   networks, mounts, processes) become label / value blocks, so nothing
   scrolls sideways. Tiles: State, CPU, Memory, Restarts (1 h) and, with a
-  health check, Health. A range that is mostly empty says how much history
+  health check, Health check. A range that is mostly empty says how much history
   there is and links the shortest range that holds it; Metrics charts that
   stayed at zero are one line of text. Signed out, every hidden Inspect
   value is a "Sign in to view" link.
@@ -106,24 +111,31 @@ OS, the ◐ button overrides it per browser.
   failing time.
 - **Logs** one click from everywhere a container is named (see
   `docs/features/logs.md`); the Logs nav item is current on every logs page.
-- **Keyboard:** `g` then `o c h l a s` jumps to a page, `j/k` moves in lists,
-  `l` opens a container's logs, `/` filters the page where it has a filter
-  (Containers, logs) and opens the palette elsewhere, `?` shows all shortcuts.
+- **Keyboard:** `g` then `o c h l y a s` jumps to a page (Overview,
+  Containers, Host, Logs, History, Alerts, Settings), `j/k` moves in lists
+  and Enter opens the row, `l` opens a container's logs, `/` filters the page
+  where it has a filter (Containers, logs) and opens the palette elsewhere,
+  `?` shows all shortcuts. They are off while you type in a field.
 - **Themes:** Dark, Light, Ember, High contrast (the theme button steps
   through Auto, Dark, Light, Ember, High contrast, one click per step, and
-  says the theme it switched to; or Settings → Appearance), all on the brand palette (`docs/BRANDING.md`). Auto follows
+  says the theme it switched to; the choice is kept per browser, and
+  Settings → Appearance sets the default for browsers that have not chosen),
+  all on the brand palette (`docs/BRANDING.md`). Auto follows
   the OS between Dark and Light. Ember is a deeper, redder dark with the
   lighter brand orange as its accent. Every theme is checked for WCAG
   contrast by a test, including a 3:1 control border (`--ctl-border`) on
   every surface.
-- **Install:** "Add to Home Screen" from the browser menu; the tab title shows
-  the number of problems.
+- **Install:** "Add to Home Screen" from the browser menu (a manifest and
+  icons; no service worker, so nothing works offline). The installed app has
+  a reload button in the top bar. The tab title and favicon show the number
+  of problems, refreshed once a minute while the tab is hidden.
 - **Live:** one SSE stream per visible page; numbers update in place. Updates
   never move what you are reading: each one is scroll-anchored by hand (Safari
   on iOS has no CSS scroll anchoring), and updates that arrive while you touch
   or scroll wait until 1.5 s after you stop (`scripts/phone-scroll-test.mjs`). The stream
   closes when the tab is hidden for 10 s (no work for nobody) and reopens on
-  return. A new build reloads open pages.
+  return; after more than a minute hidden the page reloads instead (not a
+  logs page, an open dialog or unsaved input). A new build reloads open pages.
 - **Charts:** inline SVG drawn on the server from the history database; hover
   for values; gaps stay gaps.
 - **Theming:** every color is a CSS variable (the token list is in
@@ -146,9 +158,9 @@ OS, the ◐ button overrides it per browser.
 - **Components:** buttons, form fields, dialog, toast, menu, tabs, empty
   states and skeletons are one shared layer (`static/components.css`, part of
   the one page stylesheet `/static/app.css?v=<build>`, `static/ui.js` as the first part of `/static/app.js`,
-  `window.HB`). DESIGN.md §11.4 to §11.9. Until each form moves onto the
-  dialog, the field styles (inputs, checkboxes, switches) apply only inside a
-  dialog, and the Settings pages keep their own fields and toasts.
+  `window.HB`). DESIGN.md §11.4 to §11.9. The field styles (inputs,
+  checkboxes, switches) apply inside a dialog and on the Settings pages,
+  which use the same fields and toasts.
 
 - **Motion:** four duration tokens (`--dur-1` 90 ms hover and press,
   `--dur-2` 160 ms toast, menu, tab underline, palette, leaving dialogs,
@@ -229,10 +241,10 @@ no card grid); `layout = "list"` makes the flat table the default view.
 
 Strict type scale with tabular numbers and calm zeros; primary / secondary /
 ghost panels; **24 h health strips** per container and stack; charts with a
-shared crosshair, drag-to-zoom (History), event markers, a "yesterday" line and
+shared crosshair, drag-to-zoom (History, Host), event markers, a "yesterday" line and
 legend toggles; memory treemap; ranked "Needs attention" and "since you last
 looked" on Overview. Themes: Dark, Light, Ember, High contrast (contrast-tested).
-Keyboard: `Ctrl/⌘ K` palette, `g` then `o c h l a s` for pages, `j/k` rows,
+Keyboard: `Ctrl/⌘ K` palette, `g` then `o c h l y a s` for pages, `j/k` rows,
 `?` cheat sheet, `l` logs of the current container. The tab title and favicon
 show the number of problems. Installable as an app (manifest and icons; no
 service worker, no offline page, no data caching); a bottom bar on phones. Decisions: DESIGN.md §10.

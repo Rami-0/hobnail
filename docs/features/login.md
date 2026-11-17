@@ -23,6 +23,9 @@ before you. Setting a password signs out every session. Minimum 8 characters.
   valid session cookie, the `X-RH-CSRF` header and a same-origin `Origin`
   (or `Referer`). Only `POST /api/login` is exempt (it checks `Origin` itself).
   Tested end to end for every write route (`src/http/gate_tests.rs`).
+- Requests whose `Host` header is not an IP address, `localhost`, the host
+  name or a name in `RH_ALLOWED_HOSTS` are refused with 421 (DNS rebinding);
+  `/healthz` is exempt.
 - Password: PBKDF2-HMAC-SHA256, 600,000 iterations, random salt, stored only as
   a hash in the database.
 - Session: 32 random bytes in an `HttpOnly; SameSite=Strict` cookie for 7 days;

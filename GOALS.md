@@ -4,9 +4,14 @@ A small, fast, hackable home-server dashboard written in Rust. It should replace
 the current Homepage (gethomepage) container, which idles at ~112 MiB and needs a
 watchdog script to keep `services.yaml` in sync with Docker.
 
-Status: **M0 to M5 and v2 (V1 to V4) are built**: a Dozzle-style UI, a history database and
-settings inside the app behind a login. M6 (cutover) waits for the owner. The v2
-spec is [docs/DESIGN.md](docs/DESIGN.md); sections 9 to 11 below are its goals. Numbers marked *(baseline)* were measured on this host on 2026-11-14 with
+Status: **M0 to M5, v2 (V1 to V4), v3 wave 1 and the UX pass are built**: a Dozzle-style UI,
+logs in the app, a host page, a history database and settings inside the app behind a
+login. The UX pass closed 253 of the 267 findings in [docs/qa/QA.md](docs/qa/QA.md); the
+other 14 are deferred there with a reason. M6 (cutover) waits for the owner. The
+spec is [docs/DESIGN.md](docs/DESIGN.md); sections 9 to 11 below are its goals. The
+agreed next direction, a React client served by the same Rust server, is recorded in
+[docs/decisions/react-client-and-dashboard.md](docs/decisions/react-client-and-dashboard.md)
+and not started. Numbers marked *(baseline)* were measured on this host on 2026-11-14 with
 `docker stats --no-stream` (host: 7.2 GiB RAM).
 
 ## 1. Resource usage (the headline goal)

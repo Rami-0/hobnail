@@ -27,5 +27,8 @@ config at all. The Docker events stream keeps the list current within ~0.3 s.
   last one for that name, so a container recreated under the same name would
   otherwise show the old one's "unhealthy for 2h".
 - Overrides (config or Settings → Containers and groups): name, group, icon,
-  url, description, hide, order, size; `[docker] exclude` globs; `[[groups]]`.
-- Labels on containers: `hobnail.hide`, `.name`, `.group`, `.icon`, `.url`.
+  url, description, hide, order; `[docker] exclude` globs; `[[groups]]`.
+  `size` is still accepted and offered ("Card size") but has no effect: there
+  is no card grid.
+- Labels on containers: `hobnail.hide`, `.name`, `.group`, `.icon`, `.url`
+  (the older `rust-homepage.*` labels still work; `hobnail.*` wins).

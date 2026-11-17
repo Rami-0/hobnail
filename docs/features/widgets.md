@@ -3,8 +3,9 @@
 - **custom-api:** fetch JSON from any URL, pick fields with paths, show them
   with a template or rows, optional status dot. Add and edit them in
   Settings → Widgets: a dialog with Request, Fields and Display tabs and a
-  **Fetch now** preview before saving, which shows the tile and what each
-  field's path found (never the raw response). Renaming a widget that rules
+  **Fetch now** preview before saving, which shows the tile as it would
+  appear and what each field's path found. The dialog offers GET and POST;
+  another method set in the file is kept. Renaming a widget that rules
   watch asks first and then changes those rules to the new id; a widget a
   rule watches cannot be deleted until the rule is changed. Header values and
   a request body set in the file are kept on save and never shown, only the
@@ -86,13 +87,13 @@ from `command`. Full reference:
 
 ```toml
 [[widgets]]
-id = "mailpit"                 # unique, [A-Za-z0-9_-]; DOM id and alert-rule key
+id = "mailpit"                 # unique, [A-Za-z0-9_-], at most 64; DOM id and alert-rule key
 type = "custom-api"            # or "command"
 title = "Mailpit"              # default: the id
-link = "http://192.168.1.10:8025"  # optional, makes the title a link
-icon = "mailpit.svg"           # optional, a file in data/icons/
+link = "http://192.168.1.10:8025"  # optional, makes the title a link (http://, https:// or /path)
+icon = "mailpit.svg"           # optional: a file in data/icons/, builtin:<glyph> or a dashboard-icons name
 refresh = "30s"                # default 30s, minimum 1s
-timeout = "5s"                 # default 5s
+timeout = "5s"                 # default 5s, 100ms to 5m
 # enabled = false              # turn a widget off without deleting it
 
 # --- custom-api ---

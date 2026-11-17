@@ -44,10 +44,11 @@ atomically (temp file + rename, same mode) → add a revision → record a
   says which (`?add=bookmark`, `?edit=bookmark:2`, `?edit=channel:ops-hook`,
   `?edit=rule:disk-full`, `?edit=widget:mailpit`, `?add=exclude`,
   `?edit=group:media`, `?edit=override:grafana`), so a reload or a link opens
-  the same dialog. Customize on a container page opens its override dialog
-  (`?name=<container>` still works). Esc, ×, Cancel or the backdrop close it, and ask first when
-  something was typed. Enter saves; the button shows progress; the list behind
-  updates in place and the changed row flashes.
+  the same dialog. "Edit" on a container page (signed in) opens its override
+  dialog (`?name=<container>` still works). Esc, ×, Cancel or the backdrop
+  close it, and ask first when something was typed. Enter saves (Ctrl+Enter
+  from any field); the button shows progress; the list behind updates in
+  place and the changed row flashes.
 - Lists and form values are rendered by the server, for a session only.
   `GET /settings/<tab>?frag=list` serves the lists again for those updates
   (Bookmarks, Widgets, Notifications, Containers and groups; the database
@@ -57,10 +58,11 @@ atomically (temp file + rename, same mode) → add a revision → record a
   Hidden containers and Groups (each with Undo where it deletes).
 - Delete asks in one confirm dialog; the message after it has **Undo**, which
   restores the revision from before the delete (refused if the file changed
-  since). Up / down arrows (bookmarks, widgets) move an entry one step, one
-  revision per step (bookmarks, widgets and groups). A channel or widget that alert rules still use is not
-  offered for deleting: the message names the rules.
-- An edit sends only the fields you changed; the server keeps every key the
+  since). Up / down arrows (bookmarks, widgets and groups) move an entry one
+  step, one revision per step. A channel or widget that alert rules still
+  use is not offered for deleting: the message names the rules.
+- An edit sends only the fields you changed (a bookmark sends its five
+  fields, all of which the form shows); the server keeps every key the
   request leaves out (`null` removes one). A save therefore never removes
   something the form does not show, and Save with no change writes nothing
   ("No changes"). An untouched edit dialog sends nothing at all, so it says
@@ -131,27 +133,40 @@ atomically (temp file + rename, same mode) → add a revision → record a
   (Name, Title, Icon, Collapsed, Hidden; one-click up / down), and every
   container with its override dialog (Display name, Group, Icon, URL,
   Description, Hide, Order, Card size; "Remove overrides…" asks and offers
-  Undo). Search and "Only with overrides" filter the list (without
-  JavaScript they are shown disabled); the bulk bar (Set group, Hide, Show,
-  Remove overrides…) stays in view and each action is one revision with
-  Undo. A pattern is added the way the `exclude` array is written (one per
+  Undo). A group's Icon and a container's Card size are saved, but the
+  current pages do not draw them. Search and "Only with overrides" filter
+  the list (without JavaScript they are shown disabled); the bulk bar (Set
+  group, Hide, Show, Remove overrides…, Clear selection) stays in view and
+  each action is one revision with Undo. A pattern is added the way the `exclude` array is written (one per
   line with the same indentation when it is multi-line), deleting one takes
   its own comments with it, and a pattern with a line break or other control
   character is refused. `POST /api/settings/docker` and `/api/settings/groups`
   take one entry at a time (`{base_hash, action, id?, item?, order?}`); the
   older whole-list bodies are refused (400).
-- *Appearance:* Default theme (saves when changed) and `data/custom.css`
-  (atomic, 64 KiB max, event recorded, no revision; live preview). When the
+- *Bookmarks:* Name, URL, Group, Icon, Description; one-click up / down. A
+  new or changed URL must start with `http://` or `https://`.
+- *Widgets:* the System tiles switch, the `custom-api` widgets and, read
+  only, the `command` widgets: see [widgets.md](widgets.md).
+- *Notifications:* channels and alert rules: see
+  [notifications.md](notifications.md).
+- *Appearance:* Default theme (saves when changed; "Use the default here"
+  drops this browser's own choice) and `data/custom.css` (atomic, 64 KiB
+  max, event recorded, no revision; live preview, a warning for a brace,
+  comment or string that does not close, Revert, and after a save "Previous
+  version" until the page is left). When the
   saved custom.css sets a retired token name (`--ctl`, `--border-2`,
   `--accent-bg`, `--glow`, `--pop`, `--fs-label`, or `--border` without
-  `--line`) a note names the token to set instead.
+  `--line`) a note names the token to set instead (`--glow`: remove it).
 - *History and data:* Recording on / off (saves when switched), Sample
   interval, the database figures, export, and Clear history, which asks in
   the confirm dialog with the phrase "clear history" typed.
-- *Config file:* the raw editor (Ctrl+S saves), the revisions 25 a page,
+- *Config file:* the raw editor (Ctrl+S or Cmd+S saves; Revert; "Go to
+  error"), the revisions 25 a page,
   newest first ("Newer" / "Older" links, `?rp=2` for the second page, which
   the script loads in place; a save or restore goes back to the first page),
-  View and Diff in a dialog, Restore after a confirm.
-- *Security:* change password (signs out every session; all problems shown at
+  View (with "Open in the editor") and Diff in a dialog, Restore after a
+  confirm.
+- *Security:* change password (at least 8 characters; signs out every
+  session, this one too; all problems shown at
   once, a wrong current password on its field, passwords never trimmed), sign
   out other sessions (asks first), recent logins.
