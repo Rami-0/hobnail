@@ -1,7 +1,7 @@
 //! The history sampler: one background task that samples the host and every
 //! running container on a fixed interval (`[history] sample_interval`,
 //! default 15 s, at least 5 s), with or without a viewer, and writes one
-//! small batch to the database.
+//! small batch to the database. Each tick runs on a blocking thread.
 //!
 //! It owns its own `system::Sampler` and `docker::StatsSampler` instead of
 //! sharing the ones in `AppState`. CPU and network figures are rates over the
@@ -41,7 +41,14 @@ impl Samplers {
         state.db.record_system(now, &s);
 
         let snap = state.snapshot();
-        let stats = self.ctr.sample(&snap.containers);
+        // Each running container's cgroup files are read once per tick and
+        // serve the core sample and the extras below.
+        let cgroups = super::ctrx::read_all(&state.env.host_sys, &snap.containers);
+        let readings = cgroups
+            .iter()
+            .filter_map(|(id, c)| Some((id.clone(), (c.usage_usec?, c.docker_mem()))))
+            .collect();
+        let stats = self.ctr.sample_from(&snap.containers, &readings);
         let rows: Vec<_> = snap
             .containers
             .iter()
@@ -49,7 +56,7 @@ impl Samplers {
             .collect();
         state.db.record_containers(now, &rows);
         // Wave 1 hooks (each owned by its own module).
-        super::ctrx::on_tick(state, now);
+        super::ctrx::on_tick(state, now, &cgroups);
         crate::host::on_tick(state, now);
     }
 }
@@ -72,15 +79,30 @@ pub async fn run(state: Arc<AppState>) {
     loop {
         let cfg = state.config.current();
         let step = interval(&cfg);
-        if cfg.history.enabled {
+        let enabled = cfg.history.enabled;
+        if enabled {
             if !was_enabled {
                 // Re-prime: a rate over the paused time would be meaningless.
                 samplers = Samplers::new(&state.env);
             }
-            // A few file reads and one small transaction: inline is fine.
-            samplers.tick(&state, &cfg, crate::util::unix_now() as i64);
+            // File reads, an inspect now and then, and three small write
+            // transactions: on a blocking thread, so a slow tick (or a page
+            // read holding the database) never stalls the server's one
+            // reactor thread.
+            let st = state.clone();
+            samplers = match tokio::task::spawn_blocking(move || {
+                samplers.tick(&st, &cfg, crate::util::unix_now() as i64);
+                samplers
+            })
+            .await
+            {
+                Ok(s) => s,
+                // The tick panicked (it does not; `panic = "abort"` in
+                // release anyway): start over with fresh counters.
+                Err(_) => Samplers::new(&state.env),
+            };
         }
-        was_enabled = cfg.history.enabled;
+        was_enabled = enabled;
         // The interval is re-read every round, so a config reload applies at once.
         next += step;
         let t = Instant::now();
