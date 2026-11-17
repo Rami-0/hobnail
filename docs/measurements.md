@@ -196,3 +196,126 @@ test on the live stack. Host load average ~4 on 4 cores.
 | History DB | 2.4 MiB @ 1.3 h | projected: core ~30 MiB + host series ~25 MiB + container extras + log counts ≈ **60–70 MiB at 90 days** | ≤ 150 MB | ✅ projected, not yet observed |
 | Phone scroll test | 0 px | **0 px**, 0 swaps while touching | 0 | ✅ |
 | Contrast (automated test over app.css) | AA | Dark 5.15, Light 4.81, Ember 5.46, High contrast 11.1 (lowest body text) | AA; HC ≥ 7 | ✅ |
+
+## ux-pass bench phase (2026-11-17)
+
+Builds compared: **baseline** `02c21fb` (before the UI pass), **before** `49a8421`
+(after UI waves 1 to 5, start of this phase) and **after** `47f31b0` (the last
+optimisation commit). Host: a 2-core / 4-thread 7th-generation mobile Intel CPU,
+7.2 GiB RAM, kernel 7.0, Docker 29.5.2, cgroup v2, about 40 other containers,
+load average 1.5 to 3.9 during the runs. Every instance was a throwaway
+container on 127.0.0.1 with the same seed config, the host's Docker socket
+(read-only, 21 to 23 running containers), and a copy of the same database;
+A and B ran side by side (idle) or alternated (timings). The phase was stopped
+early at the owner's request: see "Not done".
+
+**Databases.** *Busy*: an online backup of the shared test instance's database
+(11 MB, 8,558 events, 200 config revisions, ~1 day of history). *Steady*:
+`gen_db.py` on top of it: 6 h raw, 7 d of 1-min and 90 d of 10-min rollups for
+the host, 40 containers and 33 host keys, 100,000 events over 180 d (131.3 MiB).
+
+**Method** (scripts kept outside the repo; each is a few lines of shell):
+- *Idle*: 20 s after start, nobody connected: `docker stats --no-stream`,
+  `VmRSS`/`RssAnon` from `/proc/<pid>/status`, CPU = utime+stime from
+  `/proc/<pid>/stat` over 120 s (3 rounds) or 60 s (2 rounds). With a binary
+  bind-mounted over `/hobnail`, `RssFile` and docker stats include different
+  file pages, so **RssAnon** is the number to compare between builds.
+- *Server time*: `curl -w %{time_starttransfer}` on loopback, signed in, 15
+  requests per page, median / p90, two rounds alternating the builds.
+- *Load*: `hey` 0.1.4 (host network), signed in, keep-alive, 2 s warm-up then
+  8 s at `-c 1`, `-c 8`, `-c 32` per route (the baseline report's `load.sh`).
+- *Syscalls*: `strace -f -y -p 1` from a container in the app's PID namespace,
+  46 s, grouped per 15 s tick.
+- *Cold start, binary*: exec of the release binary on the host (empty data
+  dir, no Docker) to the first `200` from `/healthz`, raw-socket polling every
+  ~1 ms, 7 runs. *Container*: `docker stop`, then `docker start` to the first
+  `200`, 5 runs.
+
+### Results
+
+| Metric | Baseline `02c21fb` | Before `49a8421` | After `47f31b0` |
+|---|---|---|---|
+| Idle RAM, busy DB: docker stats | 5.81-5.95 MiB | 5.76-5.81 MiB | **3.77-3.80 MiB** |
+| Idle RssAnon / VmRSS, busy DB | 3.31-3.37 / 7.76-7.80 MiB | 3.32-3.38 / 7.73-7.76 MiB | **1.16-1.20** MiB / 5.66-5.69 MiB* |
+| Idle RAM, fresh DB: docker stats (RssAnon) | 2.2-3.0 MiB (1.14-1.20) | 2.4-3.0 MiB (1.12-1.16) | not re-measured |
+| Idle CPU, busy DB | 0.10-0.14 % (120-170 ms / 120 s) | 0.10-0.14 % | **0.07-0.10 %** (80-120 ms / 120 s) |
+| Idle CPU, fresh DB | 0.09-0.11 % | 0.09-0.11 % | not re-measured |
+| Syscalls per 15 s tick (cgroup files) | — | 3,335-3,462 (1,812) | **2,837-2,853 (1,334-1,337)** |
+| Image (unpacked / compressed) | 10.8 MB / 3.67 MB | 11.6 MB / 3.91 MB | see the dev image rebuilt from the final commit (binary +12 KB) |
+| Release binary | 6,039,984 B | 6,621,616 B | 6,633,904 B |
+| Cold start, binary (exec → `/healthz` 200) | 4.4 ms median (3.2-155) | — | **3.5 ms** median (2.9-10.4) |
+| Cold start, container (`docker start` → 200) | — | — | 460 ms median (428-526); `StartedAt` → 200: 365 ms |
+| `/history`, steady DB | 752-768 ms | 782-830 ms | **44-48 ms** |
+| `/history?range=7d`, steady DB | 845-880 ms | 875-923 ms | **132-137 ms** |
+| `/containers/<name>`, steady DB | 109-111 ms | 109-128 ms | **9-13 ms** |
+| `/containers/<name>?tab=metrics`, steady DB | — | 231-272 ms | **22-33 ms** |
+| `/host`, steady DB | 27-32 ms | 37-44 ms | 22-30 ms |
+| `/history`, busy DB | 47 ms | 71 ms | 44-48 ms (steady DB; busy not re-measured) |
+| `/containers` while `/history` renders in a loop | p90 732 ms, p99 975 ms, 8.8 rps (baseline report) | — | **p90 20 ms, p99 28-30 ms, 73-74 rps** |
+| `/api/state` p99 / slowest while ticks run (c=1, 45 s) | — | 6.8-7.3 / 20-25 ms | 5.0-5.3 / 16-22 ms |
+
+\* bind-mounted binary: RssFile reads near 0 there, so VmRSS of a normal image
+is about 4.4 MB higher.
+
+Load, busy DB, p50 / p99 ms (baseline → before; "after" from a shorter run,
+6 s per cell, two rounds, after the migration, sampler and cache commits):
+
+| Route | c=1 baseline | c=1 before | c=1 after | c=8 baseline | c=8 before | c=8 after |
+|---|---|---|---|---|---|---|
+| `/` | 8.8 / 17.7 | 15.7 / 34.5 | 6.6-8.4 / 11-19 | 58 / 86 | 79 / 125 | 36-51 / 72-103 |
+| `/containers` | 5.3 / 9.9 | 6.5 / 11.1 | 5.5-5.6 / 10-11 | 32 / 57 | 38 / 67 | 37-38 / 64-78 |
+| `/host` | 32 / 64 | 37 / 64 | 7.1-8.5 / 14-19 † | 232 / 328 | 273 / 407 | 50-56 / 90-98 † |
+| `/history` | 49 / 94 | 77 / — | not re-run | 390 / 804 | 608 / 1317 | not re-run |
+| `/alerts` | 3.7 / 6.9 | 6.7 / 11.3 | 6.2-7.1 / 16-20 | 19 / 32 | 39 / 79 | 38 / 72-99 |
+| `/api/state` | 2.0 / 3.2 | 2.2 / 4.0 | 2.2 / 3.9-4.1 | 12 / 20 | 13 / 24 | 13 / 19-21 |
+
+† `/host` repeats within the 2 s reuse window under load, so it measures the
+cached path; the full render is in the server-time table above.
+
+Not measured in this phase: browser metrics (LCP, CLS, INP, long tasks at 4x
+and 390 px), the 150-row table's DOM size and render time, log-burst
+main-thread time, page bytes after the UI pass, RAM with one viewer. The
+baseline values for these are in the baseline report of this pass (ROB-05:
+6,035 nodes, a 1,025 ms long task at 4x; LG-18: 48 long tasks of 60-780 ms).
+
+### Schema migration v6
+
+Adds `events_ts (ts)` and `events_kind_ts (kind, ts, subject)`. On the steady
+database: file 131.3 → 136.7 MiB (+5.3 MiB, about 4 %); first start 590 ms
+(26 ms on later starts); the two `CREATE INDEX` alone 178 ms. **An older build
+refuses a v6 database** ("newer than this build understands"): a rollback needs
+the copy of `hobnail.db` taken before the upgrade. Restart counts: 96 → 2.1 ms
+(covering index); retention count 5.8 → 0.005 ms; a 1 h window 3 days back
+6.0 → 0.04 ms; the newest 24 h window 0.54 → 0.98 ms (index plus sort, still
+small).
+
+### Ranked list and decisions
+
+| # | Candidate | Measured cost before | Expected gain | Cost / risk | Decision |
+|---|---|---|---|---|---|
+| 1 | Index on events, used by restart counts, History, Host markers, strips, retention | `/history` 800 ms, detail 120 ms at steady state | 10-20× on those pages | +5.3 MiB DB at 90 d; one-way migration | **done** `8461d1b` |
+| 2 | SQLite page cache released when idle | 2.2 MiB of the 3.4 MiB heap at idle | −2.2 MiB idle | 7-day API call 7 → 12 ms | **done** `47f31b0` |
+| 3 | Sampler off the reactor; cgroup files once; no inspect per tick | 3.4k syscalls per tick, 1 inspect per tick | −15 % syscalls, no reactor stall | none | **done** `4b893b3` |
+| 4 | Second read-only connection | `/containers` p90 732 ms during `/history` (baseline) | after 1-3: p90 20 ms, p99 30 ms | +1 page cache of RAM | **not needed**: the remaining contention is the 2 blocking threads and CPU, which a second connection does not change |
+| 5 | Host poll vs 2 s cache | one viewer 310 ms CPU / 60 s (~13 ms per poll) | — | — | **no change**: one viewer is already one scan per 3 s poll; two pollers 1.4 s apart cost 330-350 ms (they share the cache); with no viewer no scan runs |
+| 6 | `opt-level = 3` instead of `"s"` | — | faster renders | binary 6.63 → 9.16 MB (+2.5 MB) | **tried, did not help**: `/` c1 p50 6.6-8.4 vs 7.5-8.1 ms, `/containers` 5.5-5.6 vs 5.6-5.8 ms, `/api/state` 2.2 vs 1.8 ms; no route clearly faster beyond noise |
+| 7 | gzip for HTML and static assets (ROB-04, ROB-10) | pages 94-530 KB raw | 8-12× fewer bytes | new crate (`miniz_oxide`, not in the tree) | **not done** (phase stopped; needs the owner's agreement for the crate) |
+| 8 | 150-row containers table: `content-visibility` on phone-layout stack groups (ROB-05) | 6,035 nodes, 1 s long task at 4x (baseline) | — | — | **not done** |
+| 9 | Log bursts: render per frame within a time budget (LG-18) | 48 long tasks 60-780 ms (QA) | — | — | **not done** (written, not measured, reverted) |
+| 10 | `/alerts`, `/` server time grew in the UI pass (3.7 → 6.7 ms, 8.8 → 15.7 ms c1) | — | — | — | **not done**, not profiled |
+| 11 | Allocator change | — | — | new crate, RSS risk | **not done**: single reactor thread, no contention measured |
+| 12 | Dockerfile: build into a per-checkout target dir | stale-artefact risk | — | — | proposal only (see report) |
+
+### Proposed wording for GOALS.md section 1 (for the owner; GOALS.md not edited)
+
+> | Metric | Target | Stretch | Measured 2026-11-17 |
+> |---|---|---|---|
+> | Idle RAM (docker stats), no viewers, with the history database | ≤ 15 MiB | ≤ 8 MiB | 3.8 MiB (RssAnon 1.2 MiB) |
+> | Container image | ≤ 20 MB | ≤ 10 MB | ~11.6 MB |
+> | Idle CPU (sampler, events, alerts) | ~0 % | ~0 % | 0.07-0.10 % of one core |
+> | Cold start, **binary** (exec → first `/healthz` 200, no Docker) | < 200 ms | < 50 ms | 3.5 ms |
+> | Cold start, container (`docker start` → first 200) | reported, no target | — | 460 ms on a loaded host; Docker's share, not the app's |
+> | Page served (server time, busy database) | < 150 ms | < 80 ms | ≤ 48 ms for every page |
+>
+> The cold-start target means the binary: the container figure is runc and
+> Docker networking before `main()` runs, which the app cannot change.
