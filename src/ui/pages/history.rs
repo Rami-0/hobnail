@@ -267,6 +267,8 @@ fn scan(db: &crate::db::Db, signed: bool, from: i64, to: i64, before: Option<i64
             &EventFilter {
                 limit: SCAN_BATCH,
                 before_id: cursor,
+                since: Some(from),
+                until: Some(to),
                 ..Default::default()
             }
             .for_viewer(signed),

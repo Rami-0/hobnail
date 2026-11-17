@@ -911,7 +911,7 @@ fn rename_reuses_legacy_database_without_losing_password_or_history() {
 }
 
 /// The seek History's scan starts from: the newest id at or before a time,
-/// by a bounded binary search over the id (gaps from the cap included).
+/// one lookup on `events_ts` (gaps from the cap included).
 #[test]
 fn event_id_at_or_before_seeks_by_id() {
     let db = Db::open_in_memory().unwrap();
@@ -944,4 +944,86 @@ fn event_id_at_or_before_seeks_by_id() {
     ] {
         assert_eq!(db.event_id_at_or_before(t), want(t), "t = {t}");
     }
+}
+
+/// Schema v6 on a database that a v5 build wrote, with data in it: the
+/// migration keeps every row, adds the two event indexes, and the event
+/// reads give the same answers as before.
+#[test]
+fn upgrade_from_v5_adds_event_indexes() {
+    let path = tmp("upgrade-v6");
+    {
+        let mut c = Connection::open(&path).unwrap();
+        let tx = c.transaction().unwrap();
+        for sql in &schema::MIGRATIONS[..5] {
+            tx.execute_batch(sql).unwrap();
+        }
+        tx.pragma_update(None, "user_version", 5).unwrap();
+        for i in 0..300i64 {
+            let kind = ["container.start", "container.die", "auth.login"][(i % 3) as usize];
+            tx.execute(
+                "INSERT INTO events (ts, kind, level, subject, detail) VALUES (?1, ?2, 'info', ?3, '')",
+                rusqlite::params![T0 + i * 60, kind, format!("c{}", i % 4)],
+            )
+            .unwrap();
+        }
+        tx.execute(
+            "INSERT INTO sys_roll (res, ts, cpu, cpu_x) VALUES (60, ?1, 500, 700)",
+            [T0],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    db.with((), |i| {
+        assert_eq!(schema::version(&i.conn).unwrap(), 6);
+        let idx: Vec<String> = i
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events' ORDER BY name")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(idx, ["events_kind_ts", "events_subject", "events_ts"]);
+        Ok(())
+    });
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM events"), 300);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM sys_roll"), 1);
+    // 100 starts, 25 per container; the last 10 minutes hold 4 of them.
+    let all = db.restart_counts(0);
+    assert_eq!(all.len(), 4);
+    assert!(all.iter().all(|(_, n)| *n == 25));
+    let recent: u32 = db.restart_counts(T0 + 288 * 60).iter().map(|x| x.1).sum();
+    assert_eq!(recent, 4);
+    let w = db.events(&EventFilter {
+        since: Some(T0 + 100 * 60),
+        until: Some(T0 + 109 * 60),
+        limit: 500,
+        ..Default::default()
+    });
+    assert_eq!(w.len(), 10);
+    assert_eq!(w[0].ts, T0 + 109 * 60, "newest first");
+    drop(db);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The event reads that run per page use an index, never a full scan.
+#[test]
+fn event_reads_use_the_v6_indexes() {
+    let db = Db::open_in_memory().unwrap();
+    let plan = |sql: &str| -> String {
+        db.with(String::new(), |i| {
+            let mut st = i.conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+            let rows: Vec<String> = st
+                .query_map([], |r| r.get::<_, String>(3))?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(rows.join("; "))
+        })
+    };
+    let rc = plan(
+        "SELECT subject, COUNT(*) AS n FROM events WHERE kind = 'container.start' AND ts >= 5 GROUP BY subject ORDER BY n DESC, subject",
+    );
+    assert!(rc.contains("COVERING INDEX events_kind_ts"), "{rc}");
+    let seek = plan("SELECT id FROM events WHERE ts <= 5 ORDER BY ts DESC, id DESC LIMIT 1");
+    assert!(seek.contains("events_ts"), "{seek}");
+    let ret = plan("SELECT COUNT(*) FROM events WHERE ts < 5");
+    assert!(ret.contains("events_ts"), "{ret}");
 }
