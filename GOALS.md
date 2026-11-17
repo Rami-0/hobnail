@@ -11,14 +11,19 @@ spec is [docs/DESIGN.md](docs/DESIGN.md); sections 9 to 11 below are its goals. 
 
 ## 1. Resource usage (the headline goal)
 
-| Metric | Baseline | Target | Stretch |
-|---|---|---|---|
-| Idle RAM (RSS), no viewers | Homepage: 112 MiB *(baseline)* | **≤ 15 MiB** | ≤ 8 MiB |
-| RAM with 1 active viewer | n/a | ≤ 25 MiB | ≤ 15 MiB |
-| Container image size | Homepage: 376 MB *(baseline)*; Dozzle: 101 MB | ≤ 20 MB | ≤ 10 MB |
-| Idle CPU | not measured yet | ~0% | ~0% |
-| Cold start to first request | not measured yet | < 200 ms | < 50 ms |
-| Page load (LAN, first paint) | not measured yet | < 150 ms | < 80 ms |
+| Metric | Baseline | Target | Stretch | Measured 2026-11-17 |
+|---|---|---|---|---|
+| Idle RAM (docker stats), no viewers, with the history database | Homepage: 112 MiB *(baseline)* | **≤ 15 MiB** | ≤ 8 MiB | 3.8 MiB (RssAnon 1.2 MiB) |
+| RAM with 1 active viewer | n/a | ≤ 25 MiB | ≤ 15 MiB | 2.3 MiB |
+| Container image size | Homepage: 376 MB *(baseline)*; Dozzle: 101 MB | ≤ 20 MB | ≤ 10 MB | 11.6 MB |
+| Idle CPU (sampler, events, alerts) | n/a | ~0% | ~0% | 0.07 to 0.10 % of one core |
+| Cold start, **binary** (exec to first `/healthz` 200, no Docker) | n/a | < 200 ms | < 50 ms | 3.5 ms |
+| Cold start, container (`docker start` to first 200) | n/a | reported, no target | n/a | 250 to 460 ms on a loaded host |
+| Page served (server time) | n/a | < 150 ms | < 80 ms | ≤ 71 ms for every page (`/history?range=7d` about 125 ms on 90 days of data) |
+
+The cold-start target means the binary: the container figure is runc and
+Docker networking before `main()` runs, which the app cannot change. Method
+and the full table: [docs/measurements.md](docs/measurements.md).
 
 Reference points on this host *(baseline)*: Dozzle 41 MiB, Beszel hub 37 MiB,
 Beszel agent 14 MiB, Arcane 59 MiB (after a memory cap; 83 MiB without).
