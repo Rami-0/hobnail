@@ -25,8 +25,9 @@ pub fn render(w: &WidgetConfig, out: Option<&WidgetOutput>) -> Markup {
         },
     });
     let link = w.link.as_deref().filter(|l| safe_link(l));
+    let waiting = enabled && out.is_none();
     html! {
-        div id={"w-" (w.id)} class=(class) data-fetched=[out.map(|o| o.fetched_at)] {
+        div id={"w-" (w.id)} class=(class) data-fetched=[out.map(|o| o.fetched_at)] data-wait=[waiting.then_some("")] {
             div.tile-title {
                 @if w.icon.is_some() { (crate::ui::icon(w.icon.as_deref(), title)) }
                 @if let Some(l) = link {
@@ -40,10 +41,12 @@ pub fn render(w: &WidgetConfig, out: Option<&WidgetOutput>) -> Markup {
                 div.muted.w-off { (DISABLED) }
             } @else {
                 @match out {
-                    None => div.muted.w-loading { "loading…" },
+                    // A skeleton until the first answer (ROB-14); the size of a value.
+                    None => div.w-loading { span.sk {} span.sk-t { "Waiting for the first answer…" } },
                     Some(o) => {
                         @if let Some(e) = error {
-                            div.err.w-err title=(e) { (e) }
+                            // A short plain cause; the raw error behind a disclosure.
+                            div.err.w-err { (plain_error(e)) details.w-raw { summary { "Details" } code.wrap { (e) } } }
                         } @else {
                             // Built by widgets::present with maud: every
                             // remote value in it is already escaped.
@@ -51,12 +54,38 @@ pub fn render(w: &WidgetConfig, out: Option<&WidgetOutput>) -> Markup {
                         }
                         div.w-meta.muted title={"updated " (crate::util::fmt_utc(o.fetched_at))} {
                             @if o.fetched_at > 0 { time data-t=(o.fetched_at) { "updated" } } @else { span {} }
-                            span { (o.duration_ms) " ms" }
+                            @if o.duration_ms > 0 { span { (o.duration_ms) " ms" } } @else { span {} }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/// A failed fetch in a few plain words; the raw message stays in "Details".
+pub fn plain_error(e: &str) -> String {
+    let l = e.to_ascii_lowercase();
+    if l.contains("timed out") || l.contains("timeout") {
+        "No answer in time".into()
+    } else if l.contains("refused") {
+        "Refused: nothing is listening there".into()
+    } else if l.contains("lookup")
+        || l.contains("resolve")
+        || l.contains("dns")
+        || l.contains("name or service")
+    {
+        "The name does not resolve".into()
+    } else if let Some(code) = e
+        .strip_prefix("HTTP ")
+        .and_then(|r| r.get(..3))
+        .filter(|c| c.bytes().all(|b| b.is_ascii_digit()))
+    {
+        format!("The service answered HTTP {code}")
+    } else if l.contains("certificate") || l.contains("tls") {
+        "The secure connection failed".into()
+    } else {
+        "Could not get an answer".into()
     }
 }
 
@@ -78,7 +107,16 @@ mod tests {
         let html = render(&w, None).into_string();
         assert!(html.contains(r#"id="w-x""#), "{html}");
         assert!(html.contains(r#"class="tile widget""#), "{html}");
-        assert!(html.contains("loading…"));
+        // Waiting: marked for the script, which makes it a busy tile with a
+        // skeleton; never busy from the server, so a plain word without
+        // script (ROB-14, §11.9).
+        assert!(
+            html.contains(r#"data-wait="""#)
+                && !html.contains("aria-busy")
+                && html.contains(r#"class="sk""#),
+            "{html}"
+        );
+        assert!(html.contains("Waiting for the first answer"));
         assert!(html.contains("&lt;X&gt;"), "title is escaped: {html}");
         assert!(html.contains(r#"href="http://h/""#));
         assert!(html.contains(r#"class="dot""#));
@@ -93,8 +131,28 @@ mod tests {
             html.contains("is-err") && html.contains("dot bad"),
             "{html}"
         );
-        assert!(html.contains("HTTP 500 &lt;b&gt;"));
-        assert!(html.contains("12 ms"));
+        assert!(
+            html.contains("HTTP 500 &lt;b&gt;"),
+            "the raw error, in Details"
+        );
+        assert!(
+            html.contains("The service answered HTTP 500") && html.contains("<details"),
+            "{html}"
+        );
+        assert!(html.contains("12 ms") && !html.contains("data-wait"));
+        assert_eq!(
+            plain_error("connect 127.0.0.1:9: Connection refused (os error 111)"),
+            "Refused: nothing is listening there"
+        );
+        assert_eq!(plain_error("timed out after 5000ms"), "No answer in time");
+        let zero = WidgetOutput {
+            error: Some("timed out after 5000ms".into()),
+            ..Default::default()
+        };
+        assert!(
+            !render(&w, Some(&zero)).into_string().contains("0 ms"),
+            "no 0 ms timing on a failure"
+        );
 
         let mut ok = WidgetOutput {
             html: Some("<div class=\"tile-value w-value\">PASS</div>".into()),

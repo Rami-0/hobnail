@@ -183,6 +183,11 @@ pub struct EventFilter {
     /// `auth.` excluded: login history (with client IPs) is not dashboard
     /// data. See [`EventFilter::for_viewer`].
     pub exclude_kind_prefix: Option<String>,
+    /// Only events with `ts >= since` / `ts <= until` (unix seconds).
+    /// Served by the `events_ts` index (schema v6), so a window reads only
+    /// its own rows however long the table is.
+    pub since: Option<i64>,
+    pub until: Option<i64>,
 }
 
 impl EventFilter {
@@ -729,7 +734,21 @@ impl Db {
         let limit = match f.limit {
             0 => 50,
             n => n.min(500),
-        } as i64;
+        };
+        self.events_ordered(f, limit, "id DESC")
+    }
+
+    /// Every event of `f` inside its `since..=until` window, newest first,
+    /// at most `cap` (up to 10,000) rows, in one pass over `events_ts` in
+    /// index order (`ts DESC, id DESC`): no sort and no repeated seek,
+    /// however much of the table the window holds. Ids and timestamps both
+    /// grow, so this is the order of `events` up to events of one second.
+    pub fn window_events(&self, f: &EventFilter, cap: usize) -> Vec<Event> {
+        self.events_ordered(f, cap.clamp(1, 10_000), "ts DESC, id DESC")
+    }
+
+    fn events_ordered(&self, f: &EventFilter, limit: usize, order: &str) -> Vec<Event> {
+        let limit = limit as i64;
         self.with(Vec::new(), |i| {
             let mut sql =
                 String::from("SELECT id, ts, kind, level, subject, detail FROM events WHERE 1 = 1");
@@ -760,8 +779,16 @@ impl Db {
                 args.push(b.into());
                 sql.push_str(&format!(" AND id < ?{}", args.len()));
             }
+            if let Some(t) = f.since {
+                args.push(t.into());
+                sql.push_str(&format!(" AND ts >= ?{}", args.len()));
+            }
+            if let Some(t) = f.until {
+                args.push(t.into());
+                sql.push_str(&format!(" AND ts <= ?{}", args.len()));
+            }
             args.push(limit.into());
-            sql.push_str(&format!(" ORDER BY id DESC LIMIT ?{}", args.len()));
+            sql.push_str(&format!(" ORDER BY {order} LIMIT ?{}", args.len()));
             let mut st = i.conn.prepare(&sql)?;
             let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
                 Ok(Event {
@@ -774,6 +801,19 @@ impl Db {
                 })
             })?;
             rows.collect()
+        })
+    }
+
+    /// The newest event id with `ts <= t`, or `None` when every event is
+    /// newer: one seek on `events_ts`, so a History window far in the past
+    /// starts its scan at the window. Ids and timestamps both grow; among
+    /// events of the same second the highest id wins.
+    pub fn event_id_at_or_before(&self, t: i64) -> Option<i64> {
+        self.with(None, |i| {
+            i.conn
+                .prepare("SELECT id FROM events WHERE ts <= ?1 ORDER BY ts DESC, id DESC LIMIT 1")?
+                .query_row([t], |r| r.get(0))
+                .optional()
         })
     }
 
@@ -1000,6 +1040,17 @@ impl Db {
     /// Roll up, prune, optimize. Safe to call often; does the work at most hourly.
     pub fn maintain(&self, now: i64) {
         maintain::run_once(self, now);
+        self.release_memory();
+    }
+
+    /// Give the page cache back (`sqlite3_db_release_memory`). Called after
+    /// each sampler tick and after maintenance: the cache is only worth
+    /// something while a page is being read, and with nobody viewing it is
+    /// most of the process's heap (about 2 MiB on a real database). The
+    /// pages stay in the kernel's file cache, so the next read is a copy, not
+    /// a disk read.
+    pub fn release_memory(&self) {
+        self.with((), |i| i.conn.release_memory());
     }
 
     /// True when `maintain(now)` would do its work (not run in the last hour).

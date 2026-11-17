@@ -425,6 +425,37 @@ pub struct CgroupNow {
     pub io_write: Option<u64>,
     pub pids: Option<u64>,
     pub pids_max: Option<u64>,
+    /// `cpu.stat` `usage_usec`, `memory.current` and `memory.stat`
+    /// `inactive_file`: what the core per-container sample needs, so the
+    /// history tick reads each file once for both samplers.
+    pub usage_usec: Option<u64>,
+    pub mem_current: Option<u64>,
+    pub inactive_file: Option<u64>,
+}
+
+impl CgroupNow {
+    /// Memory as `docker stats` shows it: `memory.current` minus
+    /// `inactive_file`.
+    pub fn docker_mem(&self) -> Option<u64> {
+        self.mem_current
+            .map(|c| c.saturating_sub(self.inactive_file.unwrap_or(0)))
+    }
+}
+
+/// One reading per running container that has a cgroup directory, keyed by
+/// container id.
+pub fn read_all(
+    host_sys: &str,
+    containers: &[crate::model::Container],
+) -> HashMap<String, CgroupNow> {
+    containers
+        .iter()
+        .filter(|c| c.is_running())
+        .filter_map(|c| {
+            let dir = crate::docker::container_cgroup_dir(host_sys, &c.id)?;
+            Some((c.id.clone(), read_cgroup(&dir)))
+        })
+        .collect()
 }
 
 pub fn read_cgroup(dir: &Path) -> CgroupNow {
@@ -434,11 +465,14 @@ pub fn read_cgroup(dir: &Path) -> CgroupNow {
         c.nr_periods = flat(&t, "nr_periods");
         c.nr_throttled = flat(&t, "nr_throttled");
         c.throttled_usec = flat(&t, "throttled_usec");
+        c.usage_usec = flat(&t, "usage_usec");
     }
     if let Some(t) = read("memory.stat") {
         c.cache = flat(&t, "file");
         c.anon = flat(&t, "anon");
+        c.inactive_file = flat(&t, "inactive_file");
     }
+    c.mem_current = read("memory.current").and_then(|t| t.trim().parse().ok());
     c.limit = read("memory.max").and_then(|t| parse_max(&t));
     c.oom_kills = read("memory.events").and_then(|t| flat(&t, "oom_kill"));
     if let Some(t) = read("io.stat") {
@@ -504,6 +538,25 @@ struct XSampler {
     prev: HashMap<String, Prev>,
     /// id -> how its network is read.
     net: HashMap<String, NetSource>,
+    /// id -> start time (`/proc/<pid>/stat` field 22) of the PID an inspect
+    /// gave. While it is unchanged the PID is still that process, even when
+    /// its `cgroup` file does not name the container (a process in our own
+    /// cgroup namespace reads `0::/`), so it is not inspected again.
+    started: HashMap<String, u64>,
+}
+
+/// Start time of a process in clock ticks since boot (`stat` field 22).
+fn pid_start(host_proc: &str, pid: i64) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    let t = std::fs::read_to_string(format!("{host_proc}/{pid}/stat")).ok()?;
+    // The command name (field 2) may hold spaces and parentheses.
+    t.get(t.rfind(')')? + 1..)?
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
 }
 
 /// Inspects per tick at most (the first tick after start would otherwise
@@ -523,8 +576,9 @@ pub fn net_source(id: &str) -> Option<NetSource> {
         .copied()
 }
 
-/// Called by the history sampler after the core container samples.
-pub fn on_tick(state: &AppState, now: i64) {
+/// Called by the history sampler after the core container samples, with
+/// the cgroup readings it took for them (`read_all`).
+pub fn on_tick(state: &AppState, now: i64, cgroups: &HashMap<String, CgroupNow>) {
     let snap = state.snapshot();
     let env = &state.env;
     let t = Instant::now();
@@ -534,21 +588,33 @@ pub fn on_tick(state: &AppState, now: i64) {
     let mut rows: Vec<(String, XSample)> = Vec::new();
     let mut seen = HashMap::new();
     for c in snap.containers.iter().filter(|c| c.is_running()) {
-        let Some(dir) = crate::docker::container_cgroup_dir(&env.host_sys, &c.id) else {
+        let Some(cg) = cgroups.get(&c.id) else {
             continue;
         };
-        let cg = read_cgroup(&dir);
         // Network source: cached, checked against /proc/<pid>/cgroup.
+        let same_start = |p: i64| {
+            s.started
+                .get(&c.id)
+                .is_some_and(|&st| pid_start(&env.host_proc, p) == Some(st))
+        };
         let src = match s.net.get(&c.id) {
-            Some(NetSource::Pid(p)) if pid_belongs(&env.host_proc, *p, &c.id) => {
+            Some(NetSource::Pid(p)) if same_start(*p) || pid_belongs(&env.host_proc, *p, &c.id) => {
                 Some(NetSource::Pid(*p))
             }
             Some(NetSource::Pid(_)) | None => {
                 if inspects < MAX_INSPECTS_PER_TICK && !env.docker_socket.is_empty() {
                     inspects += 1;
-                    crate::docker::inspect_blocking(&env.docker_socket, &c.id)
+                    let src = crate::docker::inspect_blocking(&env.docker_socket, &c.id)
                         .ok()
-                        .map(|i| net_source_of(&i))
+                        .map(|i| net_source_of(&i));
+                    match src.and_then(|x| match x {
+                        NetSource::Pid(p) => pid_start(&env.host_proc, p),
+                        _ => None,
+                    }) {
+                        Some(st) => s.started.insert(c.id.clone(), st),
+                        None => s.started.remove(&c.id),
+                    };
+                    src
                 } else {
                     None
                 }
@@ -571,7 +637,7 @@ pub fn on_tick(state: &AppState, now: i64) {
             net,
         };
         let prev = s.prev.get(&c.id);
-        let sample = compute(prev, &cur, &cg);
+        let sample = compute(prev, &cur, cg);
         seen.insert(c.id.clone(), cur);
         rows.push((c.name.clone(), sample));
     }
@@ -580,6 +646,7 @@ pub fn on_tick(state: &AppState, now: i64) {
     let live: std::collections::HashSet<&str> =
         snap.containers.iter().map(|c| c.id.as_str()).collect();
     s.net.retain(|id, _| live.contains(id.as_str()));
+    s.started.retain(|id, _| live.contains(id.as_str()));
     drop(guard);
     let refs: Vec<(&str, &XSample)> = rows.iter().map(|(n, x)| (n.as_str(), x)).collect();
     state.db.record_ctrx(now, &refs);
@@ -682,6 +749,12 @@ mod tests {
         assert_eq!(c.oom_kills, Some(2));
         assert_eq!((c.io_read, c.io_write), (Some(150), Some(15)));
         assert_eq!((c.pids, c.pids_max), (Some(14), Some(8706)));
+        // The core sample's values come from the same reads.
+        assert_eq!(c.usage_usec, Some(100));
+        assert_eq!((c.mem_current, c.docker_mem()), (None, None));
+        w("memory.current", "50000000\n");
+        let c = read_cgroup(&d);
+        assert_eq!(c.docker_mem(), Some(50000000 - 17424384));
         w("memory.max", "536870912\n");
         assert_eq!(read_cgroup(&d).limit, Some(536870912));
         // A missing directory reads as nothing, not an error.

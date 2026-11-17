@@ -54,15 +54,59 @@ pub fn pill(kind: &str, text: &str) -> Markup {
     html! { span class={"pill " (kind)} { (text) } }
 }
 
+/// What an empty state is about (DESIGN.md §11.9); it sets the icon's tone.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Empty {
+    /// Nothing here yet (first use, no history yet).
+    First,
+    /// A filter hides everything.
+    NoMatch,
+    /// Nothing is wrong: nothing stopped, nothing firing.
+    Good,
+    /// Could not load: Docker unreachable, a failing source.
+    Error,
+}
+
 /// An empty state: icon, headline and a sentence of help.
 pub fn empty_state(icon: &str, title: &str, body: Markup) -> Markup {
+    empty(Empty::First, "", icon, title, body, None)
+}
+
+/// The one empty-state component (§11.9): icon, a one-line title, one
+/// sentence, at most one action. `size` is "" (a page or panel),
+/// `compact` (inside a panel) or `inline` (a list row's height). Always
+/// rendered by the server, so it shows with the script blocked.
+pub fn empty(
+    kind: Empty,
+    size: &str,
+    icon: &str,
+    title: &str,
+    body: Markup,
+    action: Option<Markup>,
+) -> Markup {
+    let tone = match kind {
+        Empty::Good => " good",
+        Empty::Error => " bad",
+        Empty::First | Empty::NoMatch => "",
+    };
+    let sp = if size.is_empty() { "" } else { " " };
     html! {
-        div.empty {
-            (ic(icon))
+        div class={"empty" (tone) (sp) (size)} {
+            span.empty-ic { (ic(icon)) }
             h3 { (title) }
             p { (body) }
+            @if let Some(a) = action { div.acts { (a) } }
         }
     }
+}
+
+/// A value that has not arrived yet (a first sample): a skeleton bar once
+/// the script has run (`html.hb-ready`; it shows after 150 ms, §11.9), "—"
+/// without it. The region around it carries `data-wait`, which the script
+/// turns into `aria-busy` (never the server: with the script off, blocked
+/// or failed, nothing is busy).
+pub fn skel_word() -> Markup {
+    html! { span.sk aria-hidden="true" {} span.sk-t { "—" } }
 }
 
 /// A panel heading with an optional link on the right.

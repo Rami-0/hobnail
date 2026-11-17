@@ -34,24 +34,25 @@ title = "Monitoring"
 [page]
 title = "homelab"           # default: host name
 greeting = "Welcome back"   # default: time-of-day greeting
-columns = 4                 # v1 card grid only: no effect in the v2 table (kept for compatibility)
-layout = "grid"             # "list" makes the flat (ungrouped) table the default view
-theme = "auto"              # auto (follow OS) | dark | light; the ◐ button overrides per browser
+columns = 4                 # v1 card grid only: no effect (accepted, kept; not in Settings any more)
+layout = "grid"             # "list" makes the flat (ungrouped) table the default view (file only)
+theme = "auto"              # auto | dark | light | ember | contrast (Settings › Appearance); the ◐ button overrides per browser
 search_url = "https://duckduckgo.com/?q={q}"
 show_stopped = true
 show_stats = true           # live CPU / memory on container cards
 
 [docker]
+# enabled = false           # do not discover containers at all (default true)
 exclude = ["ci-test-*"]     # hide containers by name (globs)
 standalone_group = "Standalone"
-# logs_url / metrics_url default to the Dozzle / Beszel containers found on this host.
-# Placeholders: {host} {id} {name}
-# logs_url = "http://{host}:8888/container/{id}"
+# logs_url / metrics_url (links to Dozzle / Beszel) are retired: logs and metrics
+# are in the app. A file that still has them loads; the values are ignored.
 
 [[groups]]                  # order of [[groups]] = order on the page; others follow A-Z
 name = "media"              # a compose project name, or a group set by an override/label
 title = "Media"
-# columns / layout per group: v1 only, no effect in the v2 table
+# icon = "jellyfin"         # accepted and kept; the current pages do not draw it
+# columns / layout per group: v1 only, no effect (accepted and kept; not in Settings)
 collapsed = true
 # hide = true
 
@@ -62,7 +63,7 @@ icon = "grafana"
 url = "http://192.168.1.10:3000"
 description = "Metrics dashboards"
 order = 1                   # sort weight in the group
-size = "wide"               # small | normal | wide
+size = "wide"               # small | normal | wide: accepted and kept; the current pages do not use it
 # hide = true
 
 [[bookmarks]]
@@ -70,6 +71,14 @@ name = "Router"
 url = "http://192.168.1.1"
 group = "Links"             # default "Bookmarks"
 icon = "builtin:globe"
+description = "Admin page"  # second line; default: the URL's host
+
+[system]                    # host tiles and vitals
+# enabled = false           # hide them (Settings › Widgets › System tiles)
+# refresh = "3s"            # while someone is viewing
+# disks = [{ path = "/data", label = "/" }]   # paths as seen in the container; this is the default
+# net_iface = "eth0"        # default: the interface with the default route
+# temp_sensor = "coretemp"  # hwmon sensor name
 ```
 
 ## Container labels
@@ -106,7 +115,7 @@ Put overrides in `data/custom.css`; it is loaded last and re-read on every page
 load. Example:
 
 ```css
-:root { --accent: #2f81f7; --radius: 4px; --font: "Inter", system-ui, sans-serif; }
+:root { --accent: #2f81f7; --r: 4px; --font: "Inter", system-ui, sans-serif; }
 ```
 
 ## Outgoing HTTP
@@ -118,5 +127,7 @@ allow_hosts = ["192.168.1.10", "127.0.0.1", "*.example.com"]   # empty = any hos
 
 Applies to widgets, HTTP checks, icon fetches and notifications.
 
-Widgets and notification channels are configured in the same file: see
-[features/widgets.md](features/widgets.md) and [features/notifications.md](features/notifications.md).
+Widgets, notification channels, `[history]` and `[logs]` are configured in
+the same file: see [features/widgets.md](features/widgets.md),
+[features/notifications.md](features/notifications.md),
+[features/history.md](features/history.md) and [features/logs.md](features/logs.md).

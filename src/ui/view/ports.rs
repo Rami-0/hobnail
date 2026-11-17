@@ -20,6 +20,8 @@ pub struct PortView {
     pub local: bool,
     /// Tooltip: "8125 → 8025/tcp on 100.64.0.10, 127.0.0.1".
     pub detail: String,
+    /// `tcp` or `udp`: a chip that is not a link says it (OV-25).
+    pub proto: String,
 }
 
 fn is_unspecified(ip: &str) -> bool {
@@ -130,6 +132,7 @@ pub fn port_views(ports: &[PortMapping], host: &str) -> Vec<PortView> {
                     ips.join(", ")
                 ),
                 label,
+                proto: proto.to_string(),
             }
         })
         .collect()

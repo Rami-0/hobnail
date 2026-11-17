@@ -120,28 +120,26 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["general"]) => {
             let r: ops::PatchReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::general(c, &r)
+                ops::general(c, &r).and_then(ops::precheck)
             })?)
         }
 
         // ---- containers and groups
         (true, _, ["containers"]) => json(containers_get(state)?),
+        // Both take one entry at a time (`{base_hash, action, id?, item?,
+        // order?}`, as every list). The old whole-list bodies are gone: a
+        // whole list rewrote keys the caller never showed (`columns`).
         (_, true, ["docker"]) => {
-            let r: ops::ExcludeReq = body(call)?;
+            let r: CollectionReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::docker_exclude(c, &r)
+                ops::exclude_action(c, &r).and_then(ops::precheck)
             })?)
         }
-        (_, true, ["groups"]) => {
-            let r: ops::GroupsReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::groups(c, &r)
-            })?)
-        }
+        (_, true, ["groups"]) => json(list_post(state, call, &ops::GROUPS)?),
         (_, true, ["containers", "override"]) => {
             let r: ops::OverrideReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::container_override(c, &r)
+                ops::container_override(c, &r).and_then(ops::precheck)
             })?)
         }
 
@@ -183,7 +181,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["system"]) => {
             let r: ops::SystemReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::system(c, &r)
+                ops::system(c, &r).and_then(ops::precheck)
             })?)
         }
 
@@ -192,7 +190,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["channels"]) => {
             let r: CollectionReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::channel_action(c, &r)
+                ops::channel_action(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["channels", "test"]) => {
@@ -213,7 +211,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["history"]) => {
             let r: ops::PatchReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |c| {
-                ops::history(c, &r)
+                ops::history(c, &r).and_then(ops::precheck)
             })?)
         }
         (_, true, ["history", "clear"]) => {
@@ -235,10 +233,9 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (_, true, ["security", "password"]) => {
             let r: ops::PasswordReq = body(call)?;
             if r.new.is_empty() || r.new.len() > 1024 {
-                return Err(ApiError::bad_request("new password: 1 to 1024 bytes"));
+                return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
             }
-            crate::auth::change_password(state, &r.current, &r.new)
-                .map_err(ApiError::bad_request)?;
+            crate::auth::change_password(state, &r.current, &r.new).map_err(password_error)?;
             json(json!({"ok": true}))
         }
         (_, true, ["security", "sign-out-others"]) => {
@@ -256,10 +253,31 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     })
 }
 
+/// A refused password change on the field it is about (422), in plain
+/// words; anything else (no password set, too many attempts) stays a 400.
+fn password_error(e: String) -> ApiError {
+    let field = if e.contains("current password") {
+        Some("current")
+    } else if e.starts_with("the password must") {
+        Some("new")
+    } else {
+        None
+    };
+    let mut c = e.chars();
+    let msg = c
+        .next()
+        .map(|f| f.to_uppercase().chain(c).collect::<String>() + ".")
+        .unwrap_or_default();
+    match field {
+        Some(f) => ApiError::invalid(&msg, Some(f), None),
+        None => ApiError::bad_request(msg),
+    }
+}
+
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
     store::edit(state, &r.base_hash, &call.user, |c| {
-        ops::list_action(c, spec, &r)
+        ops::list_action(c, spec, &r).and_then(ops::precheck)
     })
 }
 
@@ -634,6 +652,16 @@ fn css_path(state: &AppState) -> std::path::PathBuf {
     state.env.data_dir.join(CSS_FILE)
 }
 
+/// The saved custom.css and its hash (the `base_hash` of a save), for the
+/// Appearance page.
+pub fn css_current(state: &AppState) -> Result<(String, String), ApiError> {
+    let v = css_get(state)?;
+    Ok((
+        v["css"].as_str().unwrap_or("").to_string(),
+        v["hash"].as_str().unwrap_or("").to_string(),
+    ))
+}
+
 fn css_get(state: &AppState) -> Result<J, ApiError> {
     let css = match std::fs::read(css_path(state)) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),
@@ -670,18 +698,22 @@ fn css_post(state: &AppState, user: &str, r: &ops::CssReq) -> Result<J, ApiError
     if cur["hash"].as_str() != Some(r.base_hash.trim()) {
         return Err(ApiError::stale());
     }
-    let hash = doc::sha256_hex(r.css.as_bytes());
-    if cur["css"].as_str() == Some(r.css.as_str()) {
-        return Ok(json!({"ok": true, "unchanged": true, "hash": hash}));
+    // A CRLF file stays CRLF (the textarea gives LF).
+    let css = doc::keep_line_ends(cur["css"].as_str().unwrap_or(""), r.css.clone());
+    let hash = doc::sha256_hex(css.as_bytes());
+    // Saved or not, the retired token names it sets (shown on the form).
+    let warnings = ops::css_token_warnings(&css);
+    if cur["css"].as_str() == Some(css.as_str()) {
+        return Ok(json!({"ok": true, "unchanged": true, "hash": hash, "warnings": warnings}));
     }
-    doc::write_atomic(&css_path(state), r.css.as_bytes(), 0o644).map_err(ApiError::internal)?;
+    doc::write_atomic(&css_path(state), css.as_bytes(), 0o644).map_err(ApiError::internal)?;
     let now = crate::util::unix_now() as i64;
     state
         .db
         .record_event(now, "config.saved", "info", user, "appearance: custom.css");
     crate::info!("custom.css saved from the app", user = user);
     state.changed("reload");
-    Ok(json!({"ok": true, "hash": hash}))
+    Ok(json!({"ok": true, "hash": hash, "warnings": warnings}))
 }
 
 fn stats_json(state: &AppState) -> J {

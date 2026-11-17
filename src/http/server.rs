@@ -26,21 +26,69 @@ use crate::state::{AppState, ViewerGuard};
 
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
+/// Inlined into every page: tokens, themes and shell (`app.css`), then the
+/// component layer (`components.css`), then the page parts.
 pub const APP_CSS: &str = concat!(
     include_str!("../../static/app.css"),
+    include_str!("../../static/components.css"),
     include_str!("../../static/cards.css"),
     include_str!("../../static/widgets.css"),
     include_str!("../../static/alerts.css"),
     include_str!("../../static/detail.css"),
     include_str!("../../static/host.css"),
 );
-const APP_JS: &str = include_str!("../../static/app.js");
+/// `/static/app.js`: the component layer (`ui.js`, `window.HB`) and the app
+/// script, one cached request.
+pub const APP_JS: &str = concat!(
+    include_str!("../../static/ui.js"),
+    include_str!("../../static/app.js"),
+);
 /// Loaded only by the settings pages (kept out of every other page).
 pub const SETTINGS_CSS: &str = include_str!("../../static/settings.css");
 pub const SETTINGS_JS: &str = include_str!("../../static/settings.js");
 /// Loaded only by the logs pages.
 pub const LOGS_CSS: &str = include_str!("../../static/logs.css");
 pub const LOGS_JS: &str = include_str!("../../static/logs.js");
+
+/// 64-bit FNV-1a of an asset's bytes, at compile time: the `?v=` of its URL.
+/// Keyed on the content, not the build id (`dev`, `nogit`, `<sha>-dirty` can
+/// stay the same while the files change).
+const fn fnv1a(s: &str) -> u64 {
+    let b = s.as_bytes();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut i = 0;
+    while i < b.len() {
+        h ^= b[i] as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        i += 1;
+    }
+    h
+}
+const fn hex16(h: u64) -> [u8; 16] {
+    let d = b"0123456789abcdef";
+    let mut o = [0u8; 16];
+    let mut i = 0;
+    while i < 16 {
+        o[i] = d[((h >> (60 - 4 * i)) & 0xf) as usize];
+        i += 1;
+    }
+    o
+}
+macro_rules! version_of {
+    ($name:ident, $hex:ident, $src:expr) => {
+        const $hex: [u8; 16] = hex16(fnv1a($src));
+        pub const $name: &str = match std::str::from_utf8(&$hex) {
+            Ok(s) => s,
+            Err(_) => panic!("hex is ASCII"),
+        };
+    };
+}
+version_of!(APP_CSS_V, APP_CSS_HEX, APP_CSS);
+version_of!(APP_JS_V, APP_JS_HEX, APP_JS);
+version_of!(SETTINGS_CSS_V, SETTINGS_CSS_HEX, SETTINGS_CSS);
+version_of!(SETTINGS_JS_V, SETTINGS_JS_HEX, SETTINGS_JS);
+version_of!(LOGS_CSS_V, LOGS_CSS_HEX, LOGS_CSS);
+version_of!(LOGS_JS_V, LOGS_JS_HEX, LOGS_JS);
 
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
     let listener = TcpListener::bind(addr)
@@ -162,16 +210,12 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         "/api/stream" => sse(state, host),
         "/api/state" => json(&crate::render::state_json(&state)),
         "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
-        "/static/app.css" => asset(APP_CSS, "text/css; charset=utf-8", state.build.sha),
-        "/static/app.js" => asset(APP_JS, "text/javascript; charset=utf-8", state.build.sha),
-        "/static/logs.css" => asset(LOGS_CSS, "text/css; charset=utf-8", state.build.sha),
-        "/static/logs.js" => asset(LOGS_JS, "text/javascript; charset=utf-8", state.build.sha),
-        "/static/settings.css" => asset(SETTINGS_CSS, "text/css; charset=utf-8", state.build.sha),
-        "/static/settings.js" => asset(
-            SETTINGS_JS,
-            "text/javascript; charset=utf-8",
-            state.build.sha,
-        ),
+        "/static/app.css" => asset(req.uri().query(), APP_CSS, CSS, APP_CSS_V),
+        "/static/app.js" => asset(req.uri().query(), APP_JS, JS, APP_JS_V),
+        "/static/logs.css" => asset(req.uri().query(), LOGS_CSS, CSS, LOGS_CSS_V),
+        "/static/logs.js" => asset(req.uri().query(), LOGS_JS, JS, LOGS_JS_V),
+        "/static/settings.css" => asset(req.uri().query(), SETTINGS_CSS, CSS, SETTINGS_CSS_V),
+        "/static/settings.js" => asset(req.uri().query(), SETTINGS_JS, JS, SETTINGS_JS_V),
         "/custom.css" => {
             let css =
                 std::fs::read_to_string(state.env.data_dir.join("custom.css")).unwrap_or_default();
@@ -239,12 +283,29 @@ pub fn json(v: &serde_json::Value) -> Response<Body> {
     r
 }
 
-fn asset(body: &'static str, ctype: &str, _sha: &str) -> Response<Body> {
-    // URLs carry ?v=<sha>, so the browser may cache them for a long time.
+const CSS: &str = "text/css; charset=utf-8";
+const JS: &str = "text/javascript; charset=utf-8";
+
+/// A compiled-in asset. Cached for a year (`immutable`) only when the URL
+/// asks for exactly this content (`?v=<hash of the bytes>`); any other or no
+/// `v` is `no-cache`, so a stale page never pins a wrong file.
+fn asset(query: Option<&str>, body: &'static str, ctype: &str, v: &str) -> Response<Body> {
     let mut r = full(StatusCode::OK, body);
     set(&mut r, CONTENT_TYPE, ctype);
-    set(&mut r, CACHE_CONTROL, "public, max-age=31536000, immutable");
+    set(&mut r, CACHE_CONTROL, asset_cache(query, v));
     r
+}
+
+fn asset_cache(query: Option<&str>, v: &str) -> &'static str {
+    let asked = query
+        .unwrap_or("")
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("v="));
+    if asked == Some(v) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
 }
 
 /// SSE body backed by a channel; holding the viewer guard for its lifetime.
@@ -353,5 +414,160 @@ mod tests {
     fn sse_multiline() {
         let b = sse_event("frag", "a\nb");
         assert_eq!(&b[..], b"event: frag\ndata: a\ndata: b\n\n");
+    }
+
+    /// GET `path` from a server on a real socket: (status, head, body).
+    async fn get(path: &str) -> (u16, String, String) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(serve_listener(st, l));
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let r = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+        s.write_all(r.as_bytes()).await.unwrap();
+        let mut out = Vec::new();
+        s.read_to_end(&mut out).await.unwrap();
+        let text = String::from_utf8_lossy(&out).into_owned();
+        let (head, body) = text.split_once("\r\n\r\n").unwrap();
+        let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, head.to_ascii_lowercase(), body.to_string())
+    }
+
+    /// The component script is the first part of `/static/app.js` (one
+    /// cached request, no new one), before the app script.
+    #[tokio::test]
+    async fn app_js_serves_the_component_layer_then_the_app() {
+        let (status, head, body) = get(&format!("/static/app.js?v={APP_JS_V}")).await;
+        assert_eq!(status, 200);
+        assert!(head.contains("content-type: text/javascript"), "{head}");
+        assert!(head.contains("immutable"), "{head}");
+        assert!(body.contains(APP_JS), "the whole bundle, unchunked");
+        let hb = body
+            .find("const HB = (window.HB = {});")
+            .expect("window.HB");
+        let app = body
+            .find("// hobnail client: theme, sidebar")
+            .expect("app.js");
+        assert!(hb < app, "ui.js comes first so app.js can use HB");
+        for api in [
+            "HB.open = ",
+            "HB.close = ",
+            "HB.validate = ",
+            "HB.toast = ",
+            "HB.confirm = ",
+            "HB.flash = ",
+            "HB.remove = ",
+        ] {
+            assert!(body.contains(api), "{api}");
+        }
+        // Not built (owner decision Y13): no reorder dialog code is shipped.
+        assert!(!body.contains("data-move"), "reorder script shipped");
+    }
+
+    /// The offline page is gone (NAV-70): no route, no worker, and nothing
+    /// (manifest, page head) points at it.
+    #[tokio::test]
+    async fn no_offline_page_and_no_service_worker() {
+        let (status, _, body) = get("/offline").await;
+        assert_eq!(status, 404);
+        assert!(body.contains("Page not found"), "the shell's 404");
+        let (status, head, manifest) = get("/manifest.webmanifest").await;
+        assert_eq!(status, 200);
+        assert!(head.contains("application/manifest+json"), "{head}");
+        assert!(!manifest.contains("offline"), "{manifest}");
+        assert!(!manifest.contains("serviceworker"));
+        let (_, _, page) = get("/").await;
+        assert!(page.contains("rel=\"manifest\""));
+        assert!(!page.contains("/offline") && !page.contains("serviceWorker"));
+        assert!(!APP_JS.contains("serviceWorker"));
+    }
+
+    /// The page CSS (tokens, then components, then the page parts) is one
+    /// cached file, `/static/app.css?v=<hash of its bytes>`, linked in every page's head
+    /// before `custom.css` (which loads last); nothing is inlined.
+    #[tokio::test]
+    async fn every_page_links_tokens_and_components() {
+        let (status, head, css) = get(&format!("/static/app.css?v={APP_CSS_V}")).await;
+        assert_eq!(status, 200);
+        assert!(head.contains("content-type: text/css"), "{head}");
+        assert!(head.contains("max-age=31536000, immutable"), "{head}");
+        assert_eq!(css, APP_CSS);
+        let tokens = css.find("\n:root,[data-theme=dark]{").expect("dark tokens");
+        let comp = css.find("dialog.dlg{").expect("dialog");
+        let cards = css.find(".tbl{").expect("cards.css");
+        assert!(tokens < comp && comp < cards, "tokens, components, pages");
+        for sel in [
+            ".btn.primary{",
+            ".fld-err{",
+            ".in{",
+            ".note{",
+            "dialog.dlg::backdrop{",
+            ".toasts{",
+            ".toast{",
+            ".menu{",
+            ".mi{",
+            ".tab{",
+            ".empty-ic{",
+            ".navbar{",
+            ".sw{",
+            ".choice{",
+        ] {
+            assert!(css.contains(sel), "{sel}");
+        }
+        assert!(
+            !css.contains(".reorder"),
+            "reorder CSS shipped (Y13: not built)"
+        );
+        let (status, _, html) = get("/").await;
+        assert_eq!(status, 200);
+        let head = &html[..html.find("</head>").unwrap()];
+        assert!(!html.contains("<style>"), "nothing inlined");
+        assert_eq!(
+            head.matches(r#"<link rel="stylesheet" href="/static/app.css?v="#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            html.matches("<script src=").count(),
+            1,
+            "one script request"
+        );
+    }
+
+    /// Asset URLs carry a hash of the bytes; only that exact `v` is cached
+    /// for good. A wrong or missing `v` must be revalidated (`no-cache`).
+    #[tokio::test]
+    async fn assets_are_immutable_only_for_their_own_hash() {
+        assert_eq!(APP_CSS_V.len(), 16);
+        assert_eq!(fnv1a(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_ne!(APP_CSS_V, APP_JS_V);
+        for (path, v) in [
+            ("/static/app.css", APP_CSS_V),
+            ("/static/app.js", APP_JS_V),
+            ("/static/logs.css", LOGS_CSS_V),
+            ("/static/logs.js", LOGS_JS_V),
+            ("/static/settings.css", SETTINGS_CSS_V),
+            ("/static/settings.js", SETTINGS_JS_V),
+        ] {
+            let (st, head, _) = get(&format!("{path}?v={v}")).await;
+            assert_eq!(st, 200);
+            assert!(
+                head.contains("cache-control: public, max-age=31536000, immutable"),
+                "{path}: {head}"
+            );
+            for q in ["", "?v=dev", "?v=0000000000000000", &format!("?x=1&v={v}x")] {
+                let (_, head, _) = get(&format!("{path}{q}")).await;
+                assert!(
+                    head.contains("cache-control: no-cache"),
+                    "{path}{q}: {head}"
+                );
+                assert!(!head.contains("immutable"), "{path}{q}");
+            }
+        }
+        let (_, _, html) = get("/").await;
+        assert!(html.contains(&format!("/static/app.css?v={APP_CSS_V}\"")));
+        assert!(html.contains(&format!("/static/app.js?v={APP_JS_V}\"")));
     }
 }

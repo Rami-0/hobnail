@@ -163,9 +163,30 @@ async fn server() -> u16 {
                             json!({
                                 "method": method,
                                 "auth": header(&req, "authorization"),
+                                "auth_len": header(&req, "authorization").map(str::len),
                                 "token": header(&req, "x-token"),
+                                "token_len": header(&req, "x-token").map(str::len),
                                 "ctype": header(&req, "content-type"),
                                 "body": body,
+                            })
+                            .to_string(),
+                        )
+                    }
+                    // A destination that reflects the request (TRACE, a
+                    // debug page): as text, and as JSON with the header as
+                    // a key, a value and inside a longer string.
+                    "/reflect" => (200, "message/http", req.clone()),
+                    "/reflect.json" => {
+                        let auth = header(&req, "authorization").unwrap_or("").to_string();
+                        let tok = header(&req, "x-token").unwrap_or("").to_string();
+                        (
+                            200,
+                            "application/json",
+                            json!({
+                                "seen": format!("you sent {auth} and {tok}"),
+                                "list": [auth.clone()],
+                                (tok.clone()): "as a key",
+                                "token_only": auth.split_once(' ').map(|x| x.1).unwrap_or(""),
                             })
                             .to_string(),
                         )
@@ -367,15 +388,18 @@ async fn custom_api_secret_headers_and_body() {
         port,
         "/echo",
         &format!(
-            "method = \"post\"\nbody = '{{\"q\":1}}'\nheaders_env = {{ Authorization = \"{var}\" }}\nheaders_file = {{ X-Token = \"{}\" }}\n[widgets.fields]\nauth = \"auth\"\ntoken = \"token\"\nmethod = \"method\"\nctype = \"ctype\"\nbody = \"body\"\n",
+            "method = \"post\"\nbody = '{{\"q\":1}}'\nheaders_env = {{ Authorization = \"{var}\" }}\nheaders_file = {{ X-Token = \"{}\" }}\n[widgets.fields]\nauth = \"auth\"\nauth_len = \"auth_len\"\ntoken = \"token\"\ntoken_len = \"token_len\"\nmethod = \"method\"\nctype = \"ctype\"\nbody = \"body\"\n",
             file.display()
         ),
     );
     let o = go(&w).await;
     let _ = std::fs::remove_file(&file);
     assert_eq!(o.error, None);
-    assert_eq!(o.values["auth"], json!("Bearer s3cret"));
-    assert_eq!(o.values["token"], json!("tok-123"));
+    // Sent (the lengths say so), and never shown back.
+    assert_eq!(o.values["auth_len"], json!("Bearer s3cret".len()));
+    assert_eq!(o.values["token_len"], json!("tok-123".len()));
+    assert_eq!(o.values["auth"], json!("<redacted>"));
+    assert_eq!(o.values["token"], json!("<redacted>"));
     assert_eq!(o.values["method"], json!("POST"));
     assert_eq!(o.values["ctype"], json!("application/json"));
     assert_eq!(o.values["body"], json!("{\"q\":1}"));
@@ -403,6 +427,73 @@ async fn custom_api_secret_headers_and_body() {
     let e = go(&w).await.error.unwrap();
     assert!(!e.contains("bad"), "{e}");
     std::env::remove_var(&var);
+}
+
+#[tokio::test]
+async fn custom_api_secret_headers_never_come_back() {
+    let port = server().await;
+    let var = format!("RH_TEST_REFLECT_{}", std::process::id());
+    std::env::set_var(&var, "Bearer r3fl3ct-me");
+    let file = std::env::temp_dir().join(format!("rh-reflect-{}", std::process::id()));
+    std::fs::write(&file, "tok-\"quoted\"-9\n").unwrap();
+    let secrets = format!(
+        "headers_env = {{ Authorization = \"{var}\" }}\nheaders_file = {{ X-Token = \"{}\" }}\n",
+        file.display()
+    );
+    let leaks = |o: &WidgetOutput| {
+        let all = format!("{:?} {:?} {:?}", o.values, o.html, o.error);
+        ["r3fl3ct-me", "tok-", "quoted"]
+            .iter()
+            .filter(|s| all.contains(*s))
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+    };
+    // Text output: `_text` and the rendered tile.
+    let w = api(port, "/reflect", &format!("output = \"text\"\n{secrets}"));
+    let o = go(&w).await;
+    assert_eq!(o.error, None);
+    assert!(leaks(&o).is_empty(), "{o:?}");
+    assert!(o.values["_text"]
+        .as_str()
+        .unwrap()
+        .contains("authorization: <redacted>"));
+    // JSON: extracted values, keys, the raw JSON tile, a template.
+    let w = api(
+        port,
+        "/reflect.json",
+        &format!("{secrets}template = \"{{{{seen}}}} {{{{only}}}}\"\n[widgets.fields]\nseen = \"seen\"\nlist = \"list\"\nonly = \"token_only\"\n"),
+    );
+    let o = go(&w).await;
+    assert_eq!(o.error, None);
+    assert!(leaks(&o).is_empty(), "{o:?}");
+    assert_eq!(
+        o.values["seen"],
+        json!("you sent <redacted> and <redacted>")
+    );
+    assert_eq!(o.values["only"], json!("<redacted>"));
+    let w = api(port, "/reflect.json", &secrets);
+    let o = go(&w).await;
+    assert!(leaks(&o).is_empty(), "raw JSON tile: {o:?}");
+    // Not JSON: the error names no value either.
+    let w = api(port, "/reflect", &secrets);
+    let o = go(&w).await;
+    assert!(o.error.is_some() && leaks(&o).is_empty(), "{o:?}");
+    let _ = std::fs::remove_file(&file);
+    std::env::remove_var(&var);
+}
+
+#[test]
+fn scrub_replaces_each_form_of_a_secret() {
+    let s = Scrub::new(&["Bearer abc123".into(), "".into(), "k\"q".into()]);
+    assert_eq!(
+        s.text("a Bearer abc123 b abc123 c"),
+        "a <redacted> b <redacted> c"
+    );
+    assert_eq!(s.text(r#"{"h":"k\"q"}"#), r#"{"h":"<redacted>"}"#);
+    assert_eq!(s.text("nothing here"), "nothing here");
+    let mut v = json!({"k\"q": ["Bearer abc123", 1]});
+    s.json(&mut v);
+    assert_eq!(v, json!({"<redacted>": ["<redacted>", 1]}));
 }
 
 // ------------------------------------------------------------------ command

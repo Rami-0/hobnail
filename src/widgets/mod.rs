@@ -554,19 +554,29 @@ async fn fetch_api(w: &WidgetConfig, policy: &HttpPolicy) -> Result<Fetched, Fai
     for (k, v) in &w.headers {
         req = req.header(k, v);
     }
-    // Secret values: never put them in an error message or a log line.
+    // Secret values: never put them in an error message or a log line, and
+    // never let them come back in what the destination answers (one that
+    // reflects request headers: TRACE, a debug or error page).
+    let mut secrets = Vec::new();
     for (k, var) in &w.headers_env {
         let v = std::env::var(var).map_err(|_| {
             Failure::new(format!("header {k}: environment variable {var} is not set"))
         })?;
-        req = req.header(k, secret_value(k, v.trim())?);
+        let v = secret_value(k, v.trim())?;
+        req = req.header(k, &v);
+        secrets.push(v);
     }
     for (k, file) in &w.headers_file {
         let v = read_secret(file)
             .map_err(|e| Failure::new(format!("header {k}: cannot read {file}: {e}")))?;
-        req = req.header(k, secret_value(k, &v)?);
+        let v = secret_value(k, &v)?;
+        req = req.header(k, &v);
+        secrets.push(v);
     }
-    let resp = client::send(req, policy).await.map_err(Failure::new)?;
+    let scrub = Scrub::new(&secrets);
+    let resp = client::send(req, policy)
+        .await
+        .map_err(|e| Failure::new(scrub.text(&e)))?;
     let code = i64::from(resp.status);
     if !resp.is_success() {
         let reason = hyper::StatusCode::from_u16(resp.status)
@@ -580,13 +590,76 @@ async fn fetch_api(w: &WidgetConfig, policy: &HttpPolicy) -> Result<Fetched, Fai
         });
     }
     let data = match w.output {
-        Output::Json => Data::Json(serde_json::from_slice(&resp.body).map_err(|e| Failure {
-            code: Some(code),
-            msg: format!("response is not JSON ({e})"),
-        })?),
-        Output::Text => Data::Text(resp.text()),
+        Output::Json => {
+            let mut v: Value = serde_json::from_slice(&resp.body).map_err(|e| Failure {
+                code: Some(code),
+                msg: scrub.text(&format!("response is not JSON ({e})")),
+            })?;
+            scrub.json(&mut v);
+            Data::Json(v)
+        }
+        Output::Text => Data::Text(scrub.text(&resp.text())),
     };
     Ok(Fetched { code, data })
+}
+
+/// Replaces the values of a widget's secret headers in what came back
+/// (before anything is extracted, shown, stored or logged).
+struct Scrub(Vec<String>);
+
+const REDACTED: &str = "<redacted>";
+
+impl Scrub {
+    /// Each value, the credentials after its scheme (`Bearer x` → `x`) and
+    /// its JSON-escaped form; the longest first.
+    fn new(secrets: &[String]) -> Self {
+        let mut all: Vec<String> = Vec::new();
+        for v in secrets.iter().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            all.push(v.to_string());
+            if let Some((_, cred)) = v.split_once(' ') {
+                let cred = cred.trim();
+                if cred.chars().count() >= 4 {
+                    all.push(cred.to_string());
+                }
+            }
+            let esc = Value::from(v).to_string();
+            let esc = &esc[1..esc.len() - 1];
+            if esc != v {
+                all.push(esc.to_string());
+            }
+        }
+        all.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        all.dedup();
+        Self(all)
+    }
+
+    fn text(&self, s: &str) -> String {
+        let mut out = s.to_string();
+        for v in &self.0 {
+            if out.contains(v.as_str()) {
+                out = out.replace(v.as_str(), REDACTED);
+            }
+        }
+        out
+    }
+
+    fn json(&self, v: &mut Value) {
+        if self.0.is_empty() {
+            return;
+        }
+        match v {
+            Value::String(s) => *s = self.text(s),
+            Value::Array(a) => a.iter_mut().for_each(|x| self.json(x)),
+            Value::Object(o) => {
+                let old = std::mem::take(o);
+                for (k, mut x) in old {
+                    self.json(&mut x);
+                    o.insert(self.text(&k), x);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn secret_value(name: &str, v: &str) -> Result<String, Failure> {

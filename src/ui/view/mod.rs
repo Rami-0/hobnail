@@ -103,8 +103,6 @@ pub struct CardView {
     /// `die` events in the last hour, when 2 or more.
     pub restarts: usize,
     pub ports: Vec<PortView>,
-    pub logs_url: Option<String>,
-    pub metrics_url: Option<String>,
     /// Live usage; None when stats are off, the container is stopped or not sampled yet.
     pub cpu: Option<f64>,
     pub mem: Option<u64>,
@@ -155,21 +153,6 @@ impl CardView {
     }
 }
 
-/// Logs and metrics link templates: from the config, else auto-detected from a
-/// running Dozzle / Beszel container.
-fn link_templates(cfg: &Config, snap: &Snapshot, host: &str) -> (Option<String>, Option<String>) {
-    let logs =
-        cfg.docker.logs_url.clone().or_else(|| {
-            detect_service(snap, host, is_dozzle).map(|b| format!("{b}/container/{{id}}"))
-        });
-    let metrics = cfg
-        .docker
-        .metrics_url
-        .clone()
-        .or_else(|| detect_service(snap, host, is_beszel).map(|b| format!("{b}/")));
-    (logs, metrics)
-}
-
 /// The card for one container by name, even when the lists hide it (direct
 /// links to a hidden container still work). The card's `stack` is its group key.
 pub fn card_for(
@@ -180,16 +163,14 @@ pub fn card_for(
     name: &str,
 ) -> Option<CardView> {
     let c = snap.containers.iter().find(|c| c.name == name)?;
-    let (logs, metrics) = link_templates(cfg, snap, host);
     let ov = cfg.containers.get(&c.name);
-    let mut card = container_card(cfg, c, ov, stats, host, &logs, &metrics);
+    let mut card = container_card(cfg, c, ov, stats, host);
     card.stack = group_of(cfg, c, ov);
     Some(card)
 }
 
 /// Build the view model. Pure: no I/O, no clock.
 pub fn build_groups(cfg: &Config, snap: &Snapshot, stats: &StatsMap, host: &str) -> Vec<GroupView> {
-    let (logs_tpl, metrics_tpl) = link_templates(cfg, snap, host);
     let mut containers: BTreeMap<String, Vec<CardView>> = BTreeMap::new();
     if cfg.docker.enabled {
         for c in &snap.containers {
@@ -198,7 +179,7 @@ pub fn build_groups(cfg: &Config, snap: &Snapshot, stats: &StatsMap, host: &str)
                 continue;
             }
             let group = group_of(cfg, c, ov);
-            let card = container_card(cfg, c, ov, stats, host, &logs_tpl, &metrics_tpl);
+            let card = container_card(cfg, c, ov, stats, host);
             containers.entry(group).or_default().push(card);
         }
     }
@@ -343,8 +324,6 @@ fn container_card(
     ov: Option<&ContainerOverride>,
     stats: &StatsMap,
     host: &str,
-    logs_tpl: &Option<String>,
-    metrics_tpl: &Option<String>,
 ) -> CardView {
     let id12: String = c.id.chars().take(12).collect();
     let title = ov
@@ -418,8 +397,6 @@ fn container_card(
             0
         },
         ports,
-        logs_url: logs_tpl.as_ref().map(|t| fill(t, host, &id12, &c.name)),
-        metrics_url: metrics_tpl.as_ref().map(|t| fill(t, host, &id12, &c.name)),
         cpu: live.map(|s| s.cpu_percent.max(0.0)),
         mem: live.map(|s| s.mem_bytes),
         label: status_label(c),
@@ -493,22 +470,6 @@ fn state_text(c: &Container) -> String {
             }
         }
     }
-}
-
-fn is_dozzle(c: &Container) -> bool {
-    c.image.contains("amir20/dozzle")
-}
-
-fn is_beszel(c: &Container) -> bool {
-    c.image.contains("henrygd/beszel") && !c.image.contains("beszel-agent")
-}
-
-/// Base URL (`http://host:port`) of a running container matching `pred`.
-fn detect_service(snap: &Snapshot, host: &str, pred: fn(&Container) -> bool) -> Option<String> {
-    snap.containers
-        .iter()
-        .filter(|c| c.is_running() && pred(c))
-        .find_map(|c| port_views(&c.ports, host).into_iter().find_map(|p| p.url))
 }
 
 /// Fill a link template: `{host}`, `{id}` (12 chars), `{name}`.

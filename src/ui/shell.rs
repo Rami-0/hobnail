@@ -24,6 +24,18 @@ use crate::util::human_bytes;
 /// styles that only make sense with scripting.
 const BOOT_JS: &str = "var d=document.documentElement;d.classList.add('js');try{var t=localStorage.getItem('rh-theme');if(t)d.dataset.theme=t;if(localStorage.getItem('rh-side')==='rail')d.dataset.side='rail'}catch(e){}";
 
+/// Runs right after the sidebar is parsed, before first paint (rendering
+/// waits for `#hb-end`): the stacks this browser folded, the remembered tree
+/// filter, the tree's scroll position from the last page with the open
+/// container's item kept in view (NAV-24), and the live indicator, which the
+/// server renders as "live" and which says "connecting" only when the
+/// script has not reported the stream within 1.5 s (`app.js` sets
+/// `window.HB_LIVE` on its first word about the stream). When `app.js`
+/// never ran (blocked or failed: no `window.HB` once the document is
+/// parsed) the indicator is hidden: nothing would update the page. `app.js` repeats
+/// the tree part after live updates; the two must agree.
+const SHELL_JS: &str = "(function(){var d=document,t=d.getElementById('tree'),f=d.getElementById('tree-filter');var nl=function(){var l=d.getElementById('live');if(l&&!window.HB)l.hidden=true;return!l||!window.HB};d.addEventListener('DOMContentLoaded',nl);setTimeout(function(){var l=d.getElementById('live');if(window.HB_LIVE||nl())return;l.firstChild.className='dot off';l.lastChild.textContent='connecting';l.title='Live updates: connecting'},1500);if(!t)return;var S=t.querySelectorAll('details.stack');try{var c=JSON.parse(localStorage.getItem('rh-tree')||'{}')||{};S.forEach(function(s){if(c[s.dataset.k]&&!s.querySelector('a[aria-current]'))s.open=false})}catch(e){}try{var q=sessionStorage.getItem('rh-tree-q')||'',v=q.trim().toLowerCase(),any=false;if(f&&v){f.value=q;S.forEach(function(s){var k=s.dataset.k.toLowerCase().indexOf(v)>=0,hit=false;s.querySelectorAll('li.ctr').forEach(function(li){var ok=k||li.dataset.s.indexOf(v)>=0;li.hidden=!ok;hit=hit||ok});s.hidden=!hit;any=any||hit;if(hit)s.open=true});var n=t.querySelector('.tree-none');if(n)n.hidden=any}}catch(e){}try{var y=+sessionStorage.getItem('rh-tree-y')||0;if(y)t.scrollTop=y;var a=t.querySelector('a[aria-current]');if(a&&t.clientHeight){var r=a.getBoundingClientRect(),b=t.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)t.scrollTop+=r.top-b.top-b.height/3}}catch(e){}})()";
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Nav {
     Overview,
@@ -36,6 +48,8 @@ pub enum Nav {
     Host,
     /// `/logs` and the per-container / per-stack log pages.
     Logs,
+    /// `/more`: the phone drawer's contents as a page (ROB-16).
+    More,
 }
 
 /// Everything a page needs to know about the request.
@@ -130,7 +144,11 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
     crate::ui::view::seed_cpu(ctx.state, &mut sys, ctx.now as i64);
     let strips = crate::ui::view::strips(ctx.state, ctx.now as i64);
     let refresh = ctx.cfg.system.refresh.0.as_secs().max(1);
-    let active_ctr = ctx.path.strip_prefix("/containers/").map(url_decode);
+    // A container's pages, its logs (the Logs tab) included, mark it in the tree.
+    let active_ctr = ctx
+        .path
+        .strip_prefix("/containers/")
+        .map(|p| url_decode(p.strip_suffix("/logs").unwrap_or(p)));
     let firing = ctx.state.alerts.lock().unwrap().incidents.len();
     let now = ctx.now as i64;
     let markup = html! {
@@ -140,19 +158,31 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="dark light";
-                meta name="theme-color" content="#0b0e13";
+                meta name="theme-color" content="#1D1210";
                 link rel="manifest" href="/manifest.webmanifest";
                 link rel="apple-touch-icon" href="/apple-touch-icon.png";
                 @if let Some(t) = &ctx.csrf { meta name="rh-csrf" content=(t); }
                 title { (doc_title) " · " (site) " · Hobnail" }
                 link rel="icon" href=(crate::ui::FAVICON);
-                // Inlined: one render-blocking request fewer.
-                style { (PreEscaped(crate::http::server::APP_CSS)) }
+                // One cached file (immutable, by content hash), not ~110 KB inlined
+                // in every page: each navigation parses that much less HTML
+                // (measured: no slower on a first visit, no unstyled frame,
+                // since a stylesheet in the head holds the first paint).
+                link rel="stylesheet" href={"/static/app.css?v=" (crate::http::server::APP_CSS_V)};
                 @if has_custom_css { link rel="stylesheet" href="/custom.css"; }
                 script { (PreEscaped(BOOT_JS)) }
+                // One swap per page change: Chromium keeps the previous page
+                // on screen until the whole document is parsed (`#hb-end`),
+                // then paints once; the deferred app script runs before that
+                // paint in practice (scripts/smooth-check.mjs; holding the
+                // paint for it measured no better). Without support pages
+                // render as they arrive, as before.
+                link rel="expect" href="#hb-end" blocking="render";
             }
             body data-started=(ctx.state.started_unix) data-now=(ctx.now) data-sha=(sha)
                  data-search-url=(ctx.cfg.page.search_url) data-path=(ctx.path) data-refresh=(refresh) {
+                // Before the first icon that uses it: icons are in the first paint.
+                (sheet())
                 a.skip href="#main" { "Skip to content" }
                 div.app {
                     aside #side.side aria-label="Sidebar" {
@@ -161,8 +191,10 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                 (logo())
                                 span.brand-name { "Hobnail" span.brand-site { (site) } }
                             }
-                            button.icon-btn.rail-toggle type="button" #rail-toggle
+                            button.icon-btn.rail-toggle.js-only type="button" #rail-toggle
                                 aria-label="Collapse sidebar" title="Collapse sidebar" aria-pressed="false" { (ic("panel")) }
+                            // The phone drawer's own close control (NAV-34).
+                            button.icon-btn.side-close.js-only type="button" data-act="side-close" aria-label="Close menu" title="Close" { (ic("x")) }
                         }
                         nav.nav aria-label="Main" {
                             @for (n, href, label, icon) in NAV {
@@ -172,6 +204,13 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                     span.nav-label { (label) }
                                     @if *n == Nav::Alerts { (nav_alerts(firing)) }
                                 }
+                            }
+                            // The rail's way to the stacks (NAV-27): the script
+                            // expands the sidebar with focus in its filter;
+                            // without it, the plain page that lists them.
+                            a.nav-item.rail-only href="/more" data-act="rail-stacks" data-rtip="Stacks" {
+                                (ic("filter"))
+                                span.nav-label { "Stacks and containers" }
                             }
                         }
                         div.tree-wrap {
@@ -187,32 +226,36 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                             (tree_inner(&ctx.cfg, &snap, &groups, active_ctr.as_deref(), Some(&strips)))
                         }
                         div.side-foot {
-                            span.live #live title="Live updates" { span.dot.off {} span.live-t { "connecting" } }
-                            button.linklike.keys-btn type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
+                            // "live" from the start (no flip on every page
+                            // load); SHELL_JS and app.js say otherwise.
+                            span.live.js-only #live title="Live updates: live" { span.dot.ok {} span.live-t { "live" } }
+                            button.linklike.keys-btn.js-only type="button" data-act="keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" { (ic("keyboard")) }
                             span.ver title={"built " (ctx.state.build.time)} {
                                 "v" (ctx.state.build.version) " · " code { (sha) }
                             }
                         }
+                        script { (PreEscaped(SHELL_JS)) }
                     }
                     div.scrim #scrim {}
                     div.col {
                         header.top {
-                            button.icon-btn.menu-btn type="button" #menu-btn aria-label="Open sidebar"
-                                aria-controls="side" aria-expanded="false" { (ic("menu")) }
                             div.crumbs { (heading) }
-                            button.cmd type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
+                            button.cmd.js-only type="button" #cmd aria-haspopup="dialog" aria-controls="palette" aria-label="Search and commands (Ctrl K)" {
                                 (ic("search"))
                                 span.cmd-t { "Search or jump to…" }
                                 kbd.cmd-k { "Ctrl K" }
                             }
                             (vitals(&ctx.cfg, sys.as_ref(), Some((&ctx.state.db, now))))
-                            button.icon-btn #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
+                            button.icon-btn.js-only #theme type="button" aria-label="Theme: auto. Click to change" title="Theme" {
                                 span.th.th-auto { (ic("monitor")) }
                                 span.th.th-dark { (ic("moon")) }
                                 span.th.th-light { (ic("sun")) }
                                 span.th.th-ember { (ic("flame")) }
                                 span.th.th-contrast { (ic("contrast")) }
                             }
+                            // NAV-73: an installed app (standalone) has no
+                            // browser reload: a button, shown only there.
+                            button.icon-btn.pwa-reload.js-only type="button" data-act="reload" aria-label="Reload this page" title="Reload" { (ic("refresh")) }
                             (account(ctx))
                         }
                         main #main tabindex="-1" {
@@ -225,6 +268,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                     }
                                 }
                             }
+                            (docker_banner(&ctx.cfg, &snap))
                             (main)
                         }
                     }
@@ -232,8 +276,11 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 (bottom_bar(nav, firing))
                 (palette_shell())
                 (keys_dialog())
-                (sheet())
-                script src={"/static/app.js?v=" (sha)} defer {}
+                // After the pages' own deferred scripts (settings.js wraps
+                // EventSource before this one opens the stream).
+                script src={"/static/app.js?v=" (crate::http::server::APP_JS_V)} defer {}
+                // The last element: first paint waits for it (see the head).
+                div #hb-end hidden {}
             }
         }
     };
@@ -241,7 +288,9 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
 }
 
 /// Phone navigation (under 700 px): the four places you go most, and
-/// "More", which opens the sidebar drawer.
+/// "More", the only way into the drawer (Y3, NAV-35): a link to `/more`, the
+/// drawer's contents as a page (ROB-16), which the script turns into the
+/// drawer. It is current on the pages it holds (NAV-31).
 fn bottom_bar(nav: Nav, firing: usize) -> Markup {
     let item = |n: Nav, href: &str, label: &str, icon: &str| {
         html! {
@@ -257,7 +306,10 @@ fn bottom_bar(nav: Nav, firing: usize) -> Markup {
             (item(Nav::Containers, "/containers", "Containers", "box"))
             (item(Nav::Logs, "/logs", "Logs", "logs"))
             (item(Nav::Alerts, "/alerts", "Alerts", "bell"))
-            button.bb-i type="button" data-act="more" aria-controls="side" { (ic("more")) span { "More" } }
+            a.bb-i href="/more" data-act="more" aria-controls="side" aria-expanded="false"
+                aria-current=[matches!(nav, Nav::Host | Nav::History | Nav::Settings | Nav::More).then_some("page")] {
+                (ic("more")) span { "More" }
+            }
         }
     }
 }
@@ -280,14 +332,16 @@ fn keys_dialog() -> Markup {
                 (row(&["g", "c"], "Containers"))
                 (row(&["g", "h"], "Host"))
                 (row(&["g", "l"], "Logs"))
+                (row(&["g", "y"], "History"))
                 (row(&["g", "a"], "Alerts"))
                 (row(&["g", "s"], "Settings"))
-                (row(&["j"], "Next row"))
+                (row(&["j"], "Next row that opens something"))
                 (row(&["k"], "Previous row"))
                 (row(&["↵"], "Open the row"))
                 (row(&["l"], "Logs of the focused or open container"))
-                (row(&["/"], "Filter this page"))
-                (row(&["Ctrl", "K"], "Search and commands"))
+                // The script names this page's filter (NAV-62).
+                div.kr { dt { kbd { "/" } } dd data-k="slash" { "This page's filter, or search and commands" } }
+                div.kr { dt { kbd.mod { "Ctrl" } " " kbd { "K" } } dd { "Search and commands" } }
                 (row(&["?"], "This list"))
                 (row(&["Esc"], "Close"))
             }
@@ -299,6 +353,27 @@ fn logo() -> Markup {
     PreEscaped(crate::ui::pwa::ICON_SVG.to_string())
 }
 
+/// Docker cannot be reached: one plain sentence on every page, with what to
+/// check, and the raw error behind a disclosure (ROB-09). Live region
+/// `dk-err`, re-rendered with the tree, so it comes and goes on its own.
+pub fn docker_banner(cfg: &Config, snap: &Snapshot) -> Markup {
+    html! {
+        div #dk-err {
+            @if let Some(e) = snap.error.as_ref().filter(|_| cfg.docker.enabled) {
+                div.banner.bad role="alert" {
+                    (ic("alert"))
+                    div {
+                        strong { "Hobnail cannot reach Docker." }
+                        " Is the Docker socket mounted and readable?"
+                        @if !snap.containers.is_empty() { " Containers show their last known state." }
+                        details.dk-raw { summary { "Details" } code.wrap { (e) } }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The count badge next to "Alerts" in the nav (live region `nav-al`).
 pub fn nav_alerts(firing: usize) -> Markup {
     html! {
@@ -308,27 +383,66 @@ pub fn nav_alerts(firing: usize) -> Markup {
     }
 }
 
+/// Signed in: the account menu (who, Sign out; Settings is in the sidebar,
+/// Y4). Signed out: a plain "Sign in" link back to this page (NAV-43).
 fn account(ctx: &Ctx) -> Markup {
+    let Some(u) = &ctx.user else {
+        return html! {
+            div.acct #account {
+                a.btn.sm.ghost.acct-in href={"/login?next=" (url_encode(&next_of(ctx)))} { (ic("log-in")) span { "Sign in" } }
+            }
+        };
+    };
     html! {
-        div.menu #account {
-            button.icon-btn.menu-btn-acct type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
-                aria-label={"Account" @if let Some(u) = &ctx.user { ": " (u) }}
-                title=(ctx.user.as_deref().unwrap_or("Account")) {
+        div.acct #account {
+            button.icon-btn.menu-btn-acct.js-only type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu"
+                aria-label={"Account: " (u)} title=(u) {
                 (ic("user"))
-                @if ctx.user.is_some() { span.signed {} }
+                span.signed {}
             }
             div.menu-body #account-menu role="menu" hidden {
-                @if let Some(u) = &ctx.user {
-                    div.menu-who { "Signed in as " strong { (u) } }
-                    a.menu-item role="menuitem" href="/settings" { (ic("sliders")) "Settings" }
-                    button.menu-item role="menuitem" type="button" data-act="logout" { (ic("log-out")) "Sign out" }
-                } @else {
-                    div.menu-who { "Viewing is open. Changing settings needs a login." }
-                    a.menu-item role="menuitem" href={"/login?next=" (url_encode(&next_of(ctx)))} { (ic("log-in")) "Sign in" }
-                }
+                div.menu-who { "Signed in as " strong { (u) } }
+                button.menu-item role="menuitem" type="button" data-act="logout" { (ic("log-out")) "Sign out" }
             }
         }
     }
+}
+
+/// `/more`: everything the phone drawer holds, as a plain page (ROB-16):
+/// every page, then each stack's containers with their logs. "More" links
+/// here; with the script it opens the drawer instead. Public, like the
+/// sidebar it copies.
+pub fn more_page(ctx: &Ctx) -> String {
+    let snap = ctx.state.snapshot();
+    let stats = crate::ui::view::stats_with_history(ctx.state, &snap);
+    let groups = crate::ui::view::build_groups(&ctx.cfg, &snap, &stats, ctx.host);
+    let body = html! {
+        div.page.more-page {
+            nav.more-nav aria-label="All pages" {
+                ul {
+                    @for (_, href, label, icon) in NAV {
+                        li { a href=(href) { (ic(icon)) span { (label) } } }
+                    }
+                }
+            }
+            @for g in groups.iter().filter(|g| g.cards.iter().any(|c| c.container)) {
+                section.panel.more-stack aria-label=(g.title) {
+                    h2 { (g.title) }
+                    ul {
+                        @for c in g.cards.iter().filter(|c| c.container) {
+                            li.rl {
+                                (status_dot(c))
+                                a.row-link href={"/containers/" (url_encode(&c.name))} { (c.title) }
+                                @if !c.running { span.sr { " (" (c.label) ")" } }
+                                a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    layout(ctx, Nav::More, "More", html! { h1.title { "More" } }, body)
 }
 
 fn next_of(ctx: &Ctx) -> String {
@@ -351,14 +465,15 @@ fn palette_shell() -> Markup {
                     (ic("search"))
                     input #pal-q type="text" autocomplete="off" spellcheck="false"
                         placeholder="Containers, pages, bookmarks, actions… or search the web"
-                        role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list";
-                    kbd { "Esc" }
+                        role="combobox" aria-expanded="false" aria-controls="pal-list" aria-autocomplete="list";
+                    kbd.pal-esc { "Esc" }
+                    button.icon-btn.pal-x type="button" data-act="pal-close" aria-label="Close search" { (ic("x")) }
                 }
                 ul.pal-list #pal-list role="listbox" aria-label="Results" {}
                 div.pal-foot {
                     span { kbd { "↑" } kbd { "↓" } " move" }
                     span { kbd { "↵" } " open" }
-                    span { kbd { "⇧↵" } " details" }
+                    span { kbd { "Home" } kbd { "End" } " first, last" }
                     span { kbd { "Esc" } " close" }
                 }
             }
@@ -399,7 +514,7 @@ pub fn vitals(cfg: &Config, s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> 
         |key: &str, label: &str, v: Option<f64>, tip: String, color: &str, h: Option<String>| {
             let lv = level(v);
             html! {
-                a.chip.(lv) href="/history" title=(tip) {
+                a.chip.(lv) href="/host" title=(tip) {
                     span.chip-l { (label) }
                     b.num { @match v { Some(v) => { (format!("{v:.0}")) "%" } None => { "—" } } }
                     @if !lv.is_empty() { span.sr { " (high)" } }
@@ -506,29 +621,39 @@ fn tree_inner(
                 @let ctrs: Vec<&CardView> = g.cards.iter().filter(|c| c.container).collect();
                 @let has_active = active.is_some_and(|a| ctrs.iter().any(|c| c.name == a));
                 @let trouble = ctrs.iter().any(|c| matches!(c.label, "unhealthy" | "restarting" | "dead"));
-                details.stack data-k=(g.name) open {
+                // Stack logs only where a compose project of that name exists
+                // (a config group has no `/stacks/<x>/logs`, LG-09).
+                @let project = crate::logs::is_project(cfg, snap, &g.name);
+                // Keyed (HB.morph): a stack and a container keep their
+                // nodes, focus and open state when the order changes.
+                details.stack data-k=(g.name) data-key={"s:" (g.name)} open {
                     summary.cur[has_active] {
                         (ic("chev-r"))
-                        span.stack-name title=(g.title) { (g.title) }
+                        // The name opens the stack in the table; the chevron folds (NAV-25).
+                        a.stack-name href={"/containers?stack=" (url_encode(&g.name))} title=(g.title) { (g.title) }
                         @if trouble { span.dot.bad role="img" aria-label="problem in this stack" {} }
                         span.cnt.num.all-up[g.running == ctrs.len()] title={(g.running) " of " (ctrs.len()) " running"} {
                             (g.running) "/" (ctrs.len())
                         }
-                        a.icon-btn.sm.stack-logs href=(crate::logs::stack_logs_url(&g.name))
-                            title={"Logs of " (g.title)} aria-label={"Logs of " (g.title)} { (ic("logs")) }
+                        @if project {
+                            a.ia.logs href=(crate::logs::stack_logs_url(&g.name))
+                                title="Logs of the whole stack" aria-label={"Logs of the stack " (g.title)} { (ic("logs")) }
+                        }
                         @if let Some(st) = strips.filter(|st| !st.by_name.is_empty()) {
                             (health_strip(&stack_strip(st, g), st, &g.title, StripStyle::Runs))
                         }
                     }
                     ul {
                         @for c in ctrs {
-                            li.ctr.stopped[!c.running] data-s=(c.search.to_lowercase()) {
+                            li.ctr.stopped[!c.running] data-key=(c.name) data-s=(c.search.to_lowercase()) {
                                 a href={"/containers/" (url_encode(&c.name))} title=(c.name)
                                     aria-current=[(active == Some(c.name.as_str())).then_some("page")] {
                                     (status_dot(c))
                                     span.nm { (c.title) }
                                     @if !c.running { span.sr { " (" (c.label) ")" } }
                                 }
+                                a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs"
+                                    aria-label={"Logs of " (c.title)} { (ic("logs")) }
                             }
                         }
                     }
@@ -583,10 +708,17 @@ mod tests {
             "{html}"
         );
         assert!(
-            html.contains(r#"<details class="stack" data-k="shop" open>"#),
+            html.contains(r#"<details class="stack" data-k="shop" data-key="s:shop" open>"#),
             "{html}"
         );
         assert!(html.contains(r#"<summary class="cur">"#), "{html}");
+        // The stack's name opens it in the table; the chevron folds (NAV-25).
+        assert!(
+            html.contains(
+                r#"<a class="stack-name" href="/containers?stack=shop" title="shop">shop</a>"#
+            ),
+            "{html}"
+        );
         assert!(html.contains(r#"aria-current="page""#));
         assert!(html.contains(">1/2<"), "{html}");
         // Stopped containers are dimmed and say so in text.
@@ -596,6 +728,34 @@ mod tests {
         assert!(!html.contains("<b>x</b>"));
         assert!(html.contains("&lt;b&gt;x&lt;/b&gt;"));
         assert!(html.contains("/containers/%3Cb%3Ex%3C%2Fb%3E"), "{html}");
+        // Every item: one click to its logs, a sibling of the item's link,
+        // visible at rest (NAV-05, NAV-07).
+        assert!(html.contains(r#"</a><a class="ia logs" href="/containers/web/logs" title="Logs" aria-label="Logs of web">"#), "{html}");
+        assert!(html.contains(r#"href="/containers/%3Cb%3Ex%3C%2Fb%3E/logs""#));
+        assert!(html.contains(r#"<a class="ia logs" href="/stacks/shop/logs""#));
+    }
+
+    /// Stack logs only for a compose project; a config group gets none (LG-09).
+    #[test]
+    fn stack_logs_only_for_compose_projects() {
+        let snap = Snapshot {
+            containers: vec![c("web", "shop", "running"), c("mon", "x", "running")],
+            fetched_at: 1,
+            error: None,
+        };
+        let cfg = crate::config::parse(
+            "[[groups]]\nname = \"tools\"\n[containers.mon]\ngroup = \"tools\"\n",
+            "c.toml",
+        )
+        .unwrap();
+        let groups = build_groups(&cfg, &snap, &StatsMap::new(), "h");
+        let html = tree_inner(&cfg, &snap, &groups, None, None).into_string();
+        assert!(html.contains("/stacks/shop/logs"));
+        assert!(!html.contains("/stacks/tools/logs"), "{html}");
+        assert!(
+            html.contains("/containers/mon/logs"),
+            "its container still has logs"
+        );
     }
 
     #[test]
@@ -631,6 +791,9 @@ mod tests {
         assert!(html.contains("95%"));
         assert!(html.contains("(high)"), "never colour only");
         assert!(html.contains("4.0 GiB of 8.0 GiB"));
+        // The chips open the Host page (NAV-40).
+        assert_eq!(html.matches(r#"href="/host""#).count(), 3, "{html}");
+        assert!(!html.contains("/history"));
         let mut off = Config::default();
         off.system.enabled = false;
         assert_eq!(
@@ -639,24 +802,47 @@ mod tests {
         );
     }
 
-    /// Theme token sets parsed from `static/app.css`: `name -> var -> rgb`.
-    fn themes() -> Vec<(String, std::collections::HashMap<String, [f64; 3]>)> {
-        let css = include_str!("../../static/app.css");
+    const APP_CSS_SRC: &str = include_str!("../../static/app.css");
+
+    /// The theme blocks of `static/app.css` (DESIGN.md §11.2), by name. The
+    /// bare `[data-theme=x]` selectors let a preview show another theme
+    /// inside a page; "auto-light" is the OS-light block.
+    const THEME_BLOCKS: &[(&str, &str)] = &[
+        ("\n:root,[data-theme=dark]{", "dark"),
+        ("\n[data-theme=light]{", "light"),
+        ("\n[data-theme=ember]{", "ember"),
+        ("\n[data-theme=contrast]{", "contrast"),
+        (
+            "@media (prefers-color-scheme:light){:root:not([data-theme]),[data-theme=auto]{",
+            "auto-light",
+        ),
+    ];
+
+    /// The six surfaces text and controls sit on.
+    const SURFACES: &[&str] = &[
+        "--bg",
+        "--bg-side",
+        "--surface",
+        "--surface-2",
+        "--raised",
+        "--field",
+    ];
+
+    type Tokens = std::collections::HashMap<String, [f64; 3]>;
+
+    /// The body of the block that starts with `sel`, up to its first `}`.
+    fn block<'c>(css: &'c str, sel: &str) -> &'c str {
+        let start = css.find(sel).unwrap_or_else(|| panic!("no block {sel}")) + sel.len();
+        &css[start..start + css[start..].find('}').unwrap()]
+    }
+
+    /// Theme token sets parsed from `static/app.css`: `name -> var -> rgb`
+    /// (only the plain hex values; the test needs every colour token as hex).
+    fn themes() -> Vec<(String, Tokens)> {
         let mut out = Vec::new();
-        for (sel, name) in [
-            (":root,:root[data-theme=dark]{", "dark"),
-            (":root[data-theme=light]{", "light"),
-            (":root[data-theme=ember]{", "ember"),
-            (":root[data-theme=contrast]{", "contrast"),
-            (
-                ":root[data-theme=auto],:root:not([data-theme]){",
-                "auto-light",
-            ),
-        ] {
-            let start = css.find(sel).unwrap_or_else(|| panic!("no block {sel}")) + sel.len();
-            let body = &css[start..start + css[start..].find('}').unwrap()];
-            let mut vars = std::collections::HashMap::new();
-            for decl in body.split(';') {
+        for (sel, name) in THEME_BLOCKS {
+            let mut vars = Tokens::new();
+            for decl in block(APP_CSS_SRC, sel).split(';') {
                 let Some((k, v)) = decl.trim().split_once(':') else {
                     continue;
                 };
@@ -687,54 +873,730 @@ mod tests {
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
     }
 
-    /// WCAG contrast for every theme: body text 4.5:1 (7:1 in high
-    /// contrast), status text and links 4.5:1, UI parts (status dots, input
-    /// borders, chart lines) 3:1. Run with `--nocapture` to print the table.
+    /// WCAG contrast for every theme (DESIGN.md §11.2) on all six surfaces:
+    /// body, secondary and muted text 4.5:1 (7:1 in high contrast); links and
+    /// status text 4.5:1; UI parts (accent, focus ring, status dots, the
+    /// stopped dot, chart series) 3:1; `--ctl-border` (inputs, selects,
+    /// checkboxes, outlined buttons, switches) 3:1; text on the accent and on
+    /// a danger fill 4.5:1. The OS-light block must equal Light. Run with
+    /// `--nocapture` to print the worst value per pair.
     #[test]
     fn theme_contrast() {
         let ts = themes();
+        assert_eq!(
+            ts.iter().map(|t| t.0.as_str()).collect::<Vec<_>>(),
+            ["dark", "light", "ember", "contrast", "auto-light"]
+        );
         let light = &ts.iter().find(|t| t.0 == "light").unwrap().1;
         let auto = &ts.iter().find(|t| t.0 == "auto-light").unwrap().1;
         assert_eq!(light, auto, "the OS-light block must equal the light theme");
         for (name, v) in &ts {
-            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no {k}"));
-            let body_min = if name == "contrast" { 7.0 } else { 4.5 };
-            let mut worst = f64::INFINITY;
-            for bg in ["--bg", "--bg-side", "--surface", "--surface-2", "--raised"] {
-                for fg in ["--text", "--text-2", "--text-3"] {
-                    let r = contrast(get(fg), get(bg));
-                    worst = worst.min(r);
-                    assert!(
-                        r >= body_min,
-                        "{name}: {fg} on {bg} is {r:.2}:1, needs {body_min}"
-                    );
-                }
-                for fg in ["--accent-fg", "--ok-fg", "--warn-fg", "--bad-fg"] {
-                    if bg == "--surface-2" {
-                        continue; // status text never sits on hover surfaces alone
-                    }
-                    let r = contrast(get(fg), get(bg));
-                    assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1");
-                }
-                for ui in [
-                    "--ok", "--warn", "--bad", "--accent", "--ctl", "--ch-cpu", "--ch-mem",
-                ] {
-                    if bg == "--surface-2" {
-                        continue;
-                    }
-                    let r = contrast(get(ui), get(bg));
-                    assert!(r >= 3.0, "{name}: {ui} on {bg} is {r:.2}:1 (UI needs 3)");
+            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no hex {k}"));
+            let worst = |fg: &str| {
+                SURFACES
+                    .iter()
+                    .map(|bg| (contrast(get(fg), get(bg)), *bg))
+                    .fold((f64::INFINITY, ""), |a, b| if b.0 < a.0 { b } else { a })
+            };
+            let text_min = if name == "contrast" { 7.0 } else { 4.5 };
+            let mut line = Vec::new();
+            for (fgs, need) in [
+                (&["--text", "--text-2", "--text-3"][..], text_min),
+                (
+                    &["--accent-fg", "--ok-fg", "--warn-fg", "--bad-fg"][..],
+                    4.5,
+                ),
+                (
+                    &[
+                        "--accent",
+                        "--focus",
+                        "--ok",
+                        "--warn",
+                        "--bad",
+                        "--off",
+                        "--ctl-border",
+                        "--ch-cpu",
+                        "--ch-mem",
+                        "--ch-rx",
+                        "--ch-tx",
+                        "--ch-temp",
+                        "--ch-load",
+                        "--ch-swap",
+                        "--ch-disk",
+                    ][..],
+                    3.0,
+                ),
+            ] {
+                for fg in fgs {
+                    let (r, bg) = worst(fg);
+                    assert!(r >= need, "{name}: {fg} on {bg} is {r:.2}:1, needs {need}");
+                    line.push(format!("{fg} {r:.2}"));
                 }
             }
-            let on = contrast(get("--on-accent"), get("--accent-bg"));
-            assert!(on >= 4.5, "{name}: button text {on:.2}:1");
-            println!(
-                "{name:>10}: text {:.1}, text-2 {:.1}, text-3 {:.1} on surface; worst body {worst:.2}; button {on:.1}",
-                contrast(get("--text"), get("--surface")),
-                contrast(get("--text-2"), get("--surface")),
-                contrast(get("--text-3"), get("--surface")),
+            for (fg, bg) in [
+                ("--on-accent", "--accent"),
+                ("--on-accent", "--accent-hover"),
+                ("--on-bad", "--bad"),
+            ] {
+                let r = contrast(get(fg), get(bg));
+                assert!(r >= 4.5, "{name}: {fg} on {bg} is {r:.2}:1, needs 4.5");
+                line.push(format!("{fg}/{bg} {r:.2}"));
+            }
+            println!("{name:>10}: {}", line.join(", "));
+        }
+    }
+
+    /// `--ctl-border` is the boundary of every control: 3:1 against each
+    /// surface a control can sit on, in every theme (A11Y-12, A11Y-17). The
+    /// brand `--border` is decorative only and is allowed to be lower.
+    #[test]
+    fn control_border_is_3_to_1_on_every_surface() {
+        for (name, v) in themes() {
+            let get = |k: &str| *v.get(k).unwrap_or_else(|| panic!("{name}: no hex {k}"));
+            let worst = SURFACES
+                .iter()
+                .map(|bg| contrast(get("--ctl-border"), get(bg)))
+                .fold(f64::INFINITY, f64::min);
+            assert!(worst >= 3.0, "{name}: --ctl-border worst {worst:.2}:1");
+            println!("{name:>10}: --ctl-border worst {worst:.2}");
+        }
+    }
+
+    /// Every theme sets the same colour tokens, so switching theme never
+    /// leaves a value from the previous one behind.
+    #[test]
+    fn every_theme_sets_the_same_tokens() {
+        let ts = themes();
+        let keys = |t: &Tokens| {
+            let mut k: Vec<String> = t.keys().cloned().collect();
+            k.sort();
+            k
+        };
+        let dark = keys(&ts[0].1);
+        assert_eq!(dark.len(), 33, "{dark:?}");
+        for (name, t) in &ts {
+            assert_eq!(keys(t), dark, "{name}");
+        }
+        // Non-hex tokens are per theme too.
+        for (sel, name) in THEME_BLOCKS {
+            let b = block(APP_CSS_SRC, sel);
+            for k in [
+                "--tint:",
+                "--tint-2:",
+                "--scrim:",
+                "--shadow-1:",
+                "--shadow-2:",
+                "--shadow-3:",
+                "color-scheme:",
+            ] {
+                assert!(b.contains(k), "{name}: no {k}");
+            }
+        }
+    }
+
+    /// The retired names stay readable from a user's custom.css (§11.2,
+    /// Y20): each is an alias of its new token, declared on every theme
+    /// root, and no theme block sets the old name itself.
+    #[test]
+    fn old_token_names_are_aliases() {
+        assert!(block(APP_CSS_SRC, "\n:root{").contains("--fs-label:var(--fs-micro)"));
+        let aliases = block(APP_CSS_SRC, "\n:root,[data-theme]{");
+        for (old, new) in [
+            ("--ctl", "var(--ctl-border)"),
+            ("--border-2", "var(--ctl-border)"),
+            ("--accent-bg", "var(--accent)"),
+            ("--glow", "transparent"),
+            ("--pop", "var(--shadow-2)"),
+        ] {
+            assert!(
+                aliases.split(';').any(|d| d == format!("{old}:{new}")),
+                "{old} -> {new} in {aliases}"
+            );
+            for (sel, name) in THEME_BLOCKS {
+                assert!(
+                    !block(APP_CSS_SRC, sel).contains(&format!("{old}:")),
+                    "{name} sets {old}"
+                );
+            }
+        }
+        // The app's own CSS uses only the new names.
+        for (file, css) in [
+            ("app.css", APP_CSS_SRC),
+            (
+                "components.css",
+                include_str!("../../static/components.css"),
+            ),
+            ("settings.css", include_str!("../../static/settings.css")),
+            ("logs.css", include_str!("../../static/logs.css")),
+            ("page css", crate::http::server::APP_CSS),
+        ] {
+            for old in ["--ctl)", "--border-2)", "--accent-bg)", "--glow)", "--pop)"] {
+                assert!(
+                    !css.contains(&format!("var({old}")),
+                    "{file} reads var({old}"
+                );
+            }
+        }
+    }
+
+    /// Every selector of a CSS file, flattened out of `@media` and
+    /// `@supports` blocks (keyframes and `@starting-style` bodies included,
+    /// which is harmless for the checks below).
+    fn selectors(css: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = css;
+        while let Some(i) = rest.find('{') {
+            let head = rest[..i].trim();
+            let head = head.rsplit_once("*/").map_or(head, |(_, h)| h);
+            let head = head.trim_start_matches(|c: char| c == '}' || c.is_whitespace());
+            let head = head.trim();
+            rest = &rest[i + 1..];
+            if head.starts_with('@') {
+                continue; // descend: the next '{' opens the first inner rule
+            }
+            let end = rest.find('}').unwrap_or(rest.len());
+            rest = &rest[(end + 1).min(rest.len())..];
+            // Split on top-level commas only (not inside `:is(...)`).
+            let (mut depth, mut from) = (0i32, 0);
+            for (i, c) in head.char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    ',' if depth == 0 => {
+                        out.push(head[from..i].trim().to_string());
+                        from = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            out.push(head[from..].trim().to_string());
+        }
+        out
+    }
+
+    /// The component layer does not restyle pages outside Settings. Field
+    /// controls are scoped to the dialog and to the Settings pages
+    /// (`.set-main`: since wave 2c every Settings form uses the component
+    /// markup, so settings.css no longer styles them) and the toast rules to
+    /// HB's own region. Fails if a selector naming one of those classes or a
+    /// checkbox escapes its scope.
+    #[test]
+    fn component_fields_and_toasts_stay_scoped() {
+        let css = include_str!("../../static/components.css");
+        let sels = selectors(css);
+        assert!(sels.len() > 150, "{}", sels.len());
+        let scoped = [
+            ".fld", ".in", ".sw", ".cb", ".choice", ".hint", ".fld-err", ".req", ".grid-2",
+            "checkbox", "radio",
+        ];
+        let (mut fields, mut toasts) = (0, 0);
+        for s in &sels {
+            let names = |tok: &str| {
+                s.match_indices(tok).any(|(i, _)| {
+                    let next = s[i + tok.len()..].chars().next();
+                    !matches!(next, Some(c) if c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                })
+            };
+            if scoped.iter().any(|t| names(t)) {
+                assert!(s.starts_with(":is(.dlg,.set-main) "), "unscoped: {s}");
+                fields += 1;
+            }
+            if names(".toast") || names(".toasts") {
+                assert!(s.starts_with("body>.toasts"), "unscoped toast: {s}");
+                toasts += 1;
+            }
+        }
+        assert!(
+            fields >= 30 && toasts >= 10,
+            "parser saw {fields} / {toasts}"
+        );
+        // Settings forms are the component markup: settings.css adds layout
+        // only and never a second look for the same controls.
+        for s in selectors(include_str!("../../static/settings.css")) {
+            let base = s.split([':', '[']).next().unwrap_or("");
+            assert!(
+                !matches!(
+                    base,
+                    ".fld"
+                        | ".in"
+                        | "select.in"
+                        | "textarea.in"
+                        | ".hint"
+                        | ".fld-err"
+                        | ".cb"
+                        | ".sw"
+                        | "input"
+                ),
+                "settings.css restyles a field control: {s}"
             );
         }
+        // No cross-document view transition: Chromium makes every link dead
+        // while one runs (measured by scripts/motion-check.mjs).
+        assert!(!css.contains("@view-transition{"));
+        assert!(!APP_CSS_SRC.contains("@view-transition"));
+    }
+
+    /// Motion (DESIGN.md §11.3): every transition and animation of every
+    /// shipped stylesheet takes its duration from the tokens; the only
+    /// literal durations are the ambient loops of busy indicators, which the
+    /// one reduced-motion rule stops. That rule is the only
+    /// `prefers-reduced-motion: reduce` block and sets every token to 0.
+    #[test]
+    fn motion_uses_the_tokens_and_one_reduced_motion_rule() {
+        use crate::http::server::{APP_CSS, LOGS_CSS, SETTINGS_CSS};
+        let all = format!("{APP_CSS}\n{LOGS_CSS}\n{SETTINGS_CSS}");
+        let literal = |w: &str| {
+            let n = w.trim_end_matches("ms").trim_end_matches('s');
+            n.len() < w.len() && !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.')
+        };
+        const LOOPS: &[&str] = &["spin", "sk", "nav", "sw-wait", "pulse"];
+        for prop in [
+            "transition:",
+            "transition-duration:",
+            "animation:",
+            "animation-duration:",
+        ] {
+            for (i, _) in all.match_indices(prop) {
+                let v = &all[i + prop.len()..];
+                let v = &v[..v.find([';', '}']).unwrap_or(v.len())];
+                // Split on the commas between layers, not those in cubic-bezier().
+                let mut parts = vec![String::new()];
+                let mut depth = 0;
+                for c in v.chars() {
+                    match c {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        ',' if depth == 0 => {
+                            parts.push(String::new());
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    parts.last_mut().unwrap().push(c);
+                }
+                for part in &parts {
+                    let words: Vec<&str> = part.split_whitespace().collect();
+                    let lit: Vec<&&str> = words
+                        .iter()
+                        .filter(|w| literal(w) && !matches!(**w, "0s" | "0ms"))
+                        .collect();
+                    if lit.is_empty() {
+                        continue;
+                    }
+                    let ambient =
+                        prop.starts_with("animation") && words.iter().any(|w| LOOPS.contains(w));
+                    // A start delay (the skeleton's 150 ms) is not a duration.
+                    let delay_only = part.contains("var(--dur-") && lit.len() == 1;
+                    assert!(ambient || delay_only, "a literal duration in `{prop}{v}`");
+                }
+            }
+        }
+        assert_eq!(
+            all.matches("prefers-reduced-motion:reduce").count(),
+            1,
+            "one reduced-motion rule"
+        );
+        let rm = &APP_CSS[APP_CSS
+            .find("@media (prefers-reduced-motion:reduce)")
+            .unwrap()..];
+        let rm = &rm[..rm.find("}}").unwrap() + 2];
+        for t in [
+            "--dur-1:0ms",
+            "--dur-2:0ms",
+            "--dur-3:0ms",
+            "--dur-4:0ms",
+            "animation-duration:0ms!important",
+            "transition-duration:0ms!important",
+            "scroll-behavior:auto!important",
+        ] {
+            assert!(rm.contains(t), "{t} in {rm}");
+        }
+        // Script-driven motion asks the same query.
+        let js = crate::http::server::APP_JS;
+        assert!(
+            js.contains("HB.dur = (n) => (calm.matches ? 0"),
+            "HB.dur follows reduced motion"
+        );
+        assert!(
+            !js.contains("behavior: \"smooth\"")
+                && !crate::http::server::SETTINGS_JS.contains("smooth"),
+            "no smooth scroll (A11Y-22)"
+        );
+        // Nothing on a live region animates its layout (meters change at once).
+        assert!(!all.contains("transition:width"), "no width transition");
+    }
+
+    /// A11Y-18: on touch and phones every control is a 44 px target by its
+    /// own size (the tokens), not by a hit area grown over its neighbours.
+    #[test]
+    fn touch_targets_are_44_by_size() {
+        let coarse = block(
+            APP_CSS_SRC,
+            "@media (pointer:coarse),(max-width:699px){:root{",
+        );
+        // (Controls grow past 44 px with a larger root font, A11Y-20.)
+        for t in [
+            "--ctl-h:max(44px,",
+            "--ctl-h-sm:max(44px,",
+            "--ia:44px",
+            "--hit:44px",
+        ] {
+            assert!(coarse.contains(t), "{t} in {coarse}");
+        }
+        let css = include_str!("../../static/components.css");
+        let touch = &css[css
+            .find("/* 44 px targets on touch and phones (A11Y-18)")
+            .expect("the touch block")..];
+        for sel in [
+            ".icon-btn",
+            ".crumb>a",
+            ".seg a",
+            ".tab",
+            ".nav-item",
+            ".linkbtn",
+        ] {
+            assert!(touch.contains(sel), "{sel} is sized on touch");
+        }
+        // No hit area that reaches over a neighbour.
+        for s in selectors(css) {
+            assert!(
+                !(s.ends_with("::after") && (s.contains(".linkbtn") || s.contains(".btn.sm"))),
+                "a grown hit area: {s}"
+            );
+        }
+        assert!(!css.contains("inset:-6px -13px -21px"));
+    }
+
+    /// NAV-56, NAV-60 to NAV-64: the shortcut sheet lists History (`g y`)
+    /// and lets the script say what `/` does here; the script's keys match.
+    #[test]
+    fn keyboard_sheet_and_map_agree() {
+        let sheet = keys_dialog().into_string();
+        assert!(
+            sheet.contains("<kbd>g</kbd> <kbd>y</kbd></dt><dd>History"),
+            "{sheet}"
+        );
+        assert!(sheet.contains(r#"<dd data-k="slash">"#));
+        assert!(sheet.contains(r#"<kbd class="mod">Ctrl</kbd>"#));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"y: "/history""#) && js.contains(r#"h: "/host""#));
+        // `/` never means the sidebar filter (NAV-56).
+        let slash = &js[js.find("const slashTarget").unwrap()..];
+        assert!(!slash[..slash.find('\n').unwrap()].contains("tree-filter"));
+        // j / k only over rows with a link (NAV-60); a checkbox keeps the keys (NAV-64).
+        assert!(js.contains(r#"shown(r) && r.querySelector("a[href]")"#));
+        assert!(js.contains("checkbox|radio|button"));
+    }
+
+    /// NAV-80, NAV-82, A11Y-09, A11Y-11: signing out stays on the page
+    /// (Settings goes to Overview) and says so; the login page has a way
+    /// back to `next`; the Settings lock panel's heading follows the h1;
+    /// the palette box is not "expanded" while closed.
+    #[test]
+    fn sign_in_and_out_paths() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let (_, login) =
+            crate::ui::pages::render(&Ctx::new(&st, "h", "/login", "next=%2Fhost", &h));
+        assert!(
+            login.contains(r#"<a class="btn ghost login-back" href="/host">Back</a>"#),
+            "{login}"
+        );
+        assert!(login.contains(r#"role="combobox" aria-expanded="false""#));
+        let (_, set) = crate::ui::pages::render(&Ctx::new(&st, "h", "/settings/general", "", &h));
+        assert!(set.contains(r#"<h2 id="lock-h">"#) && !set.contains("<h3 id=\"lock-h\""));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"? "/" : location.pathname + location.search"#));
+        assert!(js.contains(r#"HB.toast("Signed out""#));
+        assert!(!js.contains(r#"location.href = "/";"#));
+    }
+
+    /// ROB-17: the shell's controls that only the script can run are not
+    /// shown with JavaScript off (`.js-only`); their links keep working.
+    #[test]
+    fn script_only_shell_controls_hide_without_script() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let mut ctx = Ctx::new(&st, "h", "/", "", &h);
+        ctx.user = Some("admin".into());
+        let html = layout(&ctx, Nav::Overview, "t", html! {}, html! {});
+        for c in [
+            r#"class="icon-btn rail-toggle js-only""#,
+            r#"class="icon-btn side-close js-only""#,
+            r#"class="linklike keys-btn js-only""#,
+            r#"class="cmd js-only""#,
+            r#"class="icon-btn js-only" id="theme""#,
+            r#"class="icon-btn menu-btn-acct js-only""#,
+        ] {
+            assert!(html.contains(c), "{c}");
+        }
+        assert!(APP_CSS_SRC.contains("html:not(.js) .js-only{display:none!important}"));
+    }
+
+    /// A11Y-20: the shell, component and Settings CSS size text in rem, so
+    /// a larger default font size in the browser or OS scales the UI.
+    #[test]
+    fn type_sizes_are_in_rem() {
+        // Every stylesheet in static/ is listed below.
+        let shipped: Vec<String> =
+            std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/static"))
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".css"))
+                .collect();
+        assert_eq!(shipped.len(), 9, "{shipped:?}");
+        for (f, css) in [
+            ("app.css", APP_CSS_SRC),
+            (
+                "components.css",
+                include_str!("../../static/components.css"),
+            ),
+            ("settings.css", include_str!("../../static/settings.css")),
+            ("logs.css", include_str!("../../static/logs.css")),
+            ("widgets.css", include_str!("../../static/widgets.css")),
+            ("cards.css", include_str!("../../static/cards.css")),
+            ("alerts.css", include_str!("../../static/alerts.css")),
+            ("host.css", include_str!("../../static/host.css")),
+            ("detail.css", include_str!("../../static/detail.css")),
+        ] {
+            let mut rest = css;
+            while let Some(i) = rest.find("font") {
+                rest = &rest[i + 4..];
+                let decl = &rest[..rest.find([';', '}']).unwrap_or(rest.len())];
+                let size = if let Some(v) = decl.strip_prefix("-size:") {
+                    v
+                } else if let Some(v) = decl.strip_prefix(':') {
+                    // the shorthand's size: the word before "/" or the family
+                    v.split_whitespace()
+                        .map(|w| w.split('/').next().unwrap_or(""))
+                        .find(|w| {
+                            w.starts_with(|c: char| c.is_ascii_digit() || c == '.')
+                                && w.ends_with(|c: char| c.is_ascii_alphabetic() || c == '%')
+                        })
+                        .unwrap_or("")
+                } else {
+                    continue;
+                };
+                assert!(!size.trim().ends_with("px"), "{f}: font{decl}");
+            }
+        }
+    }
+
+    /// A11Y-20: boxes that hold a line of text grow with the root font size
+    /// (the same px at the default 14 px root): controls, the top bar, nav
+    /// items and the Settings tab column.
+    #[test]
+    fn text_boxes_follow_the_root_font_size() {
+        use crate::http::server::{APP_CSS, SETTINGS_CSS};
+        for want in [
+            "--ctl-h:max(32px,calc(32rem/14))",
+            "--ctl-h-sm:max(28px,calc(28rem/14))",
+            "--top-h:max(52px,calc(52rem/14))",
+            "--ctl-h:max(44px,calc(32rem/14))",
+            ".nav-item{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14))",
+        ] {
+            assert!(APP_CSS.contains(want), "{want}");
+        }
+        assert!(
+            SETTINGS_CSS.contains("grid-template-columns:max(200px,calc(200rem/14)) minmax(0,1fr)")
+        );
+        // LG-41: no empty cells at the end of a chart group.
+        assert!(APP_CSS.contains(".charts>.chart:last-child{grid-column-end:-1}"));
+        assert!(SETTINGS_CSS.contains(
+            ".set-nav a{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14))"
+        ));
+    }
+
+    /// A11Y-17: brand Accent and Error have the same luminance, so the
+    /// accent is never a status colour: no rule for a status class (ok,
+    /// warn, bad) in the shell or component CSS paints with the accent.
+    #[test]
+    fn accent_is_never_a_status_colour() {
+        use crate::http::server::{APP_CSS, LOGS_CSS, SETTINGS_CSS};
+        // Every stylesheet the app ships (shell, components and page parts).
+        for css in [APP_CSS, LOGS_CSS, SETTINGS_CSS] {
+            let mut rest = css;
+            while let Some(i) = rest.find('{') {
+                let head = rest[..i].rsplit(['}', '\n']).next().unwrap_or("");
+                let end = rest[i..].find('}').map_or(rest.len(), |e| i + e);
+                let body = &rest[i + 1..end];
+                let status = [".ok", ".warn", ".bad"].iter().any(|c| {
+                    head.match_indices(c).any(|(j, _)| {
+                        !matches!(head[j + c.len()..].chars().next(), Some(x) if x.is_ascii_alphanumeric() || x == '-' || x == '_')
+                    })
+                });
+                assert!(
+                    !(status && body.contains("var(--accent")),
+                    "a status painted with the accent: {head}{{{body}}}"
+                );
+                rest = &rest[(end + 1).min(rest.len())..];
+            }
+        }
+        // The Overview's "alert firing 10m" is a status in words: it is
+        // drawn in the error colour, not as an accent-coloured link.
+        let w = include_str!("../../static/widgets.css");
+        assert!(w.contains("\n.attn .when a.bad{color:var(--bad-fg)}"));
+    }
+
+    /// SET-41, SET-48, ROB-08: a long value never widens a Settings tab:
+    /// every cell may break anywhere and a row's name wraps inside a bounded
+    /// column (a fixed width: a percentage is ignored while the table sizes
+    /// its columns).
+    #[test]
+    fn settings_tables_wrap_long_values() {
+        let css = include_str!("../../static/settings.css");
+        assert!(css.contains("\n.set-main .tbl td{overflow-wrap:anywhere}"));
+        assert!(css.contains("\n.set-main .tbl .linkbtn{max-width:36ch}"));
+        let comp = include_str!("../../static/components.css");
+        assert!(
+            comp.contains(".linkbtn{display:inline-block;"),
+            "max-width needs a box"
+        );
+    }
+
+    /// ROB-03: the stack tree is the containing block of the visually
+    /// hidden text inside it, so items far down the scrolled tree never
+    /// stretch the page.
+    #[test]
+    fn tree_contains_its_hidden_text() {
+        let tree = block(APP_CSS_SRC, "\n.tree{");
+        assert!(tree.starts_with("position:relative;"), "{tree}");
+        assert!(tree.contains("overflow-y:auto"));
+    }
+
+    /// The account menu is not a `.menu`: that class is the popover menu of
+    /// the component layer (fixed, hidden until open).
+    #[test]
+    fn account_menu_does_not_use_the_popover_class() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/", "", &h);
+        let html = account(&ctx).into_string();
+        assert!(
+            html.starts_with(r#"<div class="acct" id="account">"#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"class="menu""#), "{html}");
+    }
+
+    /// Phone navigation: no hamburger; "More" is a link to `/more`, the
+    /// drawer's contents as a plain page (ROB-16, Y3), current on the pages
+    /// it holds (NAV-31). Signed out the account control is a plain "Sign
+    /// in" link (NAV-43); signed in its menu has no Settings item (Y4).
+    #[test]
+    fn phone_nav_and_account() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let get = |p: &str| crate::ui::pages::render(&Ctx::new(&st, "h", p, "", &h));
+        let (status, html) = get("/more");
+        assert_eq!(status, hyper::StatusCode::OK);
+        let more = r#"<a class="bb-i" href="/more" data-act="more" aria-controls="side" aria-expanded="false""#;
+        assert!(
+            html.contains(&format!(r#"{more} aria-current="page">"#)),
+            "{html}"
+        );
+        for (_, href, _, _) in NAV {
+            assert!(
+                html.contains(&format!(r#"<li><a href="{href}">"#)),
+                "/more lists {href}"
+            );
+        }
+        assert!(html.contains(r#"<a class="row-link" href="/containers/web">"#));
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/web/logs""#));
+        assert!(!html.contains("id=\"menu-btn\""), "no hamburger");
+        assert!(
+            html.contains(r#"data-act="side-close" aria-label="Close menu""#),
+            "the drawer's close control"
+        );
+        for p in ["/host", "/history", "/settings/general"] {
+            assert!(
+                get(p)
+                    .1
+                    .contains(&format!(r#"{more} aria-current="page">"#)),
+                "{p}"
+            );
+        }
+        let (_, html) = get("/containers");
+        assert!(
+            html.contains(&format!("{more}>")),
+            "not current on Containers"
+        );
+        assert!(
+            html.contains(r#"<a class="btn sm ghost acct-in" href="/login?next=%2Fcontainers">"#),
+            "{html}"
+        );
+        assert!(!html.contains("account-menu"));
+        // Signed in: who and Sign out, no Settings item.
+        let mut ctx = Ctx::new(&st, "h", "/", "", &h);
+        ctx.user = Some("admin".into());
+        let a = account(&ctx).into_string();
+        assert!(
+            a.contains("Signed in as")
+                && a.contains(r#"data-act="logout""#)
+                && !a.contains("/settings"),
+            "{a}"
+        );
+    }
+
+    /// The shell's state is in the first paint (ux-pass, "flicker"): the
+    /// inline script that folds stacks, restores the tree filter and scroll
+    /// and backs the live indicator runs right after the sidebar, before the
+    /// top bar and the content; it reads the keys `app.js` writes, and
+    /// `app.js` no longer moves the tree or says "paused" on leaving.
+    #[test]
+    fn reload_button_only_in_an_installed_app() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/containers/web", "tab=metrics", &h);
+        let html = layout(&ctx, Nav::Containers, "t", html! {}, html! { p { "x" } });
+        assert!(html.contains(r#"<button class="icon-btn pwa-reload js-only" type="button" data-act="reload" aria-label="Reload this page""#), "NAV-73");
+        let css = crate::http::server::APP_CSS;
+        assert!(css.contains(".pwa-reload{display:none!important}") && css.contains("@media (display-mode:standalone){.js .pwa-reload{display:inline-flex!important}}"));
+        assert!(crate::http::server::APP_JS.contains(r#"closest('[data-act="reload"]')"#));
+    }
+
+    #[test]
+    fn shell_state_is_set_before_first_paint() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/containers/web", "", &h);
+        let html = layout(&ctx, Nav::Containers, "t", html! {}, html! { p { "x" } });
+        let tree = html.find(r#"id="tree""#).unwrap();
+        let script = html.find(SHELL_JS).expect("inline shell script");
+        let top = html.find(r#"<header class="top">"#).unwrap();
+        assert!(tree < script && script < top && top < html.find("<main").unwrap());
+        assert_eq!(
+            html.matches("<script>").count(),
+            2,
+            "boot and shell scripts"
+        );
+        let js = crate::http::server::APP_JS;
+        for k in [
+            "'rh-tree'",
+            "'rh-tree-q'",
+            "'rh-tree-y'",
+            "window.HB_LIVE",
+            "if(l&&!window.HB)l.hidden=true",
+        ] {
+            assert!(SHELL_JS.contains(k), "{k}");
+        }
+        for k in [
+            r#"const TREE = "rh-tree""#,
+            r#"TF = "rh-tree-q""#,
+            r#"sessionStorage.setItem("rh-tree-y""#,
+            "window.HB_LIVE = 1",
+        ] {
+            assert!(js.contains(k), "{k}");
+        }
+        assert!(
+            !js.contains(r#"disconnect("paused"); });"#),
+            "leaving keeps the indicator"
+        );
+        assert!(
+            !js.contains("treeBox.scrollTop +="),
+            "the tree is not moved after paint"
+        );
+        assert!(BOOT_JS.contains("d.dataset.side='rail'") && BOOT_JS.contains("d.dataset.theme=t"));
     }
 
     #[test]

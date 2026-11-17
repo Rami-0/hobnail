@@ -553,6 +553,37 @@ fn event_cap_and_filters() {
         50,
         "default limit"
     );
+    // Time bounds: only events inside [since, until], newest first.
+    let win = db.events(&EventFilter {
+        limit: 500,
+        since: Some(T0 + 2450),
+        until: Some(T0 + 2459),
+        ..Default::default()
+    });
+    assert_eq!(
+        win.iter().map(|e| e.ts - T0).collect::<Vec<_>>(),
+        (2450..=2459).rev().collect::<Vec<_>>()
+    );
+    let open_end = db.events(&EventFilter {
+        limit: 500,
+        since: Some(T0 + 2490),
+        ..Default::default()
+    });
+    assert_eq!(open_end.len(), 10);
+    // The bounded query walks the rowid (no index on `ts`, and no new one
+    // without a migration): SQLite's plan says so. A History window is
+    // therefore still read with the paged loop (`ui::pages::history::scan`).
+    let plan: Vec<String> = db.with(Vec::new(), |i| {
+        let mut st = i.conn.prepare(
+            "EXPLAIN QUERY PLAN SELECT id FROM events WHERE ts >= 1 AND ts <= 2 ORDER BY id DESC LIMIT 5",
+        )?;
+        let rows = st.query_map([], |r| r.get::<_, String>(3))?;
+        rows.collect()
+    });
+    assert!(
+        plan.iter().all(|p| !p.contains("USING INDEX")),
+        "an index on ts appeared: use it for History ({plan:?})"
+    );
     // Restart counts.
     let rc = db.restart_counts(0);
     assert_eq!(rc.iter().map(|(_, n)| n).sum::<u32>(), 50);
@@ -877,4 +908,135 @@ fn rename_reuses_legacy_database_without_losing_password_or_history() {
     std::fs::write(&current, []).unwrap();
     assert_eq!(default_path(dir), current, "new filename has priority");
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The seek History's scan starts from: the newest id at or before a time,
+/// one lookup on `events_ts` (gaps from the cap included).
+#[test]
+fn event_id_at_or_before_seeks_by_id() {
+    let db = Db::open_in_memory().unwrap();
+    assert_eq!(db.event_id_at_or_before(100), None, "empty table");
+    for i in 0..1000 {
+        db.record_event(1_000 + 2 * i, "container.die", "warn", "web", "");
+    }
+    // Gaps in the ids, as the cap leaves them.
+    db.with((), |i| {
+        i.conn
+            .execute_batch("DELETE FROM events WHERE id % 7 = 0 OR (id > 400 AND id < 450)")
+    });
+    let all = db.events(&EventFilter {
+        limit: 500,
+        ..Default::default()
+    });
+    let newest = all[0].id;
+    assert_eq!(db.event_id_at_or_before(999), None, "every event is newer");
+    assert_eq!(db.event_id_at_or_before(i64::MAX), Some(newest));
+    let want = |t: i64| -> Option<i64> {
+        db.with(None, |i| {
+            i.conn
+                .query_row("SELECT MAX(id) FROM events WHERE ts <= ?1", [t], |r| {
+                    r.get(0)
+                })
+        })
+    };
+    for t in [
+        1_000, 1_001, 1_012, 1_013, 1_800, 1_850, 1_900, 2_500, 2_998, 2_999,
+    ] {
+        assert_eq!(db.event_id_at_or_before(t), want(t), "t = {t}");
+    }
+}
+
+/// Schema v6 on a database that a v5 build wrote, with data in it: the
+/// migration keeps every row, adds the two event indexes, and the event
+/// reads give the same answers as before.
+#[test]
+fn upgrade_from_v5_adds_event_indexes() {
+    let path = tmp("upgrade-v6");
+    {
+        let mut c = Connection::open(&path).unwrap();
+        let tx = c.transaction().unwrap();
+        for sql in &schema::MIGRATIONS[..5] {
+            tx.execute_batch(sql).unwrap();
+        }
+        tx.pragma_update(None, "user_version", 5).unwrap();
+        for i in 0..300i64 {
+            let kind = ["container.start", "container.die", "auth.login"][(i % 3) as usize];
+            tx.execute(
+                "INSERT INTO events (ts, kind, level, subject, detail) VALUES (?1, ?2, 'info', ?3, '')",
+                rusqlite::params![T0 + i * 60, kind, format!("c{}", i % 4)],
+            )
+            .unwrap();
+        }
+        tx.execute(
+            "INSERT INTO sys_roll (res, ts, cpu, cpu_x) VALUES (60, ?1, 500, 700)",
+            [T0],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    db.with((), |i| {
+        assert_eq!(schema::version(&i.conn).unwrap(), 6);
+        let idx: Vec<String> = i
+            .conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events' ORDER BY name")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(idx, ["events_kind_ts", "events_subject", "events_ts"]);
+        Ok(())
+    });
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM events"), 300);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM sys_roll"), 1);
+    // 100 starts, 25 per container; the last 10 minutes hold 4 of them.
+    let all = db.restart_counts(0);
+    assert_eq!(all.len(), 4);
+    assert!(all.iter().all(|(_, n)| *n == 25));
+    let recent: u32 = db.restart_counts(T0 + 288 * 60).iter().map(|x| x.1).sum();
+    assert_eq!(recent, 4);
+    let w = db.events(&EventFilter {
+        since: Some(T0 + 100 * 60),
+        until: Some(T0 + 109 * 60),
+        limit: 500,
+        ..Default::default()
+    });
+    assert_eq!(w.len(), 10);
+    assert_eq!(w[0].ts, T0 + 109 * 60, "newest first");
+    drop(db);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The event reads that run per page use an index, never a full scan.
+#[test]
+fn event_reads_use_the_v6_indexes() {
+    let db = Db::open_in_memory().unwrap();
+    let plan = |sql: &str| -> String {
+        db.with(String::new(), |i| {
+            let mut st = i.conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+            let rows: Vec<String> = st
+                .query_map([], |r| r.get::<_, String>(3))?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(rows.join("; "))
+        })
+    };
+    let rc = plan(
+        "SELECT subject, COUNT(*) AS n FROM events WHERE kind = 'container.start' AND ts >= 5 GROUP BY subject ORDER BY n DESC, subject",
+    );
+    assert!(rc.contains("COVERING INDEX events_kind_ts"), "{rc}");
+    let seek = plan("SELECT id FROM events WHERE ts <= 5 ORDER BY ts DESC, id DESC LIMIT 1");
+    assert!(seek.contains("events_ts"), "{seek}");
+    let ret = plan("SELECT COUNT(*) FROM events WHERE ts < 5");
+    assert!(ret.contains("events_ts"), "{ret}");
+}
+
+/// Giving the page cache back keeps the data and the next reads working.
+#[test]
+fn release_memory_keeps_reads_working() {
+    let db = Db::open_in_memory().unwrap();
+    db.record_system(T0, &sys(10.0, 1 << 30));
+    db.record_event(T0, "container.start", "info", "web", "");
+    db.release_memory();
+    db.record_system(T0 + 15, &sys(20.0, 1 << 30));
+    db.release_memory();
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM sys_samples"), 2);
+    assert_eq!(db.restart_counts(0), vec![("web".to_string(), 1)]);
 }

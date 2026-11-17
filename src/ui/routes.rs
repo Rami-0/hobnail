@@ -45,6 +45,12 @@ pub async fn route(
         let body = pages::containers::table(&ctx, &v.snap, &v.groups, &q).into_string();
         return html(StatusCode::OK, body);
     }
+    // Settings pages are never stored by a cache, signed in or not (their
+    // fragments carry the lists). Any other page is `no-store` when it was
+    // rendered with a session (below): it may carry the config hash, the
+    // CSRF token, settings data (the dialogs on `/` and `/alerts`) or probe
+    // output. Signed out a page keeps `no-cache`.
+    let settings = path == "/settings" || path.starts_with("/settings/");
     let (path, query) = (
         path.to_string(),
         req.uri().query().unwrap_or("").to_string(),
@@ -52,10 +58,17 @@ pub async fn route(
     let (st, host, headers) = (state.clone(), host.to_string(), req.headers().clone());
     let job = move || {
         let ctx = Ctx::new(&st, &host, &path, &query, &headers);
-        pages::render(&ctx)
+        let session = ctx.user.is_some();
+        // `/settings/<tab>?frag=…`: built from this request's session (401
+        // without one), never from an empty HeaderMap like the table above.
+        if let Some((s, b)) = crate::ui::settings::fragment(&ctx) {
+            return (s, b, session);
+        }
+        let (s, b) = pages::render(&ctx);
+        (s, b, session)
     };
     // History queries are synchronous SQLite calls: keep them off the reactor.
-    let (status, body) = if state.db.is_enabled() {
+    let (status, body, session) = if state.db.is_enabled() {
         match tokio::task::spawn_blocking(job).await {
             Ok(r) => r,
             Err(_) => return text(StatusCode::INTERNAL_SERVER_ERROR, "render failed\n"),
@@ -63,7 +76,11 @@ pub async fn route(
     } else {
         job()
     };
-    html(status, body)
+    let mut r = html(status, body);
+    if settings || session {
+        set(&mut r, CACHE_CONTROL, "no-store");
+    }
+    r
 }
 
 /// `GET /api/palette`: what the command palette can jump to.
@@ -90,12 +107,12 @@ pub const SETTINGS: &[(&str, &str, &str)] = &[
     (
         "General",
         "general",
-        "Title, greeting, layout, theme, search",
+        "Title, greeting, search, what the overview shows",
     ),
     (
         "Containers and groups",
         "containers",
-        "Excludes, groups, per-container overrides",
+        "Hidden containers, groups, per-container overrides",
     ),
     ("Bookmarks", "bookmarks", "Extra links"),
     ("Widgets", "widgets", "Custom API widgets, system tiles"),
@@ -104,15 +121,16 @@ pub const SETTINGS: &[(&str, &str, &str)] = &[
     (
         "History and data",
         "history",
-        "Retention, sample interval, database",
+        "Recording, sample interval, database",
     ),
     ("Config file", "config", "Raw TOML editor and revisions"),
     ("Security", "security", "Password and sessions"),
 ];
 
-/// Items are `{t, n, s?, u?, d?, l?, k?, r?}`: type (`p` page, `s` settings,
-/// `c` container, `b` bookmark), name, secondary text, URL, details URL, logs
-/// URL, extra search keywords, running.
+/// Items are `{t, n, s?, u?, d?, k?, r?}`: type (`p` page, `s` settings,
+/// `c` container, `b` bookmark), name, secondary text, URL, details URL,
+/// extra search keywords, running. The script adds "Logs: X" (the details
+/// URL + `/logs`) for each container.
 pub fn palette_json(state: &AppState, host: &str) -> Value {
     let cfg = state.config.current();
     let snap = state.snapshot();
@@ -130,7 +148,7 @@ pub fn palette_json(state: &AppState, host: &str) -> Value {
                 let details = format!("/containers/{}", url_encode(&c.name));
                 items.push(json!({
                     "t": "c", "n": c.title, "s": g.title, "d": details, "u": c.url,
-                    "l": c.logs_url, "k": c.search, "r": c.running,
+                    "k": c.search, "r": c.running,
                 }));
             } else if let Some(u) = &c.url {
                 items.push(json!({"t": "b", "n": c.title, "s": g.title, "u": u, "k": c.search}));
@@ -169,5 +187,35 @@ mod tests {
             .iter()
             .any(|i| i["t"] == "c" && i["d"] == "/containers/web%3C1%3E"));
         assert!(items.iter().any(|i| i["t"] == "b" && i["n"] == "GitHub"));
+        // No outside log viewer: "Open in Dozzle: X" is gone (NAV-53).
+        assert!(items.iter().all(|i| i.get("l").is_none()));
+    }
+
+    #[test]
+    fn palette_script_has_no_dozzle_rows() {
+        let js = crate::http::server::APP_JS;
+        assert!(!js.contains("Dozzle"), "NAV-53");
+        assert!(js.contains("\"Logs: \" + x.n"), "Logs: X stays");
+        // Y5: no "Toggle sidebar"; NAV-55: one action per theme, no blind
+        // toggle; NAV-50: a container's service is its own row.
+        assert!(!js.contains("Toggle sidebar") && !js.contains("Toggle theme"));
+        assert!(js.contains("\"Theme: \" + THEME_LABEL[t]"));
+        assert!(js.contains("\"Open service ↗\""));
+    }
+
+    /// The remembered Settings tab is taken only when it is one of these
+    /// (a stale `rh-set-tab` must not send every Settings link to a 404).
+    #[test]
+    fn script_knows_every_settings_tab() {
+        let js = crate::http::server::APP_JS;
+        let want = SETTINGS
+            .iter()
+            .map(|t| format!("\"{}\"", t.1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert!(
+            js.contains(&format!("const SET_TABS = [{want}];")),
+            "app.js SET_TABS differs from routes::SETTINGS"
+        );
     }
 }

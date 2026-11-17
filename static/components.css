@@ -1,0 +1,345 @@
+/* hobnail component layer (DESIGN.md §11.4 to §11.9), lifted from the
+   reviewed prototype: status dot and pill, buttons, icon and row actions,
+   form field, notes, dialog, toast, menu (popover), tabs, empty state,
+   skeleton, navigation progress. Inlined into every page right after
+   app.css; the script side is static/ui.js (window.HB). Colours come only
+   from the theme tokens in app.css. */
+/* ---- status: dot and pill (state is never colour alone: always a word next to it) ---- */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--off)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.dot.off{background:none;box-shadow:inset 0 0 0 1.5px var(--off)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-xs);font-weight:500;color:var(--text-2);white-space:nowrap}
+.pill.ok{border-color:var(--ok)}.pill.warn{border-color:var(--warn)}.pill.bad{border-color:var(--bad)}
+.pill.ok{color:var(--ok-fg)}.pill.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.pill.warn{color:var(--warn-fg);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+.pill.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 55%,transparent)}
+
+/* ---- buttons: primary (one per view), secondary (default), ghost, danger; icon and small sizes ---- */
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--s-2);height:var(--ctl-h);min-width:var(--ctl-h);padding:0 var(--s-3);border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text);font:500 var(--fs-sm)/1 var(--font);white-space:nowrap;cursor:pointer;text-decoration:none;user-select:none;
+ transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.btn:hover{background-image:linear-gradient(var(--tint),var(--tint));text-decoration:none}
+.btn:active{transform:translateY(1px);background-image:linear-gradient(var(--tint-2),var(--tint-2))}
+.btn.primary{background-color:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.ghost{background-color:transparent;border-color:transparent;color:var(--text-2)}
+.btn.ghost:hover{color:var(--text)}
+.btn.danger{color:var(--bad-fg)}
+.btn.primary.danger{background:var(--bad);border-color:var(--bad);color:var(--on-bad)}
+.btn.primary.danger:hover{background:var(--bad);filter:brightness(1.08)}
+.btn.icon{padding:0;width:var(--ctl-h)}
+.btn.sm{height:var(--ctl-h-sm);min-width:var(--ctl-h-sm);padding:0 var(--s-2);font-size:var(--fs-xs)}
+.btn.sm.icon{width:var(--ctl-h-sm);padding:0}
+.btn:disabled,.btn[aria-disabled=true]{opacity:.5;cursor:not-allowed;transform:none;background-image:none}
+.btn[aria-busy=true]{cursor:progress;opacity:1}
+.btn[aria-busy=true]::before{content:"";width:13px;height:13px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+.btn[aria-busy=true]>svg{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* ---- icon action: compact row/list action (logs, open, more) ---- */
+.ia{position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--ia);height:var(--ia);flex:none;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-3);cursor:pointer;
+ transition:color var(--dur-1) var(--ease-out),background-color var(--dur-1) var(--ease-out),opacity var(--dur-1) var(--ease-out)}
+.ia:hover{color:var(--text);background:var(--tint-2);text-decoration:none}
+.ia:disabled{opacity:.35;cursor:default;background:none}
+.ia.logs:hover,.ia.logs:focus-visible{color:var(--accent-fg)}
+@media (hover:hover){[data-tip]:hover::before{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;translate:-50% 0;z-index:5;padding:3px 8px;border-radius:var(--r-xs);background:var(--text);color:var(--bg);font:500 var(--fs-xs)/1.4 var(--font);white-space:nowrap;pointer-events:none}}
+
+/* ---- row actions (tables and lists) ---- */
+.ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
+.ra .btn.sm{gap:6px}
+.row-link{position:static}
+.row-link::before{content:"";position:absolute;inset:0;z-index:0}
+tr.rl,li.rl,.tm{position:relative}
+.ra,.ra *{position:relative;z-index:1}
+/* What a stretched row shows sits above its link: text selects, titles show,
+   other links work; a click on empty row space still opens the row. */
+tr.rl>td>:not(.row-link),li.rl>:not(.row-link){position:relative;z-index:1}
+/* Compact rows whose text is only a label (attention, firing list, alert
+   log): a click on the text opens the row too. */
+:is(.attn .rows,.incidents,.al-log) li.rl>:is(.dot,.why,.inc-state,.inc-rule,.inc-since,.detail,.ev-rule,.when:not(:has(a)),.pill){pointer-events:none}
+/* A name link with its logs action beside it (tables on Host, History). */
+.nm-l{display:inline-flex;align-items:center;gap:var(--s-1);max-width:100%;vertical-align:middle}
+.nm-l>a:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.linkbtn{display:inline-block;padding:0;border:0;background:none;color:var(--text);font:600 var(--fs-sm)/1.3 var(--font);text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.linkbtn:hover{color:var(--accent-fg);text-decoration:underline}
+tr.row-new>td,li.row-new,.row-new{animation:row-new var(--dur-4) var(--ease-out)}
+@keyframes row-new{from{background-color:color-mix(in srgb,var(--accent) 20%,transparent)}}
+
+/* ---- form field: label, control, error, hint ----
+   Scoped to the dialog and to the Settings pages (every Settings form uses
+   this markup): other pages keep their own controls. */
+:is(.dlg,.set-main) .fld{display:grid;gap:6px;align-content:start;min-width:0}
+:is(.dlg,.set-main) .fld.wide{grid-column:1/-1}
+:is(.dlg,.set-main) .fld>label:not(.cb),:is(.dlg,.set-main) .fld>.fld-l,:is(.dlg,.set-main) fieldset.fld>legend{display:flex;align-items:baseline;gap:6px;padding:0;font:600 var(--fs-sm)/1.3 var(--font);color:var(--text)}
+:is(.dlg,.set-main) .req{color:var(--text-3);font-weight:500;text-decoration:none}
+:is(.dlg,.set-main) .hint{font-size:var(--fs-xs);line-height:1.4;color:var(--text-3)}
+:is(.dlg,.set-main) .fld-err{display:flex;align-items:flex-start;gap:6px;font:500 var(--fs-xs)/1.4 var(--font);color:var(--bad-fg)}
+:is(.dlg,.set-main) .fld-err::before{content:"!";display:inline-grid;place-items:center;flex:none;width:14px;height:14px;margin-top:1px;border-radius:50%;background:var(--bad);color:var(--on-bad);font:700 .7143rem/1 var(--font)}
+:is(.dlg,.set-main) .fld-err:not([hidden]){animation:err-in var(--dur-2) var(--ease-out)}
+@keyframes err-in{from{opacity:0;transform:translateY(-3px)}}
+:is(.dlg,.set-main) .in{display:block;width:100%;min-width:0;height:var(--ctl-h);padding:0 10px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field);color:var(--text);font:400 var(--fs-input)/1.2 var(--font);
+ transition:border-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out)}
+:is(.dlg,.set-main) .in.mono{font-family:var(--mono);font-size:calc(var(--fs-input) - .5px)}
+:is(.dlg,.set-main) .in::placeholder{color:var(--text-3);opacity:1}
+:is(.dlg,.set-main) .in:hover{border-color:var(--text-3)}
+:is(.dlg,.set-main) .in:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+:is(.dlg,.set-main) .in[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
+:is(.dlg,.set-main) .in:disabled,:is(.dlg,.set-main) .in[readonly]{background:var(--surface-2);color:var(--text-2);border-style:dashed;cursor:not-allowed}
+:is(.dlg,.set-main) textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:vertical}
+:is(.dlg,.set-main) select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--text-2) 50%),linear-gradient(135deg,var(--text-2) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat}
+:is(.dlg,.set-main) input[type=checkbox],:is(.dlg,.set-main) input[type=radio]{accent-color:var(--accent);width:16px;height:16px;margin:0;flex:none}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw){appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;border:1px solid var(--ctl-border);border-radius:var(--r-xs);background:var(--field);cursor:pointer}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):checked{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):checked::after{content:"";width:8px;height:4px;margin-top:-2px;border:2px solid var(--on-accent);border-top:0;border-right:0;transform:rotate(-45deg)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):indeterminate{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) input[type=checkbox]:not(.sw):indeterminate::after{content:"";width:8px;height:0;margin:0;border:0;border-top:2px solid var(--on-accent);transform:none}
+:is(.dlg,.set-main) .cb{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:var(--fs-sm);color:var(--text);cursor:pointer}
+:is(.dlg,.set-main) .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4) var(--s-5)}
+@media (max-width:699px){:is(.dlg,.set-main) .grid-2{grid-template-columns:minmax(0,1fr)}}
+/* switch: a checkbox with role=switch */
+:is(.dlg,.set-main) .sw{appearance:none;-webkit-appearance:none;position:relative;width:36px!important;height:20px!important;border-radius:var(--r-pill);border:1px solid var(--ctl-border);background:var(--field);cursor:pointer;transition:background-color var(--dur-2) var(--ease-out)}
+:is(.dlg,.set-main) .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
+:is(.dlg,.set-main) .sw:checked{background:var(--accent);border-color:var(--accent)}
+:is(.dlg,.set-main) .sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
+/* not live (no script yet, locked, or saving): looks it */
+:is(.dlg,.set-main) input:is(.sw,[type=checkbox],[type=search]):disabled{opacity:.5;cursor:not-allowed}
+@media (pointer:coarse),(max-width:699px){
+ /* a switch and a lone checkbox keep their look inside a 44 px box (transparent border) */
+ :is(.dlg,.set-main) .sw{width:52px!important;height:44px!important;border:13px solid transparent!important;border-width:13px 9px!important;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
+ :is(.dlg,.set-main) td input[type=checkbox]:not(.sw){width:44px;height:44px;border:14px solid transparent!important;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
+ :is(.dlg,.set-main) :is(.sw,td input[type=checkbox]):checked{box-shadow:none}
+}
+/* choice: a radio group drawn as a segmented control (few options, all visible) */
+:is(.dlg,.set-main) .choice{justify-self:start;display:inline-flex;flex-wrap:wrap;gap:2px;padding:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+:is(.dlg,.set-main) .choice label{position:relative;display:inline-flex;align-items:center;gap:6px;height:calc(var(--ctl-h) - 6px);padding:0 var(--s-3);border-radius:var(--r-xs);color:var(--text-2);font:500 var(--fs-sm)/1 var(--font);cursor:pointer;white-space:nowrap}
+:is(.dlg,.set-main) .choice label:hover{color:var(--text);background:var(--tint)}
+:is(.dlg,.set-main) .choice input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+:is(.dlg,.set-main) .choice label:has(input:checked){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
+:is(.dlg,.set-main) .choice label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
+
+/* a wrapper of fields that belong to one choice, laid out as if it were not there */
+.fc{display:contents}
+:is(.dlg,.set-main) .fld.ro-off{display:none}
+/* "More options" and the like: a <details> in a form */
+:is(.dlg,.set-main) details>summary{display:flex;align-items:center;gap:6px;min-height:var(--hit);color:var(--text-2);font:500 var(--fs-sm)/1.3 var(--font);cursor:pointer;list-style:none}
+:is(.dlg,.set-main) details>summary::-webkit-details-marker{display:none}
+:is(.dlg,.set-main) details>summary::before{content:"";width:6px;height:6px;margin:0 3px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform var(--dur-1) var(--ease-out)}
+:is(.dlg,.set-main) details[open]>summary::before{transform:rotate(45deg)}
+:is(.dlg,.set-main) details>summary:hover{color:var(--text)}
+:is(.dlg,.set-main) details[open]>summary{margin-bottom:var(--s-3)}
+:is(.dlg,.set-main) .cset-opts{display:flex;flex-wrap:wrap;gap:0 var(--s-4)}
+:is(.dlg,.set-main) .cset-opts .mono{font-family:var(--mono);font-size:var(--fs-xs)}
+/* in-page tabs inside a dialog: stay in view while the panel scrolls */
+.tabs.dlg-tabs{min-height:41px;position:sticky;top:calc(-1*var(--s-1));z-index:2;margin:0 calc(-1*var(--s-5));padding:0 var(--s-4);background:var(--raised)}
+.tabpanel{display:grid;gap:var(--s-4);align-content:start}
+:is(.dlg,.set-main) :is(.tabpanel,.dlg-sec,.fld)>.btn.sm{justify-self:start}
+.dlg-page.wide{max-width:860px}
+
+/* ---- notes: a message inside a panel or dialog that is not tied to one field ---- */
+.note{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-sm);color:var(--text-2)}
+.note>svg{margin-top:1px;color:var(--accent-fg)}
+.note strong{color:var(--text)}
+.note .acts{display:flex;flex-wrap:wrap;gap:var(--s-2);margin-top:var(--s-2)}
+.note.bad{border-color:var(--bad)}.note.warn{border-color:var(--warn)}
+.note.bad{border-color:color-mix(in srgb,var(--bad) 55%,var(--line));background:color-mix(in srgb,var(--bad) 8%,var(--surface))}.note.bad>svg{color:var(--bad-fg)}
+.note.warn{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--surface))}.note.warn>svg{color:var(--warn-fg)}
+.note.ok>svg{color:var(--ok-fg)}
+
+/* ---- dialog: one component for every add / edit ---- */
+dialog.dlg{--dx:0px;--dy:12px;flex-direction:column;width:min(560px,calc(100vw - 32px));max-height:88vh;max-height:min(88dvh,780px);margin:auto;padding:0;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);color:var(--text);box-shadow:var(--shadow-3);overflow:hidden}
+dialog.dlg[open]{display:flex}
+dialog.dlg::backdrop{background:var(--scrim)}
+/* Every modal (form, confirm, shortcuts) and the phone sheet: scales in from
+   the trigger over --dur-3, leaves faster with --ease-in. Without
+   @starting-style it appears at once; without allow-discrete it leaves at once. */
+dialog:is(.dlg,.keys){--dx:0px;--dy:12px;opacity:0;transform:translate(var(--dx),var(--dy)) scale(.97);
+ transition:opacity var(--dur-2) var(--ease-in),transform var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
+dialog:is(.dlg,.keys)[open]{opacity:1;transform:none;transition-duration:var(--dur-3);transition-timing-function:var(--ease-out)}
+@starting-style{dialog:is(.dlg,.keys)[open]{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.97)}}
+dialog:is(.dlg,.keys)::backdrop{opacity:0;transition:opacity var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
+dialog:is(.dlg,.keys)[open]::backdrop{opacity:1;transition-duration:var(--dur-3)}
+@starting-style{dialog:is(.dlg,.keys)[open]::backdrop{opacity:0}}
+dialog.dlg.wide{width:min(760px,calc(100vw - 32px))}
+.dlg>form{display:flex;flex-direction:column;min-height:0;flex:1}
+.dlg-h{display:flex;align-items:center;gap:var(--s-3);padding:var(--s-4) var(--s-4) var(--s-3) var(--s-5);flex:none}
+.dlg-h h2{flex:1;min-width:0;font:650 var(--fs-h2)/1.25 var(--font);letter-spacing:-.015em;overflow-wrap:anywhere}
+.dlg-h p{color:var(--text-3);font-size:var(--fs-sm)}
+.dlg-b{display:grid;gap:var(--s-4);padding:var(--s-1) var(--s-5) var(--s-5);overflow-y:auto;overscroll-behavior:contain;min-height:0;flex:1}
+.dlg-b>fieldset{margin:0;padding:0;border:0;min-width:0;display:grid;gap:var(--s-4)}
+.dlg-sec{display:grid;gap:var(--s-4);padding-top:var(--s-4);border-top:1px solid var(--line)}
+.dlg-sec>h3{font:600 var(--fs-micro)/1 var(--font);letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
+.dlg-ft{display:flex;align-items:center;gap:var(--s-2);padding:var(--s-3) var(--s-5);border-top:1px solid var(--line);background:var(--raised);flex:none}
+.dlg-ft .grow{flex:1;min-width:0}
+.dlg-main{display:contents}
+.dlg[data-mode=add] .edit-only{display:none}
+.dlg-msg{font-size:var(--fs-xs);color:var(--text-3)}
+.dlg-msg.bad{color:var(--bad-fg);font-weight:500}
+.dlg-guard{display:flex;align-items:center;gap:var(--s-2);width:100%}
+.dlg-guard>span{flex:1;font-weight:600}
+.dlg-guard:not([hidden]){animation:err-in var(--dur-2) var(--ease-out)}
+.dlg.confirm{width:min(440px,calc(100vw - 32px))}
+.dlg.confirm .dlg-b{padding-top:0;color:var(--text-2)}
+.dlg.confirm .dlg-h h2{display:flex;gap:10px;align-items:center}
+.dlg.confirm .dlg-h h2 svg{color:var(--bad-fg);width:20px;height:20px}
+/* phones: a bottom sheet with its actions always in view */
+@media (max-width:699px){
+ dialog.dlg,dialog.dlg.wide,dialog.dlg.confirm{--dx:0px!important;--dy:40px!important;width:100%;max-width:100%;max-height:94vh;max-height:94dvh;margin:auto 0 0;border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0}
+ .dlg-ft{padding-bottom:calc(var(--s-3) + env(safe-area-inset-bottom))}
+ .dlg-ft{flex-wrap:wrap}
+ .dlg-ft .btn{flex:1}
+ .dlg-ft .btn.ghost,.dlg-ft [data-submit],.dlg-ft [data-act=wf-preview]{flex:1 1 100%}
+ .dlg-ft [data-submit],.dlg-ft [data-act=wf-preview]{order:-1}
+ .dlg-ft .grow:not(.dlg-msg),.dlg-ft .dlg-msg:empty{display:none}
+ .dlg-ft .dlg-msg{flex-basis:100%}
+ .dlg-guard{flex-wrap:wrap}.dlg-guard>span{flex-basis:100%}
+}
+/* "Saving needs JavaScript" and the no-JS page form: shown until ui.js has
+   run and enabled the save buttons (html.hb-ready), so they also show when
+   /static/app.js is slow or fails, not only with JavaScript off */
+.hb-ready .needs-js{display:none!important}
+/* the same form without JavaScript: a page section */
+.dlg-page{max-width:640px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised)}
+.dlg-page .dlg-b{overflow:visible}
+@media (max-width:699px){.dlg-page .dlg-ft{flex-wrap:wrap}.dlg-page .dlg-ft .btn{flex:1}}
+
+/* ---- toast (HB.toast's region, appended to <body>; the only toasts there are) ---- */
+body>.toasts{position:fixed;inset:auto var(--s-4) var(--s-4) auto;z-index:var(--z-toast);display:grid;gap:var(--s-2);justify-items:end;width:max-content;max-width:calc(100vw - 32px);margin:0;padding:0;border:0;background:none;overflow:visible;pointer-events:none;color:var(--text)}
+body>.toasts>.toast{display:flex;align-items:center;gap:10px;min-height:44px;max-width:420px;padding:6px 6px 6px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);box-shadow:var(--shadow-2);font-size:var(--fs-sm);pointer-events:auto;
+ transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out)}
+@starting-style{body>.toasts>.toast{opacity:0;transform:translateY(10px)}}
+body>.toasts>.toast.out{opacity:0;transform:translateY(6px);transition-timing-function:var(--ease-in)}
+body>.toasts>.toast>svg{color:var(--ok-fg)}body>.toasts>.toast.info>svg{color:var(--accent-fg)}body>.toasts>.toast.bad>svg{color:var(--bad-fg)}
+body>.toasts>.toast.bad{border-color:color-mix(in srgb,var(--bad) 55%,var(--border))}
+body>.toasts>.toast>span{flex:1;min-width:0;padding:4px 0}
+@media (max-width:699px){body>.toasts{inset:auto 12px calc(68px + env(safe-area-inset-bottom)) 12px;width:auto;justify-items:stretch}body>.toasts>.toast{max-width:none}}
+
+/* ---- menu (popover): theme picker, row overflow ---- */
+.menu{position:fixed;inset:0;margin:auto;height:fit-content;min-width:200px;max-width:min(320px,calc(100vw - 16px));padding:var(--s-1);border:1px solid var(--border);border-radius:var(--r);background:var(--raised);color:var(--text);box-shadow:var(--shadow-2);
+ opacity:1;transform:none;transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
+@starting-style{.menu:popover-open{opacity:0;transform:translateY(-4px)}}
+.menu:not(:popover-open){opacity:0;transition-timing-function:var(--ease-in)}
+@supports not selector(:popover-open){.menu{display:none;z-index:var(--z-pop)}.menu.open{display:block}}
+.mi{display:flex;align-items:center;gap:10px;width:100%;min-height:var(--ctl-h);padding:0 var(--s-3) 0 10px;border:0;border-radius:var(--r-xs);background:none;color:var(--text-2);font:400 var(--fs-sm)/1.2 var(--font);text-align:left;cursor:pointer;text-decoration:none}
+.mi:hover,.mi:focus-visible{background:var(--surface-2);color:var(--text);outline:none;text-decoration:none}
+.mi:focus-visible{box-shadow:inset 0 0 0 2px var(--focus)}
+.mi>span{flex:1}
+.mi .chk{visibility:hidden;color:var(--accent-fg)}
+.mi[aria-checked=true]{color:var(--text);font-weight:600}
+.mi[aria-checked=true] .chk{visibility:visible}
+.mi.danger{color:var(--bad-fg)}
+.mi kbd{color:var(--text-3);font-size:var(--fs-micro)}
+.menu hr{margin:var(--s-1) 2px;border:0;border-top:1px solid var(--line)}
+.menu .mh{padding:6px 10px 4px;font:600 var(--fs-micro)/1.2 var(--font);letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
+
+/* ---- tabs: page tabs are links (aria-current), in-page tabs are role=tab ---- */
+.tabs{display:flex;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line);
+ background:linear-gradient(90deg,var(--bg) 40%,transparent) left/28px 100% no-repeat local,linear-gradient(270deg,var(--bg) 40%,transparent) right/28px 100% no-repeat local,
+ linear-gradient(90deg,var(--bg),transparent) left/28px 100% no-repeat scroll,linear-gradient(270deg,var(--bg),transparent) right/28px 100% no-repeat scroll}
+.tabs::-webkit-scrollbar{display:none}
+.tab{position:relative;display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 var(--s-3);flex:none;border:0;border-radius:var(--r-sm) var(--r-sm) 0 0;background:none;color:var(--text-2);font:500 var(--fs-body)/1 var(--font);white-space:nowrap;cursor:pointer;text-decoration:none;transition:color var(--dur-1) var(--ease-out),background-color var(--dur-1) var(--ease-out)}
+.tab:hover{color:var(--text);background:var(--tint);text-decoration:none}
+.tab::after{content:"";position:absolute;left:var(--s-2);right:var(--s-2);bottom:-1px;height:2px;border-radius:2px;background:var(--accent);transform:scaleX(0);transition:transform var(--dur-2) var(--ease-out)}
+.tab[aria-current=page],.tab[aria-selected=true]{color:var(--text);font-weight:600}
+.tab[aria-current=page]::after,.tab[aria-selected=true]::after{transform:none}
+.tab .n{min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-pill);background:var(--surface-2);font:600 var(--fs-micro)/18px var(--font);color:var(--text-2);text-align:center}
+.tab .n.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad-fg)}
+.tab svg{width:15px;height:15px}
+[role=tabpanel]:focus-visible{outline-offset:4px}
+
+/* ---- empty state ---- */
+.empty{display:grid;justify-items:center;gap:var(--s-2);padding:var(--s-10) var(--s-5);text-align:center}
+.empty-ic{display:grid;place-items:center;width:44px;height:44px;margin-bottom:var(--s-1);border-radius:50%;background:var(--surface-2);color:var(--text-2)}
+.empty-ic svg{width:20px;height:20px}
+.empty h3{font:600 var(--fs-title)/1.3 var(--font);color:var(--text)}
+.empty p{max-width:52ch;font-size:var(--fs-sm);color:var(--text-2)}
+.empty .acts{display:flex;flex-wrap:wrap;justify-content:center;gap:var(--s-2);margin-top:var(--s-2)}
+.empty.good .empty-ic{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok-fg)}
+.empty.bad .empty-ic{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad-fg)}
+.empty.compact{padding:var(--s-5) var(--s-4)}
+.empty.inline{grid-template-columns:auto minmax(0,1fr);justify-items:start;align-items:center;column-gap:var(--s-3);padding:var(--s-3) 0;text-align:left}
+.empty.inline .empty-ic{grid-row:span 2;width:32px;height:32px;margin:0}.empty.inline .empty-ic svg{width:16px;height:16px}
+.empty.inline h3{font-size:var(--fs-sm)}.empty.inline p{font-size:var(--fs-xs)}.empty.inline .acts{grid-column:2;justify-content:start;margin-top:0}
+.empty details{font-size:var(--fs-xs);color:var(--text-3)}.empty summary{cursor:pointer}
+
+/* ---- skeleton: shown only after 150 ms, never shimmers under reduced motion ---- */
+.sk{display:block;height:.8em;border-radius:var(--r-xs);background:linear-gradient(90deg,var(--surface-2) 30%,color-mix(in srgb,var(--surface-2) 60%,var(--text) 10%) 50%,var(--surface-2) 70%) 0 0/300% 100%;
+ animation:sk-in var(--dur-2) 150ms both,sk 1.6s linear 150ms infinite}
+.sk.line{height:12px;margin:6px 0}.sk.block{height:100%;min-height:40px;border-radius:var(--r-sm)}.sk.circle{width:20px;height:20px;border-radius:50%}
+@keyframes sk{from{background-position:100% 0}to{background-position:-200% 0}}
+@keyframes sk-in{from{opacity:0}}
+[aria-busy=true] .sk-hide{visibility:hidden}
+/* A skeleton stands in for content the script brings (a first sample, a
+   widget's answer, the first log lines): it is switched on only by
+   html.hb-ready, which the loaded script sets (never by the boot script's
+   .js), so with the script off, blocked or failed it is a plain word. */
+.sk-t{color:var(--text-3)}
+.hb-ready .sk-t{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+html:not(.hb-ready) .sk{display:none}
+/* Said when the script did not load (JS on, /static/*.js blocked or
+   failed): hidden for its first 2 s, so a page whose script runs never
+   shows it; at once with JavaScript off. The script removes it. */
+@keyframes late{from{visibility:hidden}}
+.js .js-late{animation:late var(--dur-1) 2s both}
+.sk-rows{display:grid;gap:var(--s-2);width:100%}.sk-rows .sk{height:12px}.sk-rows .sk:nth-child(2n){width:72%}.sk-rows .sk:nth-child(3n){width:86%}
+
+/* ---- navigation progress: a 2 px line after 150 ms (full page loads, slow lines) ---- */
+.navbar{position:fixed;left:0;top:0;z-index:100;height:2px;width:100%;background:var(--accent);transform-origin:0 50%;transform:scaleX(0);opacity:0;pointer-events:none}
+.navbar.on{opacity:1;animation:nav 8s cubic-bezier(.1,.6,.2,1) 150ms both}
+@keyframes nav{from{transform:scaleX(0)}to{transform:scaleX(.9)}}
+
+/* ---- motion the pages share (§11.3): entries use --ease-out, exits --ease-in;
+   opacity and transform only, never per line or per tick; app.css's one
+   reduced-motion rule makes all of it instant ---- */
+.pal{transition:opacity var(--dur-2) var(--ease-out)}
+.pal-box,.menu-body{transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out)}
+@starting-style{.pal{opacity:0}.pal-box{transform:translateY(-6px) scale(.98)}.menu-body{opacity:0;transform:translateY(-4px)}}
+/* a page tab or range just clicked: marked at once while the page loads (ROB-12) */
+.tab[data-pending]::after{transform:none}
+.tabs:has([data-pending]) .tab[aria-current=page]:not([data-pending])::after{transform:scaleX(0)}
+.seg a[data-pending]{background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
+.seg:has([data-pending]) a[aria-current]:not([data-pending]){background:none;box-shadow:none}
+.cd-tabs a[data-pending]{color:var(--text);border-bottom-color:var(--accent)}
+.cd-tabs:has([data-pending]) a[aria-current]:not([data-pending]){color:var(--text-3);border-bottom-color:transparent}
+/* live updates stopped (ROB-13): a pill at the bottom, on every page and
+   phone (above the tab bar there); as wide as its words, full width less the
+   margins at most; never over the heading or the top bar's controls, and
+   clicks go through it to what is underneath */
+.live-off{position:fixed;inset:auto 12px calc(12px + env(safe-area-inset-bottom)) 12px;z-index:var(--z-toast);width:fit-content;max-width:min(560px,calc(100vw - 24px));margin-inline:auto;display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid color-mix(in srgb,var(--warn) 60%,var(--border));border-radius:var(--r);background:var(--raised);box-shadow:var(--shadow-2);font-size:var(--fs-xs);line-height:1.4;color:var(--text);pointer-events:none;
+ transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out)}
+@starting-style{.live-off{opacity:0;transform:translateY(6px)}}
+@media (max-width:699px){.live-off{bottom:calc(72px + env(safe-area-inset-bottom))}}
+.live-off .dot{flex:none}
+.live-off .dot{background:var(--warn)}
+/* a switch or arrow that saved at once and waits for the answer (optimistic, §11.1) */
+:is(.dlg,.set-main) .sw[aria-busy=true]{cursor:progress}
+:is(.dlg,.set-main) .sw[aria-busy=true]::after{animation:sw-wait .8s var(--ease-io) infinite alternate}
+@keyframes sw-wait{to{opacity:.45}}
+tr.moved>td{animation:row-new var(--dur-4) var(--ease-out)}
+
+/* ---- states (§11.4): hover tints, pressed shows at once, disabled is 50 %;
+   focus is the one ring of app.css, drawn inside parents that clip (A11Y-04) ---- */
+:is(.icon-btn,.ia,.tab,.cd-tabs a,.seg a,.chip,.nav-item,.lg,.tgl,.mi,.menu-item,.bb-i,.grp-t,.stack>summary,.ctr>a,.cmd,.mark,.hs-cell,.port,.pal-list li,.lchip,.more-nav a,.ctbl th a):active{background-image:linear-gradient(var(--tint-2),var(--tint-2))}
+:is(.icon-btn,.ia,.lg,.tgl,.grp-t,.lchip):active:not(:disabled){transform:translateY(1px)}
+:is(.icon-btn,.lg,.tgl,.tab,.grp-t,.mi,.menu-item,.linkbtn,.lchip):is(:disabled,[aria-disabled=true]){opacity:.5;cursor:not-allowed;background-image:none}
+:is(.hs-cell,.c-name a,.tabs .tab,.cd-tabs a,.mark):focus-visible{outline-offset:-2px}
+.tm:has(>.tm-a:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}.tm-a:focus-visible{outline:0}
+
+/* No page-to-page View Transition (wave 4 tried one, scoped to the content
+   with the shell named and still): during a cross-document transition
+   Chromium sends every click to the root, so links were dead for its
+   duration, even with ::view-transition{pointer-events:none}. Feedback on
+   navigation is the 2 px line and the pending tab instead (ROB-12). */
+
+/* 44 px targets on touch and phones (A11Y-18): the control itself is 44 px
+   (the tokens --ctl-h, --ctl-h-sm, --ia and --hit are 44 there) and its row
+   grows to it; never a hit area that reaches over a neighbour. */
+@media (pointer:coarse),(max-width:699px){
+ .tree .ia.logs,.stack summary .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia,.more-stack .ia,.icon-btn,.icon-btn.sm{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
+ .panel-h .more,.sec-h .more,.linkbtn,.brand,.stack-name,.cd-tabs a{display:inline-flex;align-items:center;min-height:44px}
+ .crumb>a,.nm-l>a:first-child{min-height:44px;display:inline-flex;align-items:center}.nm-l>a:first-child{min-width:44px}
+ .panel-h .more,.sec-h .more,.linkbtn{min-width:44px}.panel-h .more,.sec-h .more{justify-content:flex-end}
+ .seg a,.tab,.cd-tabs a,.lg,.tgl,.nav-item,.menu-item,.pal-list li,.tree-filter input{height:44px;min-width:44px;justify-content:center}
+ .nav-item{justify-content:flex-start}.tree-filter svg{top:15px}
+ .strip-list .sl-n{display:flex;align-items:center;min-height:44px}
+ .ctr>a:first-child,.stack>summary{height:44px}
+ .panel.login input[type=password],.panel.login .btn{height:44px}
+}
+.login-acts{display:flex;align-items:center;gap:var(--s-2)}

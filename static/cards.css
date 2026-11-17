@@ -1,8 +1,8 @@
 /* Containers: the dense table (/containers), the details page and shared
    table styles. Rows are 36 px; names, images and ports are mono. */
-.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
-.tbl th{height:32px;padding:0 10px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--border);white-space:nowrap}
-.tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+.tbl th{height:32px;padding:0 10px;text-align:left;font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
 .tbl tbody tr:last-child td{border-bottom-color:transparent}
 .tbl .num,.tbl td.num,.tbl th.num{text-align:right}
 .tbl.small td{height:32px}
@@ -11,14 +11,14 @@
 
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .search-in{position:relative;flex:1 1 240px;max-width:360px}
-.search-in svg{position:absolute;left:10px;top:9px;color:var(--text-3);width:14px;height:14px}
-.search-in input,.bar select{width:100%;height:32px;padding:0 10px 0 30px;border:1px solid var(--ctl);border-radius:var(--r-sm);background:var(--surface);font-size:13px}
+.search-in svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px}
+.search-in input,.bar select{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-sm)}
 .bar select{width:auto;padding:0 8px;max-width:200px;color:var(--text-2)}
-.search-in input:focus,.bar select:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 1px var(--accent)}
+.search-in input:focus,.bar select:focus{border-color:var(--accent)}
 
-.tablewrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);min-width:0}
+.tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
 .tablewrap>.banner{margin:10px}
-.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:12px;color:var(--text-3);border-bottom:1px solid var(--border)}
+.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
 .ctbl caption b{color:var(--text);font-weight:600}
 .ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
 .ctbl th a{display:inline-flex;align-items:center;gap:3px;color:inherit}
@@ -28,71 +28,82 @@
 .ctbl th[aria-sort=ascending] .sort-i,.ctbl th[aria-sort=descending] .sort-i,.ctbl th a:hover .sort-i{opacity:1}
 .ctbl .row:hover td{background:var(--surface-2)}
 .ctbl .row td:first-child{padding-left:14px}
-.c-name{width:26%}
+/* the whole row opens the container: text that is not a control lets the click through to the row link (OV-23) */
+.ctbl tr.rl>td>:is(.dot,.icon,.pill,.st-l,.st-t,.exit,.img,.num,.spark,.muted){pointer-events:none}
+.c-name{width:34%}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
-.c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:9px}
+.c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
 .c-name>.icon.glyph svg{width:12px;height:12px}
-.c-name .nm{color:var(--text);font:500 13px var(--mono)}
+.c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
 .c-name .nm-t{white-space:nowrap}
-.c-name .sub{margin-left:8px;font-size:11.5px;color:var(--text-3)}
+.c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
 .c-name .pill{margin-left:8px}
 .c-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
 .c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
 .c-stack a{color:var(--text-2)}
 .grouped .c-stack{display:none}
 .c-image{width:20%;max-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.c-image .img{font-size:12px}
-.c-state{width:17%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
-.st-l{font-size:12.5px;color:var(--text-2)}
+.c-image .img{font-size:var(--fs-xs)}
+/* state is never cut (short ages, OV-21); name and image take the rest */
+.c-state{width:1%;white-space:nowrap}
+.st-l{font-size:calc(12.5rem/14);color:var(--text-2)}
 .st-l.warn{color:var(--warn-fg)}.st-l.bad{color:var(--bad-fg);font-weight:600}.st-l.off{color:var(--text-3)}
-.st-t{font-size:12px;color:var(--text-3)}
-.exit{font-size:11px;padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
+.st-t{font-size:var(--fs-xs);color:var(--text-3)}
+.exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
 .c-num{width:124px;text-align:right;white-space:nowrap}
 .ctbl th.c-num{text-align:right}
-.c-num .num{font:12.5px var(--mono);display:inline-block;min-width:62px}
+.c-num .num{font:calc(12.5rem/14) var(--mono);display:inline-block;min-width:62px}
 .c-num .spark{display:inline-block;width:40px;height:14px;margin-left:8px;vertical-align:-2px}
-.c-ports{white-space:nowrap}
-.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--border-2);border-radius:4px;font:12px/18px var(--mono);color:var(--accent-fg)}
+.c-ports{width:1%;white-space:nowrap}
+.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/18px var(--mono);color:var(--accent-fg)}
 .port:hover{border-color:var(--accent);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
-.port.local small{font-size:10px;font-family:var(--font)}
+.port.local small,.port.plain small{font-size:calc(10rem/14);font-family:var(--font)}
 .port.plain{color:var(--text-2)}
 .port.more{color:var(--text-3)}
-.c-act{width:96px;text-align:right;white-space:nowrap}
-.c-act .icon-btn{color:var(--text-3)}
-.row:hover .c-act .icon-btn{color:var(--text-2)}
+.c-act{width:112px;text-align:right;white-space:nowrap}
+.ctbl .c-hist{width:100px}.ctbl .c-hist .hstrip{width:92px}
 .row.stopped .nm{color:var(--text-2)}
 .row.stopped .c-image .img{color:var(--text-3)}
-.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--border);text-transform:none;letter-spacing:0;position:static}
-tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--border)}
-.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 6px;border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:12.5px;font-weight:600;text-align:left}
+.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
+tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
+.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 6px;border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:calc(12.5rem/14);font-weight:600;text-align:left}
 .grp-t svg.i{width:14px;height:14px;color:var(--text-3);transition:transform var(--t)}
 .grp.closed .grp-t svg.i{transform:rotate(-90deg)}
 .grp.closed .row{display:none}
-.grp-n{font-family:var(--mono)}
-.grp-t .cnt{font:500 11px var(--mono);color:var(--text-3)}
-tbody.none td{height:80px;text-align:center;color:var(--text-3)}
-@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:32%}}
+/* a long stack name ellipsises, never widens the table (ROB-07) */
+.grp-t{contain:inline-size}
+.grp-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp-t>svg,.grp-t .cnt{flex:none}
+.grp-t .cnt{font:500 var(--fs-micro) var(--mono);color:var(--text-3)}
+tbody.none td{padding:0}
+tbody.none:not([data-why=stopped]) .why-stopped,tbody.none:not([data-why=problem]) .why-problem,tbody.none:is([data-why=stopped],[data-why=problem]) .why-filter{display:none}
+@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
+/* "Sort by" for phones, where the header is hidden (OV-19) */
+.sortctl{display:none;gap:4px}
 @media (max-width:900px){.c-num .spark{display:none}.c-num{width:80px}.ctbl .c-ports{display:none}}
 
 /* phones: each row becomes a stacked block */
 @media (max-width:699px){
  .bar .seg{overflow-x:auto;max-width:100%}
  .search-in{max-width:none;flex-basis:100%}
+ .sortctl{display:flex}
+ #cbar{min-width:0}
+ .bar select{height:var(--ctl-h)}
  .ctbl,.ctbl tbody{display:block}
  .ctbl thead{display:none}
  .ctbl caption{display:block}
- .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--border)}
+ .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--line)}
  .ctbl tr.row td{display:block;height:auto;padding:0;border:0;width:auto;max-width:none;background:none!important}
  .ctbl tr.row td.c-name{flex:1 1 60%;min-width:0;padding:0!important}
  .ctbl tr.row td.c-act{order:2}
- .ctbl tr.row td.c-stack,.ctbl tr.row td.c-state,.ctbl tr.row td.c-num,.ctbl tr.row td.c-ports{order:3;font-size:12px}
+ .ctbl tr.row td.c-stack,.ctbl tr.row td.c-state,.ctbl tr.row td.c-num,.ctbl tr.row td.c-ports{order:3;font-size:var(--fs-xs)}
  .ctbl.grouped tr.row td.c-stack{display:none}
  .ctbl tr.row td.c-ports{display:block;flex-basis:100%}
  .ctbl tr.row td.c-image{display:none}
  .ctbl tr.row td.c-num{text-align:left}
  .ctbl tr.row td.c-num:empty{display:none}
- .ctbl tr.row td.c-num::before{content:attr(data-l) " ";color:var(--text-3);font-size:11px}
+ .ctbl tr.row td.c-num::before{content:attr(data-l) " ";color:var(--text-3);font-size:var(--fs-micro)}
  .c-num .num{min-width:0}
  .ctbl tr.grp-h{display:block}
  .ctbl tr.grp-h th{display:block;height:auto}
@@ -101,21 +112,33 @@ tbody.none td{height:80px;text-align:center;color:var(--text-3)}
 
 /* ---- details page ---- */
 .ctr-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.ctr-head>.icon{width:40px;height:40px;border-radius:9px;font-size:18px}
+.ctr-head>.icon{width:40px;height:40px;border-radius:9px;font-size:var(--fs-h2)}
 .ctr-head>.icon.glyph svg{width:22px;height:22px}
 .ctr-id{flex:1 1 260px;min-width:0}
-.ctr-id h2{display:flex;align-items:center;gap:10px;font-size:20px;font-family:var(--mono);font-weight:600;overflow-wrap:anywhere}
-.ctr-id p{margin-top:3px;font-size:12.5px;overflow-wrap:anywhere}
+.ctr-id h2{display:flex;align-items:center;gap:10px;font-size:calc(20rem/14);font-family:var(--mono);font-weight:600;overflow-wrap:anywhere}
+.ctr-id p{margin-top:3px;font-size:calc(12.5rem/14);overflow-wrap:anywhere}
 .ctr-actions{display:flex;gap:6px;flex-wrap:wrap}
-.st-l.lg{font-size:18px;font-weight:600}
+.st-l.lg{font-size:var(--fs-h2);font-weight:600}
 .st-l.lg.ok{color:var(--ok-fg)}
-.kv{display:grid;grid-template-columns:minmax(120px,max-content) 1fr;gap:4px 16px;margin:0;font-size:12px}
+.kv{display:grid;grid-template-columns:minmax(120px,max-content) 1fr;gap:4px 16px;margin:0;font-size:var(--fs-xs)}
 .kv dt{color:var(--text-3);overflow-wrap:anywhere}
 .kv dd{margin:0;color:var(--text-2);overflow-wrap:anywhere}
 .rows{list-style:none;margin:0;padding:0}
-.rows li{display:flex;align-items:center;gap:10px;min-height:34px;padding:4px 0;border-bottom:1px solid var(--border);font-size:13px}
+.rows li{display:flex;align-items:center;gap:10px;min-height:34px;padding:4px 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
 .rows li:last-child{border-bottom:0}
 .rows .nm{font-family:var(--mono);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:45%}
 .rows .why{color:var(--text-2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rows .when{color:var(--text-3);font-size:12px;white-space:nowrap;margin-left:auto}
+/* whole-pixel lines: a fractional row height lets a tap on its last pixel land
+   on the next row's stretched link (the hit test snaps to pixels) */
+.attn .rows li{line-height:20px}
+@media (max-width:699px){.attn .rows li{flex-wrap:wrap;row-gap:0}.attn .rows .why{flex-basis:100%;order:3;white-space:normal;overflow-wrap:anywhere}}
+.rows .when{color:var(--text-3);font-size:var(--fs-xs);white-space:nowrap;margin-left:auto}
 @media (max-width:699px){.ctbl tr.row td.c-hist{order:4;flex-basis:100%;width:auto}.c-hist .hstrip{width:100%;height:5px;opacity:.85}}
+/* the containers table when nothing matches: its rows size the columns, unseen */
+.ctbl tbody.sizer{visibility:collapse}@media (max-width:699px){.ctbl tbody.sizer{display:none}}
+/* 44 px targets on touch and phones (A11Y-18): port chips and stack
+   headers (the filter and selects take --ctl-h, 44 px there). */
+@media (pointer:coarse),(max-width:699px){
+ .port{height:44px;min-width:44px;line-height:42px;text-align:center;margin-block:2px}
+ .grp-t{height:44px}
+}

@@ -7,7 +7,7 @@
 **A tiny home for your homelab.**
 
 Hobnail is a home-server dashboard written in Rust: one static binary in a
-~10 MB `scratch` image, idling at about 1 MiB of RAM. It discovers every Docker
+~12 MB `scratch` image, idling at about 4 MiB of RAM. It discovers every Docker
 container by itself, shows host stats and their history, tails logs, pulls data
 from any JSON API, sends notifications when something breaks and recovers, and
 can be configured from the browser behind a login.
@@ -48,5 +48,7 @@ docker exec -it hobnail /hobnail set-password
 | Settings in the app | [docs/features/settings.md](docs/features/settings.md) |
 | Spec, design and measurements | [GOALS.md](GOALS.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/measurements.md](docs/measurements.md) |
 | Brand | [docs/BRANDING.md](docs/BRANDING.md) |
+| QA audit: what was fixed and what is deferred | [docs/qa/QA.md](docs/qa/QA.md) |
+| Agreed next direction (not started): React client on the same Rust server | [docs/decisions/react-client-and-dashboard.md](docs/decisions/react-client-and-dashboard.md) |
 
 Each topic has one page. The README only points to them.

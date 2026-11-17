@@ -41,7 +41,6 @@ use crate::state::AppState;
 use crate::ui::fmt::{parse_query, query_get, url_encode};
 use crate::ui::shell::Ctx;
 
-#[allow(unused_imports)] // embedded by container detail / design work
 pub use pages::level_chart;
 
 /// `[logs]` in the config file.
@@ -125,16 +124,40 @@ pub fn allowed(state: &AppState, headers: &hyper::HeaderMap) -> bool {
         || crate::auth::current_user(state, headers).is_some()
 }
 
+/// The one rule for whose logs may be read: a valid name the owner has not
+/// hidden or excluded (`ui::view::is_excluded`).
+fn tailable_c(cfg: &crate::config::Config, c: &crate::model::Container) -> bool {
+    client::valid_name(&c.name) && !crate::ui::view::is_excluded(cfg, c)
+}
+
 /// A container whose logs may be read: it exists in the current snapshot and
-/// the owner has not hidden or excluded it.
+/// passes `tailable_c`.
 pub fn may_tail(state: &AppState, name: &str) -> bool {
     let cfg = state.config.current();
-    client::valid_name(name)
-        && state
-            .snapshot()
-            .containers
-            .iter()
-            .any(|c| c.name == name && !crate::ui::view::is_excluded(&cfg, c))
+    state
+        .snapshot()
+        .containers
+        .iter()
+        .any(|c| c.name == name && tailable_c(&cfg, c))
+}
+
+/// Names of the containers whose logs may be read (`may_tail`), for pages
+/// that put a logs link next to names they did not get from the snapshot
+/// (events, alerts, host processes).
+pub fn tailable(state: &AppState) -> std::collections::HashSet<String> {
+    let cfg = state.config.current();
+    state
+        .snapshot()
+        .containers
+        .iter()
+        .filter(|c| tailable_c(&cfg, c))
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+/// A logs link that opens the viewer at a moment (`#t=` in unix ms).
+pub fn logs_at(name: &str, ts_secs: i64) -> String {
+    format!("{}#t={}", logs_url(name), ts_secs.max(0) * 1000)
 }
 
 /// Containers named by `c=a,b` (at most `max`, only ones `may_tail` allows) or
@@ -160,14 +183,24 @@ pub fn stack_members(state: &AppState, stack: &str) -> Vec<String> {
     let mut v: Vec<String> = snap
         .containers
         .iter()
-        .filter(|c| c.project.as_deref() == Some(stack))
-        .filter(|c| !crate::ui::view::is_excluded(&cfg, c))
+        .filter(|c| in_stack(&cfg, c, stack))
         .map(|c| c.name.clone())
-        .filter(|n| client::valid_name(n))
         .collect();
     v.sort();
     v.truncate(24);
     v
+}
+
+/// A container of compose project `stack` whose logs may be read.
+fn in_stack(cfg: &crate::config::Config, c: &crate::model::Container, stack: &str) -> bool {
+    c.project.as_deref() == Some(stack) && tailable_c(cfg, c)
+}
+
+/// Whether `/stacks/<stack>/logs` has anything to show: a compose project
+/// of that name with a container whose logs may be read (a config group is
+/// not a project, LG-09). For the sidebar and the `/logs` list.
+pub fn is_project(cfg: &crate::config::Config, snap: &crate::model::Snapshot, stack: &str) -> bool {
+    snap.containers.iter().any(|c| in_stack(cfg, c, stack))
 }
 
 /// `since`: unix seconds, a duration back from now (`15m`, `1h`), or
@@ -200,7 +233,25 @@ fn range_query(q: &[(String, String)], default_tail: Option<u32>) -> client::Que
         tail,
         since,
         until,
+        cap: None,
     }
+}
+
+/// What the viewer's stream reads. The browser ring bounds what is shown, so
+/// never more than `MAX_TAIL` lines. A closed window (`since` and `until`: a
+/// custom range, "Load older lines") is read from its start and cut at that
+/// many lines by the server: Docker applies `tail` to the whole log before
+/// the window, which leaves nothing once more lines came after it.
+fn stream_query(q: &[(String, String)], default_tail: u32) -> client::Query {
+    let mut rq = range_query(q, Some(default_tail));
+    let n = rq.tail.unwrap_or(client::MAX_TAIL).min(client::MAX_TAIL);
+    if rq.since.is_some() && rq.until.is_some() {
+        rq.tail = None;
+        rq.cap = Some(n);
+    } else {
+        rq.tail = Some(n);
+    }
+    rq
 }
 
 /// `/api/logs/*` (GET only): `stream` (SSE), `download` (text), `levels`
@@ -220,10 +271,7 @@ pub async fn route(
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
-            let mut rq = range_query(&q, Some(cfg.logs.tail()));
-            // The browser ring bounds what is shown; never send more.
-            rq.tail = Some(rq.tail.unwrap_or(client::MAX_TAIL).min(client::MAX_TAIL));
-            tail::sse(state, names, rq)
+            tail::sse(state, names, stream_query(&q, cfg.logs.tail()))
         }
         "/api/logs/download" => {
             let names = targets(state, &q, 4);

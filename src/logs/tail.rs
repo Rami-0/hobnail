@@ -58,7 +58,9 @@ enum Msg {
     Meta(usize, Info),
     Lines(usize, Vec<Line>),
     Error(usize, String, &'static str),
-    End(usize),
+    /// One container's stream ended; `true`: it stopped on the cap with
+    /// more lines left in the window (the pane says so).
+    End(usize, bool),
 }
 
 /// Number of open Docker log connections for viewers (for tests and /api/logs/status).
@@ -114,22 +116,43 @@ async fn reader(socket: String, idx: usize, name: String, q: Query, tx: mpsc::Se
     };
     let _open = OpenGuard::new();
     let mut buf = Vec::new();
+    let mut left = q.cap.map(|c| c as usize);
     loop {
         let more = tokio::select! {
             m = stream.next(&mut buf) => m,
             _ = tx.closed() => return,
         };
+        let mut cut = left.is_some_and(|l| take_capped(&mut buf, l));
+        if let Some(l) = left.as_mut() {
+            *l -= buf.len();
+        }
         if !buf.is_empty() {
             let lines: Vec<Line> = buf.drain(..).map(Line::from_raw).collect();
             if tx.send(Msg::Lines(idx, lines)).await.is_err() {
                 return;
             }
         }
-        if !more {
-            let _ = tx.send(Msg::End(idx)).await;
+        if left == Some(0) && more && !cut {
+            // Exactly at the cap: one more read tells a window that ends
+            // here from one with more lines after.
+            cut = tokio::select! {
+                m = stream.next(&mut buf) => m || !buf.is_empty(),
+                _ = tx.closed() => return,
+            };
+        }
+        if !more || left == Some(0) {
+            let _ = tx.send(Msg::End(idx, cut)).await;
             return;
         }
     }
+}
+
+/// Keeps at most `left` lines of `buf`; `true` when some were dropped (the
+/// reader stopped on the cap).
+fn take_capped<T>(buf: &mut Vec<T>, left: usize) -> bool {
+    let cut = buf.len() > left;
+    buf.truncate(left);
+    cut
 }
 
 fn line_json(idx: usize, l: &Line) -> serde_json::Value {
@@ -214,7 +237,15 @@ pub fn sse(state: &Arc<AppState>, names: Vec<String>, q: Query) -> Response<Body
                         "err",
                         &json!({"c": i, "msg": e, "kind": kind}).to_string(),
                     )),
-                    Msg::End(i) => Some(sse_event("end", &json!({"c": i}).to_string())),
+                    Msg::End(i, cut) => Some(sse_event(
+                        "end",
+                        &if cut {
+                            json!({"c": i, "cut": true})
+                        } else {
+                            json!({"c": i})
+                        }
+                        .to_string(),
+                    )),
                 };
                 if let Some(ev) = ev {
                     // Keep order: flush the lines gathered so far first.
@@ -342,4 +373,19 @@ pub fn iso_ms(ns: i64) -> String {
     let ms = ns.rem_euclid(1_000_000_000) / 1_000_000;
     let s = crate::util::fmt_utc(secs);
     format!("{}.{ms:03}Z", &s[..s.len() - 1])
+}
+
+#[cfg(test)]
+mod cap_tests {
+    #[test]
+    fn take_capped_says_when_it_dropped_lines() {
+        let mut b = vec![1, 2, 3];
+        assert!(!super::take_capped(&mut b, 3));
+        assert_eq!(b, [1, 2, 3]);
+        assert!(!super::take_capped(&mut b, 5));
+        assert!(super::take_capped(&mut b, 2));
+        assert_eq!(b, [1, 2]);
+        let mut e: Vec<u8> = vec![];
+        assert!(!super::take_capped(&mut e, 0));
+    }
 }

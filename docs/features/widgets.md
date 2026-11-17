@@ -2,7 +2,21 @@
 
 - **custom-api:** fetch JSON from any URL, pick fields with paths, show them
   with a template or rows, optional status dot. Add and edit them in
-  Settings → Widgets, with a **Fetch now** preview before saving.
+  Settings → Widgets: a dialog with Request, Fields and Display tabs and a
+  **Fetch now** preview before saving, which shows the tile as it would
+  appear and what each field's path found. The dialog offers GET and POST;
+  another method set in the file is kept. Renaming a widget that rules
+  watch asks first and then changes those rules to the new id; a widget a
+  rule watches cannot be deleted until the rule is changed. Header values and
+  a request body set in the file are kept on save and never shown, only the
+  header names. "System tiles" is one switch that saves when switched.
+- Server behaviour (`/api/settings/widgets`): renaming a widget's id changes
+  `widget = "<old id>"` to the new id in every rule that watches it, in the
+  same revision (before, the rename was refused by the validator's `unknown
+  widget`). Deleting a widget a rule watches answers HTTP 422 with a plain
+  message and `used_by` (the rule names); nothing is written. An edited
+  widget keeps every key the request leaves out (`null` removes one), so
+  header values, the body and `output` are never sent and never lost.
 - **command:** run a program in the container and show its JSON. Off unless
   `enabled = true`, and **file-only**: the app can never create, change or enable
   one (it would be remote command execution in a container with the Docker
@@ -11,7 +25,11 @@
   refresh; widgets are fetched only while someone is viewing (or an alert rule
   uses them).
 - Header secrets (`headers_env`, `headers_file`) are set in the file on the
-  host: they are bound to their URL so the app cannot redirect them.
+  host: they are bound to their URL so the app cannot redirect them. If the
+  destination echoes request headers back (TRACE, a debug or error page),
+  their values are replaced with `<redacted>` in what the widget shows, stores
+  and returns (`_text`, extracted values, the raw JSON, errors), also in the
+  Fetch now preview.
 
 ## Add a widget
 
@@ -69,13 +87,13 @@ from `command`. Full reference:
 
 ```toml
 [[widgets]]
-id = "mailpit"                 # unique, [A-Za-z0-9_-]; DOM id and alert-rule key
+id = "mailpit"                 # unique, [A-Za-z0-9_-], at most 64; DOM id and alert-rule key
 type = "custom-api"            # or "command"
 title = "Mailpit"              # default: the id
-link = "http://192.168.1.10:8025"  # optional, makes the title a link
-icon = "mailpit.svg"           # optional, a file in data/icons/
+link = "http://192.168.1.10:8025"  # optional, makes the title a link (http://, https:// or /path)
+icon = "mailpit.svg"           # optional: a file in data/icons/, builtin:<glyph> or a dashboard-icons name
 refresh = "30s"                # default 30s, minimum 1s
-timeout = "5s"                 # default 5s
+timeout = "5s"                 # default 5s, 100ms to 5m
 # enabled = false              # turn a widget off without deleting it
 
 # --- custom-api ---

@@ -6,9 +6,14 @@
 //! - Singleton sections (`[page]`, `[history]`): a **patch**. A key that is
 //!   present sets the value, `null` removes the key (the default applies),
 //!   an absent key is left alone.
-//! - Entities (a group, bookmark, widget, channel, rule) are sent **whole**:
-//!   a managed field that is missing or `null` is removed from the file.
-//!   Keys the form does not know are left untouched.
+//! - Entities (a group, bookmark, widget, channel, rule) are sent **whole**
+//!   when added: a managed field that is missing or `null` is not written.
+//! - An **edit** of a list entry or channel is a patch of that entry: a key
+//!   that is present sets the value, `null` removes it, and a key that is
+//!   absent is left exactly as it is in the file. So a form never removes a
+//!   key it does not show (header values, a body, `api_base`, …), and a
+//!   field the user did not change can simply be left out. Keys the form
+//!   does not know are always left untouched.
 
 use serde::Deserialize;
 use serde_json::{Map, Value as J};
@@ -17,7 +22,7 @@ use toml_edit::{DocumentMut, Item, Key, Table, Value};
 
 use super::doc::{self, Style};
 use super::guard;
-use super::store::{ApiError, Current, Draft};
+use super::store::{self, ApiError, Current, Draft};
 
 pub const PAGE_KEYS: &[&str] = &[
     "title",
@@ -139,14 +144,276 @@ pub const RULE_KEYS: &[&str] = &[
     "recovery",
     "enabled",
 ];
-pub const DOCKER_FIELDS: &[&str] = &["exclude"];
 pub const SYSTEM_FIELDS: &[&str] = &["enabled"];
 pub const RAW_FIELDS: &[&str] = &[];
 
 // ------------------------------------------------------------ shapes
 
 fn shape<T: serde::de::DeserializeOwned>(v: &J, what: &str) -> Result<T, ApiError> {
-    serde_json::from_value(v.clone()).map_err(|e| ApiError::bad_request(format!("{what}: {e}")))
+    serde_json::from_value(v.clone()).map_err(|e| shape_error::<T>(v, what, &e.to_string()))
+}
+
+/// A shape error as a 422 on the form field that caused it, in plain words
+/// (SET-07): a missing required key is "Required."; a value of the wrong
+/// type is found by checking each key on its own (a lone key with the right
+/// type only misses the others). An unknown key stays a 400: the form never
+/// sends one, so it is a client bug, not a field problem.
+fn shape_error<T: serde::de::DeserializeOwned>(v: &J, what: &str, msg: &str) -> ApiError {
+    let raw = || ApiError::bad_request(format!("{what}: {msg}"));
+    if let Some(f) = msg
+        .strip_prefix("missing field `")
+        .and_then(|r| r.split('`').next())
+    {
+        return ApiError::invalid("Required.", Some(f), None);
+    }
+    if msg.starts_with("unknown field") {
+        return raw();
+    }
+    for (k, x) in v.as_object().into_iter().flatten() {
+        let one = J::Object(Map::from_iter([(k.clone(), x.clone())]));
+        if let Err(e) = serde_json::from_value::<T>(one) {
+            let e = e.to_string();
+            if !e.starts_with("missing field") && !e.starts_with("unknown field") {
+                return ApiError::invalid(&plain(&e), Some(k), None);
+            }
+        }
+    }
+    raw()
+}
+
+/// A validator or deserialiser message in the words a form uses (SET-06,
+/// SET-07, SET-55). Messages it does not know are returned as they are.
+pub fn plain(msg: &str) -> String {
+    let m = msg.trim();
+    let int = [
+        "expected u8",
+        "expected u16",
+        "expected u32",
+        "expected u64",
+        "expected i32",
+        "expected i64",
+        "expected usize",
+    ];
+    if m.contains("untagged enum DurJ") || m.starts_with("invalid duration") {
+        return "Use a duration like 30s or 5m.".into();
+    }
+    if m.starts_with("invalid value: integer") && int.iter().any(|t| m.contains(t)) {
+        return "This number is out of range.".into();
+    }
+    if m.starts_with("invalid type") && int.iter().any(|t| m.contains(t)) {
+        return "Use a whole number.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected f64") {
+        return "Use a number.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected a boolean") {
+        return "Use on or off.".into();
+    }
+    if m.starts_with("invalid type") && m.contains("expected a string") {
+        return "Use text here.".into();
+    }
+    if m.starts_with("unknown variant") {
+        return "Choose one of the offered options.".into();
+    }
+    // `page.columns must be 1..=6, got 9`, `… must be between 5s and 5m, got 1s`
+    if let Some((_, r)) = m.split_once(" must be ") {
+        let r = r.split(", got").next().unwrap_or(r);
+        if let Some((a, b)) = r.split_once("..=") {
+            return format!("Use a number from {a} to {b}.");
+        }
+        if let Some((a, b)) = r
+            .strip_prefix("between ")
+            .and_then(|r| r.split_once(" and "))
+        {
+            return format!("Use a value from {a} to {b}.");
+        }
+    }
+    m.to_string()
+}
+
+/// Validate a form's draft before the save pipeline does (it validates
+/// again; parsing twice is cheap next to a write), to put a config error on
+/// the form field that caused it (SET-06): when the validator names no field
+/// the key at the reported line and column does. A field error loses its
+/// line and column (the form never shows the file) and is put in plain
+/// words. An error that belongs to no field is returned unchanged.
+pub fn precheck(d: Draft) -> Result<Draft, ApiError> {
+    let Err(mut e) = store::validate(&d.text, d.fields) else {
+        return Ok(d);
+    };
+    // `alert "x": …`, `channel "x" (slack): …`, `widget "x": …`: a check of
+    // one entry. The field is looked for after the entry's name (a rule
+    // called "disk" is not about the Disk field) and the message is said in
+    // the form's words (SET-55).
+    let raw = e.body["error"].as_str().unwrap_or("").to_string();
+    if let Some(rest) = strip_owner(&raw) {
+        e.body["field"] = entry_field(rest, d.fields).map_or(J::Null, J::String);
+        e.body["error"] = J::String(sentence(rest));
+        e.body["line"] = J::Null;
+        e.body["col"] = J::Null;
+        return Err(e);
+    }
+    if e.body["field"].is_null() {
+        let at = (e.body["line"].as_u64(), e.body["col"].as_u64());
+        if let (Some(l), Some(c)) = at {
+            let line = d
+                .text
+                .lines()
+                .nth((l as usize).saturating_sub(1))
+                .unwrap_or("");
+            if let Some(k) = key_before(line, c as usize).filter(|k| d.fields.contains(k)) {
+                e.body["field"] = J::String(k.to_string());
+            }
+        }
+    }
+    if !e.body["field"].is_null() {
+        let msg = plain(e.body["error"].as_str().unwrap_or(""));
+        e.body["error"] = J::String(msg);
+        e.body["line"] = J::Null;
+        e.body["col"] = J::Null;
+    }
+    Err(e)
+}
+
+/// The message after an entry's name (`alert "x": `, `channel "x" (slack): `,
+/// `widget "x": `), or `None` when it names no entry.
+pub fn strip_owner(msg: &str) -> Option<&str> {
+    for p in ["alert \"", "channel \"", "widget \""] {
+        if let Some(r) = msg.strip_prefix(p) {
+            // The name is quoted with Rust's `{:?}`: skip escaped quotes.
+            let mut esc = false;
+            for (i, c) in r.char_indices() {
+                if esc {
+                    esc = false;
+                } else if c == '\\' {
+                    esc = true;
+                } else if c == '"' {
+                    let after = &r[i + 1..];
+                    let after = match after.strip_prefix(" (") {
+                        Some(a) => &a[a.find(')').map_or(0, |j| j + 1)..],
+                        None => after,
+                    };
+                    return after.strip_prefix(": ");
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The form field one entry's check is about. A widget's field names and
+/// paths, display rows and status are lists on the form, named by their
+/// list (`fields`, `rows`, `status`).
+pub fn entry_field(rest: &str, fields: &[&str]) -> Option<String> {
+    let list = |k: &str| fields.contains(&k).then(|| k.to_string());
+    if rest.starts_with("field ") {
+        return list("fields");
+    }
+    if rest.starts_with("row ") {
+        return list("rows");
+    }
+    if rest.starts_with("status") {
+        return list("status");
+    }
+    store::field_in(rest, fields)
+}
+
+/// The label a form shows for a config key.
+pub fn label_of(key: &str) -> &str {
+    match key {
+        "above" => "Above",
+        "below" => "Below",
+        "equals" => "Equals",
+        "not_equals" => "Not equals",
+        "url" => "URL",
+        "url_env" => "URL variable",
+        "url_file" => "URL file",
+        "webhook_url_env" => "Webhook URL variable",
+        "webhook_url_file" => "Webhook URL file",
+        "token_env" => "Bot token variable",
+        "token_file" => "Bot token file",
+        "chat_id" => "Chat id",
+        "chat_id_env" => "Chat id variable",
+        "containers" => "Containers",
+        "exclude" => "Except",
+        "stack" => "Stack",
+        "pattern" => "Pattern",
+        "widget" => "Widget",
+        "field" => "Field",
+        "window" => "Window",
+        "interval" => "Check every",
+        "timeout" => "Timeout",
+        "restarts" => "Restarts",
+        "count" => "Lines",
+        "failures" => "Failures in a row",
+        "expect_status" => "Expected status",
+        "refresh" => "Refresh",
+        "cooldown" => "Cooldown",
+        "for" => "For",
+        "on" => "Fire on",
+        "metric" => "Metric",
+        "disk" => "Disk",
+        "link" => "Link",
+        "id" => "Id",
+        "template" => "Template",
+        "message" => "Message",
+        "recovery" => "Recovery message",
+        k => k,
+    }
+}
+
+/// One entry's check message as a sentence in the form's words:
+/// `set exactly one of above, below` → "Set exactly one of: Above or
+/// Below."; a `key` in backticks becomes its label; durations and ranges as
+/// [`plain`] says them.
+pub fn sentence(msg: &str) -> String {
+    let m = msg.trim();
+    if let Some(list) = m.strip_prefix("set exactly one of ") {
+        let names: Vec<&str> = list.split(", ").map(|k| label_of(k.trim())).collect();
+        let joined = match names.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => names.join(""),
+        };
+        return format!("Set exactly one of: {joined}.");
+    }
+    let p = plain(m);
+    let mut out = if p != m { p } else { m.to_string() }.replace(
+        "(add it under [widgets.fields])",
+        "(add it on the Fields tab)",
+    );
+    while let Some(a) = out.find('`') {
+        let Some(b) = out[a + 1..].find('`') else {
+            break;
+        };
+        let k = out[a + 1..a + 1 + b].to_string();
+        out.replace_range(a..a + b + 2, &format!("“{}”", label_of(&k)));
+    }
+    let mut c = out.chars();
+    let mut out = c
+        .next()
+        .map(|f| f.to_uppercase().chain(c).collect::<String>())
+        .unwrap_or_default();
+    if !out.ends_with('.') {
+        out.push('.');
+    }
+    out
+}
+
+/// The key of the last `key =` before column `col` (1-based) of a TOML line:
+/// `refresh = "abc"` and `{ name = "x", url = "bad" }` both work.
+pub fn key_before(line: &str, col: usize) -> Option<&str> {
+    let end = line
+        .char_indices()
+        .nth(col.saturating_sub(1))
+        .map_or(line.len(), |(i, _)| i);
+    let upto = &line[..end];
+    let eq = upto.rfind('=')?;
+    let k = upto[..eq].trim_end();
+    let start = k
+        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .map_or(0, |i| i + 1);
+    let k = &k[start..];
+    (!k.is_empty()).then_some(k)
 }
 
 fn object<'a>(v: &'a J, what: &str) -> Result<&'a Map<String, J>, ApiError> {
@@ -205,6 +472,13 @@ struct GroupShape {
     collapsed: Option<bool>,
     icon: Option<String>,
     hide: Option<bool>,
+}
+
+/// One `[docker] exclude` pattern as the Hidden containers dialog sends it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PatternShape {
+    pattern: String,
 }
 
 #[derive(Deserialize)]
@@ -394,20 +668,6 @@ pub struct PatchReq {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExcludeReq {
-    pub base_hash: String,
-    pub exclude: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GroupsReq {
-    pub base_hash: String,
-    pub groups: Vec<J>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct OverrideReq {
     pub base_hash: String,
     pub names: Vec<String>,
@@ -542,6 +802,15 @@ fn valid_channel_name(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// The managed keys an edit touches: those present in the item (`null`
+/// included, which removes). An absent key is kept as it is in the file.
+fn present(keys: &[&'static str], m: &Map<String, J>) -> Vec<&'static str> {
+    keys.iter()
+        .copied()
+        .filter(|k| m.contains_key(*k))
+        .collect()
+}
+
 /// Drop `null` members (they mean "not set").
 fn strip_nulls(m: &Map<String, J>) -> Map<String, J> {
     m.iter()
@@ -559,9 +828,46 @@ pub fn is_command_json(w: &J) -> bool {
 
 // ------------------------------------------------------------ general
 
+/// An `http://` or `https://` link with a host and no spaces (SET-24,
+/// SET-35, SET-40).
+fn web_link(url: &str) -> bool {
+    let u = url.trim().to_ascii_lowercase();
+    let host = u
+        .strip_prefix("http://")
+        .or_else(|| u.strip_prefix("https://"))
+        .unwrap_or("");
+    !host.is_empty() && !host.starts_with('/') && !u.contains(char::is_whitespace)
+}
+
+/// A text the form limits (`maxlength`): checked again here, in the words
+/// the browser uses.
+fn at_most(m: &Map<String, J>, key: &str, max: usize) -> Result<(), ApiError> {
+    match m.get(key).and_then(J::as_str) {
+        Some(s) if s.chars().count() > max => Err(ApiError::invalid(
+            &format!("At most {max} characters."),
+            Some(key),
+            None,
+        )),
+        _ => Ok(()),
+    }
+}
+
 pub fn general(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
     let _: PageShape = shape(&req.values, "page")?;
     let patch = object(&req.values, "page")?;
+    // Only what the form sends is checked: a hand-written value left as it
+    // is in the file stays (the patch does not touch it).
+    at_most(patch, "title", 80)?;
+    at_most(patch, "greeting", 200)?;
+    if let Some(u) = patch.get("search_url").and_then(J::as_str) {
+        if !web_link(u) || !u.contains("{q}") {
+            return Err(ApiError::invalid(
+                "Use an http:// or https:// link with {q} where the search words go.",
+                Some("search_url"),
+                None,
+            ));
+        }
+    }
     let mut doc = parse_doc(cur)?;
     let root = doc.as_table_mut();
     let existed = root.contains_key("page");
@@ -573,6 +879,57 @@ pub fn general(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
         root.remove("page");
     }
     Ok(draft(&doc, "general".into(), PAGE_KEYS))
+}
+
+/// Retired theme token names that a `custom.css` sets (DESIGN.md §11.2,
+/// `docs/features/ui.md`), one sentence each naming the token to set
+/// instead. Reading an old name still works (they are aliases); setting one
+/// no longer recolours anything. Comments are ignored.
+pub fn css_token_warnings(css: &str) -> Vec<String> {
+    let mut text = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(i) = rest.find("/*") {
+        text.push_str(&rest[..i]);
+        rest = rest[i + 2..]
+            .find("*/")
+            .map_or("", |j| &rest[i + 2 + j + 2..]);
+    }
+    text.push_str(rest);
+    // `--name:` as a declaration, not a longer name (`--ctl-border:`) and
+    // not a read (`var(--ctl)`).
+    let sets = |name: &str| {
+        text.match_indices(name).any(|(i, _)| {
+            let before = text[..i].chars().next_back();
+            let after = text[i + name.len()..].trim_start();
+            !before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                && after.starts_with(':')
+        })
+    };
+    let mut out = Vec::new();
+    for (old, new) in [
+        ("--ctl", "--ctl-border"),
+        ("--border-2", "--ctl-border"),
+        ("--accent-bg", "--accent"),
+        ("--pop", "--shadow-2"),
+        ("--fs-label", "--fs-micro"),
+    ] {
+        if sets(old) {
+            out.push(format!(
+                "custom.css sets {old}, which no longer changes anything: set {new} instead."
+            ));
+        }
+    }
+    if sets("--glow") {
+        out.push("custom.css sets --glow, which is no longer used: remove it.".into());
+    }
+    if sets("--border") && !sets("--line") {
+        out.push(
+            "custom.css sets --border, which now only outlines dialogs, menus and the main panel: \
+             set --line as well to recolour panel outlines, table rows and dividers."
+                .into(),
+        );
+    }
+    out
 }
 
 /// `[history]`: a patch of scalar keys. Which keys exist is decided by the
@@ -595,139 +952,285 @@ pub fn history(cur: &Current, req: &PatchReq) -> Result<Draft, ApiError> {
     }
     let mut doc = parse_doc(cur)?;
     let root = doc.as_table_mut();
+    let mut patch = patch.clone();
+    if patch.get("enabled") == Some(&J::Bool(true)) && back_to_default(root, "history", "enabled") {
+        patch.remove("enabled");
+    }
     let existed = root.contains_key("history");
     let t = doc::table_mut(root, "history", false).map_err(engine)?;
-    for (k, v) in patch {
+    for (k, v) in &patch {
         doc::set_json(t, k, Some(v), Style::Inline).map_err(engine)?;
     }
     if !existed && t.is_empty() {
         root.remove("history");
     }
-    Ok(draft(&doc, "history".into(), &[]))
+    Ok(draft(
+        &doc,
+        "history".into(),
+        &["enabled", "sample_interval"],
+    ))
 }
 
 // ------------------------------------------------------------ containers
 
-pub fn docker_exclude(cur: &Current, req: &ExcludeReq) -> Result<Draft, ApiError> {
-    if req.exclude.len() > 500 {
-        return Err(ApiError::bad_request("exclude: at most 500 patterns"));
-    }
-    if req
-        .exclude
-        .iter()
-        .any(|p| p.trim().is_empty() || p.len() > 256)
-    {
-        return Err(ApiError::bad_request(
-            "exclude: patterns must be 1-256 characters",
-        ));
-    }
+/// One pattern of `[docker] exclude` added, changed or removed (the Hidden
+/// containers list: `{action, id: index, item: {pattern}}`). The array is
+/// edited in place, so the other patterns keep their formatting.
+pub fn exclude_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiError> {
+    let pattern = || -> Result<String, ApiError> {
+        let item = req
+            .item
+            .as_ref()
+            .ok_or_else(|| ApiError::bad_request("needs item"))?;
+        let p: PatternShape = shape(item, "pattern")?;
+        let p = p.pattern.trim().to_string();
+        if p.is_empty() {
+            return Err(ApiError::invalid("Required.", Some("pattern"), None));
+        }
+        if p.chars().count() > 256 {
+            return Err(ApiError::invalid(
+                "At most 256 characters.",
+                Some("pattern"),
+                None,
+            ));
+        }
+        // A container name never holds one, and a line break would be
+        // written as a multi-line string.
+        if p.chars().any(char::is_control) {
+            return Err(ApiError::invalid(
+                "No line breaks, tabs or other control characters.",
+                Some("pattern"),
+                None,
+            ));
+        }
+        Ok(p)
+    };
     let mut doc = parse_doc(cur)?;
     let t = doc::table_mut(doc.as_table_mut(), "docker", false).map_err(engine)?;
-    let v = (!req.exclude.is_empty()).then(|| J::from(req.exclude.clone()));
-    doc::set_json(t, "exclude", v.as_ref(), Style::Inline).map_err(engine)?;
+    let not_list = || {
+        ApiError::bad_request(
+            "`exclude` is not written as a list of patterns in the file; edit it in the Config file tab",
+        )
+    };
+    let list: Vec<String> = match t.get("exclude") {
+        None => Vec::new(),
+        Some(it) => it
+            .as_array()
+            .ok_or_else(not_list)?
+            .iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or_else(not_list))
+            .collect::<Result<_, _>>()?,
+    };
+    let index = || -> Result<usize, ApiError> {
+        req.id
+            .as_ref()
+            .and_then(J::as_u64)
+            .map(|i| i as usize)
+            .filter(|i| *i < list.len())
+            .ok_or_else(|| ApiError::not_found("no such pattern (any more)"))
+    };
+    let dup = || {
+        ApiError::invalid(
+            "This pattern is already in the list.",
+            Some("pattern"),
+            None,
+        )
+    };
+    let note = match req.action {
+        Action::Add => {
+            let p = pattern()?;
+            if list.contains(&p) {
+                return Err(dup());
+            }
+            match t.get_mut("exclude").and_then(Item::as_array_mut) {
+                Some(a) => push_like(a, p.as_str()),
+                None => doc::set_json(t, "exclude", Some(&J::from(vec![p.clone()])), Style::Inline)
+                    .map_err(engine)?,
+            }
+            format!("containers: hide {p}")
+        }
+        Action::Edit => {
+            let (i, p) = (index()?, pattern()?);
+            if list.iter().enumerate().any(|(j, x)| j != i && *x == p) {
+                return Err(dup());
+            }
+            if list[i] != p {
+                let a = t
+                    .get_mut("exclude")
+                    .and_then(Item::as_array_mut)
+                    .ok_or_else(not_list)?;
+                a.replace(i, p.as_str());
+            }
+            format!("containers: hide {p} (was {})", list[i])
+        }
+        Action::Delete => {
+            let i = index()?;
+            let a = t
+                .get_mut("exclude")
+                .and_then(Item::as_array_mut)
+                .ok_or_else(not_list)?;
+            remove_like(a, i);
+            if a.is_empty() {
+                t.remove("exclude");
+            }
+            format!("containers: show {} again", list[i])
+        }
+        Action::Reorder => return Err(ApiError::bad_request("patterns have no order")),
+    };
+    // A `[docker]` left empty goes.
     if t.is_empty() {
         doc.as_table_mut().remove("docker");
     }
-    Ok(draft(&doc, "containers: exclude".into(), DOCKER_FIELDS))
+    Ok(draft(&doc, note, &["pattern"]))
+}
+
+fn has_comment(d: &toml_edit::Decor) -> bool {
+    [d.prefix(), d.suffix()]
+        .iter()
+        .any(|x| x.and_then(|r| r.as_str()).is_some_and(|s| s.contains('#')))
+}
+
+/// A switch that is on by default turned back on: a plain `enabled =
+/// false` (what turning it off writes) goes again instead of becoming
+/// `enabled = true`, and so does its table when nothing else is left in it,
+/// so off then on gives back the file as it was without the key. A key or
+/// table with a comment stays (the key is then set to `true`). Returns
+/// whether it did that.
+fn back_to_default(root: &mut Table, table: &str, key: &str) -> bool {
+    let Some(Item::Table(t)) = root.get_mut(table) else {
+        return false;
+    };
+    let plain = match t.get_key_value(key) {
+        Some((k, Item::Value(Value::Boolean(b)))) => {
+            !*b.value() && !has_comment(k.leaf_decor()) && !has_comment(b.decor())
+        }
+        _ => false,
+    };
+    if !plain {
+        return false;
+    }
+    t.remove(key);
+    if t.is_empty() && !has_comment(t.decor()) {
+        root.remove(table);
+    }
+    true
+}
+
+/// The text before a value of an array (its comments and indentation).
+fn prefix_of(v: &Value) -> &str {
+    v.decor().prefix().and_then(|p| p.as_str()).unwrap_or("")
+}
+
+/// `s` split after its first line break: what ends the line before (a
+/// comment after the previous value's comma) and the rest. No line break:
+/// `("", s)`.
+fn split_line(s: &str) -> (&str, &str) {
+    match s.find('\n') {
+        Some(n) => (&s[..=n], &s[n + 1..]),
+        None => ("", s),
+    }
+}
+
+/// The text after a value (before its comma, or before `]` for the last
+/// value of an array without a trailing comma).
+fn suffix_of(v: &Value) -> &str {
+    v.decor().suffix().and_then(|p| p.as_str()).unwrap_or("")
+}
+
+/// What follows the last value of `a`: its suffix and the array's
+/// trailing text without a trailing comma, the trailing text with one.
+fn after_last(a: &toml_edit::Array, last_suffix: &str) -> String {
+    let tr = a.trailing().as_str().unwrap_or("");
+    if a.trailing_comma() {
+        tr.to_string()
+    } else {
+        format!("{last_suffix}{tr}")
+    }
+}
+
+/// Puts `text` back after the last value (see [`after_last`]).
+fn set_after_last(a: &mut toml_edit::Array, text: String) {
+    if a.trailing_comma() {
+        a.set_trailing(text);
+    } else if let Some(v) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+        v.decor_mut().set_suffix(text);
+        a.set_trailing("");
+    }
+}
+
+/// Appends `v` the way the array is written: one per line, with the same
+/// indentation, when its values are on lines of their own; inline else.
+fn push_like(a: &mut toml_edit::Array, v: &str) {
+    let indent = a
+        .iter()
+        .filter_map(|x| {
+            let p = prefix_of(x);
+            p.rfind('\n').map(|n| p[n + 1..].to_string())
+        })
+        .last();
+    let Some(indent) = indent else {
+        a.push(v);
+        return;
+    };
+    // What follows the last value holds its own comment up to the line
+    // break: that stays on its line, the new value starts the next one.
+    let last_sfx = a
+        .iter()
+        .last()
+        .map(|x| suffix_of(x).to_string())
+        .unwrap_or_default();
+    let tail = after_last(a, &last_sfx);
+    if !a.trailing_comma() {
+        if let Some(x) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+            x.decor_mut().set_suffix("");
+        }
+    }
+    let (head, rest) = split_line(&tail);
+    let (pre, after) = if head.is_empty() {
+        (format!("\n{indent}"), tail.clone())
+    } else {
+        (format!("{head}{indent}"), format!("\n{rest}"))
+    };
+    a.push(v);
+    if let Some(x) = a.len().checked_sub(1).and_then(|n| a.get_mut(n)) {
+        x.decor_mut().set_prefix(pre);
+        x.decor_mut().set_suffix("");
+    }
+    set_after_last(a, after);
+}
+
+/// Removes value `i` with what belongs to it: the comments above it, and
+/// the comment after its comma (which the file keeps in front of the next
+/// value, or after the last one). The neighbours keep theirs.
+fn remove_like(a: &mut toml_edit::Array, i: usize) {
+    let (gone, gone_sfx) = a
+        .get(i)
+        .map(|v| (prefix_of(v).to_string(), suffix_of(v).to_string()))
+        .unwrap_or_default();
+    let was_last = i + 1 == a.len();
+    let tail = was_last.then(|| after_last(a, &gone_sfx));
+    a.remove(i);
+    // What ends the line before the removed value (the bracket line or the
+    // previous value's comment) stays.
+    let keep = split_line(&gone).0.to_string();
+    let next = |s: &str| -> Option<String> {
+        let (_, rest) = split_line(s);
+        s.contains('\n').then(|| format!("{keep}{rest}"))
+    };
+    if let Some(v) = a.get_mut(i) {
+        match next(prefix_of(v)) {
+            Some(p) => v.decor_mut().set_prefix(p),
+            // Inline: `["a", "b"]` without "a" is `["b"]`, not `[ "b"]`.
+            None if i == 0 && prefix_of(v) == " " => v.decor_mut().set_prefix(""),
+            None => {}
+        }
+    } else if let Some(t) = tail.filter(|_| !a.is_empty()).and_then(|t| next(&t)) {
+        set_after_last(a, t);
+    }
 }
 
 fn str_field<'a>(t: &'a Table, k: &str) -> Option<&'a str> {
     t.get(k).and_then(Item::as_str)
-}
-
-fn names_of(aot: &toml_edit::ArrayOfTables, key: &str) -> Vec<String> {
-    aot.iter()
-        .map(|t| str_field(t, key).unwrap_or("").to_string())
-        .collect()
-}
-
-/// Note for a whole-list replace: what was added, removed, changed, moved.
-fn list_note(label: &str, old: &[String], new: &[String], edited: bool) -> String {
-    let added: Vec<&String> = new.iter().filter(|n| !old.contains(n)).collect();
-    let removed: Vec<&String> = old.iter().filter(|n| !new.contains(n)).collect();
-    let mut parts = Vec::new();
-    if !added.is_empty() {
-        parts.push(format!(
-            "added {}",
-            added
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if !removed.is_empty() {
-        parts.push(format!(
-            "removed {}",
-            removed
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    let kept_old: Vec<&String> = old.iter().filter(|n| new.contains(n)).collect();
-    let kept_new: Vec<&String> = new.iter().filter(|n| old.contains(n)).collect();
-    if kept_old != kept_new {
-        parts.push("reordered".into());
-    }
-    if parts.is_empty() || edited {
-        parts.push("edited".into());
-    }
-    format!("{label}: {}", parts.join(", "))
-}
-
-pub fn groups(cur: &Current, req: &GroupsReq) -> Result<Draft, ApiError> {
-    let mut want = Vec::new();
-    for (i, g) in req.groups.iter().enumerate() {
-        let _: GroupShape = shape(g, &format!("groups[{i}]"))?;
-        let m = object(g, "group")?;
-        let name = m.get("name").and_then(J::as_str).unwrap_or("").to_string();
-        if name.trim().is_empty() {
-            return Err(ApiError::bad_request(format!("groups[{i}]: name is empty")));
-        }
-        if want.iter().any(|(n, _): &(String, _)| *n == name) {
-            return Err(ApiError::bad_request(format!(
-                "group {name:?} is listed twice"
-            )));
-        }
-        want.push((name, m));
-    }
-    let mut doc = parse_doc(cur)?;
-    let aot = doc::aot_mut(&mut doc, "groups").map_err(engine)?;
-    let old = names_of(aot, "name");
-    let mut used = vec![false; old.len()];
-    let plan: Vec<Option<usize>> = want
-        .iter()
-        .map(|(n, _)| {
-            let i = old.iter().enumerate().position(|(i, o)| o == n && !used[i]);
-            if let Some(i) = i {
-                used[i] = true;
-            }
-            i
-        })
-        .collect();
-    let before: Vec<J> = aot.iter().map(|t| doc::table_json(t)).collect();
-    let orphan = doc::rebuild_aot(aot, &plan);
-    let mut edited = false;
-    for (i, (_, m)) in want.iter().enumerate() {
-        let t = aot.get_mut(i).expect("rebuilt slot");
-        doc::patch_managed(t, m, GROUP_KEYS, Style::Inline).map_err(engine)?;
-        if let Some(Some(o)) = plan.get(i) {
-            edited |= before[*o] != doc::table_json(t);
-        }
-    }
-    let empty = aot.is_empty();
-    if empty {
-        doc.as_table_mut().remove("groups");
-        doc::keep_orphan_comment(&mut doc, orphan);
-    }
-    let new: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
-    Ok(draft(
-        &doc,
-        list_note("groups", &old, &new, edited),
-        GROUP_KEYS,
-    ))
 }
 
 pub fn container_override(cur: &Current, req: &OverrideReq) -> Result<Draft, ApiError> {
@@ -747,6 +1250,21 @@ pub fn container_override(cur: &Current, req: &OverrideReq) -> Result<Draft, Api
         }
         None => &empty,
     };
+    // Checked when the form sends them (only changed fields are sent, so a
+    // hand-written value left alone stays editable).
+    if set
+        .get("url")
+        .and_then(J::as_str)
+        .is_some_and(|u| !web_link(u))
+    {
+        return Err(ApiError::invalid(
+            "Use a link that starts with http:// or https://.",
+            Some("url"),
+            None,
+        ));
+    }
+    at_most(set, "name", 80)?;
+    at_most(set, "description", 200)?;
     if let Some(k) = req
         .clear
         .iter()
@@ -819,6 +1337,17 @@ pub const WIDGETS: ListSpec = ListSpec {
     id_field: Some("id"),
     name_field: "id",
 };
+/// `[[groups]]` one entry at a time (the Groups list on Containers and
+/// groups). An edit is a patch, so `columns` and `layout`, which the form
+/// no longer shows, stay as they are in the file.
+pub const GROUPS: ListSpec = ListSpec {
+    key: "groups",
+    label: "groups",
+    keys: GROUP_KEYS,
+    style: Style::Inline,
+    id_field: Some("name"),
+    name_field: "name",
+};
 pub const ALERTS: ListSpec = ListSpec {
     key: "alerts",
     label: "alerts",
@@ -875,15 +1404,59 @@ fn check_widget_item(item: &J) -> Result<Vec<String>, ApiError> {
 fn check_item(spec: &ListSpec, item: &J) -> Result<Vec<String>, ApiError> {
     match spec.key {
         "bookmarks" => {
-            let _: BookmarkShape = shape(item, "bookmark")?;
+            let b: BookmarkShape = shape(item, "bookmark")?;
+            if b.name.trim().is_empty() {
+                return Err(ApiError::invalid("Required.", Some("name"), None));
+            }
         }
         "widgets" => return check_widget_item(item),
         "alerts" => {
             let _: RuleShape = shape(item, "rule")?;
         }
+        "groups" => {
+            let g: GroupShape = shape(item, "group")?;
+            if g.name.trim().is_empty() {
+                return Err(ApiError::invalid("Required.", Some("name"), None));
+            }
+            at_most(object(item, "group")?, "title", 80)?;
+        }
         _ => {}
     }
     Ok(Vec::new())
+}
+
+/// SET-40: a bookmark URL from the form must be a web link (no
+/// `javascript:`, no bare words). Checked on add, and on edit only when the
+/// URL changed: a hand-written entry such as `url = "/files"` stays editable
+/// (the config validator itself still accepts it).
+fn bookmark_url(spec: &ListSpec, item: &J, old: Option<&str>) -> Result<(), ApiError> {
+    if spec.key != "bookmarks" {
+        return Ok(());
+    }
+    let url = item.get("url").and_then(J::as_str).unwrap_or("");
+    if old == Some(url) {
+        return Ok(());
+    }
+    if !web_link(url) {
+        return Err(ApiError::invalid(
+            "Use a link that starts with http:// or https://.",
+            Some("url"),
+            None,
+        ));
+    }
+    Ok(())
+}
+
+/// "That name is taken", on the field that names the entry.
+fn taken(id: &str, field: &str) -> ApiError {
+    ApiError::invalid(
+        &format!(
+            "“{id}” is already in the list; use another {}.",
+            label_of(field).to_lowercase()
+        ),
+        Some(field),
+        None,
+    )
 }
 
 fn locked_entry(spec: &ListSpec, t: &Table) -> bool {
@@ -916,16 +1489,13 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                 .as_ref()
                 .ok_or_else(|| ApiError::bad_request("add needs item"))?;
             warnings.extend(check_item(spec, item)?);
+            bookmark_url(spec, item, None)?;
             if let (Some(id), Some(f)) = (item_id(item), spec.id_field) {
                 if let Some(t) = aot.iter().find(|t| str_field(t, f) == Some(id.as_str())) {
                     if locked_entry(spec, t) {
                         return Err(locked_err(t));
                     }
-                    return Err(ApiError::invalid(
-                        &format!("{} {f} {id:?} already exists", spec.label),
-                        Some(f),
-                        None,
-                    ));
+                    return Err(taken(&id, f));
                 }
             }
             let mut t = Table::new();
@@ -949,6 +1519,7 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                 return Err(locked_err(aot.get(i).unwrap()));
             }
             warnings.extend(check_item(spec, item)?);
+            bookmark_url(spec, item, str_field(aot.get(i).unwrap(), "url"))?;
             if let (Some(new_id), Some(f)) = (item_id(item), spec.id_field) {
                 if let Some(t) = aot
                     .iter()
@@ -958,14 +1529,30 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                     if locked_entry(spec, t.1) {
                         return Err(locked_err(t.1));
                     }
+                    // A rename onto another entry's name would make two.
+                    return Err(taken(&new_id, f));
                 }
             }
             let t = aot.get_mut(i).unwrap();
             let old = entry_name(t);
-            doc::patch_managed(t, object(item, "item")?, spec.keys, spec.style).map_err(engine)?;
+            let m = object(item, "item")?;
+            doc::patch_managed(t, m, &present(spec.keys, m), spec.style).map_err(engine)?;
             let new = entry_name(t);
             if old == new {
                 format!("{}: edited {new}", spec.label)
+            } else if spec.key == "widgets" {
+                // Rules that watch the widget follow the new id (the dialog
+                // names them and asks before saving).
+                let moved = rename_widget_refs(&mut doc, &old, &new);
+                if moved.is_empty() {
+                    format!("{}: renamed {old} to {new}", spec.label)
+                } else {
+                    format!(
+                        "{}: renamed {old} to {new} (rules {})",
+                        spec.label,
+                        moved.join(", ")
+                    )
+                }
             } else {
                 format!("{}: renamed {old} to {new}", spec.label)
             }
@@ -983,6 +1570,13 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
                 return Err(locked_err(t));
             }
             let name = entry_name(t);
+            if spec.key == "widgets" {
+                let users = widget_rules(&doc, &name);
+                if !users.is_empty() {
+                    return Err(in_use("widget", &name, &users));
+                }
+            }
+            let aot = doc::aot_mut(&mut doc, spec.key).map_err(engine)?;
             let plan: Vec<Option<usize>> = (0..aot.len()).filter(|j| *j != i).map(Some).collect();
             let orphan = doc::rebuild_aot(aot, &plan);
             if aot.is_empty() {
@@ -1021,8 +1615,10 @@ pub fn list_action(cur: &Current, spec: &ListSpec, req: &CollectionReq) -> Resul
 
 pub fn system(cur: &Current, req: &SystemReq) -> Result<Draft, ApiError> {
     let mut doc = parse_doc(cur)?;
-    let t = doc::table_mut(doc.as_table_mut(), "system", false).map_err(engine)?;
-    doc::set_json(t, "enabled", Some(&J::Bool(req.enabled)), Style::Inline).map_err(engine)?;
+    if !(req.enabled && back_to_default(doc.as_table_mut(), "system", "enabled")) {
+        let t = doc::table_mut(doc.as_table_mut(), "system", false).map_err(engine)?;
+        doc::set_json(t, "enabled", Some(&J::Bool(req.enabled)), Style::Inline).map_err(engine)?;
+    }
     let note = format!(
         "widgets: system tiles {}",
         if req.enabled { "on" } else { "off" }
@@ -1115,8 +1711,8 @@ fn check_channel(item: &J) -> Result<CheckedChannel, ApiError> {
     secret_refs_ok(m, &mut warnings)?;
     if m.get("url").is_some_and(|u| !u.is_null()) {
         warnings.push(
-            "url is stored in the config file as plain text (and in its revisions); if the URL \
-             contains a token, use url_env instead"
+            "The URL is stored in the config file and its revisions as plain text; if it contains \
+             a token, use a variable or a file instead."
                 .into(),
         );
     }
@@ -1165,6 +1761,7 @@ pub fn channel_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
                 .as_ref()
                 .ok_or_else(|| ApiError::bad_request("edit needs item"))?;
             let (name, fields, w) = check_channel(item)?;
+            let sent = present(CHANNEL_KEYS, object(item, "channel")?);
             warnings = w;
             if !chans.contains_key(&old) {
                 return Err(ApiError::not_found(format!("no channel {old:?}")));
@@ -1177,7 +1774,7 @@ pub fn channel_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
                 ));
             }
             let t = doc::table_mut(chans, &old, false).map_err(engine)?;
-            doc::patch_managed(t, &fields, CHANNEL_KEYS, Style::Inline).map_err(engine)?;
+            doc::patch_managed(t, &fields, &sent, Style::Inline).map_err(engine)?;
             if name != old {
                 // Move the table (decor and position go with it) and keep
                 // the rules that send to it pointing at it.
@@ -1191,9 +1788,15 @@ pub fn channel_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
         }
         Action::Delete => {
             let name = id()?;
-            if chans.remove(&name).is_none() {
+            if !chans.contains_key(&name) {
                 return Err(ApiError::not_found(format!("no channel {name:?}")));
             }
+            let users = rules_naming(&doc, "channels", &name);
+            if !users.is_empty() {
+                return Err(in_use("channel", &name, &users));
+            }
+            let chans = doc::table_mut(doc.as_table_mut(), "channels", true).map_err(engine)?;
+            chans.remove(&name);
             format!("notifications: deleted channel {name}")
         }
         Action::Reorder => {
@@ -1209,6 +1812,83 @@ pub fn channel_action(cur: &Current, req: &CollectionReq) -> Result<Draft, ApiEr
     let mut d = draft(&doc, note, CHANNEL_FIELDS);
     d.warnings = warnings;
     Ok(d)
+}
+
+/// Names of the rules whose `key` (a list, `channels`) contains `name`.
+fn rules_naming(doc: &DocumentMut, key: &str, name: &str) -> Vec<String> {
+    let Some(Item::ArrayOfTables(rules)) = doc.as_table().get("alerts") else {
+        return Vec::new();
+    };
+    rules
+        .iter()
+        .filter(|r| {
+            r.get(key)
+                .and_then(Item::as_array)
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(name)))
+        })
+        .map(|r| str_field(r, "name").unwrap_or("?").to_string())
+        .collect()
+}
+
+/// Names of the widget rules that watch the widget `id`.
+fn widget_rules(doc: &DocumentMut, id: &str) -> Vec<String> {
+    let Some(Item::ArrayOfTables(rules)) = doc.as_table().get("alerts") else {
+        return Vec::new();
+    };
+    rules
+        .iter()
+        .filter(|r| str_field(r, "widget") == Some(id))
+        .map(|r| str_field(r, "name").unwrap_or("?").to_string())
+        .collect()
+}
+
+/// A delete refused because rules still refer to the entry: says which, in
+/// plain words (422, no field: it is not about a form field).
+fn in_use(what: &str, name: &str, rules: &[String]) -> ApiError {
+    let (noun, list) = match rules {
+        [one] => ("the rule", format!("“{one}”")),
+        many => (
+            "the rules",
+            many.iter()
+                .map(|r| format!("“{r}”"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    };
+    let fix = if what == "channel" {
+        "Take it out of those rules first (or delete them), then delete the channel."
+    } else {
+        "Change or delete those rules first, then delete the widget."
+    };
+    let mut e = ApiError::invalid(
+        &format!("The {what} “{name}” is used by {noun} {list}. {fix}"),
+        None,
+        None,
+    );
+    e.body["used_by"] = J::from(rules.to_vec());
+    e
+}
+
+/// `widget = "old"` in every rule becomes `new` (formatting kept). Returns
+/// the names of the rules changed.
+fn rename_widget_refs(doc: &mut DocumentMut, old: &str, new: &str) -> Vec<String> {
+    let Some(Item::ArrayOfTables(rules)) = doc.as_table_mut().get_mut("alerts") else {
+        return Vec::new();
+    };
+    let mut moved = Vec::new();
+    for r in rules.iter_mut() {
+        if str_field(r, "widget") != Some(old) {
+            continue;
+        }
+        if let Some(v) = r.get_mut("widget").and_then(Item::as_value_mut) {
+            let decor = v.decor().clone();
+            let mut nv = Value::from(new);
+            *nv.decor_mut() = decor;
+            *v = nv;
+        }
+        moved.push(str_field(r, "name").unwrap_or("?").to_string());
+    }
+    moved
 }
 
 /// `channels = [...]` in every rule: `old` becomes `new` (formatting kept).
@@ -1238,9 +1918,17 @@ pub fn preview_widget(item: &J) -> Result<crate::widgets::WidgetConfig, ApiError
     let m = strip_nulls(object(item, "item")?);
     let mut w: crate::widgets::WidgetConfig = serde_json::from_value(J::Object(m))
         .map_err(|e| ApiError::invalid(&format!("widget: {e}"), None, None))?;
-    crate::widgets::validate(std::slice::from_ref(&w)).map_err(|e| {
-        let field = super::store::field_in(&e, WIDGET_KEYS);
-        ApiError::invalid(&e, field.as_deref(), None)
+    // The same field and words as a save's check (`precheck`).
+    crate::widgets::validate(std::slice::from_ref(&w)).map_err(|e| match strip_owner(&e) {
+        Some(rest) => ApiError::invalid(
+            &sentence(rest),
+            entry_field(rest, WIDGET_KEYS).as_deref(),
+            None,
+        ),
+        None => {
+            let field = super::store::field_in(&e, WIDGET_KEYS);
+            ApiError::invalid(&e, field.as_deref(), None)
+        }
     })?;
     // Preview even a disabled widget, and never wait long.
     w.enabled = None;

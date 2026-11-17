@@ -73,6 +73,14 @@ ALTER TABLE ctr_roll ADD COLUMN n INTEGER NOT NULL DEFAULT 1;
     super::ctrx::MIGRATION,
     // v5: extra host series (src/db/hostx.rs)
     super::hostx::MIGRATION,
+    // v6: time indexes on events. Restart counts read only the starts in
+    // their window (covering index), History, Host markers, health strips
+    // and retention read a time range instead of walking ids. An older build
+    // refuses a database at this version (see `migrate`).
+    "
+CREATE INDEX events_ts ON events (ts);
+CREATE INDEX events_kind_ts ON events (kind, ts, subject);
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.

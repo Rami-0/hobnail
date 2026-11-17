@@ -196,9 +196,12 @@ impl super::Db {
                 "SELECT ts, kind, subject, detail FROM events
                  WHERE kind IN ('container.die', 'container.oom', 'container.health',
                                 'container.stop', 'container.start')
+                   AND ts >= ?1
                  ORDER BY id DESC",
             )?;
-            let mut rows = st.query([])?;
+            // The window's rows only (`events_ts`); the cut-off below stays
+            // for rows whose ids are out of time order.
+            let mut rows = st.query([from])?;
             let mut evs: Vec<(i64, String, String, String)> = Vec::new();
             let mut older = 0;
             while let Some(r) = rows.next()? {

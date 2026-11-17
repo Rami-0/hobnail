@@ -2,14 +2,14 @@
 //! for the 3 s poll; history charts sit below it and only change with the
 //! range picker.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use maud::{html, Markup, PreEscaped};
 
 use super::collect::{CpuSplit, Host, NetView, ProcReport, PSI_RES};
 use super::parse::SensorKind;
 use crate::db::{Agg, Range};
-use crate::ui::chart::{line_chart, ChartSpec, Unit};
+use crate::ui::chart::{line_chart_ex, markers_from_events, ChartSpec, Extras, Unit};
 use crate::ui::fmt::{pct, query_get, url_encode};
 use crate::ui::ic;
 use crate::ui::shell::{layout, Ctx, Nav};
@@ -20,25 +20,27 @@ pub struct LiveView<'a> {
     pub p: &'a ProcReport,
     /// Container id -> name.
     pub names: &'a HashMap<String, String>,
+    /// Names whose logs may be read (`logs::tailable`): only these get a
+    /// logs icon (an excluded container gets none).
+    pub logs: &'a HashSet<String>,
     /// Full command lines (they can hold secrets) only for a signed-in user.
     pub signed_in: bool,
 }
 
-/// Polls the live fragment every 3 s while the tab is visible; replaces the
-/// region only when the response is a fragment (a login redirect is not).
-const POLL_JS: &str = "(function(){var el=document.getElementById('hx-live');if(!el||!window.fetch)return;var busy=0;function go(){if(document.hidden||busy)return;busy=1;fetch('/host?frag=live',{credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(function(t){busy=0;if(t.indexOf('hx-grid')>0)el.innerHTML=t}).catch(function(){busy=0})}setInterval(go,3000);document.addEventListener('visibilitychange',go)})();";
+/// Polls the live fragment every 3 s while the tab is visible; updates the
+/// region only when the response is a fragment (a login redirect is not),
+/// in place (`HB.morph`): an open "Show N bridges", a sideways scroll, a
+/// text selection and focus survive the update (LG-34, A11Y-02).
+const POLL_JS: &str = "(function(){var el=document.getElementById('hx-live');if(!el||!window.fetch)return;var busy=0;function go(){if(document.hidden||busy)return;busy=1;fetch('/host?frag=live',{credentials:'same-origin'}).then(function(r){return r.ok?r.text():''}).then(function(t){busy=0;if(t.indexOf('hx-grid')>0){if(window.HB&&HB.morph)HB.morph(el,t);else el.innerHTML=t}}).catch(function(){busy=0})}setInterval(go,3000);document.addEventListener('visibilitychange',go)})();";
 
 pub fn page(ctx: &Ctx, lv: &LiveView, q: &[(String, String)]) -> String {
-    let range = query_get(q, "range")
-        .and_then(Range::parse)
-        .unwrap_or(Range::H1);
     let body = html! {
         div.page.hx {
             (crate::ui::pages::page_sub(html! {
-                "Everything the kernel reports about this machine. Live numbers refresh every 3 s while this tab is visible."
+                "Everything the kernel reports about this machine. Live numbers refresh every 3 s while this tab is visible; rates are averages since the previous reading."
             }))
             div #hx-live aria-live="off" { (live_region(lv)) }
-            (history(ctx, lv.h, range))
+            (history(ctx, lv.h, q))
             script { (PreEscaped(POLL_JS)) }
         }
     };
@@ -68,6 +70,18 @@ fn rate(v: Option<f64>) -> String {
         .unwrap_or_else(|| "—".into())
 }
 
+/// A rate as table text: the number, then its unit in a span that a phone
+/// puts on a line of its own, on every row alike (LG-36: "144 KiB/s" in
+/// five columns does not fit 390 px; one height for every row keeps the
+/// 3 s poll from moving anything).
+fn rate_cell(v: Option<f64>) -> Markup {
+    let s = rate(v);
+    match s.split_once(' ') {
+        Some((n, u)) => html! { (n) span.hx-u { " " (u) } },
+        None => html! { (s) },
+    }
+}
+
 fn meter(v: Option<f64>, warn: f64, bad: f64) -> Markup {
     let w = v.unwrap_or(0.0).clamp(0.0, 100.0);
     html! {
@@ -91,13 +105,10 @@ pub fn live_region(lv: &LiveView) -> Markup {
             (extras(h))
         }
         p.foot-line {
+            // One statement of the averaging window, in the intro (LG-42).
             (ic("clock"))
-            @if h.window > 0.0 {
-                "Rates over the last " (format!("{:.0}", h.window.max(1.0))) " s"
-            } @else {
-                "Rates appear on the next refresh"
-            }
-            " · process scan " (format!("{:.1}", lv.p.scan_ms)) " ms over " (lv.p.total) " processes"
+            @if h.window <= 0.0 { "Rates appear on the next refresh · " }
+            "Process scan " (format!("{:.1}", lv.p.scan_ms)) " ms over " (lv.p.total) " processes"
             " · up " (crate::util::human_duration(h.uptime))
         }
     }
@@ -154,7 +165,7 @@ fn cpu(h: &Host) -> Markup {
                 ul.hx-cores {
                     @for (n, s) in &h.cores {
                         @let b = s.map(|s: CpuSplit| s.busy);
-                        li { span.hx-l { "cpu" (n) } (meter(b, 70.0, 90.0)) span.hx-v { (opt_pct(b)) } }
+                        li data-key={"cpu" (n)} { span.hx-l { "cpu" (n) } (meter(b, 70.0, 90.0)) span.hx-v { (opt_pct(b)) } }
                     }
                 }
             }
@@ -252,11 +263,14 @@ fn memory(h: &Host) -> Markup {
                             @else { (human_bytes(m.swap_used())) " / " (human_bytes(m.swap_total)) }
                         }
                     }
+                    // The rates on a line of their own: their width changes
+                    // at every poll, and a sentence after them would re-wrap
+                    // (the panel's height moved on a phone).
                     p.hx-note {
                         "Swap activity: in " b.(lvl(h.swap_in, 1.0, 100.0)) { (page_rate(h.swap_in)) }
                         " · out " b.(lvl(h.swap_out, 1.0, 100.0)) { (page_rate(h.swap_out)) }
-                        ". Used swap alone is harmless; steady swapping in means memory is short."
                     }
+                    p.hx-note.hx-tight { "Used swap alone is harmless; steady swapping in means memory is short." }
                 }
             }
         }
@@ -285,7 +299,7 @@ fn sensors(h: &Host) -> Markup {
                                     (SensorKind::Temp, None, None) if s.value >= 85.0 => "warn",
                                     _ => "",
                                 };
-                                tr {
+                                tr data-key={(s.chip) "/" (s.label)} {
                                     th scope="row" { span.hx-chip { (s.chip) } " " (s.label) }
                                     td.num.(cls) { b { (now) } }
                                     td.num.muted { (hi.unwrap_or_else(|| "—".into())) }
@@ -300,12 +314,27 @@ fn sensors(h: &Host) -> Markup {
     }
 }
 
-fn ctr_link(cid: &Option<String>, names: &HashMap<String, String>) -> Markup {
+fn ctr_link(
+    cid: &Option<String>,
+    names: &HashMap<String, String>,
+    logs: &HashSet<String>,
+) -> Markup {
     match cid {
-        None => html! { span.muted { "host" } },
+        // `nm-l` like a container's cell: every row is one height on a
+        // phone, so re-ranking at each poll moves nothing below the table.
+        None => html! { span.nm-l.muted { "host" } },
         Some(id) => match names.get(id) {
-            Some(n) => html! { a href={"/containers/" (url_encode(n))} { (n) } },
-            None => html! { span.muted title=(id) { (id.get(..12).unwrap_or(id)) } },
+            // The name opens the container; the icon, a sibling, its logs
+            // (only when they may be read).
+            Some(n) => html! {
+                span.nm-l {
+                    a href={"/containers/" (url_encode(n))} { (n) }
+                    @if logs.contains(n) {
+                        a.ia.logs href=(crate::logs::logs_url(n)) title="Logs" aria-label={"Logs of " (n)} { (ic("logs")) }
+                    }
+                }
+            },
+            None => html! { span.nm-l.muted title=(id) { (id.get(..12).unwrap_or(id)) } },
         },
     }
 }
@@ -324,9 +353,13 @@ fn procs(lv: &LiveView) -> Markup {
         section.panel.hx-p.hx-wide aria-label="Processes" {
             div.panel-h {
                 h2 { (ic("server")) "Who is using the host" }
+                // The first render's "average since started" note keeps its
+                // room once live figures replace it (no shift at 3 s).
                 span.muted.hx-h {
                     "CPU: 100% = one core"
-                    @if p.lifetime { " · average since each process started; live figures from the next refresh" }
+                    span.hx-life.off[!p.lifetime] aria-hidden=[(!p.lifetime).then_some("true")] {
+                        " · average since each process started; live figures from the next refresh"
+                    }
                 }
             }
             @if p.total == 0 {
@@ -334,13 +367,16 @@ fn procs(lv: &LiveView) -> Markup {
             } @else {
                 div.hx-two {
                     div.scroll-x {
-                        table.tbl.small.hx-t {
+                        table.tbl.small.hx-t.hx-fix.hx-byc {
                             caption { "By container" }
                             thead { tr { th { "Container" } th.num { "CPU" } th.num { "Memory" } th.num.hx-o { "Procs" } } }
-                            tbody {
+                            // Ranked (HB.morph, data-rank): re-sorted by every
+                            // sample, so rows are re-used by position (none
+                            // moves); the keyed row holding focus keeps it.
+                            tbody data-rank {
                                 @for (cid, cpu, rss, n) in p.groups.iter().take(10) {
-                                    tr {
-                                        th scope="row" { (ctr_link(cid, lv.names)) }
+                                    tr data-key=(cid.as_deref().unwrap_or("+host")) {
+                                        th scope="row" { (ctr_link(cid, lv.names, lv.logs)) }
                                         td.num.(lvl(Some(*cpu), 80.0, 200.0)) { (pct(*cpu)) }
                                         td.num { (human_bytes(*rss)) }
                                         td.num.hx-o.muted { (n) }
@@ -351,12 +387,12 @@ fn procs(lv: &LiveView) -> Markup {
                         p.hx-note { "Memory is the sum of resident sets; shared pages count once per process." }
                     }
                     div.scroll-x {
-                        table.tbl.small.hx-t.hx-procs {
+                        table.tbl.small.hx-t.hx-fix.hx-procs {
                             caption { "Top processes" }
                             thead { tr { th.hx-o { "PID" } th { "Process" } th.hx-o { "User" } th.num { "CPU" } th.num { "RSS" } th { "Container" } } }
-                            tbody {
+                            tbody data-rank {
                                 @for r in &p.top {
-                                    tr {
+                                    tr data-key=(r.pid) {
                                         td.hx-o.mono.muted { (r.pid) }
                                         td.hx-cmd {
                                             b.mono { (r.comm) }
@@ -365,7 +401,7 @@ fn procs(lv: &LiveView) -> Markup {
                                         td.hx-o.muted { (user(r.uid)) }
                                         td.num.(lvl(Some(r.cpu), 80.0, 100.0)) { (pct(r.cpu)) }
                                         td.num { (human_bytes(r.rss)) }
-                                        td { (ctr_link(&r.cid, lv.names)) }
+                                        td { (ctr_link(&r.cid, lv.names, lv.logs)) }
                                     }
                                 }
                             }
@@ -391,9 +427,9 @@ fn disks(h: &Host) -> Markup {
                         tbody {
                             @if h.mounts.is_empty() { tr { td.muted colspan="6" { "No real file systems in the host mount table." } } }
                             @for m in &h.mounts {
-                                tr {
+                                tr data-key=(m.mnt) {
                                     th scope="row" { span.mono { (m.mnt) } " " span.muted { (m.fstype) } }
-                                    td.hx-o.mono.muted { (m.dev.trim_start_matches("/dev/")) }
+                                    td.hx-o.hx-dev.mono.muted { (m.dev.trim_start_matches("/dev/")) }
                                     @if let Some((total, used, avail)) = m.usage {
                                         @let p = used as f64 * 100.0 / (used + avail).max(1) as f64;
                                         td.num { (human_bytes(used)) }
@@ -421,7 +457,7 @@ fn disks(h: &Host) -> Markup {
                         tbody {
                             @if h.disks.is_empty() { tr { td.muted colspan="5" { "No block devices in /proc/diskstats." } } }
                             @for d in &h.disks {
-                                tr {
+                                tr data-key=(d.name) {
                                     th scope="row" {
                                         span.mono { (d.name) }
                                         span.muted.hx-o {
@@ -430,8 +466,8 @@ fn disks(h: &Host) -> Markup {
                                             @match d.rotational { Some(true) => " · HDD", Some(false) => " · SSD", None => "" }
                                         }
                                     }
-                                    td.num { (rate(d.rd_bps)) }
-                                    td.num { (rate(d.wr_bps)) }
+                                    td.num { (rate_cell(d.rd_bps)) }
+                                    td.num { (rate_cell(d.wr_bps)) }
                                     td.num.hx-o { (d.iops.map(|v| format!("{v:.0}")).unwrap_or_else(|| "—".into())) }
                                     td.hx-m { (meter(d.util, 60.0, 90.0)) span.hx-v { (opt_pct(d.util)) } }
                                 }
@@ -445,16 +481,17 @@ fn disks(h: &Host) -> Markup {
     }
 }
 
-fn net_row(n: &NetView, label: Markup) -> Markup {
+/// One interface row, keyed by `key` (an interface name, or "+bridges").
+fn net_row(n: &NetView, key: &str, label: Markup) -> Markup {
     let c = &n.cur;
     let errs = c.rx_errs + c.tx_errs;
     let drops = c.rx_drop + c.tx_drop;
     html! {
-        tr {
+        tr data-key=(key) {
             th scope="row" { (label) }
             td.num.hx-o.muted { (n.speed_mbps.map(|s| if s >= 1000 { format!("{} Gb/s", s / 1000) } else { format!("{s} Mb/s") }).unwrap_or_else(|| "—".into())) }
-            td.num { (rate(n.rx_bps)) }
-            td.num { (rate(n.tx_bps)) }
+            td.num { (rate_cell(n.rx_bps)) }
+            td.num { (rate_cell(n.tx_bps)) }
             td.num.(if n.new_errs > 0 { "warn" } else { "" }) title={"rx " (c.rx_errs) " / tx " (c.tx_errs)} { (errs) }
             td.num.(if n.new_errs > 0 { "warn" } else { "" }) title={"rx " (c.rx_drop) " / tx " (c.tx_drop)} { (drops) }
             td.num.hx-o.muted { (human_bytes(c.rx_bytes)) " / " (human_bytes(c.tx_bytes)) }
@@ -497,9 +534,9 @@ fn network(h: &Host) -> Markup {
                     (head)
                     tbody {
                         @if h.nets.is_empty() { tr { td.muted colspan="7" { "No interfaces in /proc/1/net/dev." } } }
-                        @for n in &real { (net_row(n, html! { span.mono { (n.name) } })) }
+                        @for n in &real { (net_row(n, &n.name, html! { span.mono { (n.name) } })) }
                         @if !bridges.is_empty() {
-                            (net_row(&agg, html! { "Bridges " span.muted { "(" (bridges.len()) ")" } }))
+                            (net_row(&agg, "+bridges", html! { "Bridges " span.muted { "(" (bridges.len()) ")" } }))
                         }
                     }
                 }
@@ -510,7 +547,7 @@ fn network(h: &Host) -> Markup {
                     div.scroll-x {
                         table.tbl.small.hx-t {
                             (head)
-                            tbody { @for n in &bridges { (net_row(n, html! { span.mono { (n.name) } })) } }
+                            tbody { @for n in &bridges { (net_row(n, &n.name, html! { span.mono { (n.name) } })) } }
                         }
                     }
                 }
@@ -520,24 +557,21 @@ fn network(h: &Host) -> Markup {
     }
 }
 
+/// GPUs, only when the kernel lists one (LG-38): what is not shown and why
+/// (S.M.A.R.T., systemd) is in `docs/features/host.md`, not on the page.
 fn extras(h: &Host) -> Markup {
+    if h.gpus.is_empty() {
+        return html! {};
+    }
     html! {
-        section.panel.hx-p.hx-wide aria-label="Other hardware" {
-            div.panel-h { h2 { (ic("monitor")) "GPU, S.M.A.R.T., systemd" } }
-            dl.hx-kv.hx-wide-kv {
-                div {
-                    dt { "GPU" }
-                    dd {
-                        @if h.gpus.is_empty() { span.muted { "No DRM devices." } }
-                        @for g in &h.gpus {
-                            span.hx-gpu { span.mono { (g.card) } " " (g.driver) " "
-                                @if let Some(b) = g.busy { b { (pct(b)) } " busy" } @else { span.muted { "(no busy % exported)" } }
-                            }
-                        }
+        section.panel.hx-p.hx-wide aria-label="GPU" {
+            div.panel-h { h2 { (ic("monitor")) "GPU" } }
+            p.hx-gpus {
+                @for g in &h.gpus {
+                    span.hx-gpu { span.mono { (g.card) } " " (g.driver) " "
+                        @if let Some(b) = g.busy { b { (pct(b)) } " busy" } @else { span.muted { "(no busy % exported)" } }
                     }
                 }
-                div { dt { "S.M.A.R.T." } dd.muted { "Not shown: it needs raw access to the disks under /dev, which this container does not get. Drive temperatures appear under Sensors when the kernel exposes them (NVMe, drivetemp)." } }
-                div { dt { "systemd" } dd.muted { "Failed units are not shown: reading them needs the system D-Bus socket, which is not mounted." } }
             }
         }
     }
@@ -677,18 +711,59 @@ fn groups(h: &Host) -> Vec<(&'static str, Vec<C>)> {
     ]
 }
 
-fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
+/// The history charts (LG-39): the same window as History (a preset range
+/// or a zoomed `from`/`to`), moved and zoomed with plain links or a drag
+/// across a chart, with the window's incidents as markers that open them in
+/// the History timeline. Read on a page load only.
+fn history(ctx: &Ctx, h: &Host, q: &[(String, String)]) -> Markup {
+    use crate::ui::pages::history::{window_events, Window};
     let db = &ctx.state.db;
     let en = db.is_enabled();
     let now = ctx.now as i64;
+    let preset = query_get(q, "range")
+        .and_then(Range::parse)
+        .unwrap_or(Range::H1);
+    let w = Window::parse(q, preset, now);
+    let evs = if en {
+        window_events(db, ctx.user.is_some(), w.from(), w.to)
+    } else {
+        Vec::new()
+    };
+    let marks = markers_from_events(&evs);
+    let steps = w.steps(now);
+    let step = |label: &str, to: Option<&str>, hint: &str| {
+        html! {
+            @match to {
+                Some(q) => a.btn.sm href={"/host?" (q) "#history"} title=(hint) { (label) },
+                None => span.btn.sm aria-disabled="true" title=(hint) { (label) },
+            }
+        }
+    };
     html! {
-        section.sec #history aria-label="History" {
+        section.sec #history aria-label="History" data-zoom-hash {
             div.panel-h {
                 h2 { "History" }
                 nav.seg aria-label="Range" {
                     @for r in Range::ALL {
-                        a href={"/host?range=" (r.as_str()) "#history"} aria-current=[(r == range).then_some("true")] { (r.as_str()) }
+                        a href={"/host?range=" (r.as_str()) "#history"} aria-current=[(!w.zoomed && r == preset).then_some("true")] { (r.as_str()) }
                     }
+                }
+            }
+            div.toolbar.hist-bar {
+                nav.zoom-nav aria-label="Move or zoom the window" {
+                    (step("‹ Earlier", Some(&steps.earlier), "The half window before this one"))
+                    (step("Zoom in", steps.zoom_in.as_deref(), "Half this window around its middle (5 min at least)"))
+                    (step("Zoom out", Some(&steps.zoom_out), "Twice this window"))
+                    (step("Later ›", steps.later.as_deref(), "The half window after this one"))
+                }
+                @if w.zoomed {
+                    span.zoomed {
+                        (ic("search")) "Zoomed: " time.num data-t=(w.from()) data-abs="1" { (crate::ui::fmt::short_utc(w.from().max(0) as u64)) }
+                        " – " time.num data-t=(w.to) data-abs="1" { (crate::ui::fmt::short_utc(w.to.max(0) as u64)) }
+                        a.btn.sm href={"/host?range=" (preset.as_str()) "#history"} { "Reset zoom" }
+                    }
+                } @else {
+                    span.hint.muted.js-only { "Drag across a chart to zoom in" }
                 }
             }
             @if !en { (crate::ui::pages::history_off_banner()) }
@@ -701,17 +776,117 @@ fn history(ctx: &Ctx, h: &Host, range: Range) -> Markup {
                                 title: &ch.title,
                                 unit: ch.unit,
                                 color: ch.color,
-                                range_secs: range.secs(),
-                                now,
+                                range_secs: w.secs,
+                                now: w.to,
                                 cap: ch.cap,
                                 zero_based: ch.unit != Unit::Celsius,
                                 compact: true,
                             };
-                            (line_chart(&spec, &db.hostx_series(&ch.key, range, now, Agg::Avg), en))
+                            @let x = Extras { max: None, compare: None, markers: &marks, zoom: true };
+                            (line_chart_ex(&spec, &db.hostx_series(&ch.key, w.range, w.to, Agg::Avg), en, &x))
                         }
                     }
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    /// LG-39: Host's history charts move and zoom like History's: range
+    /// links, the four steps and "Reset zoom" as plain links that come back
+    /// to the section, and a drag (the section names itself for the script).
+    #[test]
+    fn host_history_moves_and_zooms_like_history() {
+        let st = crate::ui::testutil::state_with(vec![], "");
+        let hm = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/host", "", &hm);
+        let now = ctx.now as i64;
+        let q = vec![
+            ("from".to_string(), (now - 7200).to_string()),
+            ("to".to_string(), (now - 3600).to_string()),
+        ];
+        let html = history(&ctx, &Host::default(), &q).into_string();
+        assert!(
+            html.contains(
+                r#"<section class="sec" id="history" aria-label="History" data-zoom-hash>"#
+            ),
+            "{html}"
+        );
+        assert!(html.contains("Reset zoom") && html.contains(r##"href="/host?range=1h#history""##));
+        assert!(
+            !html.contains(r#"aria-current="true""#),
+            "no preset is current when zoomed"
+        );
+        assert!(
+            html.contains(&format!(
+                r##"href="/host?from={}&amp;to={}#history""##,
+                now - 3600 - 1800,
+                now - 1800
+            )),
+            "Later: {html}"
+        );
+        let html = history(&ctx, &Host::default(), &[]).into_string();
+        assert!(html.contains(r##"<a href="/host?range=1h#history" aria-current="true">"##));
+        assert!(html.contains("Drag across a chart to zoom in"));
+        let js = crate::http::server::APP_JS;
+        assert!(js.contains(r#"d.fig.closest("[data-zoom-hash][id]")"#));
+    }
+
+    /// A process row that belongs to a container: the name opens it and a
+    /// sibling icon opens its logs (one click, never a link in a link).
+    #[test]
+    fn container_cells_link_the_container_and_its_logs() {
+        let names: HashMap<String, String> = [
+            ("abc".to_string(), "web<1>".to_string()),
+            ("def".to_string(), "secret-db".to_string()),
+        ]
+        .into();
+        let logs: HashSet<String> = ["web<1>".to_string()].into();
+        let html = ctr_link(&Some("abc".into()), &names, &logs).into_string();
+        assert!(
+            html.contains(r#"<a href="/containers/web%3C1%3E">web&lt;1&gt;</a>"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/web%3C1%3E/logs" title="Logs" aria-label="Logs of web&lt;1&gt;">"#), "{html}");
+        let host = ctr_link(&None, &names, &logs).into_string();
+        assert!(!host.contains("href"), "host processes have no logs");
+        // Same row height as a container's cell (no move at each poll).
+        assert_eq!(host, r#"<span class="nm-l muted">host</span>"#);
+        let unknown = ctr_link(&Some("ffffffffffffff".into()), &names, &logs).into_string();
+        assert!(!unknown.contains("href"));
+        // An excluded (or otherwise untailable) container: its name, no logs link.
+        let excluded = ctr_link(&Some("def".into()), &names, &logs).into_string();
+        assert!(excluded.contains("secret-db"), "{excluded}");
+        assert!(!excluded.contains("/logs"), "{excluded}");
+    }
+
+    /// A rate's unit is its own span, so a phone can put it on a second
+    /// line on every row (LG-36).
+    #[test]
+    fn rates_keep_their_unit_apart() {
+        assert_eq!(
+            rate_cell(Some(2048.0)).into_string(),
+            r#"2.0<span class="hx-u"> KiB/s</span>"#
+        );
+        assert_eq!(rate_cell(None).into_string(), "—");
+    }
+
+    /// No GPU: no panel (LG-38); the "not shown" rows are gone for good.
+    #[test]
+    fn hardware_panel_only_for_a_gpu() {
+        let mut h = Host::default();
+        assert_eq!(extras(&h).into_string(), "");
+        h.gpus.push(super::super::collect::Gpu {
+            card: "card0".into(),
+            driver: "i915".into(),
+            busy: None,
+        });
+        let html = extras(&h).into_string();
+        assert!(html.contains("card0") && html.contains("i915"), "{html}");
+        assert!(!html.contains("S.M.A.R.T") && !html.contains("systemd"));
     }
 }

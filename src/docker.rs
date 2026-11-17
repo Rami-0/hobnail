@@ -535,16 +535,37 @@ impl StatsSampler {
     }
 
     fn sample_at(&mut self, containers: &[Container], now: Instant) -> StatsMap {
+        let root = self.root.clone();
+        self.sample_with(containers, now, |c| {
+            let dir = cgroup_dir_in(&root, &c.id)?;
+            Some((read_cpu_usage(&dir)?, read_memory(&dir)))
+        })
+    }
+
+    /// Like [`StatsSampler::sample`], from readings the caller has already
+    /// taken (`id -> (usage_usec, memory as docker stats shows it)`), so the
+    /// history tick reads each container's cgroup files once for both of
+    /// its samplers. A container missing from `readings` is skipped.
+    pub fn sample_from(
+        &mut self,
+        containers: &[Container],
+        readings: &HashMap<String, (u64, Option<u64>)>,
+    ) -> StatsMap {
+        self.sample_with(containers, Instant::now(), |c| readings.get(&c.id).copied())
+    }
+
+    fn sample_with(
+        &mut self,
+        containers: &[Container],
+        now: Instant,
+        mut read: impl FnMut(&Container) -> Option<(u64, Option<u64>)>,
+    ) -> StatsMap {
         let mut out = StatsMap::new();
         let mut seen: HashMap<String, (u64, Instant)> = HashMap::new();
         for c in containers.iter().filter(|c| c.is_running()) {
-            let Some(dir) = self.cgroup_dir(&c.id) else {
+            let Some((usage, mem)) = read(c) else {
                 continue;
             };
-            let Some(usage) = read_cpu_usage(&dir) else {
-                continue;
-            };
-            let mem = read_memory(&dir);
             let entry = match self.prev.get(&c.id) {
                 Some(&(prev_usage, prev_t)) if usage >= prev_usage => {
                     let wall = now.saturating_duration_since(prev_t).as_micros() as f64;
@@ -570,21 +591,24 @@ impl StatsSampler {
         out
     }
 
+    #[cfg(test)]
     fn cgroup_dir(&self, id: &str) -> Option<PathBuf> {
-        if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit()) {
-            return None;
-        }
-        // systemd cgroup driver, then the cgroupfs driver layout.
-        let systemd = self
-            .root
-            .join("system.slice")
-            .join(format!("docker-{id}.scope"));
-        if systemd.is_dir() {
-            return Some(systemd);
-        }
-        let cgroupfs = self.root.join("docker").join(id);
-        cgroupfs.is_dir().then_some(cgroupfs)
+        cgroup_dir_in(&self.root, id)
     }
+}
+
+/// A container's cgroup v2 directory under `root` (`<host_sys>/fs/cgroup`):
+/// the systemd driver layout, then the cgroupfs one.
+fn cgroup_dir_in(root: &Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let systemd = root.join("system.slice").join(format!("docker-{id}.scope"));
+    if systemd.is_dir() {
+        return Some(systemd);
+    }
+    let cgroupfs = root.join("docker").join(id);
+    cgroupfs.is_dir().then_some(cgroupfs)
 }
 
 fn read_cpu_usage(dir: &Path) -> Option<u64> {
@@ -975,7 +999,7 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
 /// The cgroup v2 directory of a container under `host_sys` (systemd or
 /// cgroupfs driver layout), if it exists.
 pub fn container_cgroup_dir(host_sys: &str, id: &str) -> Option<PathBuf> {
-    StatsSampler::new(host_sys).cgroup_dir(id)
+    cgroup_dir_in(&Path::new(host_sys).join("fs/cgroup"), id)
 }
 
 #[cfg(test)]
@@ -985,12 +1009,12 @@ mod tests {
     /// Trimmed but otherwise verbatim output of Docker 29.5 on the dev host,
     /// plus a stopped container and an unhealthy one.
     const SAMPLE: &str = r#"[
- {"Id":"1dcb32aee455d50d91c4ddd92278db4eb058654511ae22478f8f957893bcafbd","Names":["/rmli-hotel-portal-mailpit-1"],
+ {"Id":"1dcb32aee455d50d91c4ddd92278db4eb058654511ae22478f8f957893bcafbd","Names":["/example-portal-mailpit-1"],
   "Image":"axllent/mailpit:v1.31.6","ImageID":"sha256:aa","Command":"/mailpit","Created":1794189099,
   "Ports":[{"IP":"","PrivatePort":1110,"Type":"tcp"},{"IP":"100.64.0.10","PrivatePort":8025,"PublicPort":8125,"Type":"tcp"},
            {"IP":"127.0.0.1","PrivatePort":8025,"PublicPort":8125,"Type":"tcp"},{"IP":"","PrivatePort":1025,"Type":"tcp"}],
-  "Labels":{"com.docker.compose.project":"rmli-hotel-portal","com.docker.compose.service":"mailpit","com.docker.compose.oneoff":"False"},
-  "State":"running","Status":"Up 5 days (healthy)","HostConfig":{"NetworkMode":"rmli_default"},
+  "Labels":{"com.docker.compose.project":"example-portal","com.docker.compose.service":"mailpit","com.docker.compose.oneoff":"False"},
+  "State":"running","Status":"Up 5 days (healthy)","HostConfig":{"NetworkMode":"example-portal_default"},
   "Health":{"Status":"healthy","FailingStreak":0},"NetworkSettings":{"Networks":{}},"Mounts":[]},
  {"Id":"00fc7aedfce035c9220da998238c1383336dc37e89b691869432c0dc9a9fccdd","Names":["/homepage"],
   "Image":"ghcr.io/gethomepage/homepage:latest","Created":1793056864,
@@ -1018,8 +1042,8 @@ mod tests {
     fn parses_container_list() {
         let cs = parse_containers(SAMPLE.as_bytes()).unwrap();
         assert_eq!(cs.len(), 6);
-        let m = by_name(&cs, "rmli-hotel-portal-mailpit-1");
-        assert_eq!(m.project.as_deref(), Some("rmli-hotel-portal"));
+        let m = by_name(&cs, "example-portal-mailpit-1");
+        assert_eq!(m.project.as_deref(), Some("example-portal"));
         assert_eq!(m.service.as_deref(), Some("mailpit"));
         assert_eq!(m.health.as_deref(), Some("healthy"));
         assert_eq!(m.exit_code, None);

@@ -105,6 +105,8 @@ pub struct AppState {
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
+    /// Set while a password check runs (one at a time; see `auth::login_route`).
+    pub login_verifying: std::sync::atomic::AtomicBool,
     /// Fragment ids that changed ("groups", "sys", "w-<id>", "alerts") or
     /// "reload". Each SSE connection re-renders what it receives.
     pub events: broadcast::Sender<Arc<str>>,
@@ -137,6 +139,7 @@ impl AppState {
             db,
             alerts: Mutex::new(Default::default()),
             login_limiter: Mutex::new(Default::default()),
+            login_verifying: std::sync::atomic::AtomicBool::new(false),
             events,
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),

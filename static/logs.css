@@ -2,121 +2,244 @@
 :root{--a0:#3b4252;--a1:#f87171;--a2:#4ade80;--a3:#facc15;--a4:#60a5fa;--a5:#e879f9;--a6:#22d3ee;--a7:#d1d5db;
 --a8:#6b7280;--a9:#fca5a5;--a10:#86efac;--a11:#fde68a;--a12:#93c5fd;--a13:#f0abfc;--a14:#67e8f9;--a15:#f9fafb;
 --lhit:color-mix(in srgb,var(--warn) 42%,transparent);--lcn-l:68%}
-@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--a0:#1f2937;--a1:#b91c1c;--a2:#15803d;--a3:#a16207;--a4:#1d4ed8;--a5:#a21caf;--a6:#0e7490;--a7:#4b5563;
+@media (prefers-color-scheme:light){:root:not([data-theme]),:root[data-theme=auto]{--a0:#1f2937;--a1:#b91c1c;--a2:#15803d;--a3:#a16207;--a4:#1d4ed8;--a5:#a21caf;--a6:#0e7490;--a7:#4b5563;
 --a8:#6b7280;--a9:#dc2626;--a10:#16a34a;--a11:#ca8a04;--a12:#2563eb;--a13:#c026d3;--a14:#0891b2;--a15:#111827;--lcn-l:34%}}
 :root[data-theme=light]{--a0:#1f2937;--a1:#b91c1c;--a2:#15803d;--a3:#a16207;--a4:#1d4ed8;--a5:#a21caf;--a6:#0e7490;--a7:#4b5563;
 --a8:#6b7280;--a9:#dc2626;--a10:#16a34a;--a11:#ca8a04;--a12:#2563eb;--a13:#c026d3;--a14:#0891b2;--a15:#111827;--lcn-l:34%}
 
 .lpage{max-width:none;gap:10px}
 .lv{display:grid;gap:8px;min-width:0}
-.ltool{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
-.lsearch{position:relative;display:flex;align-items:center;gap:2px;flex:1 1 260px;max-width:440px;height:32px;padding:0 4px 0 8px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface)}
-.lsearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+/* One row of controls of one height (LG-31); `.lmore` is the same row on wide
+   screens and the Filters panel on a phone (LG-19). */
+.ltool{--lh:var(--ctl-h-sm);display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.lmore{display:contents}
+.lfilt{display:none}
+/* Time, Download and Add as icons below 1600 px, so the row fits beside the sidebar
+   (the words stay as their names). */
+@media (max-width:1600px){.ltool :is(#ltime,#ldl,#ladd)>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.ltool :is(#ltime,#ldl,#ladd){gap:0}}
+/* The box holds the counter and four toggles too: the input keeps 18
+   characters (it never shrinks below them), so the row wraps first. */
+.lsearch{position:relative;display:flex;align-items:center;gap:2px;flex:1 1 auto;max-width:520px;height:var(--lh);padding:0 3px 0 8px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+/* A11Y-06: the same 2 px focus ring as every other control. */
+.lsearch:focus-within{border-color:var(--accent)}
+.lsearch:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .lsearch>svg{color:var(--text-3);flex:none}
-.lsearch input{flex:1;min-width:0;height:100%;border:0;background:none;color:var(--text);font:13px var(--mono);outline:none;padding:0 6px}
+.lsearch input{flex:1;width:0;min-width:calc(18ch + 12px);height:100%;border:0;background:none;color:var(--text);font:var(--fs-sm) var(--mono);outline:none;padding:0 6px}
 .lsearch input[aria-invalid=true]{color:var(--bad-fg)}
-.lqerr{position:absolute;right:70px;font-size:11px;color:var(--bad-fg);pointer-events:none}
-.ltog.lre{height:24px;min-width:28px;padding:0 6px;border:1px solid transparent;border-radius:4px;background:none;color:var(--text-3);font:600 12px var(--mono);cursor:pointer}
+.lqerr{font-size:var(--fs-micro);color:var(--bad-fg);white-space:nowrap;pointer-events:none}
+.lqn{font-size:var(--fs-micro);color:var(--text-3);white-space:nowrap;padding:0 2px}
+.ltog.lre{display:inline-grid;place-items:center;height:calc(var(--lh) - 6px);min-width:26px;padding:0 5px;border:1px solid transparent;border-radius:4px;background:none;color:var(--text-3);font:600 var(--fs-xs) var(--mono);cursor:pointer}
 .ltog.lre:hover{color:var(--text)}
-.ltog[aria-pressed=true]{color:var(--accent-fg);border-color:color-mix(in srgb,var(--accent) 50%,var(--border-2));background:color-mix(in srgb,var(--accent) 12%,var(--surface-2))}
-.lctl select,.lcustom input{height:26px;border:1px solid var(--border-2);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text);font-size:12px;padding:0 6px}
-.lcustom{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-3)}
+.ltog.lre:disabled{opacity:.4;cursor:default;color:var(--text-3)}
+.lstep svg{width:14px;height:14px}
+.ltog[aria-pressed=true]{color:var(--accent-fg);border-color:color-mix(in srgb,var(--accent) 50%,var(--border));background:color-mix(in srgb,var(--accent) 12%,var(--surface-2))}
+.lctl select{max-width:132px}
+.lctl select,.lcustom input{height:var(--lh);border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text);font-size:var(--fs-xs);padding:0 6px}
+.ltool .btn.sm{height:var(--lh)}
+.lfn{min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--accent);color:var(--on-accent);font-size:calc(10rem/14);line-height:16px;text-align:center}
+.lfn[hidden]{display:none}
+/* Custom range: its own labelled row under the toolbar (LG-17). */
+.lcustom{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:var(--fs-xs);color:var(--text-2)}
 .lcustom[hidden]{display:none}
-.llevels{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--bg)}
-.lchip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:12px;cursor:pointer;white-space:nowrap}
+.lcf{display:inline-flex;align-items:center;gap:6px}
+.lcf>span{font-weight:600}
+.lcustom input[aria-invalid=true]{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+.lchint{font-size:calc(11.5rem/14)}
+.lerr{display:flex;align-items:center;gap:6px;flex-basis:100%;margin:0;font:500 var(--fs-xs)/1.4 var(--font);color:var(--bad-fg)}
+.lerr::before{content:"!";display:inline-grid;place-items:center;flex:none;width:14px;height:14px;border-radius:50%;background:var(--bad);color:var(--on-bad);font:700 calc(10rem/14)/1 var(--font)}
+.lerr[hidden]{display:none}
+.llevels{display:inline-flex;gap:2px;height:var(--lh);padding:2px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg)}
+.lchip{display:inline-flex;align-items:center;gap:5px;height:100%;padding:0 6px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:var(--fs-xs);cursor:pointer;white-space:nowrap}
 .lchip b{font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums}
-.lchip[aria-pressed=true]{background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--border-2)}
-.lchip[aria-pressed=false]{text-decoration:line-through;opacity:.7}
-.lchip .lg{width:8px;height:8px;border-radius:2px;background:var(--off)}
-.lchip[data-lv=e] .lg{background:var(--bad)}.lchip[data-lv=w] .lg{background:var(--warn)}
-.lchip[data-lv=i] .lg{background:var(--accent)}.lchip[data-lv=d] .lg{background:var(--ch-mem)}
-.lsp{flex:1}
-.lcount{font-size:12px;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
+.lchip[aria-pressed=true]{background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--border)}
+.lchip[aria-pressed=false]{text-decoration:line-through;color:var(--text-3)}
+.ldot{width:8px;height:8px;border-radius:2px;background:var(--off)}
+.lchip[data-lv=e] .ldot{background:var(--bad)}.lchip[data-lv=w] .ldot{background:var(--warn)}
+.lchip[data-lv=i] .ldot{background:var(--accent)}.lchip[data-lv=d] .ldot{background:var(--ch-mem)}
+.lsp{display:none}
+/* A fixed share, not its text's width: a growing count never moves the row
+   (it wraps to its own place instead of being cut to an ellipsis). */
+.lcount{flex:1 0 16em;min-width:16em;text-align:right;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-xs);color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;margin-left:auto}
 
 .lpanes{display:grid;gap:8px;min-width:0}
 .lpanes.multi{grid-template-columns:repeat(var(--n),minmax(0,1fr))}
-.lpane{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);overflow:hidden}
-.lph{display:flex;align-items:center;gap:8px;min-height:34px;padding:4px 10px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--text-2);min-width:0}
-.lph-t{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lpane{position:relative;display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden;container-type:inline-size}
+.lph{display:flex;align-items:center;gap:6px;min-height:34px;padding:2px 4px 2px 10px;border-bottom:1px solid var(--line);font-size:calc(12.5rem/14);color:var(--text-2);min-width:0}
+.lph-t{min-width:0;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a.lph-t{display:flex}
+a.lph-t .lcn{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lph-m{align-items:flex-start;padding-block:6px}
+.lchipd{flex:1;min-width:0}
+.lchipd>summary{display:flex;align-items:center;gap:6px;min-height:22px;cursor:pointer;list-style:none}
+.lchipd>summary::-webkit-details-marker{display:none}
+.lchipd>summary::before{content:"";flex:none;width:6px;height:6px;border:solid var(--text-3);border-width:0 1.5px 1.5px 0;transform:rotate(-45deg);transition:transform var(--dur-1) var(--ease-out)}
+.lchipd[open]>summary::before{transform:rotate(45deg)}
+.lchipd .lchips{margin-top:6px}
 .lchips{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
-.lph-s{margin-left:auto;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);white-space:nowrap}
+.lph-s{margin-left:auto;font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);white-space:nowrap}
+.lph-m .lph-s{line-height:22px}
 .lph-s[data-st=ok]{color:var(--ok-fg)}.lph-s[data-st=bad]{color:var(--bad-fg)}.lph-s[data-st=warn]{color:var(--warn-fg)}
 .lph-s[data-st=ok]::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:5px;vertical-align:1px}
-.lbody{height:calc(100dvh - var(--top-h) - 150px);min-height:280px;overflow:auto;overscroll-behavior:contain;outline:none;font:12.5px/1.5 var(--mono);color:var(--text);padding:4px 0}
+.lbody{height:calc(100dvh - var(--top-h) - 150px);min-height:280px;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;outline:none;font:calc(12.5rem/14)/1.5 var(--mono);color:var(--text);padding:4px 0}
 .lbody:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
 .multi .lbody{height:calc(100dvh - var(--top-h) - 186px)}
-.lmsg{padding:32px 16px;text-align:center;color:var(--text-3);font:13px var(--font)}
+.lolder{display:flex;margin:4px auto 8px;font-family:var(--font)}
+.lolder[hidden]{display:none}
+.lmsg{padding:32px 16px;text-align:center;color:var(--text-3);font:var(--fs-sm) var(--font)}
 .lmsg[hidden]{display:none}
 .lines{min-width:min-content}
 .nowrap .lines{min-width:max-content}
 
-.ll{position:relative;display:flex;align-items:flex-start;gap:8px;padding:0 10px 0 0;min-height:19px;content-visibility:auto;contain-intrinsic-size:auto 19px}
+/* Real heights, no content-visibility placeholder: "following" needs the
+   true bottom (LG-12). */
+.ll{position:relative;display:flex;align-items:flex-start;gap:8px;padding:0 10px 0 0;min-height:19px}
 .ll[hidden]{display:none}
 .ll:hover{background:var(--surface-2)}
-.ll .lg{flex:none;align-self:stretch;width:3px;background:transparent}
-.lv-e .lg{background:var(--bad)}.lv-w .lg{background:var(--warn)}.lv-i .lg{background:color-mix(in srgb,var(--accent) 45%,transparent)}.lv-d .lg{background:color-mix(in srgb,var(--ch-mem) 40%,transparent)}
+/* The level gutter: a 3 px bar, not a control (LG-22). */
+.lgut{flex:none;align-self:stretch;width:3px;background:transparent}
+.lv-e .lgut{background:var(--bad)}.lv-w .lgut{background:var(--warn)}.lv-i .lgut{background:color-mix(in srgb,var(--accent) 45%,transparent)}.lv-d .lgut{background:color-mix(in srgb,var(--ch-mem) 40%,transparent)}
 .lv-e{background:color-mix(in srgb,var(--bad) 6%,transparent)}
 .lv-w{background:color-mix(in srgb,var(--warn) 4%,transparent)}
-.lms{color:color-mix(in srgb,var(--text-3) 70%,transparent)}
+/* Full --text-3, no fade (A11Y-14). */
+.lms{color:var(--text-3)}
 .lt{flex:none;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;user-select:none}
 .notime .lt{display:none}
 .lm{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .nowrap .lm{white-space:pre;overflow-wrap:normal}
 .se .lm{color:color-mix(in srgb,var(--text) 88%,var(--bad))}
 .ltr{color:var(--text-3);font-style:italic}
-.lcn{flex:none;display:inline-block;max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px;border-radius:4px;font:11.5px/18px var(--mono);
+.lcn{flex:none;display:inline-block;max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px;border-radius:4px;font:calc(11.5rem/14)/18px var(--mono);
 color:hsl(var(--h) 70% var(--lcn-l));background:hsl(var(--h) 60% 50%/.12);border:1px solid hsl(var(--h) 60% 50%/.3)}
-.ll .lcn{line-height:17px}
+/* A fixed chip column in a stack, so messages start at one column (LG-23):
+   the script shortens long names in the middle to fit it. */
+.ll .lcn{width:calc(var(--lcw,16ch) + 14px);max-width:none;line-height:17px}
 .lph .lcn{max-width:none}
+.lmark{margin:6px 10px 2px 13px;padding-top:2px;border-top:1px dashed var(--border);font:var(--fs-micro)/1.4 var(--font);color:var(--text-3)}
 .ll.hit{background:var(--lhit)}
 ::highlight(rh-log){background-color:var(--lhit);color:inherit}
+.ll.lcur{box-shadow:inset 0 0 0 1px var(--accent)}
 .ll.lhl{background:color-mix(in srgb,var(--accent) 18%,transparent);box-shadow:inset 3px 0 0 var(--accent)}
+.ll.lsel{background:var(--surface-2);box-shadow:inset 3px 0 0 var(--accent-fg)}
 
 .ljson summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;gap:0 10px}
 .ljson summary::-webkit-details-marker{display:none}
-.ljson summary::before{content:"{…}";color:var(--text-3);font-size:11px}
+.ljson summary::before{content:"{…}";color:var(--text-3);font-size:var(--fs-micro)}
 .ljson[open] summary::before{content:"{ }"}
 .lj-kv{color:var(--text-2)}.lj-kv i{font-style:normal;color:var(--text-3)}
-.lj-pre{margin:4px 0 6px;padding:8px 10px;border-left:2px solid var(--border-2);background:var(--bg);white-space:pre-wrap;font:inherit;color:var(--text-2)}
+.lj-pre{margin:4px 0 6px;padding:8px 10px;border-left:2px solid var(--border);background:var(--bg);white-space:pre-wrap;font:inherit;color:var(--text-2)}
 .nowrap .lj-pre{white-space:pre}
 
+/* Copy and Link: on hover, on the picked line (tap, click, Enter) and while
+   focused (LG-20). */
 .lact{position:absolute;right:6px;top:-2px;display:none;gap:4px;z-index:2}
-.ll:hover>.lact{display:flex}
-.lact .btn.sm{height:22px;font-size:11px;padding:0 7px;box-shadow:var(--pop)}
-@media (hover:none){.ll:hover>.lact{display:none}}
+.ll:hover>.lact,.ll.lsel>.lact,.lact:focus-within{display:flex}
+.lact .btn.sm{height:24px;font-size:var(--fs-micro);padding:0 8px;box-shadow:var(--shadow-2)}
+@media (hover:none){.ll:hover:not(.lsel)>.lact:not(:focus-within){display:none}.lact{top:auto;bottom:calc(100% - 2px)}.lact .btn.sm{height:32px;padding:0 12px;font-size:var(--fs-xs)}}
 
-.ljump{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 14px;border:1px solid color-mix(in srgb,var(--accent) 60%,var(--border-2));border-radius:999px;
-background:var(--accent-bg);color:var(--on-accent);font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:var(--pop);z-index:3}
+.ljump{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 14px;white-space:nowrap;border:1px solid color-mix(in srgb,var(--accent) 60%,var(--border));border-radius:999px;
+background:var(--accent);color:var(--on-accent);font-size:calc(12.5rem/14);font-weight:600;cursor:pointer;box-shadow:var(--shadow-2);z-index:3}
 .ljump[hidden]{display:none}
-.lfoot{font-size:12px;margin:0}
-.lstopped .muted{font-family:var(--mono);font-size:12px}
+.ljump{transition:opacity var(--dur-2) var(--ease-out),translate var(--dur-2) var(--ease-out)}
+@starting-style{.ljump{opacity:0;translate:0 8px}}
+.lmsg .sk-rows{max-width:560px;margin:0 auto;text-align:left}
+.lmsg .empty{justify-items:center;text-align:center}
+.lfoot p{font-size:var(--fs-xs);margin:0}
+.lstopped .muted{font-family:var(--mono);font-size:var(--fs-xs)}
 
-.lpick-list{list-style:none;margin:8px 0 14px;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:2px 12px}
-.lpick-list label{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:var(--r-sm);cursor:pointer;font-size:13px;min-width:0}
-.lpick-list label:hover{background:var(--surface-2)}
-.lpick-list .mono{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Narrow panes (four side by side): the time goes above the message, which
+   keeps the full width (LG-26). */
+@container (max-width:340px){
+.ll{flex-wrap:wrap;column-gap:6px;padding-left:9px}
+.ll .lgut{position:absolute;left:0;top:0;bottom:0}
+.ll .lt{font-size:calc(10.5rem/14);line-height:15px}
+.ll .lm{flex-basis:100%}
+.lms{display:none}
+.ll .lcn{width:auto;max-width:12ch}
+}
+
+/* /logs: every container, grouped by stack, one click from its logs. */
+.lpick{display:grid;gap:12px}
+.lpick-bar{position:sticky;top:var(--top-h);z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;background:var(--bg)}
+.lpick-f{flex:1 1 300px;display:flex;align-items:center;gap:8px;min-width:0}
+.lpick-n{font-size:var(--fs-xs)}
+.lpick-bar .btn.primary{margin-left:auto}
+.lpick-hint{margin:-8px 0 0;font-size:var(--fs-xs)}
+.lpick-g{border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.lpick-h{display:flex;align-items:center;gap:8px;min-height:40px;margin:0;padding:4px 8px 4px 12px;border-bottom:1px solid var(--line);font-size:var(--fs-sm);font-weight:650}
+.lpick-t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lpick-h .cnt{font:500 var(--fs-micro) var(--mono);color:var(--text-3)}
+.lpick-h .btn{margin-left:auto}
+.lpick-list{list-style:none;margin:0;padding:4px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 8px}
+.lpick-list li{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 8px;border-radius:var(--r-sm);font-size:var(--fs-sm);min-width:0}
+.lpick-list li:hover{background:var(--surface-2)}
+.lpick-list input{position:relative;z-index:1;flex:none;margin:0}
+.lpick-list .row-link{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.lpick-list .sub{font-size:calc(11.5rem/14);color:var(--text-3)}
+.lpick-list .stopped .row-link{color:var(--text-2)}
+.lpick-st{margin-left:auto;font-size:var(--fs-xs)}
+.lpick-none{margin:0}
+.lpick-cb{position:relative;z-index:2;flex:none;display:inline-grid;place-items:center}
+@media (pointer:coarse),(max-width:699px){.lpick-list li{min-height:44px}.lpick-list input{width:20px;height:20px}.lpick-cb{width:44px;height:44px;margin:0 -6px 0 -8px}}
+/* The level chart under a container's viewer. */
+.lfoot{display:grid;gap:4px}
+.lvl-chart summary{cursor:pointer;font-size:var(--fs-xs);color:var(--text-3)}
+.lvl-chart[open]{padding-bottom:4px}
 
 .af0{color:var(--a0)}.af1{color:var(--a1)}.af2{color:var(--a2)}.af3{color:var(--a3)}.af4{color:var(--a4)}.af5{color:var(--a5)}.af6{color:var(--a6)}.af7{color:var(--a7)}
 .af8{color:var(--a8)}.af9{color:var(--a9)}.af10{color:var(--a10)}.af11{color:var(--a11)}.af12{color:var(--a12)}.af13{color:var(--a13)}.af14{color:var(--a14)}.af15{color:var(--a15)}
 .ab0{background:var(--a0)}.ab1{background:var(--a1)}.ab2{background:var(--a2)}.ab3{background:var(--a3)}.ab4{background:var(--a4)}.ab5{background:var(--a5)}.ab6{background:var(--a6)}.ab7{background:var(--a7)}
 .ab8{background:var(--a8)}.ab9{background:var(--a9)}.ab10{background:var(--a10)}.ab11{background:var(--a11)}.ab12{background:var(--a12)}.ab13{background:var(--a13)}.ab14{background:var(--a14)}.ab15{background:var(--a15)}
 .abo{font-weight:700}.adi{opacity:.65}.ait{font-style:italic}.aun{text-decoration:underline}
-
 @media (max-width:1100px){.lpanes.multi{grid-template-columns:repeat(min(var(--n),2),minmax(0,1fr))}}
-@media (max-width:700px){
+/* Phone: one row (search, Filters, Add); the rest in the Filters panel;
+   the pane takes the rest of the screen and ends above the bottom bar (the
+   script sizes it); the container's header above it is compact (LG-19). */
+@media (max-width:699px){
 .lpanes.multi{grid-template-columns:minmax(0,1fr)}
 .lbody,.multi .lbody{height:62dvh;min-height:240px}
-.lsearch{flex-basis:100%;max-width:none}
-.lcount{margin-left:0;flex-basis:100%;order:9}
+.lsearch{flex:1 1 0;min-width:0;max-width:none}
+.lsearch input{min-width:0}
+.lqn{font-size:calc(10.5rem/14)}
+.js .lfilt{display:inline-flex}
+.js .ltool #ladd>span{display:none}
+/* Split view: "Add" shares the row, so Filters is its icon (and count);
+   the word stays as its name. */
+.js .ltool:has(#ladd:not([hidden])) .lfilt>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.js .ltool:has(#ladd:not([hidden])) .lfilt{gap:0}
+.js .lmore{display:none}
+.js .lv.fopen .lmore{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex-basis:100%;padding:8px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.js .lv.lstate:not(.fopen) .lmore{display:flex;flex-basis:100%}
+.js .lv.lstate:not(.fopen) .lmore>:not(.lcount){display:none}
+.lmore .lctl{flex:1 1 100%}
+.lmore .lctl select{width:100%;max-width:none}
+.llevels{flex-wrap:wrap;height:auto}
+.lchip{height:calc(var(--lh) - 6px)}
+.lcount{margin-left:0;flex-basis:100%;white-space:normal}
 .lsp{display:none}
-.ltool .ltog>span,.ltool #ldl>span{font-size:12px}
-.lbody{font-size:12px}
-.lt{font-size:11px}
+.ltool .ltog>span,.ltool #ldl>span{font-size:var(--fs-xs)}
+.lcf{flex:1 1 100%}
+.lcf>span{width:3em}
+.lcf input{flex:1;min-width:0}
+.lbody{font-size:var(--fs-xs)}
+.lt{font-size:var(--fs-micro)}
 .lms{display:none}
-span.lph-t{display:none}
-.llevels{max-width:100%;overflow-x:auto;scrollbar-width:none}
-.crumb>a:first-child,.crumb>a:first-child+svg{display:none}
+.lph{min-height:var(--ia)}
+.crumb>a:first-child:has(~a),.crumb>a:first-child:has(~a)+svg{display:none}
 .crumb a.mono{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lcn{max-width:10ch}
+.lpage{gap:6px}
+.lpage>*{min-width:0}
+.lpage .ctr-head{gap:4px 10px;flex-wrap:nowrap;min-width:0}
+.lpage .ctr-head>.icon{width:28px;height:28px;font-size:var(--fs-body);border-radius:7px}
+.lpage .ctr-head>.icon.glyph svg{width:16px;height:16px}
+.lpage .ctr-id{min-width:0;flex:1}
+.lpage .ctr-id h2{font-size:var(--fs-title);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lpage .ctr-id p{margin:0;font-size:var(--fs-micro);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lpage .cd-tabs{margin:0}
+.lpage .cd-tabs a{padding:6px 10px}
+.lpage .ctr-actions{flex:none;display:flex;gap:4px}
+.lpage .ctr-actions .btn{font-size:0;gap:0;width:var(--ctl-h-sm);height:var(--ctl-h-sm);min-width:0;padding:0}
+.lpage .ctr-actions .btn svg{width:16px;height:16px}
 }
-@media (prefers-reduced-motion:reduce){.ljump{transition:none}}
+/* 44 px targets on touch and phones (A11Y-18): the level chart and JSON
+   disclosures and the links under a viewer. */
+@media (pointer:coarse),(max-width:699px){.lvl-chart>summary,.ljson>summary{min-height:44px;align-items:center}.lvl-chart>summary{display:flex}.lfoot p>a{display:inline-flex;align-items:center;gap:.3em;min-height:44px}.lsearch input{height:calc(100% + 2px);margin-block:-1px}}

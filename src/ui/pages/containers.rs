@@ -16,7 +16,7 @@ use crate::ui::shell::{layout, Ctx, Nav};
 use crate::ui::view::{
     build_groups, health_strip, stack_strip, window_label, CardView, GroupView, StripStyle,
 };
-use crate::ui::{empty_state, ic, pill, status_dot};
+use crate::ui::{empty, empty_state, ic, pill, status_dot, Empty};
 use crate::util::human_bytes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -264,6 +264,12 @@ pub fn select<'a>(
         all.sort_by(|a, b| cmp_card(a.1, b.1, q.sort, desc));
         return all.into_iter().map(|(g, c)| (g, vec![c])).collect();
     }
+    // Grouped and sorted by a number: the stacks follow their top row, so
+    // "CPU ↓" puts the busiest container first (OV-22); the script does the
+    // same after a re-sort.
+    if matches!(q.sort, Sort::Cpu | Sort::Mem) {
+        out.sort_by(|a, b| cmp_card(a.1[0], b.1[0], q.sort, desc));
+    }
     out
 }
 
@@ -301,7 +307,6 @@ pub fn page(ctx: &Ctx) -> String {
                         autocomplete="off" spellcheck="false" aria-label="Filter containers";
                 }
                 @if q.state != StateFilter::All { input type="hidden" name="state" value=(q.state.as_str()); }
-                @if q.sort != Sort::Name { input type="hidden" name="sort" value=(q.sort.as_str()); }
                 @if let Some(d) = q.desc { input type="hidden" name="dir" value=(if d { "desc" } else { "asc" }); }
                 @if let Some(g) = q.group { input type="hidden" name="group" value=(u8::from(g)); }
                 nav.seg #cstate aria-label="State" {
@@ -316,6 +321,7 @@ pub fn page(ctx: &Ctx) -> String {
                         option value=(g.name) selected[q.stack.as_deref() == Some(g.name.as_str())] { (g.title) }
                     }
                 }
+                (sort_ctl(&q))
                 nav.seg #cgroup aria-label="Layout" {
                     a href=(q.with(|x| x.group = Some(true))) data-group="1" aria-current=[grouped.then_some("true")] { (ic("layers")) span { "Stacks" } }
                     a href=(q.with(|x| x.group = Some(false))) data-group="0" aria-current=[(!grouped).then_some("true")] { (ic("menu")) span { "Flat" } }
@@ -333,6 +339,38 @@ pub fn page(ctx: &Ctx) -> String {
         crumb_title("Containers"),
         body,
     )
+}
+
+/// Column labels, shared by the table header and the phone sort control.
+const SORT_LABELS: [(Sort, &str); 6] = [
+    (Sort::Name, "Name"),
+    (Sort::Stack, "Stack"),
+    (Sort::Image, "Image"),
+    (Sort::Status, "State"),
+    (Sort::Cpu, "CPU"),
+    (Sort::Mem, "Memory"),
+];
+
+/// "Sort by" for phones, where the table header is hidden (OV-19): a select
+/// that is part of the toolbar form (the "Apply" button sends it without
+/// the script) and a link that flips the direction. Above 700 px the header
+/// does the job and this stays hidden (it still carries `sort` in the form).
+fn sort_ctl(q: &ListQuery) -> Markup {
+    let desc = q.is_desc();
+    let flip = q.with(|x| x.desc = Some(!desc));
+    html! {
+        div.sortctl #csortw {
+            select #csort name="sort" aria-label="Sort by" {
+                @for (k, label) in SORT_LABELS {
+                    option value=(k.as_str()) selected[q.sort == k] { "Sort: " (label) }
+                }
+            }
+            a.btn.icon #cdir href=(flip) data-dir=(if desc { "desc" } else { "asc" })
+                aria-label=(if desc { "Descending; switch to ascending" } else { "Ascending; switch to descending" }) {
+                svg.i aria-hidden="true" { use href=(if desc { "#i-arrow-down" } else { "#i-arrow-up" }) {} }
+            }
+        }
+    }
 }
 
 fn th(q: &ListQuery, label: &str, key: Sort, cls: &str) -> Markup {
@@ -383,25 +421,21 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
     let strips = crate::ui::view::strips(ctx.state, ctx.now as i64);
     html! {
         div #ctable.tablewrap data-total=(total) data-sig=(crate::ui::pages::container::live_sig(groups)) {
-            @if let Some(e) = &snap.error {
-                div.banner.bad role="alert" {
-                    (ic("alert"))
-                    div {
-                        strong { "Docker: cannot connect" } " " code.wrap { (e) }
-                        @if !snap.containers.is_empty() { " (showing the last known state)" }
-                    }
-                }
-            }
+            // Docker unreachable: the page's banner says it (shell::docker_banner).
             @if !ctx.cfg.docker.enabled {
                 (empty_state("box", "Docker discovery is off", html! { "Set " code { "docker.enabled = true" } " in the config to list containers." }))
             } @else if snap.fetched_at == 0 && snap.error.is_none() {
                 (empty_state("refresh", "Connecting to Docker…", html! { "The list appears as soon as the first snapshot arrives." }))
+            } @else if total == 0 && snap.error.is_some() {
+                (empty(Empty::Error, "", "alert", "No containers to show", html! { "Docker cannot be reached and no earlier list is known." }, None))
             } @else if total == 0 {
-                (empty_state("box", "No containers", html! { "Nothing to show. Hidden containers and excluded names are not listed." }))
+                (empty_state("box", "No containers yet", html! { "Hobnail lists the containers Docker runs on this host. Hidden containers and excluded names are not listed." }))
             } @else {
                 table.tbl.ctbl.grouped[grouped] {
                     caption.count aria-live="polite" {
                         "Showing " b.shown.num { (shown) } " of " span.num { (total) } " containers"
+                        // " · 2 in collapsed stacks", filled by the script (OV-30).
+                        span.coll {}
                     }
                     thead {
                         tr {
@@ -424,7 +458,7 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                                     th colspan=(COLS) scope="rowgroup" {
                                         button.grp-t type="button" aria-expanded="true" title=(g.counts()) {
                                             (ic("chev-d"))
-                                            span.grp-n { (g.title) }
+                                            span.grp-n title=(g.title) { (g.title) }
                                             span.cnt.num { (g.running) "/" (all_in) }
                                             span.grp-strip { (health_strip(&stack_strip(&strips, g), &strips, &g.title, StripStyle::Runs)) }
                                         }
@@ -438,8 +472,15 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
                             @for (g, cs) in &rows { @for c in cs { (row(c, gi(g), g, show_stats, &strips)) } }
                         }
                     }
-                    tbody.none hidden[shown > 0] {
-                        tr { td colspan=(COLS) { "No containers match this filter. " a href="/containers" data-clear { "Clear filters" } } }
+                    // Nothing shown: good news for a state filter on its own,
+                    // else no match (OV-24); the script keeps `data-why` true.
+                    tbody.none hidden[shown > 0] data-why=(none_why(q)) {
+                        tr { td colspan=(COLS) {
+                            div.why-stopped { (empty(Empty::Good, "compact", "check", "Nothing is stopped", html! { "Every container is running." }, None)) }
+                            div.why-problem { (empty(Empty::Good, "compact", "check", "No problems", html! { "Nothing is unhealthy, restarting or dead." }, None)) }
+                            div.why-filter { (empty(Empty::NoMatch, "compact", "search", "No containers match", html! { "Try another name or state." },
+                                Some(html! { a.btn.sm href="/containers" data-clear { "Clear filters" } }))) }
+                        } }
                     }
                     tbody.pool hidden {
                         @for (i, g, c) in &all {
@@ -458,11 +499,20 @@ pub fn table(ctx: &Ctx, snap: &Snapshot, groups: &[GroupView], q: &ListQuery) ->
     }
 }
 
+/// Why the "nothing shown" row is shown, for the query the page was opened with.
+fn none_why(q: &ListQuery) -> &'static str {
+    match q.state {
+        StateFilter::Stopped if q.q.is_empty() && q.stack.is_none() => "stopped",
+        StateFilter::Problem if q.q.is_empty() && q.stack.is_none() => "problem",
+        _ => "filter",
+    }
+}
+
 fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) -> Markup {
     let href = format!("/containers/{}", url_encode(&c.name));
     let stats = show_stats && c.running;
     html! {
-        tr.row.stopped[!c.running] data-c=(c.name) data-n=(c.title.to_lowercase()) data-s=(c.search.to_lowercase())
+        tr.row.rl.stopped[!c.running] data-c=(c.name) data-n=(c.title.to_lowercase()) data-s=(c.search.to_lowercase())
             data-gi=(gi) data-k=(g.name) data-kt=(g.title) data-gc[g.collapsed]
             data-img=(c.image.to_lowercase()) data-st=(status_rank(c)) data-run=(u8::from(c.running))
             data-prob=(u8::from(c.attention().is_some()))
@@ -471,14 +521,14 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
             td.c-name {
                 (status_dot(c))
                 (crate::ui::icon(c.icon.as_deref(), &c.title))
-                a.nm href=(href) title=(c.name) {
+                a.nm.row-link href=(href) title=(c.name) {
                     span.nm-t { (c.title) }
                     @if c.title != c.name { span.sub.mono { (c.name) } }
                 }
                 @if c.restarts > 0 { (pill("warn", &format!("{}× exit/1h", c.restarts))) }
             }
             td.c-stack data-l="Stack" { a href={"/containers?stack=" (url_encode(&c.stack))} { (g.title) } }
-            td.c-image data-l="Image" { span.mono.img title=(c.image) { (c.image) } }
+            td.c-image data-l="Image" { span.mono.img title=(c.image) { (image_label(&c.image)) } }
             td.c-state data-l="State" title=(c.state_text.as_deref().unwrap_or("")) {
                 span class={"st-l " (c.dot.map(|d| d.class()).unwrap_or("off"))} { (c.label) }
                 @if let Some(code) = c.exit_code { " " span.mono.exit title="exit code" { (code) } }
@@ -509,26 +559,39 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
                     } @else if p.local {
                         span.port.local title={(p.detail) " (loopback only)"} { (p.label) " " small { "local" } }
                     } @else {
-                        span.port.plain title=(p.detail) { (p.label) }
+                        // OV-25: not a web address; says its protocol.
+                        span.port.plain title={(p.detail) " (not a web address)"} { (p.label) " " small { (p.proto) } }
                     }
                 }
                 @if c.ports.len() > 3 { a.port.more href=(href) title="More ports on the details page" { "+" (c.ports.len() - 3) } }
             }
+            // "Logs" first, then "Open" when the service has a link (an empty
+            // slot keeps the columns aligned); the name opens the detail page.
             td.c-act {
-                @if let Some(u) = &c.url {
-                    a.icon-btn.sm href=(u) target="_blank" rel="noopener noreferrer" title="Open service" aria-label={"Open " (c.title)} { (ic("external")) }
+                div.ra {
+                    a.btn.sm href=(crate::logs::logs_url(&c.name)) title="Logs (l)" aria-label={"Logs of " (c.title)} { (ic("logs")) "Logs" }
+                    @if let Some(u) = &c.url {
+                        a.ia href=(u) target="_blank" rel="noopener noreferrer" title="Open service" aria-label={"Open " (c.title)} { (ic("external")) }
+                    } @else {
+                        span.ia aria-hidden="true" {}
+                    }
                 }
-                a.icon-btn.sm href={(href) "/logs"} title="Logs (l)" aria-label={"Logs of " (c.title)} { (ic("logs")) }
-                @if let Some(u) = &c.logs_url {
-                    a.icon-btn.sm.dz href=(u) target="_blank" rel="noopener noreferrer" title="Open in Dozzle" aria-label={"Open " (c.title) " in Dozzle"} { (ic("terminal")) }
-                }
-                a.icon-btn.sm href=(href) title="Details" aria-label={"Details of " (c.title)} { (ic("chev-r")) }
             }
         }
     }
 }
 
-/// "Up 3 hours" -> "3 hours"; "stopped · 2 hours ago" -> "2 hours ago".
+/// An image whose tag is gone shows as a bare digest; say so in words and
+/// keep the digest short (the full one is in the cell's title) (OV-26).
+fn image_label(image: &str) -> String {
+    match image.strip_prefix("sha256:") {
+        Some(h) => format!("untagged {}", h.get(..12).unwrap_or(h)),
+        None => image.to_string(),
+    }
+}
+
+/// "Up 3 hours" -> "3 h"; "stopped · 2 weeks ago" -> "2 wk ago". The cell
+/// carries the full text in its `title`; the short form is never cut (OV-21).
 fn short_state(c: &CardView) -> String {
     let t = c.state_text.as_deref().unwrap_or("");
     let t = t.strip_prefix("Up ").unwrap_or(t);
@@ -536,13 +599,54 @@ fn short_state(c: &CardView) -> String {
     if t == c.label || t == "stopped" {
         String::new()
     } else {
-        // "About an hour" reads oddly mid-line.
-        let mut s = t.to_string();
-        if let Some(f) = s.get(..1) {
-            s.replace_range(..1, &f.to_lowercase());
-        }
-        s
+        compact_age(t)
     }
+}
+
+/// Docker's ages in short units: "About an hour" -> "1 h", "12 minutes" ->
+/// "12 min", "Less than a second ago" -> "<1 s ago". Anything else (a
+/// "(Paused)" suffix, words it does not know) passes through lower-cased.
+pub(crate) fn compact_age(t: &str) -> String {
+    let lower = t.trim().to_lowercase();
+    let (head, tail) = match lower.find(" ago") {
+        Some(i) => (&lower[..i], &lower[i..]),
+        None => (lower.as_str(), ""),
+    };
+    let mut w = head.split_whitespace();
+    let n = match w.next() {
+        Some("about") => {
+            // "about an hour"
+            w.next();
+            "1".to_string()
+        }
+        Some("an" | "a") => "1".to_string(),
+        Some("less") => {
+            // "less than a second"
+            w.next();
+            w.next();
+            "<1".to_string()
+        }
+        Some(x) if x.chars().all(|ch| ch.is_ascii_digit()) => x.to_string(),
+        _ => return lower,
+    };
+    let unit = match w.next().map(|u| u.trim_end_matches('s')) {
+        Some("second") => "s",
+        Some("minute") => "min",
+        Some("hour") => "h",
+        Some("day") => "d",
+        Some("week") => "wk",
+        Some("month") => "mo",
+        Some("year") => "y",
+        _ => return lower,
+    };
+    let rest: Vec<&str> = w.collect();
+    let mut s = format!("{n} {unit}");
+    if !rest.is_empty() {
+        s.push(' ');
+        s.push_str(&rest.join(" "));
+    }
+    s.push_str(tail);
+    s
 }
 
 #[cfg(test)]
@@ -600,6 +704,106 @@ mod tests {
         rows.iter()
             .flat_map(|(_, v)| v.iter().map(|c| c.name.clone()))
             .collect()
+    }
+
+    /// Row actions (DESIGN §11.9): a labelled "Logs" first, "Open" only
+    /// with a link (else an empty slot), no Dozzle and no Details (OV-20);
+    /// the name is the stretched row link, never a link inside a link.
+    #[test]
+    fn row_actions_are_logs_then_open() {
+        let gs = groups();
+        let st = Strips::default();
+        let (g, c) = (&gs[0], &gs[0].cards[0]);
+        let html = row(c, 0, g, true, &st).into_string();
+        assert!(html.contains("class=\"row rl"), "{html}");
+        assert!(html.contains("class=\"nm row-link\""), "{html}");
+        let acts = &html[html.find("class=\"c-act\"").unwrap()..];
+        let logs = acts
+            .find(&format!("href=\"/containers/{}/logs\"", c.name))
+            .expect("logs");
+        assert!(acts.contains(&format!("aria-label=\"Logs of {}\"", c.title)));
+        assert!(acts[logs..].contains(">Logs</a>"), "labelled: {acts}");
+        assert!(
+            acts.contains("<span class=\"ia\" aria-hidden=\"true\"></span>"),
+            "no link: empty slot"
+        );
+        assert_eq!(acts.matches("<a ").count(), 1, "{acts}");
+        assert!(!html.contains("Dozzle") && !html.contains("Details of"));
+        let mut c2 = c.clone();
+        c2.url = Some("http://h:8080/".into());
+        let html = row(&c2, 0, g, true, &st).into_string();
+        let acts = &html[html.find("class=\"c-act\"").unwrap()..];
+        assert!(
+            acts.find(">Logs</a>").unwrap() < acts.find("aria-label=\"Open ").unwrap(),
+            "Logs first"
+        );
+    }
+
+    /// OV-21: state ages in short units, so the State cell is never cut.
+    #[test]
+    fn compact_ages() {
+        for (a, b) in [
+            ("3 hours", "3 h"),
+            ("About an hour", "1 h"),
+            ("About a minute", "1 min"),
+            ("Less than a second", "<1 s"),
+            ("2 weeks ago", "2 wk ago"),
+            ("12 minutes (Paused)", "12 min (paused)"),
+            ("13 days", "13 d"),
+            ("1 second", "1 s"),
+            ("3 months", "3 mo"),
+            ("2 years ago", "2 y ago"),
+            ("created, never started", "created, never started"),
+        ] {
+            assert_eq!(compact_age(a), b, "{a}");
+        }
+    }
+
+    #[test]
+    fn bare_digest_images_say_untagged() {
+        assert_eq!(
+            image_label(&format!("sha256:{}", "ab".repeat(32))),
+            "untagged abababababab"
+        );
+        assert_eq!(image_label("nginx:1.27"), "nginx:1.27");
+    }
+
+    /// OV-19: phones get a "Sort by" select (part of the toolbar form, so it
+    /// works without the script) and a direction link.
+    #[test]
+    fn sort_control_for_phones() {
+        let h = sort_ctl(&ListQuery::parse("sort=cpu&group=0")).into_string();
+        assert!(
+            h.contains(r#"<select id="csort" name="sort" aria-label="Sort by">"#),
+            "{h}"
+        );
+        assert!(
+            h.contains(r#"<option value="cpu" selected>Sort: CPU</option>"#),
+            "{h}"
+        );
+        assert_eq!(h.matches("<option").count(), 6);
+        // CPU is descending by default: the link flips it and keeps the rest.
+        assert!(
+            h.contains(r#"href="/containers?sort=cpu&amp;dir=asc&amp;group=0""#),
+            "{h}"
+        );
+        assert!(h.contains(r#"data-dir="desc""#) && h.contains("switch to ascending"));
+        let h = sort_ctl(&ListQuery::default()).into_string();
+        assert!(h.contains(r#"<option value="name" selected>"#));
+        assert!(h.contains(r#"href="/containers?dir=desc""#), "{h}");
+    }
+
+    /// OV-22: grouped and sorted by a number, the stacks follow their top row.
+    #[test]
+    fn grouped_numeric_sort_orders_stacks() {
+        let gs = groups();
+        let rows = select(&gs, &ListQuery::parse("sort=cpu"), true);
+        assert_eq!(names(&rows), ["zeta", "alpha", "mid"]);
+        let rows = select(&gs, &ListQuery::parse("sort=cpu&dir=asc"), true);
+        assert_eq!(names(&rows), ["alpha", "mid", "zeta"]);
+        // Name sort keeps the configured stack order.
+        let rows = select(&gs, &ListQuery::parse("sort=name&dir=desc"), true);
+        assert_eq!(names(&rows), ["mid", "alpha", "zeta"]);
     }
 
     #[test]

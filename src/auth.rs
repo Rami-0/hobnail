@@ -643,9 +643,6 @@ impl RateLimiter {
     }
 }
 
-/// One password check at a time: each costs a few hundred ms of CPU.
-static VERIFYING: AtomicBool = AtomicBool::new(false);
-
 // ---------------------------------------------------------------------------
 // Routes
 
@@ -741,21 +738,24 @@ async fn login_route(state: &Arc<AppState>, req: Request<hyper::body::Incoming>)
     };
     let st = state.clone();
     let outcome = tokio::task::spawn_blocking(move || {
-        // One password check at a time; a concurrent attempt is told to retry.
-        if VERIFYING
+        // One password check at a time (each costs a few hundred ms of CPU);
+        // a concurrent attempt is told to retry. The latch belongs to the
+        // instance, so parallel tests with their own state do not collide.
+        if st
+            .login_verifying
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
             return Login::Limited(1);
         }
         // Cleared on every path, even if the check panicked.
-        struct Done;
-        impl Drop for Done {
+        struct Done<'a>(&'a AtomicBool);
+        impl Drop for Done<'_> {
             fn drop(&mut self) {
-                VERIFYING.store(false, Ordering::Release);
+                self.0.store(false, Ordering::Release);
             }
         }
-        let _done = Done;
+        let _done = Done(&st.login_verifying);
         login(&st.db, &st.login_limiter, ip, now_s(), &now_ms, &password)
     })
     .await

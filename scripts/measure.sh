@@ -1,9 +1,13 @@
 #!/bin/bash
 # Measure hobnail against GOALS.md section 1. Prints a markdown block.
 #   scripts/measure.sh            (uses the running hobnail container; URL=http://host:3200 to override)
+# Another instance (it is restarted for the cold start, so never point this at
+# one you care about):
+#   C=hobnail-dev IMG=hobnail:dev URL=http://127.0.0.1:3210 DB=/path/to/data/hobnail.db scripts/measure.sh
 # Cold start restarts *our* container only (5 runs, median).
 set -eu
-C=hobnail
+C=${C:-hobnail}
+IMG=${IMG:-hobnail:latest}
 URL=${URL:-http://127.0.0.1:3200}
 TS=${TS:-$URL}
 mib() { awk '{ v=$1; u=$1; gsub(/[0-9.]/,"",u); gsub(/[^0-9.]/,"",v);
@@ -12,8 +16,8 @@ rss() { docker stats --no-stream --format '{{.MemUsage}}' $C | cut -d/ -f1 | mib
 cpu() { docker stats --no-stream --format '{{.CPUPerc}}' $C; }
 
 sha=$(curl -fs $URL/api/state | sed -n 's/.*"sha": "\([^"]*\)".*/\1/p' | head -1)
-img=$(docker image inspect hobnail:latest --format '{{.Size}}')
-disk=$(docker images hobnail:latest --format '{{.Size}}' | head -1)
+img=$(docker image inspect "$IMG" --format '{{.Size}}')
+disk=$(docker images "$IMG" --format '{{.Size}}' | head -1)
 
 # Cold start: process start (State.StartedAt) -> first successful /healthz.
 runs=()
@@ -50,7 +54,7 @@ samp_pct=$(echo "scale=3; $cpu_ms / 1200" | bc)            # % of one core
 per_sample=$(echo "scale=1; $cpu_ms / 8" | bc)              # 8 samples in 120 s
 
 # History database.
-db=/opt/stacks/hobnail/data/hobnail.db
+db=${DB:-/opt/stacks/hobnail/data/hobnail.db}
 dbsize=$(du -cb $db $db-wal 2>/dev/null | tail -1 | cut -f1)
 first=$(curl -s "$URL/api/history/system?metric=cpu&range=30d" | sed -n 's/.*"points":\[\[\([0-9]*\),.*/\1/p')
 age_h=$(echo "scale=2; ($(date +%s) - ${first:-$(date +%s)}) / 3600" | bc)

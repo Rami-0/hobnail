@@ -90,12 +90,13 @@ pub struct DockerConfig {
     pub enabled: bool,
     /// Hide containers matching these globs (by container name).
     pub exclude: Vec<String>,
-    /// Logs link template. `{host}` = host the page was opened on, `{id}` =
-    /// 12-char container id, `{name}` = container name. Default: auto-detected
-    /// from a running Dozzle container.
-    pub logs_url: Option<String>,
-    /// Metrics link template (same placeholders). Default: auto-detected Beszel.
-    pub metrics_url: Option<String>,
+    /// Retired (the "Open in Dozzle" and "Beszel" links are gone; logs and
+    /// metrics live in the app). Still accepted and ignored, so a config file
+    /// that has them keeps loading.
+    #[serde(rename = "logs_url")]
+    pub retired_logs_url: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "metrics_url")]
+    pub retired_metrics_url: Option<serde::de::IgnoredAny>,
     /// Name of the group for containers without a compose project.
     pub standalone_group: String,
 }
@@ -125,8 +126,8 @@ impl Default for DockerConfig {
         Self {
             enabled: true,
             exclude: vec![],
-            logs_url: None,
-            metrics_url: None,
+            retired_logs_url: None,
+            retired_metrics_url: None,
             standalone_group: "Standalone".into(),
         }
     }
@@ -427,6 +428,19 @@ url = "https://github.com"
         )
         .unwrap_err();
         assert!(e.starts_with("/data/config.toml:3:"), "{e}");
+    }
+
+    /// The Dozzle and Beszel links are gone (OV-20, OV-35, NAV-53); a file
+    /// that still sets their templates loads, and the values do nothing.
+    #[test]
+    fn retired_link_templates_still_load() {
+        let c = parse(
+            "[docker]\nlogs_url = \"http://{host}:8888/container/{id}\"\nmetrics_url = \"http://{host}:8090/\"\n",
+            "c.toml",
+        )
+        .unwrap();
+        assert!(c.docker.enabled);
+        assert!(c.docker.retired_logs_url.is_some() && c.docker.retired_metrics_url.is_some());
     }
 
     #[test]

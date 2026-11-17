@@ -47,7 +47,11 @@ pub fn page(ctx: &Ctx) -> String {
                     input #pw type="password" name="password" autocomplete="current-password" required
                         autofocus[set] aria-describedby="login-msg" disabled[!set];
                     p.form-msg #login-msg role="alert" aria-live="assertive" {}
-                    button.btn.primary type="submit" disabled[!set] { (ic("log-in")) "Sign in" }
+                    div.login-acts {
+                        button.btn.primary type="submit" disabled[!set] { (ic("log-in")) "Sign in" }
+                        // The way back without signing in (NAV-82).
+                        a.btn.ghost.login-back href=(next) { "Back" }
+                    }
                 }
             }
         }

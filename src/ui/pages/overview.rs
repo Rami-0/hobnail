@@ -2,18 +2,21 @@
 //! consumers, widgets, recent events and bookmarks.
 
 use maud::{html, Markup};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::alerts::Status;
+use crate::config::Config;
 use crate::db::{Db, EventFilter, Range, SysMetric};
 use crate::model::{Snapshot, SystemStats};
+use crate::ui::alerts::{subject_href, subject_link};
 pub use crate::ui::chart::live_spark;
 use crate::ui::chart::{line_chart, line_chart_ex, seed, ChartSpec, Unit};
-use crate::ui::fmt::{pct, time_tag, url_encode};
-use crate::ui::pages::{crumb_title, kind_label};
+use crate::ui::fmt::{clock_tag, url_encode};
+use crate::ui::pages::{crumb_title, event_label};
 use crate::ui::shell::{disk_percent, layout, level, mem_percent, Ctx, Nav};
 use crate::ui::view::{build_groups, CardView, GroupView, Sev};
-use crate::ui::{ic, panel_head, pill, status_dot};
+use crate::ui::{empty, ic, panel_head, pill, skel_word, status_dot, Empty};
 use crate::util::{human_bytes, human_duration};
 
 const NONE: &str = "—";
@@ -23,7 +26,19 @@ pub struct Live {
     pub snap: Arc<Snapshot>,
     pub groups: Vec<GroupView>,
     pub status: Status,
+    /// When each unhealthy container turned unhealthy (its newest
+    /// `container.health` event), for "unhealthy for 41 min".
+    pub unhealthy_since: HashMap<String, i64>,
+    /// The first line of each unhealthy container's last failing probe.
+    /// **Signed in only** (probe output can carry secrets, NAV-11): filled by
+    /// [`Live::with_probes`] for a page with a session, never for the live
+    /// fragments, which are rendered without one.
+    pub probes: HashMap<String, String>,
 }
+
+/// The most probe lines one Overview view looks up (one `docker inspect`
+/// each): the rest of the unhealthy rows say "unhealthy for …" without one.
+pub const PROBES_MAX: usize = 5;
 
 impl Live {
     pub fn new(ctx: &Ctx) -> Self {
@@ -35,7 +50,47 @@ impl Live {
             snap,
             groups,
             status,
+            unhealthy_since: HashMap::new(),
+            probes: HashMap::new(),
         }
+    }
+
+    /// Adds since when each unhealthy container has been unhealthy (one
+    /// small query each), for the views that render "Needs attention".
+    pub fn with_since(mut self, ctx: &Ctx) -> Self {
+        for c in self.snap.containers.iter() {
+            if !c.is_running() || c.health.as_deref() != Some("unhealthy") {
+                continue;
+            }
+            if let Some(t) = crate::ui::pages::container::unhealthy_since(&ctx.state.db, c, None) {
+                self.unhealthy_since.insert(c.name.clone(), t);
+            }
+        }
+        self
+    }
+
+    /// Adds the probe lines of the unhealthy containers, for a session only
+    /// (one `docker inspect` each, for the first [`PROBES_MAX`] of them;
+    /// nothing for a visitor).
+    pub fn with_probes(mut self, ctx: &Ctx) -> Self {
+        if ctx.user.is_none() {
+            return self;
+        }
+        let sick = self
+            .snap
+            .containers
+            .iter()
+            .filter(|c| c.is_running() && c.health.as_deref() == Some("unhealthy"))
+            .take(PROBES_MAX);
+        for c in sick {
+            let Ok(i) = crate::docker::inspect_blocking(&ctx.state.env.docker_socket, &c.id) else {
+                continue;
+            };
+            if let Some(line) = crate::ui::pages::container::probe_line(&i) {
+                self.probes.insert(c.name.clone(), line);
+            }
+        }
+        self
     }
 
     pub fn containers(&self) -> impl Iterator<Item = &CardView> {
@@ -52,7 +107,7 @@ impl Live {
 
 pub fn page(ctx: &Ctx) -> String {
     let cfg = &ctx.cfg;
-    let v = Live::new(ctx);
+    let v = Live::new(ctx).with_since(ctx).with_probes(ctx);
     let db = &ctx.state.db;
     let now = ctx.now as i64;
     let mut sys = ctx.state.system.lock().unwrap().1.clone();
@@ -62,7 +117,12 @@ pub fn page(ctx: &Ctx) -> String {
         .groups
         .iter()
         .any(|g| g.cards.iter().any(|c| !c.container));
+    // Signed in: "Add" on Bookmarks and Widgets opens the Settings dialog
+    // here (OV-12; the dialogs, script and routes are the tabs' own).
+    let embed = crate::ui::settings::embed(ctx, "bookmarks widgets");
+    let add = embed.as_ref().map(|e| e.hash.as_str());
     let body = html! {
+        @if let Some(e) = &embed { (e.head) }
         div.page.ov {
             div.ov-head {
                 div.ov-hi {
@@ -78,7 +138,7 @@ pub fn page(ctx: &Ctx) -> String {
             }
             section.panel.primary.pulse aria-label="Status" {
                 (health(&v))
-                (attention(ctx.now, &v))
+                (attention(cfg, ctx.now, &v))
                 (stack_strips(&v, &strips))
             }
             @if cfg.system.enabled {
@@ -92,9 +152,15 @@ pub fn page(ctx: &Ctx) -> String {
                 }
             }
             (top(&v, cfg.page.show_stats))
-            @if !cfg.widgets.is_empty() {
-                section.sec.ghost aria-labelledby="h-w" {
-                    div.sec-h { h2.label #h-w { "Widgets" } }
+            @if !cfg.widgets.is_empty() || add.is_some() {
+                section.sec.ghost #ov-w aria-labelledby="h-w" {
+                    div.sec-h {
+                        h2.label #h-w { "Widgets" }
+                        @if let Some(h) = add { (add_link("widget", "widgets", h)) }
+                    }
+                    @if cfg.widgets.is_empty() {
+                        (empty(Empty::First, "inline", "zap", "No widgets yet", html! { "A widget shows a number or a status from any JSON or text URL. Use Add above." }, None))
+                    }
                     div.widgets {
                         @for w in &cfg.widgets {
                             @let out = ctx.state.widgets.lock().unwrap().get(&w.id).cloned();
@@ -103,11 +169,12 @@ pub fn page(ctx: &Ctx) -> String {
                     }
                 }
             }
-            div.cols.c-ev[!has_marks] {
+            div.cols.c-ev[!has_marks && add.is_none()] {
                 (recent_events(ctx))
-                @if has_marks { (bookmarks(&v)) }
+                @if has_marks || add.is_some() { (bookmarks(&v, add)) }
             }
         }
+        @if let Some(e) = &embed { (e.body) (e.tail) }
     };
     layout(
         ctx,
@@ -124,10 +191,9 @@ pub fn health(v: &Live) -> Markup {
     let cards: Vec<&CardView> = v.containers().collect();
     let running = cards.iter().filter(|c| c.running).count();
     let stopped = cards.len() - running;
-    let unhealthy = cards
-        .iter()
-        .filter(|c| matches!(c.label, "unhealthy" | "restarting" | "dead"))
-        .count();
+    // The same count and word as the Containers page's "Problems" filter,
+    // where this cell leads (OV-16).
+    let unhealthy = cards.iter().filter(|c| c.attention().is_some()).count();
     let firing = v.status.incidents.len();
     let known = v.known();
     let total = cards.len().max(1) as f64;
@@ -142,7 +208,7 @@ pub fn health(v: &Live) -> Markup {
                     @match n {
                         Some(n) => (n),
                         None if v.snap.error.is_some() => (NONE),
-                        None => span.sk { span.sr { "loading" } },
+                        None => (skel_word()),
                     }
                 }
                 span.hs-l { (label) }
@@ -150,10 +216,10 @@ pub fn health(v: &Live) -> Markup {
         }
     };
     html! {
-        section #ov-health.hs aria-label="Container health" {
+        section #ov-health.hs aria-label="Container health" data-wait=[(!known && v.snap.error.is_none()).then_some("")] {
             (cell(known.then_some(running), "running", "/containers?state=running", false, "Containers that are running"))
             (cell(known.then_some(stopped), "stopped", "/containers?state=stopped", false, "Containers that are not running"))
-            (cell(known.then_some(unhealthy), "unhealthy", "/containers?state=problem", true, "Unhealthy, restarting or dead"))
+            (cell(known.then_some(unhealthy), "problems", "/containers?state=problem", true, "Unhealthy, restarting, paused or stopped with an error"))
             (cell(Some(firing), "alerts firing", "/alerts", true, "Open incidents"))
             @if known && !cards.is_empty() {
                 div.hs-bar role="img" aria-label={(running) " of " (cards.len()) " running"} {
@@ -162,8 +228,6 @@ pub fn health(v: &Live) -> Markup {
                         span.u style={"width:" (format!("{:.2}", unhealthy as f64 / total * 100.0)) "%"} {}
                     }
                 }
-            } @else if let Some(e) = &v.snap.error {
-                p.hs-err { (ic("alert")) "Docker unreachable: " (e) }
             }
         }
     }
@@ -171,10 +235,35 @@ pub fn health(v: &Live) -> Markup {
 
 // ---------------------------------------------------------------- attention
 
-pub fn attention(now: u64, v: &Live) -> Markup {
+/// The logs action at the end of a row that names a container (§11.9).
+pub fn logs_ia(c: &CardView) -> Markup {
+    html! {
+        a.ia.logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
+    }
+}
+
+/// "Needs attention": one row per subject, the whole row a link to the
+/// cause with the reason inline and, for a container, its logs beside it
+/// (OV-01, OV-04). A firing alert about something that is not a container
+/// opens its subject (the Host page, the widget, the checked URL) and names
+/// its rule. An unhealthy container says for how long and, for a session,
+/// the first line of its failing probe (NAV-11).
+/// Rows "Needs attention" shows before "N more on the Containers page".
+const ATTN_MAX: usize = 8;
+
+pub fn attention(cfg: &Config, now: u64, v: &Live) -> Markup {
+    // Names that repeat across stacks ("svc05" in three stacks) carry their
+    // stack, so each row says which one it is (ROB-06).
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for c in v.containers() {
+        *seen.entry(c.title.as_str()).or_default() += 1;
+    }
+    let stack_of = |c: &CardView| {
+        html! { @if seen.get(c.title.as_str()).is_some_and(|n| *n > 1) && c.stack != c.name { span.stk { " · " (c.stack) } } }
+    };
     // One row per subject, ranked by severity: a container with a firing
     // alert is one red row ("unhealthy · alert firing 5m"), not two.
-    let mut rows: Vec<(Sev, Markup)> = Vec::new();
+    let mut rows: Vec<(Sev, String, Markup)> = Vec::new();
     let names: std::collections::HashSet<&str> = v.containers().map(|c| c.name.as_str()).collect();
     for i in v
         .status
@@ -182,12 +271,14 @@ pub fn attention(now: u64, v: &Live) -> Markup {
         .iter()
         .filter(|i| !names.contains(i.subject.as_str()))
     {
+        let href = subject_href(cfg, &i.rule, &i.subject).unwrap_or(("/alerts".into(), false));
         rows.push((
             Sev::Bad,
+            format!("a:{}:{}", i.rule, i.subject),
             html! {
                 span.dot.bad role="img" aria-label="alert firing" {}
-                a.nm href="/alerts" { (i.subject) }
-                span.why { (i.state) }
+                (subject_link(Some(href), &i.subject, "nm"))
+                span.why { (i.state) span.muted { " · rule " (i.rule) } }
                 span.when.num { "firing " (human_duration(now.saturating_sub(i.since))) }
             },
         ));
@@ -204,15 +295,30 @@ pub fn attention(now: u64, v: &Live) -> Markup {
         match why {
             Some((sev, why)) => rows.push((
                 sev,
+                format!("c:{}", c.name),
                 html! {
                     (status_dot(c))
-                    a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
-                    span.why { (why) }
+                    a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) (stack_of(c)) }
+                    // `data-since` keys the probe line: the script keeps the
+                    // one the page was served with only while the failing
+                    // run it belongs to goes on (NAV-11).
+                    @let since = v.unhealthy_since.get(&c.name).filter(|_| c.label == "unhealthy");
+                    span.why data-since=[since] {
+                        (why)
+                        @if let Some(t) = since {
+                            " for " (human_duration(now.saturating_sub(*t as u64)))
+                        }
+                        @if let Some(p) = v.probes.get(&c.name).filter(|_| c.label == "unhealthy") {
+                            span.probe data-since=[since] title="The check's output when this page was loaded" { " · " (p) }
+                        }
+                    }
                     @if let Some(i) = inc {
-                        span.when.num { a href="/alerts" { "alert firing " (human_duration(now.saturating_sub(i.since))) } }
+                        // A status in words, in the status colour (never the accent, A11Y-17).
+                        span.when.num { a.bad href="/alerts" { "alert firing " (human_duration(now.saturating_sub(i.since))) } }
                     } @else {
                         span.when { (c.state_text.as_deref().unwrap_or("")) }
                     }
+                    (logs_ia(c))
                 },
             )),
             None if !c.running => clean_stopped += 1,
@@ -237,33 +343,48 @@ pub fn attention(now: u64, v: &Live) -> Markup {
                 let why = s.why.get(&i).map(String::as_str).unwrap_or("problem");
                 rows.push((
                     Sev::Warn,
+                    format!("c:{}", c.name),
                     html! {
                         (status_dot(c))
-                        a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
+                        a.nm.row-link href={"/containers/" (url_encode(&c.name))} data-c=(c.name) { (c.title) (stack_of(c)) }
                         span.why { "recovered after: " (why) }
                         span.when { "last hour" }
+                        (logs_ia(c))
                     },
                 ));
             }
         }
     }
-    rows.sort_by_key(|(s, _)| *s != Sev::Bad);
+    rows.sort_by_key(|(s, _, _)| *s != Sev::Bad);
+    // A long list is cut at eight rows with a link to the rest (ROB-06).
+    let all_rows = rows.len();
+    rows.truncate(ATTN_MAX);
     let total = v.containers().count();
+    let connecting = v.snap.fetched_at == 0 && v.snap.error.is_none();
     html! {
-        section #ov-attn.attn.quiet[rows.is_empty()] aria-label="Needs attention" {
+        section #ov-attn.attn.quiet[rows.is_empty()] aria-label="Needs attention" data-wait=[connecting.then_some("")] {
             div.attn-h {
                 h2.label { "Needs attention" }
-                @if !rows.is_empty() { span.count-pill.bad { (rows.len()) } }
+                @if !rows.is_empty() { span.count-pill.bad { (all_rows) } }
             }
             @if rows.is_empty() {
-                p.ok-line {
-                    (ic("check"))
-                    @if v.known() { "All clear. " span.muted { (total) " containers, nothing needs you." } }
-                    @else { "Nothing needs attention." }
+                @if v.snap.error.is_some() {
+                    p.ok-line.unknown { (ic("alert")) "Unknown while Docker cannot be reached." }
+                } @else if connecting {
+                    div.sk-rows { span.sk {} span.sk {} span.sk-t { "Connecting to Docker…" } }
+                } @else if total == 0 {
+                    p.ok-line.unknown { (ic("box")) "No containers yet." }
+                } @else {
+                    p.ok-line { (ic("check")) "All clear. " span.muted { (total) " containers, nothing needs you." } }
                 }
             } @else {
-                ul.rows {
-                    @for (_, r) in &rows { li { (r) } }
+                ul.rows data-flash {
+                    @for (_, k, r) in &rows { li.rl data-key=(k) { (r) } }
+                }
+                @if all_rows > rows.len() {
+                    p.foot-line {
+                        a href="/containers?state=problem&group=0" { (all_rows - rows.len()) " more on the Containers page" }
+                    }
                 }
             }
             @if clean_stopped > 0 {
@@ -282,6 +403,39 @@ pub fn attention(now: u64, v: &Live) -> Markup {
 
 pub fn top(v: &Live, show_stats: bool) -> Markup {
     let cards: Vec<&CardView> = v.containers().collect();
+    // Nothing to sample is not the same as no sample yet (ROB-01). Both
+    // panels say why in the standard empty state; each its own title.
+    let why: Option<(Empty, &str, &str)> = if v.snap.error.is_some() {
+        Some((
+            Empty::Error,
+            "alert",
+            "Docker cannot be reached, so nothing is sampled.",
+        ))
+    } else if v.known() && cards.is_empty() {
+        Some((
+            Empty::First,
+            "box",
+            "Hobnail lists the containers Docker runs on this host. Hidden ones are under Settings, Containers and groups.",
+        ))
+    } else if v.known() && !cards.iter().any(|c| c.running) {
+        Some((
+            Empty::First,
+            "box",
+            "Stopped containers use no CPU or memory.",
+        ))
+    } else {
+        None
+    };
+    let why_box = |title: &str| {
+        why.map(|(kind, icon, body)| {
+            let title = match (kind, title) {
+                (Empty::Error, _) => "No numbers",
+                _ if cards.is_empty() => "No containers yet",
+                (_, t) => t,
+            };
+            empty(kind, "compact", icon, title, html! { (body) }, None)
+        })
+    };
     let board = |title: &str,
                  color: &str,
                  key: fn(&CardView) -> Option<f64>,
@@ -291,19 +445,26 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             .filter_map(|c| key(c).filter(|x| x.is_finite()).map(|x| (*c, x)))
             .collect();
         v.sort_by(|a, b| b.1.total_cmp(&a.1));
-        v.truncate(5);
-        let max = v.first().map(|x| x.1).unwrap_or(0.0).max(f64::MIN_POSITIVE);
+        // Eight rows fill the panel beside the treemap; a full bar is one
+        // whole core (100 %), not the top row, so 11 % never looks maxed
+        // out (OV-14).
+        v.truncate(8);
+        let max = v.first().map(|x| x.1).unwrap_or(0.0).max(100.0);
         html! {
             div.board style={"--s:var(" (color) ")"} {
                 @if !title.is_empty() { h3.label { (title) } }
                 @if v.is_empty() {
-                    p.muted { "Waiting for the first sample…" }
+                    div.sk-rows data-wait { span.sk {} span.sk {} span.sk {} span.sk-t { "Waiting for the first sample…" } }
                 } @else {
-                    ol.bars {
+                    // Ranked (HB.morph, data-rank): re-used by position, so
+                    // nothing moves when ranks change; keyed by container,
+                    // so a focused link stays that container's.
+                    ol.bars data-rank {
                         @for (c, x) in v {
-                            li {
+                            li data-key=(c.name) {
                                 a.nm href={"/containers/" (url_encode(&c.name))} { (c.title) }
                                 span.val { (fmt(x)) }
+                                (logs_ia(c))
                                 span.meter { span style={"width:" (format!("{:.1}", (x / max * 100.0).clamp(0.0, 100.0))) "%"} {} }
                             }
                         }
@@ -317,10 +478,12 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             div.panel.res-mem {
                 div.panel-h {
                     h2 { "Memory by container" }
-                    a.more href="/containers?sort=mem" { "All" (ic("arrow-right")) }
+                    a.more href="/containers?sort=mem&group=0" { "All" (ic("arrow-right")) }
                 }
                 @if !show_stats {
                     p.muted { "Live stats are off (" code { "page.show_stats = false" } ")." }
+                } @else if let Some(w) = why_box("Nothing is running") {
+                    (w)
                 } @else {
                     (treemap(&cards))
                 }
@@ -328,19 +491,60 @@ pub fn top(v: &Live, show_stats: bool) -> Markup {
             div.panel.res-cpu {
                 div.panel-h {
                     h2 { "Top CPU" }
-                    a.more href="/containers?sort=cpu" { "All" (ic("arrow-right")) }
+                    a.more href="/containers?sort=cpu&group=0" { "All" (ic("arrow-right")) }
                 }
                 @if show_stats {
-                    div.boards { (board("", "--ch-cpu", |c| c.cpu, pct)) }
+                    @if let Some(w) = why_box("Nothing to rank") {
+                        (w)
+                    } @else {
+                        // One number format for every row: "0.4%", "11.0%".
+                        div.boards { (board("", "--ch-cpu", |c| c.cpu, |x| format!("{x:.1}%"))) }
+                    }
                 }
             }
         }
     }
 }
 
-/// "Where did my RAM go": a squarified treemap of container memory (the 18
-/// biggest, the rest folded into "others"), coloured by stack, as positioned
-/// HTML boxes (crisp text, no script). Each box links to its container.
+/// The treemap's box on a phone (px), the smallest it is drawn: a tile must
+/// hold its name there, or it folds into "+N others" (Y10, OV-09).
+const TM_W: f64 = 326.0;
+const TM_H: f64 = 200.0;
+/// The smallest tile that holds a one-line name (px, on that box).
+const TM_MIN_W: f64 = 64.0;
+const TM_MIN_H: f64 = 24.0;
+
+/// The layout: the boxes (in % of the treemap) of the `k` biggest and, when
+/// any are left, one more for the rest. `k` is the most tiles (at most 18)
+/// whose boxes, and the rest's, all hold a name on a phone.
+fn tm_layout(w: &[f64]) -> (usize, Vec<(f64, f64, f64, f64)>) {
+    let fits = |r: &(f64, f64, f64, f64)| r.2 * TM_W >= TM_MIN_W && r.3 * TM_H >= TM_MIN_H;
+    let mut k = w.len().min(18);
+    loop {
+        let rest: f64 = w[k..].iter().sum();
+        let mut weights = w[..k].to_vec();
+        if rest > 0.0 {
+            weights.push(rest);
+        }
+        let rects: Vec<_> = squarify(&weights, 0.0, 0.0, 1.0, 1.0);
+        if k == 0 || rects.iter().all(fits) {
+            let pct = rects
+                .iter()
+                .map(|r| (r.0 * 100.0, r.1 * 100.0, r.2 * 100.0, r.3 * 100.0))
+                .collect();
+            return (k, pct);
+        }
+        k -= 1;
+    }
+}
+
+/// "Where did my RAM go": a squarified treemap of container memory,
+/// coloured by stack, as positioned HTML boxes (crisp text, no script).
+/// A tile is a box holding a stretched name link to the container and, as
+/// a sibling (never a link inside a link), its logs icon, which shows when
+/// the tile is big enough (CSS container query: 64 × 40 px, 88 × 56 px on
+/// touch; OV-01). Tiles too small for a name on a phone fold into "+N
+/// others", a link to the containers table sorted by memory (OV-10).
 pub fn treemap(cards: &[&CardView]) -> Markup {
     let mut items: Vec<(&CardView, f64)> = cards
         .iter()
@@ -348,18 +552,18 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
         .collect();
     items.sort_by(|a, b| b.1.total_cmp(&a.1));
     if items.is_empty() {
-        return html! { div.tmap.sk-box { span.muted { "Waiting for the first sample…" } } };
+        return html! {
+            div.tmap-wrap data-wait {
+                p.tmap-sum { span.sk {} span.sk-t { "Waiting for the first sample…" } }
+                div.tmap.sk-box { span.sk.block {} }
+            }
+        };
     }
     let total: f64 = items.iter().map(|x| x.1).sum();
-    const MAX: usize = 18;
-    let rest: f64 = items.iter().skip(MAX).map(|x| x.1).sum();
-    let rest_n = items.len().saturating_sub(MAX);
-    items.truncate(MAX);
-    let mut weights: Vec<f64> = items.iter().map(|x| x.1).collect();
-    if rest > 0.0 {
-        weights.push(rest);
-    }
-    let rects = squarify(&weights, 0.0, 0.0, 100.0, 100.0);
+    let weights: Vec<f64> = items.iter().map(|x| x.1).collect();
+    let (k, rects) = tm_layout(&weights);
+    let rest: f64 = weights[k..].iter().sum();
+    let rest_n = items.len() - k;
     let hue = |s: &str| {
         s.bytes()
             .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32))
@@ -368,23 +572,25 @@ pub fn treemap(cards: &[&CardView]) -> Markup {
     html! {
         div.tmap-wrap {
             p.tmap-sum.muted {
-                b.num { (human_bytes(total as u64)) } " in " (items.len() + rest_n) " containers"
+                b.num { (human_bytes(total as u64)) } " in " (items.len()) " containers"
             }
-            div.tmap role="list" aria-label="Memory by container" {
+            div.tmap role="list" aria-label="Memory by container" data-rank {
                 @for (i, r) in rects.iter().enumerate() {
                     @let style = format!("left:{:.2}%;top:{:.2}%;width:{:.2}%;height:{:.2}%", r.0, r.1, r.2, r.3);
-                    // Boxes too small for two lines get one; tiny ones none
-                    // (the title still says what they are).
-                    @let fit = if r.3 < 9.0 || r.2 < 6.0 { "tm tiny" } else if r.3 < 19.0 { "tm short" } else { "tm" };
-                    @if let Some((c, m)) = items.get(i) {
-                        a class=(fit) role="listitem" href={"/containers/" (url_encode(&c.name))}
-                            style={(style) ";--h:" (hue(&c.stack))}
+                    // Under two lines' height on a phone: one line.
+                    @let fit = if r.3 * TM_H / 100.0 < 40.0 { "tm short" } else { "tm" };
+                    @if let Some((c, m)) = items.get(i).filter(|_| i < k) {
+                        div class=(fit) role="listitem" data-key=(c.name) style={(style) ";--h:" (hue(&c.stack))}
                             title={(c.title) ": " (human_bytes(*m as u64)) " (" (format!("{:.0}", m / total * 100.0)) "%)"} {
-                            span.tm-n { (c.title) }
-                            span.tm-v { (human_bytes(*m as u64)) }
+                            a.tm-a.row-link href={"/containers/" (url_encode(&c.name))} {
+                                span.tm-n { (c.title) }
+                                span.tm-v { (human_bytes(*m as u64)) }
+                            }
+                            a.ia.logs.tm-logs href=(crate::logs::logs_url(&c.name)) title="Logs" aria-label={"Logs of " (c.title)} { (ic("logs")) }
                         }
                     } @else {
-                        span.tm.tm-rest role="listitem" style=(style) title={(rest_n) " smaller containers: " (human_bytes(rest as u64))} {
+                        a class={(fit) " tm-rest"} role="listitem" data-key="+rest" href="/containers?sort=mem&group=0" style=(style)
+                            title={(rest_n) " smaller containers: " (human_bytes(rest as u64)) ". Open them in the table, by memory"} {
                             span.tm-n { "+" (rest_n) " others" }
                             span.tm-v { (human_bytes(rest as u64)) }
                         }
@@ -488,7 +694,10 @@ fn stack_strips(v: &Live, st: &crate::db::strips::Strips) -> Markup {
                             a.sl-n href={"/containers?stack=" (url_encode(&g.name))} title=(g.counts()) { (g.title) }
                             span.sl-c.num { (g.running) "/" (ctrs) }
                             (health_strip(s, st, &g.title, StripStyle::Runs))
-                            span.sl-s.muted { (strip_summary(s, st).split(" of the last").next().unwrap_or("")) }
+                            // "running 98%", or "running 100% of 30m" while the
+                            // history is young (OV-03); the full line on hover.
+                            @let sum = strip_summary(s, st);
+                            span.sl-s.muted title=(sum) { (sum.split(" of the last").next().unwrap_or("").trim_end_matches(" with data")) }
                         }
                     }
                 }
@@ -514,7 +723,7 @@ fn meter(p: Option<f64>, color: &str) -> Markup {
 fn skel(s: Option<&SystemStats>) -> Markup {
     match s {
         Some(_) => html! { (NONE) },
-        None => html! { span.sk { span.sr { "loading" } } },
+        None => skel_word(),
     }
 }
 
@@ -527,6 +736,28 @@ fn cell_head(icon: &str, label: &str) -> Markup {
 pub fn sys_strip(s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> Markup {
     let hist =
         |m: SysMetric| db.and_then(|(db, now)| seed(&db.system_series(m, Range::H1, now), 40));
+    // The network line starts drawn like the others: received + sent over
+    // the last hour (OV-11). Page loads only; live re-renders pass no `db`.
+    let net_hist = db.and_then(|(db, now)| {
+        let rx = db.system_series(SysMetric::NetRx, Range::H1, now);
+        let tx: HashMap<i64, f64> = db
+            .system_series(SysMetric::NetTx, Range::H1, now)
+            .points
+            .into_iter()
+            .collect();
+        let points = rx
+            .points
+            .iter()
+            .filter_map(|(t, v)| tx.get(t).map(|w| (*t, v + w)))
+            .collect();
+        seed(
+            &crate::db::Series {
+                step: rx.step,
+                points,
+            },
+            40,
+        )
+    });
     let cpu = s.and_then(|s| s.cpu_percent);
     let memp = s.and_then(mem_percent);
     let diskp = s.and_then(disk_percent);
@@ -545,7 +776,7 @@ pub fn sys_strip(s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> Markup {
         _ => "",
     };
     html! {
-        div #ov-sys.strip aria-label="Host vitals" {
+        div #ov-sys.strip aria-label="Host vitals" data-wait=[s.is_none().then_some("")] {
             div.cell {
                 (cell_head("cpu", "CPU"))
                 div class={"big " (level(cpu))} { @match cpu { Some(p) => { span.tw { (format!("{p:.0}")) } small { "%" } } None => (skel(s)) } }
@@ -596,7 +827,7 @@ pub fn sys_strip(s: Option<&SystemStats>, db: Option<(&Db, i64)>) -> Markup {
                     span title="sent" { (ic("arrow-up")) (rate(s.and_then(|s| s.net_tx_bps))) }
                 }
                 div.sub { span.mono { (s.and_then(|s| s.net_iface.as_deref()).unwrap_or(NONE)) } }
-                (live_spark("s:net", net_total, "--ch-rx", None))
+                (live_spark("s:net", net_total, "--ch-rx", net_hist))
             }
             div.cell {
                 (cell_head("thermo", "Temperature"))
@@ -669,47 +900,121 @@ fn recent_events(ctx: &Ctx) -> Markup {
         }
         .for_viewer(ctx.user.is_some()),
     );
+    let names = crate::logs::tailable(ctx.state);
     html! {
         section.panel aria-label="Recent events" {
             (panel_head("Recent events", Some(("/history#events", "Timeline"))))
             @if evs.is_empty() {
-                p.muted {
-                    @if ctx.state.db.is_enabled() { "No events recorded yet." }
-                    @else { "Starts, stops, health changes and alerts appear here once history is recording." }
+                @if ctx.state.db.is_enabled() {
+                    (empty(Empty::First, "inline", "history", "No events yet", html! { "Starts, stops, health changes and alerts appear here as they happen." }, None))
+                } @else {
+                    (empty(Empty::First, "inline", "history", "History is off", html! { "Starts, stops, health changes and alerts appear here once history is recording." }, None))
                 }
             } @else {
-                ul.events {
-                    @for e in &evs { (event_row(ctx.now, e, true)) }
+                // Identical rows in a row (five "Hobnail started" after a few
+                // restarts) are one row with a count (OV-05).
+                ul.events.recent {
+                    @for (e, n) in collapse(&evs) { (event_row_n(ctx.now, e, true, Some(&names), n, Some(&ctx.cfg))) }
                 }
             }
         }
     }
 }
 
-/// One timeline row. `link` makes a container subject a link.
-pub fn event_row(now: u64, e: &crate::db::Event, link: bool) -> Markup {
+/// One timeline row. `link` makes a container subject a link; `logs` (the
+/// containers whose logs may be read) adds a logs icon that opens the logs
+/// at the moment of the event when the subject is one of them.
+pub fn event_row(
+    now: u64,
+    e: &crate::db::Event,
+    link: bool,
+    logs: Option<&std::collections::HashSet<String>>,
+) -> Markup {
+    event_row_n(now, e, link, logs, 1, None)
+}
+
+/// Consecutive events with the same kind, subject and detail, newest first,
+/// as `(newest, count)`.
+fn collapse(evs: &[crate::db::Event]) -> Vec<(&crate::db::Event, usize)> {
+    let mut out: Vec<(&crate::db::Event, usize)> = Vec::new();
+    for e in evs {
+        match out.last_mut() {
+            Some((p, n)) if p.kind == e.kind && p.subject == e.subject && p.detail == e.detail => {
+                *n += 1
+            }
+            _ => out.push((e, 1)),
+        }
+    }
+    out
+}
+
+/// `event_row` for `n` identical events in a row ("× 5"). The kind reads in
+/// plain words (OV-05); the time is a clock time (LG-47); a row links to its
+/// subject the way the History timeline does (LG-48): a container to its
+/// page, an alert to what it watches (`cfg`; the Alerts page without it).
+fn event_row_n(
+    _now: u64,
+    e: &crate::db::Event,
+    link: bool,
+    logs: Option<&std::collections::HashSet<String>>,
+    n: usize,
+    cfg: Option<&Config>,
+) -> Markup {
+    let logs = logs.filter(|n| n.contains(&e.subject));
     let kind = match e.level.as_str() {
         "error" => "bad",
         "warn" => "warn",
         _ => "",
     };
+    let href: Option<(String, bool)> = if !link || e.subject.is_empty() {
+        None
+    } else if e.kind.starts_with("container.") {
+        Some((format!("/containers/{}", url_encode(&e.subject)), false))
+    } else if e.kind.starts_with("alert.") {
+        e.detail
+            .split_once(": ")
+            .zip(cfg)
+            .and_then(|((rule, _), cfg)| subject_href(cfg, rule, &e.subject))
+            .or_else(|| Some(("/alerts".into(), false)))
+    } else if e.kind.starts_with("auth.") {
+        // OV-06: sign-in events (signed-in viewers only) lead to where the
+        // sessions are.
+        Some(("/settings/security".into(), false))
+    } else {
+        None
+    };
     html! {
         li.ev {
-            span.when { (time_tag(now, e.ts.max(0) as u64)) }
-            (pill(kind, kind_label(&e.kind)))
-            @if !e.subject.is_empty() {
-                @if link && e.kind.starts_with("container.") {
-                    a.nm href={"/containers/" (url_encode(&e.subject))} { (e.subject) }
-                } @else {
-                    span.nm { (e.subject) }
-                }
+            span.when { (clock_tag(e.ts.max(0) as u64)) }
+            (pill(kind, event_label(&e.kind)))
+            @if n > 1 { span.muted.num.ev-n { "× " (n) } }
+            @match href {
+                Some((u, true)) => a.nm href=(u) target="_blank" rel="noopener noreferrer" { (e.subject) " ↗" },
+                Some((u, false)) => a.nm href=(u) { (e.subject) },
+                None => @if !e.subject.is_empty() { span.nm { (e.subject) } },
             }
             @if !e.detail.is_empty() { span.muted.detail { (e.detail) } }
+            @if logs.is_some() {
+                a.ia.logs href=(crate::logs::logs_at(&e.subject, e.ts)) title="Logs at that moment"
+                    aria-label={"Logs of " (e.subject)} { (ic("logs")) }
+            }
         }
     }
 }
 
-fn bookmarks(v: &Live) -> Markup {
+/// "Add" in a panel head, signed in only (OV-12): the Settings dialog on
+/// this page, or that tab's `?add=` page without the script. `hash`: the
+/// config version the page shows (the dialog's base).
+fn add_link(kind: &str, tab: &str, hash: &str) -> Markup {
+    html! {
+        span.head-add data-hash=(hash) {
+            a.btn.sm href={"/settings/" (tab) "?add=" (kind)} data-dlg={"dlg-" (kind)} { (ic("plus")) "Add" span.sr { " " (kind) } }
+        }
+    }
+}
+
+/// Bookmarks (`#ov-marks`); `add`: the config version, for a session.
+fn bookmarks(v: &Live, add: Option<&str>) -> Markup {
     let marks: Vec<(&GroupView, Vec<&CardView>)> = v
         .groups
         .iter()
@@ -722,10 +1027,16 @@ fn bookmarks(v: &Live) -> Markup {
         .filter(|(_, v)| !v.is_empty())
         .collect();
     html! {
-        section.panel aria-label="Bookmarks" {
-            (panel_head("Bookmarks", None))
+        section.panel #ov-marks aria-label="Bookmarks" {
+            div.panel-h {
+                h2 { "Bookmarks" }
+                @if let Some(h) = add { (add_link("bookmark", "bookmarks", h)) }
+            }
             @if marks.is_empty() {
-                p.muted { "No bookmarks. Add " code { "[[bookmarks]]" } " entries to the config." }
+                (empty(Empty::First, "inline", "bookmark", "No bookmarks yet", html! {
+                    @if add.is_some() { "Links to things that are not containers, like the router. Use Add above." }
+                    @else { "Links to things that are not containers. They are added in Settings." }
+                }, None))
             }
             @for (g, cards) in marks {
                 div.mark-group {
@@ -837,6 +1148,8 @@ mod tests {
                 cards,
             }],
             status: Status::default(),
+            unhealthy_since: HashMap::new(),
+            probes: HashMap::new(),
         }
     }
 
@@ -853,13 +1166,36 @@ mod tests {
         let html = health(&v).into_string();
         assert!(html.contains(r#"href="/containers?state=running""#));
         assert!(html.contains(r#"<span class="hs-n tw">2</span>"#), "{html}");
+        // One word for one thing: the Containers page's "Problems" (OV-16).
+        assert!(
+            html.contains(r#"<span class="hs-l">problems</span>"#),
+            "{html}"
+        );
         assert!(html.contains("hs-cell hot"), "unhealthy is hot: {html}");
         assert!(html.contains("alerts firing"));
         // Docker error: counts are unknown, not zero.
         let v = live(vec![card("a", "running", true)], Some("down"));
         let html = health(&v).into_string();
         assert!(html.contains(r#"<span class="hs-n tw">—</span>"#));
-        assert!(html.contains("Docker unreachable"));
+        // The cause is the page's banner (ROB-09), not a raw line here, and
+        // nothing is "loading" when Docker is down.
+        assert!(
+            !html.contains("Docker unreachable") && !html.contains("data-wait"),
+            "{html}"
+        );
+        // Connecting: skeleton numbers on a region the script makes busy
+        // (`data-wait`; never `aria-busy` from the server, §11.9).
+        let mut v = live(vec![], None);
+        v.snap = Arc::new(Snapshot::default());
+        let html = health(&v).into_string();
+        assert!(
+            html.contains(r#"data-wait="""#)
+                && !html.contains("aria-busy")
+                && html.contains(
+                    r#"<span class="sk" aria-hidden="true"></span><span class="sk-t">—</span>"#
+                ),
+            "{html}"
+        );
     }
 
     #[test]
@@ -871,15 +1207,112 @@ mod tests {
         let clean = card("clean", "stopped", false);
         let fine = card("fine", "running", true);
         let v = live(vec![crashed, sick, clean, fine.clone()], None);
-        let html = attention(100, &v).into_string();
+        let html = attention(&Config::default(), 100, &v).into_string();
         assert!(html.contains("sick") && html.contains("unhealthy"));
         assert!(html.contains("stopped, exit 1"));
         assert!(!html.contains(">fine<"));
         assert!(html.contains("1 container is stopped cleanly"));
         // Bad rows sort before warnings.
         assert!(html.find("sick").unwrap() < html.find("crashed").unwrap());
-        let html = attention(100, &live(vec![fine], None)).into_string();
+        // Every container row ends with its logs action (one click, §11.9).
+        assert!(html.contains(r#"<a class="ia logs" href="/containers/sick/logs" title="Logs" aria-label="Logs of sick">"#), "{html}");
+        assert!(html.contains(r#"href="/containers/crashed/logs""#));
+        let html = attention(&Config::default(), 100, &live(vec![fine], None)).into_string();
         assert!(html.contains("All clear"));
+    }
+
+    /// ROB-06: at most eight rows and a link to the rest; a name that
+    /// repeats across stacks carries its stack.
+    #[test]
+    fn attention_is_capped_and_names_the_stack_of_repeats() {
+        let cards: Vec<CardView> = (0..11)
+            .map(|i| {
+                let mut c = card(&format!("stack{i}-svc-1"), "unhealthy", true);
+                c.title = "svc".into();
+                c.stack = format!("stack{i}");
+                c
+            })
+            .collect();
+        let html = attention(&Config::default(), 100, &live(cards, None)).into_string();
+        assert_eq!(html.matches("<li class=\"rl\"").count(), 8, "{html}");
+        assert!(html.contains(r#"<span class="count-pill bad">11</span>"#));
+        assert!(html.contains("3 more on the Containers page"));
+        assert!(
+            html.contains(r#"svc<span class="stk"> · stack0</span>"#),
+            "{html}"
+        );
+    }
+
+    /// Rows open their cause, say why inline and how long an unhealthy
+    /// container has been unhealthy; the probe line only when the page
+    /// put one in (a session, `Live::with_probes`) (OV-04, NAV-11).
+    #[test]
+    fn attention_rows_open_their_cause() {
+        let mut sick = card("sick", "unhealthy", true);
+        sick.dot = Some(crate::ui::view::Dot::Bad);
+        let mut v = live(vec![sick], None);
+        v.unhealthy_since.insert("sick".into(), 10_000 - 2460);
+        let cfg = crate::config::parse(
+            "[[alerts]]\nname = \"mem\"\ntype = \"host\"\nmetric = \"memory\"\nabove = 90\n",
+            "t.toml",
+        )
+        .unwrap();
+        let html = attention(&cfg, 10_000, &v).into_string();
+        // Rows are keyed by subject, so a live update keeps the row a reader
+        // is on (A11Y-02), and a new one flashes once.
+        assert!(html.contains(r#"<ul class="rows" data-flash>"#), "{html}");
+        assert!(
+            html.contains(r#"<li class="rl" data-key="c:sick">"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(
+                r#"<a class="nm row-link" href="/containers/sick" data-c="sick">sick</a>"#
+            ),
+            "{html}"
+        );
+        assert!(html.contains("unhealthy for 41m"), "{html}");
+        assert!(
+            !html.contains("probe"),
+            "no probe line without a session: {html}"
+        );
+        assert!(html.contains(r#"href="/containers/sick/logs""#));
+        v.probes.insert("sick".into(), "curl: (7) <refused>".into());
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<span class="why" data-since="7540">unhealthy for 41m<span class="probe" data-since="7540" title="The check's output when this page was loaded"> · curl: (7) &lt;refused&gt;</span></span>"#),
+            "{html}"
+        );
+        // A firing alert about the host opens the Host page and names its rule.
+        v.status.incidents.push(crate::alerts::Incident {
+            rule: "mem".into(),
+            subject: "memory".into(),
+            state: "92% > 90%".into(),
+            value: "92".into(),
+            since: 9_000,
+            notified: true,
+        });
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<a class="nm row-link" href="/host">memory</a>"#),
+            "{html}"
+        );
+        assert!(html.contains(" · rule mem"), "{html}");
+        // A container with a firing alert: "alert firing" in the error
+        // colour (a status class), never the accent of a plain link.
+        v.status.incidents.push(crate::alerts::Incident {
+            rule: "mem".into(),
+            subject: "sick".into(),
+            state: "x".into(),
+            value: "1".into(),
+            since: 9_400,
+            notified: true,
+        });
+        let html = attention(&cfg, 10_000, &v).into_string();
+        assert!(
+            html.contains(r#"<a class="bad" href="/alerts">alert firing 10m</a>"#),
+            "{html}"
+        );
     }
 
     #[test]
@@ -895,14 +1328,66 @@ mod tests {
             html.find(">b<").unwrap() < html.find("&lt;i&gt;").unwrap(),
             "{html}"
         );
-        assert!(html.contains("width:100.0%"));
+        // A full bar is one whole core, one decimal everywhere (OV-14).
+        assert!(
+            html.contains("width:90.0%") && html.contains("width:40.0%"),
+            "{html}"
+        );
+        assert!(
+            html.contains(">90.0%<") && html.contains(">40.0%<"),
+            "{html}"
+        );
         assert!(!html.contains("<i>a</i>"));
+        assert!(
+            html.contains(r#"href="/containers/b/logs""#),
+            "Top CPU rows carry logs"
+        );
+        // Bars and tiles are keyed by container (HB.morph keeps a focused
+        // link on its container when the ranks change).
+        assert!(html.contains(r#"<li data-key="b">"#), "{html}");
+        assert!(
+            html.contains(r#"<li data-key="&lt;i&gt;a&lt;/i&gt;">"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"role="listitem" data-key="b""#), "{html}");
         assert!(top(&live(vec![a], None), false)
             .into_string()
             .contains("show_stats"));
-        assert!(top(&live(vec![], None), true)
-            .into_string()
-            .contains("Waiting for the first sample"));
+        // Nothing to sample is said as such (ROB-01); waiting is a skeleton.
+        let none = top(&live(vec![], None), true).into_string();
+        assert!(
+            none.contains("No containers yet") && !none.contains("data-wait"),
+            "{none}"
+        );
+        let mut idle = card("c", "running", true);
+        idle.cpu = None;
+        idle.mem = None;
+        let wait = top(&live(vec![idle], None), true).into_string();
+        assert!(wait.contains("Waiting for the first sample"), "{wait}");
+        assert!(
+            wait.contains("data-wait")
+                && !wait.contains("aria-busy")
+                && wait.contains(r#"class="sk"#),
+            "{wait}"
+        );
+        let down = top(&live(vec![], Some("no socket")), true).into_string();
+        assert!(
+            down.contains("empty bad") && down.contains("cannot be reached"),
+            "{down}"
+        );
+        // Top CPU says why in the standard empty state too, not a bare line.
+        assert_eq!(
+            down.matches(r#"<div class="empty bad compact">"#).count(),
+            2,
+            "{down}"
+        );
+        assert!(!down.contains("Nothing to rank."), "{down}");
+        let idle = top(&live(vec![card("c", "exited", false)], None), true).into_string();
+        assert!(
+            idle.contains("<h3>Nothing to rank</h3>")
+                && idle.contains("<h3>Nothing is running</h3>"),
+            "{idle}"
+        );
     }
 
     #[test]
@@ -934,10 +1419,39 @@ mod tests {
             .collect();
         let refs: Vec<&CardView> = cards.iter().collect();
         let html = treemap(&refs).into_string();
-        assert_eq!(html.matches("<a class=\"tm").count(), 18, "{html}");
-        assert!(html.contains("+7 others"));
+        // Tiles too small for a name on a phone fold into "+N others"
+        // (Y10, OV-09), a link to the table sorted by memory (OV-10).
+        let count = |h: &str| {
+            h.matches(r#"<div class="tm" role"#).count()
+                + h.matches(r#"<div class="tm short" role"#).count()
+        };
+        let tiles = count(&html);
+        assert!((1..=18).contains(&tiles), "{tiles}");
+        assert!(html.contains(&format!("+{} others", 25 - tiles)), "{html}");
+        assert!(
+            html.contains(
+                r#"<a class="tm tm-rest" role="listitem" data-key="+rest" href="/containers?sort=mem&amp;group=0""#
+            ),
+            "{html}"
+        );
+        let (k, rects) = tm_layout(&(0..25).rev().map(|i| (i + 1) as f64).collect::<Vec<_>>());
+        assert_eq!(k, tiles);
+        for r in &rects {
+            assert!(
+                r.2 * TM_W / 100.0 >= TM_MIN_W - 1e-6 && r.3 * TM_H / 100.0 >= TM_MIN_H - 1e-6,
+                "{r:?}"
+            );
+        }
+        // A tile: the name link stretched over it and, as its sibling (never
+        // a link inside a link), the logs icon (OV-01).
+        assert!(html.contains(r#"<a class="tm-a row-link" href="/containers/c24%3C"><span class="tm-n">c24&lt;</span><span class="tm-v">25.0 MiB</span></a><a class="ia logs tm-logs" href="/containers/c24%3C/logs""#), "{html}");
         assert!(html.contains("c24&lt;") && !html.contains("c24<"));
         assert!(treemap(&[]).into_string().contains("Waiting"));
+        // Few containers: no fold.
+        let few: Vec<&CardView> = cards.iter().rev().take(3).collect();
+        let html = treemap(&few).into_string();
+        assert_eq!(count(&html), 3, "{html}");
+        assert!(!html.contains("others"));
     }
 
     #[test]
@@ -950,11 +1464,70 @@ mod tests {
             subject: "web<1>".into(),
             detail: "exit 137 & more".into(),
         };
-        let html = event_row(1_794_660_400, &e, true).into_string();
-        assert!(html.contains("pill bad") && html.contains(">die<"));
+        let html = event_row(1_794_660_400, &e, true, None).into_string();
+        assert!(html.contains("pill bad") && html.contains(">exited<"));
         assert!(html.contains("href=\"/containers/web%3C1%3E\""), "{html}");
         assert!(html.contains("exit 137 &amp; more") && html.contains("web&lt;1&gt;"));
-        let plain = event_row(1_794_660_400, &e, false).into_string();
+        assert!(!html.contains("/logs"), "no logs link without the names");
+        let plain = event_row(1_794_660_400, &e, false, None).into_string();
         assert!(!plain.contains("href="));
+        // OV-06: a sign-in row leads to the sessions; an alert row to Alerts.
+        let mut a = e.clone();
+        (a.kind, a.subject) = ("auth.login_failed".into(), "10.0.0.9".into());
+        assert!(event_row(1, &a, true, None)
+            .into_string()
+            .contains(r#"<a class="nm" href="/settings/security">10.0.0.9</a>"#));
+        (a.kind, a.detail) = ("alert.delivery_failed".into(), "slack: timeout".into());
+        assert!(event_row(1, &a, true, None)
+            .into_string()
+            .contains(r#"href="/alerts""#));
+        // A container whose logs may be read: one click to its logs at that
+        // moment (unix ms), a sibling of the name link, never inside it.
+        let names: std::collections::HashSet<String> = ["web<1>".to_string()].into();
+        let html = event_row(1_794_660_400, &e, true, Some(&names)).into_string();
+        assert!(
+            html.contains(
+                "<a class=\"ia logs\" href=\"/containers/web%3C1%3E/logs#t=1794660300000\""
+            ),
+            "{html}"
+        );
+        assert!(html.contains("aria-label=\"Logs of web&lt;1&gt;\""));
+        assert!(!html.contains("<a class=\"nm\" href=\"/containers/web%3C1%3E\">web&lt;1&gt;<a"));
+        // OV-05: five identical events in a row are one row "× 5".
+        let five: Vec<crate::db::Event> = (0..5)
+            .map(|i| crate::db::Event { id: i, ..e.clone() })
+            .collect();
+        assert_eq!(collapse(&five).len(), 1);
+        assert_eq!(collapse(&five)[0].1, 5);
+        let n = event_row_n(1, &e, true, None, 5, None).into_string();
+        assert!(n.contains(">× 5<"), "{n}");
+        // LG-47: a clock time, not "N ago"; LG-48: an alert row links to
+        // what its rule watches, as the History timeline does.
+        assert!(
+            html.contains(r#"data-abs="1""#) && !html.contains(" ago<"),
+            "{html}"
+        );
+        let cfg = crate::config::parse(
+            "[[alerts]]\nname = \"disk\"\ntype = \"host\"\nmetric = \"disk\"\nabove = 90\n",
+            "c.toml",
+        )
+        .unwrap();
+        let al = crate::db::Event {
+            kind: "alert.fired".into(),
+            level: "warn".into(),
+            subject: "/".into(),
+            detail: "disk: 93%".into(),
+            ..e.clone()
+        };
+        let a = event_row_n(1, &al, true, None, 1, Some(&cfg)).into_string();
+        assert!(a.contains(r#"<a class="nm" href="/host">/</a>"#), "{a}");
+        let a = event_row_n(1, &al, true, None, 1, None).into_string();
+        assert!(a.contains(r#"href="/alerts""#), "{a}");
+        assert_eq!(event_label("app.start"), "Hobnail started");
+        assert_eq!(event_label("something.new"), "new");
+        let other: std::collections::HashSet<String> = ["db".to_string()].into();
+        assert!(!event_row(1, &e, true, Some(&other))
+            .into_string()
+            .contains("/logs"));
     }
 }

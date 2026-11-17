@@ -38,6 +38,9 @@ const WRITES: &[(&str, &str)] = &[
     ("PATCH", "/api/settings/config"),
     ("POST", "/"),
     ("POST", "/containers"),
+    // Where the Settings forms point (`method="post"`): refused like any write.
+    ("POST", "/settings/security"),
+    ("POST", "/settings/bookmarks"),
     ("POST", "/api/events"),
     ("DELETE", "/api/history/system"),
 ];
@@ -372,4 +375,415 @@ async fn anonymous_events_hide_login_history() {
             "{page} shows login history"
         );
     }
+}
+
+/// ROB-15: a Settings form that is submitted without the script (a plain
+/// form post, no `X-RH-CSRF`) is refused by the gate exactly as before,
+/// changes nothing and echoes nothing of what was sent.
+#[tokio::test]
+async fn a_plain_form_post_is_refused_and_leaks_nothing() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let stored = st.db.kv_get("auth.password");
+    let cfg = std::fs::read_to_string(st.config.path()).unwrap_or_default();
+    let addr = start(st.clone()).await;
+    let (cookie, _) = login(addr).await;
+    let origin = format!("http://{addr}");
+    let form = "current=correct+horse+battery&new=Sekrit-New-Value-1&repeat=Sekrit-New-Value-1";
+    for path in [
+        "/settings/security",
+        "/api/settings/security/password",
+        "/settings/bookmarks",
+        "/settings/notifications",
+        "/settings/widgets",
+    ] {
+        let r = req(
+            addr,
+            "POST",
+            path,
+            &[
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Origin", &origin),
+                ("Cookie", &cookie),
+            ],
+            form,
+        )
+        .await;
+        assert_eq!(r.status, 403, "{path}: {}", r.body);
+        assert_eq!(r.body, "missing or bad X-RH-CSRF header\n", "{path}");
+        assert!(
+            !r.head.contains("Sekrit") && !r.body.contains("Sekrit"),
+            "{path}"
+        );
+        // Signed out: 401, same refusal as today.
+        let r = req(
+            addr,
+            "POST",
+            path,
+            &[
+                ("Content-Type", "application/x-www-form-urlencoded"),
+                ("Origin", &origin),
+            ],
+            form,
+        )
+        .await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(!r.body.contains("Sekrit"), "{path}");
+    }
+    assert_eq!(
+        st.db.kv_get("auth.password"),
+        stored,
+        "the password is unchanged"
+    );
+    assert_eq!(
+        std::fs::read_to_string(st.config.path()).unwrap_or_default(),
+        cfg,
+        "the config is unchanged"
+    );
+}
+
+/// The Settings list fragment reads the session from the request: 401 and
+/// an empty body without one, the list with one.
+#[tokio::test]
+async fn settings_fragments_need_a_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    std::fs::write(
+        st.config.path(),
+        "[[bookmarks]]\nname = \"Wiki\"\nurl = \"https://wiki.example/frag-mark\"\n",
+    )
+    .unwrap();
+    let addr = start(st).await;
+    let r = req(addr, "GET", "/settings/bookmarks?frag=list", &[], "").await;
+    assert_eq!(r.status, 401);
+    assert!(r.body.is_empty(), "{}", r.body);
+    let r = req(addr, "GET", "/settings/bookmarks?edit=bookmark:0", &[], "").await;
+    assert_eq!(r.status, 200);
+    assert!(!r.body.contains("data-item") && !r.body.contains("value=\"Wiki\""));
+    let (cookie, _) = login(addr).await;
+    let r = req(
+        addr,
+        "GET",
+        "/settings/bookmarks?frag=list",
+        &[("Cookie", &cookie)],
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("frag-mark") && r.body.contains("data-hash="));
+    assert!(!r.body.contains("<html"), "a fragment, not a page");
+    // Form values and the CSRF token are never stored by a cache.
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    assert!(no_store(&r.head), "{}", r.head);
+    let r = req(
+        addr,
+        "GET",
+        "/settings/bookmarks",
+        &[("Cookie", &cookie)],
+        "",
+    )
+    .await;
+    assert!(
+        r.body.contains("rh-csrf") && no_store(&r.head),
+        "{}",
+        r.head
+    );
+}
+
+/// Notifications and Widgets (wave 2b) behave like Bookmarks: their list
+/// fragments need a session (401, empty, without one); the `?edit=` page
+/// forms show nothing to a visitor; with a session both are `no-store`.
+/// Their writes still go through the unchanged guards: a channel a rule
+/// uses is refused in plain words and nothing is written.
+#[tokio::test]
+async fn channel_rule_widget_lists_need_a_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let cfg = "[[widgets]]\nid = \"wmark\"\ntype = \"custom-api\"\nurl = \"http://w.example/frag-mark\"\n\n\
+               [channels.chmark]\ntype = \"webhook\"\nurl_env = \"RH_FRAG_MARK\"\n\n\
+               [[alerts]]\nname = \"rulemark\"\ntype = \"container\"\nchannels = [\"chmark\"]\n";
+    std::fs::write(st.config.path(), cfg).unwrap();
+    let addr = start(st.clone()).await;
+    let marks = [
+        "frag-mark",
+        "RH_FRAG_MARK",
+        "rulemark",
+        "data-item",
+        "data-hash",
+    ];
+    for path in [
+        "/settings/notifications?frag=list",
+        "/settings/widgets?frag=list",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(r.body.is_empty(), "{path}: {}", r.body);
+    }
+    for path in [
+        "/settings/notifications?edit=channel:chmark",
+        "/settings/notifications?edit=rule:rulemark",
+        "/settings/widgets?edit=widget:wmark",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        // The sign-in link echoes the visitor's own URL (`next=`): not data.
+        let body: String = r
+            .body
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    p
+                } else {
+                    &p[p.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect();
+        for m in marks {
+            assert!(!body.contains(m), "{path}: leaked {m}");
+        }
+    }
+    let (cookie, csrf) = login(addr).await;
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    for (path, mark) in [
+        ("/settings/notifications?frag=list", "RH_FRAG_MARK"),
+        ("/settings/widgets?frag=list", "frag-mark"),
+        (
+            "/settings/notifications?edit=channel:chmark",
+            "RH_FRAG_MARK",
+        ),
+        ("/settings/widgets?edit=widget:wmark", "frag-mark"),
+    ] {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        assert!(r.body.contains(mark), "{path}");
+        assert!(no_store(&r.head), "{path}: {}", r.head);
+    }
+    let origin = format!("http://{addr}");
+    let hash = crate::settings::read_current(&st).unwrap().hash;
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/channels",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+            ("X-RH-CSRF", &csrf),
+        ],
+        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
+    )
+    .await;
+    assert_eq!(r.status, 422, "{}", r.body);
+    assert!(r.body.contains("used by the rule"), "{}", r.body);
+    assert_eq!(std::fs::read_to_string(st.config.path()).unwrap(), cfg);
+    // Without the CSRF header the same delete is refused by the gate.
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/channels",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+        ],
+        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
+    )
+    .await;
+    assert_eq!(r.status, 403);
+}
+
+/// Wave 2c: Containers and groups, General, Appearance, History and Config
+/// file are rendered with their values for a session only. Signed out they
+/// show nothing of the file and their fragments answer 401 with an empty
+/// body; signed in, pages and fragments are `no-store`. The one-entry
+/// requests on the existing `docker` and `groups` routes go through the
+/// unchanged gate: refused without the CSRF header or from another origin,
+/// written with both.
+#[tokio::test]
+async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let cfg = "# raw-mark\n[page]\ngreeting = \"greet-mark\"\n\n[docker]\nexclude = [\"ex-mark\"]\n\n[[groups]]\nname = \"grp-mark\"\n\n[containers.ov-mark]\nname = \"Ov-mark\"\n\n[history]\nsample_interval = \"45s\"\n";
+    std::fs::write(st.config.path(), cfg).unwrap();
+    std::fs::write(st.env.data_dir.join("custom.css"), "/* css-mark */").unwrap();
+    let addr = start(st.clone()).await;
+    let marks = [
+        "raw-mark",
+        "greet-mark",
+        "ex-mark",
+        "grp-mark",
+        "Ov-mark",
+        "45s",
+        "css-mark",
+        "data-hash",
+        "data-item",
+    ];
+    for path in [
+        "/settings/containers?frag=list",
+        "/settings/history?frag=list",
+        "/settings/config?frag=list",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 401, "{path}");
+        assert!(r.body.is_empty(), "{path}: {}", r.body);
+    }
+    for path in [
+        "/settings/general",
+        "/settings/containers",
+        "/settings/containers?edit=override:ov-mark",
+        "/settings/containers?name=ov-mark",
+        "/settings/containers?edit=group:grp-mark",
+        "/settings/appearance",
+        "/settings/history",
+        "/settings/config",
+    ] {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        let body: String = r
+            .body
+            .split("/login?next=")
+            .enumerate()
+            .map(|(i, p)| {
+                if i == 0 {
+                    p
+                } else {
+                    &p[p.find('"').unwrap_or(0)..]
+                }
+            })
+            .collect();
+        for m in marks {
+            assert!(!body.contains(m), "{path}: leaked {m}");
+        }
+    }
+    let (cookie, csrf) = login(addr).await;
+    let no_store = |h: &str| {
+        h.lines()
+            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
+    };
+    for (path, mark) in [
+        ("/settings/containers?frag=list", "ex-mark"),
+        ("/settings/containers", "Ov-mark"),
+        ("/settings/containers?edit=override:ov-mark", "Ov-mark"),
+        ("/settings/general", "greet-mark"),
+        ("/settings/appearance", "css-mark"),
+        ("/settings/history", "45s"),
+        ("/settings/history?frag=list", "db-stats"),
+        ("/settings/config", "raw-mark"),
+        ("/settings/config?frag=list", "rev-list"),
+    ] {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}: {}", r.body);
+        assert!(r.body.contains(mark), "{path}");
+        assert!(no_store(&r.head), "{path}: {}", r.head);
+    }
+    let origin = format!("http://{addr}");
+    let hash = crate::settings::read_current(&st).unwrap().hash;
+    let add = format!(r#"{{"base_hash":"{hash}","action":"add","item":{{"pattern":"new-*"}}}}"#);
+    for (headers, want) in [
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", origin.as_str()),
+                ("Cookie", cookie.as_str()),
+            ],
+            403,
+        ),
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", "http://evil.example"),
+                ("Cookie", cookie.as_str()),
+                ("X-RH-CSRF", csrf.as_str()),
+            ],
+            403,
+        ),
+        (
+            vec![
+                ("Content-Type", "application/json"),
+                ("Origin", origin.as_str()),
+                ("X-RH-CSRF", csrf.as_str()),
+            ],
+            401,
+        ),
+    ] {
+        for path in ["/api/settings/docker", "/api/settings/groups"] {
+            let r = req(addr, "POST", path, &headers, &add).await;
+            assert_eq!(r.status, want, "{path} {headers:?}: {}", r.body);
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(st.config.path()).unwrap(),
+        cfg,
+        "nothing written"
+    );
+    let r = req(
+        addr,
+        "POST",
+        "/api/settings/docker",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &origin),
+            ("Cookie", &cookie),
+            ("X-RH-CSRF", &csrf),
+        ],
+        &add,
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(std::fs::read_to_string(st.config.path())
+        .unwrap()
+        .contains(r#"exclude = ["ex-mark", "new-*"]"#));
+}
+
+/// Any page or fragment rendered with a session is `no-store`: signed in,
+/// `/` and `/alerts` carry the config hash, the CSRF token and the
+/// Settings dialogs (and `/` the probe lines). Signed out they keep
+/// `no-cache`; Settings stays `no-store` either way.
+#[tokio::test]
+async fn pages_rendered_with_a_session_are_no_store() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st.clone()).await;
+    let cache = |h: &str| {
+        h.lines()
+            .find_map(|l| {
+                let (k, v) = l.split_once(':')?;
+                k.eq_ignore_ascii_case("cache-control")
+                    .then(|| v.trim().to_ascii_lowercase())
+            })
+            .unwrap_or_default()
+    };
+    let pages = [
+        "/",
+        "/?add=bookmark",
+        "/alerts",
+        "/alerts?add=channel",
+        "/containers/web",
+        "/more",
+    ];
+    for path in pages {
+        let r = req(addr, "GET", path, &[], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(cache(&r.head), "no-cache", "{path} signed out: {}", r.head);
+    }
+    let r = req(addr, "GET", "/settings/general", &[], "").await;
+    assert_eq!(cache(&r.head), "no-store", "settings signed out");
+    let (cookie, _) = login(addr).await;
+    for path in pages {
+        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
+        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(cache(&r.head), "no-store", "{path} signed in: {}", r.head);
+    }
+    let r = req(addr, "GET", "/alerts", &[("Cookie", &cookie)], "").await;
+    assert!(
+        r.body.contains("data-hash"),
+        "the signed-in /alerts has the hash"
+    );
 }

@@ -42,8 +42,8 @@ scripts/cargo.sh test    # run cargo in the dev container (also: clippy, fmt, bu
 copies `deploy/compose.yaml` to the stack folder (`STACK`, default
 `/opt/stacks/hobnail`), runs `docker compose up -d`, waits for the healthcheck
 and curls every published address.
-Open pages notice the new build and reload themselves. The page footer shows the
-build SHA, build time and uptime.
+Open pages notice the new build and reload themselves. The foot of the sidebar
+shows the version and the build SHA (hover for the build time).
 
 Manual equivalent:
 
@@ -56,8 +56,8 @@ docker compose -f deploy/compose.yaml up -d
 What the container gets: the Docker socket **read-only** (the app only sends
 `GET` requests), its own `./data` folder, and read-only `/proc` and `/sys` for
 host stats. It runs as uid 1000 with group 982 (docker) for the socket, a
-read-only root filesystem, no capabilities. Set `group_add` to your host's
-docker group id (`getent group docker`).
+read-only root filesystem, no capabilities. Set `DOCKER_GID` to your host's
+docker group id (`getent group docker`) if it is not 982; `group_add` uses it.
 
 The port is published on `127.0.0.1` only. To open it to your network, add
 your own addresses, never `0.0.0.0` unless the host is firewalled:
@@ -94,8 +94,12 @@ CLI (inside the container: `docker exec hobnail /hobnail <cmd>`):
 ## Environment variables
 
 A restart is needed after changing these: `RH_LISTEN` (default `127.0.0.1:3200`,
-comma-separated), `RH_DATA_DIR` (`/data`), `RH_CONFIG` (`$RH_DATA_DIR/config.toml`),
-`RH_DB` (`$RH_DATA_DIR/hobnail.db`),
-`RH_DOCKER_SOCKET`, `RH_HOST_PROC`/`RH_HOST_SYS` (`/host/proc`, `/host/sys`),
-`RH_HOSTNAME`, `RH_ALLOWED_HOSTS` (extra host names allowed in the `Host`
-header, globs; IPs and `localhost` always work: this blocks DNS rebinding).
+comma-separated; the compose file sets `0.0.0.0:3200` inside the container),
+`RH_DATA_DIR` (`/data` in the image; `./data` outside it), `RH_CONFIG`
+(`$RH_DATA_DIR/config.toml`), `RH_DB` (`$RH_DATA_DIR/hobnail.db`),
+`RH_DOCKER_SOCKET` (`/var/run/docker.sock`), `RH_HOST_PROC`/`RH_HOST_SYS`
+(`/host/proc`, `/host/sys` in the image; `/proc`, `/sys` outside it),
+`RH_HOSTNAME` (default: the host's name from `RH_HOST_PROC`),
+`RH_ALLOWED_HOSTS` (extra host names allowed in the `Host` header, globs,
+comma-separated; IPs, `localhost` and `RH_HOSTNAME` always work: this blocks
+DNS rebinding).

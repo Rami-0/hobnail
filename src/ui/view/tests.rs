@@ -76,7 +76,7 @@ fn sample() -> Vec<Container> {
         stopped(ctr("webshop-dev-job-1", Some("webshop-dev")), 137),
         ctr("beszel", Some("beszel")),
         ctr("homepage", None),
-        ctr("cafe-pg", None),
+        ctr("demo-pg", None),
     ]
 }
 
@@ -312,6 +312,28 @@ fn names_icons_order_size() {
     assert_eq!(z.search, "Zed proj-b-1 proj img/proj-b-1:latest");
 }
 
+/// OV-25: a chip that is not a link (not HTTP) carries its protocol, and the
+/// containers table shows it, so grey chips say what they are.
+#[test]
+fn plain_ports_say_their_protocol() {
+    let mut u = port("0.0.0.0", 5353, 53);
+    u.proto = "udp".into();
+    let v = port_views(&[port("0.0.0.0", 5432, 5432), u], "homelab");
+    assert_eq!((v[0].url.as_deref(), v[0].proto.as_str()), (None, "tcp"));
+    assert_eq!((v[1].url.as_deref(), v[1].proto.as_str()), (None, "udp"));
+    let mut c = ctr("db", None);
+    c.ports = vec![port("0.0.0.0", 5432, 5432)];
+    let st = crate::ui::testutil::state_with(vec![c], "");
+    let h = hyper::HeaderMap::new();
+    let ctx = crate::ui::shell::Ctx::new(&st, "h", "/containers", "", &h);
+    let html = crate::ui::pages::render(&ctx).1;
+    assert!(
+        html.contains(r#"<span class="port plain" title="5432 → 5432/tcp on 0.0.0.0 (not a web address)">5432 <small>tcp</small></span>"#),
+        "{}",
+        &html[html.rfind("c-ports").unwrap_or(0)..][..600]
+    );
+}
+
 #[test]
 fn links_any_address_uses_page_host() {
     let ps = vec![port("0.0.0.0", 3000, 3000)];
@@ -426,49 +448,6 @@ fn main_link_precedence() {
         format!("https://c.example/c/{id12}")
     );
     assert_eq!(card(&gs, "d").url, None);
-}
-
-#[test]
-fn dozzle_and_beszel_autodetect() {
-    let mut dozzle = ctr("dozzle", Some("dozzle"));
-    dozzle.image = "amir20/dozzle:latest".into();
-    dozzle.ports = vec![
-        port("100.64.0.10", 8888, 8080),
-        port("192.168.1.10", 8888, 8080),
-    ];
-    let mut beszel = ctr("beszel", Some("beszel"));
-    beszel.image = "henrygd/beszel:latest".into();
-    beszel.ports = vec![
-        port("100.64.0.10", 8090, 8090),
-        port("127.0.0.1", 8090, 8090),
-    ];
-    let mut agent = ctr("beszel-agent", Some("beszel"));
-    agent.image = "henrygd/beszel-agent:latest".into();
-    let app = ctr("app", None);
-    let id12: String = app.id.chars().take(12).collect();
-    let s = snap(vec![dozzle, beszel, agent, app]);
-    let gs = build_groups(&Config::default(), &s, &StatsMap::new(), "192.168.1.10");
-    let a = card(&gs, "app");
-    assert_eq!(
-        a.logs_url.clone().unwrap(),
-        format!("http://192.168.1.10:8888/container/{id12}")
-    );
-    assert_eq!(a.metrics_url.as_deref(), Some("http://100.64.0.10:8090/"));
-
-    // A stopped Dozzle is not used.
-    let mut s2 = s.clone();
-    s2.containers[0].state = "exited".into();
-    let gs = build_groups(&Config::default(), &s2, &StatsMap::new(), HOST);
-    assert_eq!(card(&gs, "app").logs_url, None);
-
-    // Config templates win.
-    let mut cfg = Config::default();
-    cfg.docker.logs_url = Some("http://{host}:9999/l/{name}".into());
-    cfg.docker.metrics_url = Some("http://m/{id}".into());
-    let gs = build_groups(&cfg, &s, &StatsMap::new(), "homelab");
-    let a = card(&gs, "app");
-    assert_eq!(a.logs_url.as_deref(), Some("http://homelab:9999/l/app"));
-    assert_eq!(a.metrics_url.clone().unwrap(), format!("http://m/{id12}"));
 }
 
 #[test]
@@ -596,7 +575,7 @@ fn stack_and_labels_are_set() {
 fn card_for_finds_hidden_containers() {
     let mut cfg = Config::default();
     cfg.containers.insert(
-        "cafe-pg".into(),
+        "demo-pg".into(),
         ContainerOverride {
             hide: Some(true),
             ..Default::default()
@@ -606,8 +585,8 @@ fn card_for_finds_hidden_containers() {
     assert!(!build_groups(&cfg, &s, &StatsMap::new(), HOST)
         .iter()
         .flat_map(|g| &g.cards)
-        .any(|c| c.name == "cafe-pg"));
-    let c = card_for(&cfg, &s, &StatsMap::new(), HOST, "cafe-pg").unwrap();
+        .any(|c| c.name == "demo-pg"));
+    let c = card_for(&cfg, &s, &StatsMap::new(), HOST, "demo-pg").unwrap();
     assert_eq!(c.stack, "Standalone");
     assert!(card_for(&cfg, &s, &StatsMap::new(), HOST, "nope").is_none());
 }

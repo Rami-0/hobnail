@@ -13,7 +13,9 @@
   };
   const skew = Date.now() / 1000 - Number(body.dataset.now || 0);
   const nowS = () => Date.now() / 1000 - skew;
-  const typing = () => { const a = doc.activeElement; return a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+  // Shortcuts are off only in fields that take text (NAV-64): a checkbox,
+  // radio, button or range input keeps them; a select keeps its type-ahead.
+  const typing = () => { const a = doc.activeElement; return !!a && (a.isContentEditable || /^(TEXTAREA|SELECT)$/.test(a.tagName) || (a.tagName === "INPUT" && !/^(checkbox|radio|button|submit|reset|range|color|file|image)$/.test(a.type))); };
 
   // ---- formatting (mirrors src/util.rs and ui/chart.rs) ----
   function bytes(n) {
@@ -29,7 +31,7 @@
       case "b": return bytes(v);
       case "bps": return bytes(v) + "/s";
       case "c": return v.toFixed(0) + " °C";
-      default: return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
+      default: return Number.isInteger(v) ? String(v) : Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1);
     }
   }
   function dur(s) {
@@ -51,52 +53,105 @@
   setInterval(tick, 15000);
 
   // ---- theme: auto -> dark -> light -> ember -> contrast ----
+  // One click per step (owner decision Y9); each step says which theme it
+  // switched to, in a toast a phone shows too (NAV-41, A11Y-11).
   const themeBtn = $("theme"), THEMES = ["auto", "dark", "light", "ember", "contrast"];
   const THEME_NAME = { auto: "auto (follows the system)", dark: "dark", light: "light", ember: "ember (warm)", contrast: "high contrast" };
+  const THEME_LABEL = { auto: "Auto (follows the system)", dark: "Dark", light: "Light", ember: "Ember", contrast: "High contrast" };
+  let themeGone = null;
   function showTheme() {
     const t = root.dataset.theme || "auto";
     // The browser UI (phone status bar, installed app title bar) follows the page.
     const m = doc.querySelector('meta[name="theme-color"]');
-    if (m) m.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#0b0e13";
+    if (m) m.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#1D1210";
     if (!themeBtn) return;
-    themeBtn.setAttribute("aria-label", `Theme: ${THEME_NAME[t] || t}. Click to change`);
-    themeBtn.title = `Theme: ${THEME_NAME[t] || t}`;
+    const next = THEMES[(THEMES.indexOf(t) + 1) % THEMES.length];
+    themeBtn.setAttribute("aria-label", `Theme: ${THEME_NAME[t] || t}. Click for ${THEME_NAME[next]}`);
+    themeBtn.title = `Theme: ${THEME_NAME[t] || t} (click for ${THEME_NAME[next]})`;
   }
-  function setTheme(next) {
+  function setTheme(next, say) {
     root.dataset.theme = next;
     try { localStorage.setItem("rh-theme", next); } catch {}
     showTheme();
+    if (say && window.HB && HB.toast) { if (themeGone) themeGone(); themeGone = HB.toast("Theme: " + (THEME_LABEL[next] || next), { kind: "info", ms: 2500 }); }
   }
   function cycleTheme() {
-    setTheme(THEMES[(THEMES.indexOf(root.dataset.theme || "auto") + 1) % THEMES.length]);
+    setTheme(THEMES[(THEMES.indexOf(root.dataset.theme || "auto") + 1) % THEMES.length], true);
   }
   themeBtn && themeBtn.addEventListener("click", cycleTheme);
   showTheme();
 
   // ---- sidebar: rail (wide screens, remembered) or overlay/drawer ----
-  const side = $("side"), menuBtn = $("menu-btn"), railBtn = $("rail-toggle");
+  // Over 1100 px the sidebar is in the page (the toggle makes it a rail);
+  // from 700 to 1100 px it is a rail that the toggle opens over the page;
+  // under 700 px it is a drawer that only "More" opens (Y3). Open over the
+  // page, everything behind is inert and Back closes it (A11Y-03, NAV-33);
+  // a closed drawer is inert (A11Y-01; CSS hides it from the tab order
+  // without the script too).
+  const side = $("side"), railBtn = $("rail-toggle"), moreBtn = $$('[data-act="more"]');
   const wide = () => matchMedia("(min-width:1101px)").matches;
-  function setOpen(open) {
-    root.classList.toggle("side-open", open);
-    menuBtn && menuBtn.setAttribute("aria-expanded", String(open));
-    if (open) { const f = side && side.querySelector(".nav-item"); f && f.focus(); }
+  const phone = () => matchMedia("(max-width:699px)").matches;
+  let drawerPushed = false, drawerPop = false, drawerFrom = null;
+  function sideState() {
+    const open = root.classList.contains("side-open");
+    if (side) side.inert = phone() && !open;
+    $$(".col, #bbar").forEach((x) => { x.inert = open && !wide(); });
+    moreBtn.forEach((b) => b.setAttribute("aria-expanded", String(open)));
+    if (railBtn) {
+      const label = wide() ? (root.dataset.side === "rail" ? "Expand sidebar" : "Collapse sidebar") : open ? "Close sidebar" : "Open sidebar";
+      railBtn.setAttribute("aria-label", label); railBtn.title = label;
+      railBtn.setAttribute("aria-pressed", String(wide() ? root.dataset.side === "rail" : open));
+    }
   }
+  // `entry`: the drawer's history entry is there already (Forward onto it).
+  function setOpen(open, from, entry) {
+    if (open === root.classList.contains("side-open")) return;
+    if (open) drawerFrom = from || doc.activeElement; // focus comes back here
+    root.classList.toggle("side-open", open);
+    sideState();
+    if (open) {
+      const f = side && side.querySelector(".nav-item"); f && f.focus();
+      if (entry) drawerPushed = true;
+      else try { history.pushState({ rhDrawer: 1 }, ""); drawerPushed = true; } catch {}
+    } else {
+      if (drawerPushed) { drawerPushed = false; drawerPop = true; try { history.back(); } catch { drawerPop = false; } }
+      if (drawerFrom && drawerFrom.isConnected && !wide()) drawerFrom.focus({ preventScroll: true });
+    }
+  }
+  // Back closes the drawer; Forward onto its entry opens it again (the
+  // entry is never a dead step).
+  window.addEventListener("popstate", (e) => {
+    if (drawerPop) { drawerPop = false; return; }
+    if (root.classList.contains("side-open")) { drawerPushed = false; setOpen(false); }
+    else if (e.state && e.state.rhDrawer && !wide()) setOpen(true, null, true);
+  });
+  // Leaving through a link in the open drawer replaces its history entry,
+  // so Back from the next page comes straight back here.
+  side && side.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !drawerPushed || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || a.target) return;
+    e.preventDefault(); drawerPushed = false; location.replace(a.href);
+  });
+  window.addEventListener("pageshow", (e) => { if (e.persisted && root.classList.contains("side-open")) { drawerPushed = false; root.classList.remove("side-open"); sideState(); } });
   function toggleSide() {
     if (wide()) {
       const rail = root.dataset.side !== "rail";
       if (rail) root.dataset.side = "rail"; else delete root.dataset.side;
       try { localStorage.setItem("rh-side", rail ? "rail" : "open"); } catch {}
-      railBtn && railBtn.setAttribute("aria-pressed", String(rail));
+      sideState();
     } else setOpen(!root.classList.contains("side-open"));
   }
   railBtn && railBtn.addEventListener("click", toggleSide);
-  railBtn && railBtn.setAttribute("aria-pressed", String(root.dataset.side === "rail"));
-  menuBtn && menuBtn.addEventListener("click", () => setOpen(true));
+  // The rail's labels are styled tooltips (NAV-27), not the native title.
+  $$(".nav-item[title]").forEach((a) => { a.dataset.rtip = a.title; a.title = ""; });
   $("scrim") && $("scrim").addEventListener("click", () => setOpen(false));
+  matchMedia("(min-width:1101px)").addEventListener("change", () => { if (wide()) setOpen(false); sideState(); });
+  matchMedia("(max-width:699px)").addEventListener("change", sideState);
+  sideState();
 
   // ---- stack tree: remembered open/closed stacks, filter, current container ----
   const TREE = "rh-tree";
-  const here = decodeURIComponent((body.dataset.path || "").replace(/^\/containers\//, ""));
+  const here = decodeURIComponent((body.dataset.path || "").replace(/^\/containers\//, "").replace(/\/logs$/, ""));
   function treeApply() {
     const closed = store.get(TREE, {});
     const href = "/containers/" + encodeURIComponent(here);
@@ -131,12 +186,61 @@
     if (d.open) delete c[d.dataset.k]; else c[d.dataset.k] = true;
     store.set(TREE, c);
   }, true);
-  $("tree-filter") && $("tree-filter").addEventListener("input", treeFilter);
+  // The filter text survives navigation until it is cleared (NAV-23);
+  // Enter opens the first match, Down moves into the results (NAV-22).
+  const tf = $("tree-filter"), TF = "rh-tree-q";
+  if (tf) {
+    try { tf.value = sessionStorage.getItem(TF) || ""; } catch {}
+    tf.addEventListener("input", () => { try { sessionStorage.setItem(TF, tf.value); } catch {} treeFilter(); });
+    const hits = () => $$("#tree li.ctr:not([hidden]) > a:first-child").filter((a) => !a.closest("details[hidden]"));
+    tf.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { const a = hits()[0]; if (a) { e.preventDefault(); a.click(); } }
+      else if (e.key === "ArrowDown") { const a = hits()[0]; if (a) { e.preventDefault(); a.focus(); } }
+    });
+    side.addEventListener("keydown", (e) => {
+      if (!e.target.matches || !e.target.matches("#tree li.ctr > a:first-child") || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+      const list = hits(), i = list.indexOf(e.target), next = list[i + (e.key === "ArrowDown" ? 1 : -1)];
+      e.preventDefault();
+      if (e.key === "ArrowUp" && i === 0) tf.focus(); else if (next) next.focus();
+    });
+  }
   treeApply();
+  // The tree's scroll position carries over to the next page, where the
+  // shell's inline script restores it before first paint and keeps the open
+  // container's item in view (NAV-24); nothing here moves it after paint.
+  window.addEventListener("pagehide", () => { const t = $("tree"); try { sessionStorage.setItem("rh-tree-y", String(t ? Math.round(t.scrollTop) : 0)); } catch {} });
+
+  // "Last 5 checks" under "Why is this red?" starts closed on a phone (it
+  // makes the page long there); without the script it stays open.
+  if (phone()) $$("details.cd-probes[open]").forEach((d) => { d.open = false; });
+
+  // Container tabs: on a phone the strip scrolls; the current tab is in view
+  // and the edge with more tabs behind it fades (OV-36). A tab or range
+  // change keeps the reader's place on the page (OV-37).
+  const cdTabs = doc.querySelector(".cd-tabs");
+  if (cdTabs) {
+    const edges = () => { const more = cdTabs.scrollWidth - cdTabs.clientWidth; cdTabs.classList.toggle("more-l", more > 1 && cdTabs.scrollLeft > 1); cdTabs.classList.toggle("more-r", more > 1 && cdTabs.scrollLeft < more - 1); };
+    const cur = cdTabs.querySelector("[aria-current]");
+    if (cur && cdTabs.scrollWidth > cdTabs.clientWidth) cdTabs.scrollLeft += cur.getBoundingClientRect().left - cdTabs.getBoundingClientRect().left - (cdTabs.clientWidth - cur.offsetWidth) / 2;
+    cdTabs.addEventListener("scroll", edges, { passive: true }); window.addEventListener("resize", edges, { passive: true }); edges();
+    try { const y = JSON.parse(sessionStorage.getItem("rh-cd-y") || "null"); sessionStorage.removeItem("rh-cd-y"); if (y && y.p === location.pathname + location.search) window.scrollTo(0, y.y); } catch {}
+    doc.addEventListener("click", (e) => {
+      const a = e.target.closest && e.target.closest(".cd-tabs a, .cd .panel-h .seg a");
+      if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button || /\/logs( |$)/.test(a.pathname + " " + location.pathname)) return;
+      try { sessionStorage.setItem("rh-cd-y", JSON.stringify({ p: a.pathname + a.search, y: Math.round(scrollY) })); } catch {}
+    });
+  }
+
+  // ---- Settings links open the tab used last in this browser (Y17) ----
+  // settings.js remembers it; without the script `/settings` is General.
+  // Only a tab that exists (routes::SETTINGS; a test keeps the two equal).
+  const SET_TABS = ["general", "containers", "bookmarks", "widgets", "notifications", "appearance", "history", "config", "security"];
+  const setTab = (() => { try { const t = localStorage.getItem("rh-set-tab"); return SET_TABS.includes(t) ? "/settings/" + t : "/settings"; } catch { return "/settings"; } })();
+  $$('a[href="/settings"]').forEach((a) => { if (!a.closest(".crumb")) a.setAttribute("href", setTab); });
 
   // ---- account menu and sign out ----
   const acct = $("account");
-  if (acct) {
+  if (acct && acct.querySelector("button")) { // signed in (signed out it is a link)
     const btn = acct.querySelector("button"), menu = $("account-menu");
     const show = (on) => { menu.hidden = !on; btn.setAttribute("aria-expanded", String(on)); if (on) { const f = menu.querySelector(".menu-item"); f && f.focus(); } };
     btn.addEventListener("click", () => show(menu.hidden));
@@ -148,9 +252,15 @@
     try {
       await fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-RH-CSRF": m ? m.content : "" } });
     } catch {}
-    location.href = "/";
+    try { sessionStorage.setItem("rh-out", "1"); } catch {}
+    // Built on the origin: a path that starts with "//" must not become
+    // another host (a 404 at "//example.invalid/x" is still this site).
+    location.replace(location.origin + (/^\/settings(\/|$)/.test(location.pathname) ? "/" : location.pathname + location.search));
   }
+  try { if (sessionStorage.getItem("rh-out")) { sessionStorage.removeItem("rh-out"); window.HB && HB.toast && HB.toast("Signed out", { kind: "info" }); } } catch {}
   doc.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest('[data-act="logout"]'); if (b) { e.preventDefault(); logout(); } });
+  // NAV-73: the installed app's reload button (no browser bar there).
+  doc.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-act="reload"]')) location.reload(); });
 
   // ---- live sparklines: a ring buffer per key, drawn zero based ----
   const series = new Map(), MAXP = 40;
@@ -218,8 +328,13 @@
     const x = Math.min(r.width, (i * step) / (t1 - t0) * r.width);
     cur.hidden = tip.hidden = false;
     cur.style.left = x + "px";
-    tip.style.left = Math.min(r.width - 40, Math.max(40, x)) + "px";
     tip.replaceChildren(el("span", "", fmtTime(t0 + i * step, t1 - t0)), raw === undefined || raw === "" ? "no data" : fmtVal(fig.dataset.u, parseFloat(raw)));
+    // A marker under the crosshair says what happened (OV-17; no title
+    // tooltip on touch): within 8 px of it.
+    const mk = $$(".mk[data-t]", cv).find((m) => Math.abs((+m.dataset.t - t) / (t1 - t0) * r.width) <= 8);
+    if (mk) tip.append(el("span", "tip-mk", mk.getAttribute("aria-label") || ""));
+    const half = tip.offsetWidth / 2;
+    tip.style.left = Math.min(r.width - half, Math.max(half, x)) + "px";
   }
   let hoverT = null;
   function chartHover(e) {
@@ -244,12 +359,15 @@
     const a = Math.max(0, Math.min(drag.x, e.clientX) - r.left), b = Math.min(r.width, Math.max(drag.x, e.clientX) - r.left);
     drag.sel.hidden = b - a < 3; drag.sel.style.left = a + "px"; drag.sel.style.width = b - a + "px";
   }
+  // Touch and pen drag too (LG-46): the canvas lets sideways drags through
+  // (touch-action: pan-y); a tap shows the read-out.
   doc.addEventListener("pointerdown", (e) => {
-    const cv = e.button === 0 && e.pointerType === "mouse" && e.target.closest && e.target.closest("figure.chart[data-zoom] .canvas");
+    const cv = (e.pointerType !== "mouse" || e.button === 0) && e.target.closest && e.target.closest("figure.chart[data-zoom] .canvas");
     if (!cv || e.target.closest(".mk")) return;
-    e.preventDefault();
+    if (e.pointerType === "mouse") e.preventDefault(); else chartHover(e);
     drag = { cv, fig: cv.closest("figure"), x: e.clientX, sel: cv.querySelector(".sel") };
   });
+  doc.addEventListener("pointercancel", () => { if (drag) { drag.sel.hidden = true; drag = null; } });
   doc.addEventListener("pointerup", (e) => {
     if (!drag) return;
     const d = drag; drag = null; d.sel.hidden = true;
@@ -259,16 +377,27 @@
     const at = (x) => Math.round(t0 + Math.min(1, Math.max(0, (x - r.left) / r.width)) * (t1 - t0));
     const p = new URLSearchParams(location.search);
     p.delete("range"); p.set("from", at(Math.min(d.x, e.clientX))); p.set("to", at(Math.max(d.x, e.clientX)));
-    location.href = location.pathname + "?" + p.toString();
+    // Charts lower on a page (Host's history, LG-39) come back into view.
+    const sec = d.fig.closest("[data-zoom-hash][id]");
+    location.href = location.origin + location.pathname + "?" + p.toString() + (sec ? "#" + sec.id : "");
   });
 
-  // Legend buttons toggle a chart's layers (avg, max band, yesterday).
+  // Legend buttons toggle a layer (avg, max band, yesterday) on every chart
+  // of the page at once, remembered in this browser (LG-51).
+  function legend(ser, on) {
+    $$(`.lg[data-ser="${ser}"]`).forEach((b) => { b.setAttribute("aria-pressed", String(on)); b.closest("figure").classList.toggle("off-" + ser, !on); });
+  }
+  // Only the known layers: the stored value goes into a selector, and a bad
+  // one must not stop the rest of this script.
+  const SERIES = ["avg", "max", "cmp"];
+  const chartOff = () => { const v = store.get("hb.chartOff", []); return Array.isArray(v) ? v.filter((s) => SERIES.includes(s)) : []; };
+  chartOff().forEach((s) => legend(s, false));
   doc.addEventListener("click", (e) => {
     const b = e.target.closest && e.target.closest(".lg[data-ser]");
     if (!b) return;
-    const on = b.getAttribute("aria-pressed") === "false";
-    b.setAttribute("aria-pressed", String(on));
-    b.closest("figure").classList.toggle("off-" + b.dataset.ser, !on);
+    const on = b.getAttribute("aria-pressed") === "false", ser = b.dataset.ser;
+    legend(ser, on);
+    store.set("hb.chartOff", chartOff().filter((s) => s !== ser).concat(on ? [] : [ser]));
   });
 
   // ---- container details: header numbers from the live data ----
@@ -279,9 +408,11 @@
     try { d = JSON.parse(j.dataset.j || "{}").c[box.dataset.cdName]; } catch { return; }
     if (!d) return;
     const set = (k, txt) => { const el = box.querySelector(`[data-cd="${k}"]`); if (el) el.textContent = txt; };
-    set("l", d[0]); set("s", d[2]); set("c", d[3]); set("m", d[4]);
-    const l = box.querySelector('[data-cd="l"]');
-    if (l) l.className = "st-l lg " + d[1];
+    set("s", d[2]); set("c", d[3]); set("m", d[4]);
+    // With a health check, State says running and Health has the check's word (OV-42).
+    const l = box.querySelector('[data-cd="l"]'), h = box.querySelector('[data-cd="h"]'), hw = /^(healthy|unhealthy|starting)$/.test(d[0]);
+    if (l) { l.textContent = l.hasAttribute("data-run") && hw ? "running" : d[0]; l.className = "st-l lg " + (l.hasAttribute("data-run") && hw ? "ok" : d[1]); }
+    if (h && hw) { h.textContent = d[0]; h.className = "st-l lg " + d[1]; }
     const push = (suffix, v) => {
       const svg = box.querySelector(`svg.spark[data-k$="${suffix}"]`);
       if (svg && v !== null && v !== undefined) { svg.dataset.v = String(v); svg.dataset.seen = ""; }
@@ -331,7 +462,7 @@
     const fromUrl = keys.some((k) => p.has(k));
     const v = fromUrl ? {} : store.get(VIEW, {});
     keys.forEach((k) => { if (p.has(k)) v[k] = p.get(k); });
-    if (!fromUrl) delete v.q;
+    if (!fromUrl) { delete v.q; delete v.state; delete v.stack; } // only sort and grouping are remembered (OV-28)
     return v;
   }
   function grouped() { return view.group ? view.group === "1" : bar.dataset.defaultGroup === "1"; }
@@ -342,8 +473,7 @@
     ["state", "stack", "sort", "dir", "group"].forEach((k) => { if (view[k]) p.set(k, view[k]); });
     const s = p.toString();
     history.replaceState(null, "", "/containers" + (s ? "?" + s : ""));
-    const keep = Object.assign({}, view); delete keep.q;
-    store.set(VIEW, keep);
+    store.set(VIEW, { sort: view.sort, dir: view.dir, group: view.group });
   }
   function matches(tr) {
     const st = view.state || "";
@@ -390,7 +520,8 @@
     if (g) {
       const groups = new Map();
       hit.forEach((r) => { const k = r.dataset.gi; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
-      [...groups.keys()].sort((a, b) => a - b).forEach((gi) => {
+      const num = view.sort === "cpu" || view.sort === "mem"; // stacks follow their top row (OV-22)
+      [...groups.keys()].sort((a, b) => (num && cmp(groups.get(a)[0], groups.get(b)[0])) || a - b).forEach((gi) => {
         const rs = groups.get(gi), k = rs[0].dataset.k;
         const all = rows.filter((r) => r.dataset.k === k), run = all.filter((r) => r.dataset.run === "1").length;
         const tb = el("tbody", "grp"); tb.dataset.k = k;
@@ -399,7 +530,8 @@
         const tr = el("tr", "grp-h"), th = el("th"); th.colSpan = cols; th.scope = "rowgroup";
         const b = el("button", "grp-t"); b.type = "button";
         b.setAttribute("aria-expanded", String(!tb.classList.contains("closed")));
-        b.append(svgUse("chev-d"), el("span", "grp-n", rs[0].dataset.kt), el("span", "cnt num", `${run}/${all.length}`));
+        const gn = el("span", "grp-n", rs[0].dataset.kt); gn.title = rs[0].dataset.kt;
+        b.append(svgUse("chev-d"), gn, el("span", "cnt num", `${run}/${all.length}`));
         const gs = $$(".gstrips > span", wrapOf(table)).find((s) => s.dataset.k === k);
         if (gs && gs.firstElementChild) { const sp = el("span", "grp-strip"); sp.append(gs.firstElementChild.cloneNode(true)); b.append(sp); }
         th.append(b); tr.append(th); tb.append(tr, ...rs);
@@ -410,8 +542,14 @@
     }
     pool.append(...miss);
     none.hidden = hit.length > 0;
+    // Nothing matches: the hidden rows stay laid out but collapsed (no
+    // height, not focusable, not read), so the columns keep their widths
+    // and the header does not re-flow around the empty state.
+    pool.hidden = hit.length > 0; pool.classList.toggle("sizer", !hit.length);
+    // Nothing shown: good news for an empty state filter on its own, else "no match" (OV-24).
+    none.dataset.why = !view.q && !view.stack && (view.state === "stopped" || view.state === "problem") ? view.state : "filter";
     table.classList.toggle("grouped", g);
-    const shown = table.querySelector("caption .shown"); shown && (shown.textContent = hit.length);
+    collCount(table);
     // controls
     const desc = isDesc();
     $$("th[data-sort]", table).forEach((th) => {
@@ -425,9 +563,17 @@
     rows.forEach((r) => { r.dataset.run === "1" ? cnt.running++ : cnt.stopped++; if (r.dataset.prob === "1") cnt.problem++; });
     $$("#cstate .n").forEach((n) => { n.textContent = cnt[n.dataset.n]; });
     const sel = $("cstack"); if (sel && sel.value !== (view.stack || "")) sel.value = view.stack || "";
+    const cs = $("csort"), cd = $("cdir"); if (cs) cs.value = view.sort || "name";
+    if (cd) { cd.dataset.dir = desc ? "desc" : "asc"; cd.setAttribute("aria-label", desc ? "Descending; switch to ascending" : "Ascending; switch to descending"); cd.querySelector("use").setAttribute("href", desc ? "#i-arrow-down" : "#i-arrow-up"); }
     const q = $("cq"); if (q && doc.activeElement !== q && q.value !== (view.q || "")) q.value = view.q || "";
     if (store_) canonical();
     sparks(table);
+  }
+  // "Showing 38 of 40": rows in collapsed stacks are not shown (OV-30).
+  function collCount(table) {
+    const shown = table.querySelector("caption .shown"), hid = $$("tbody.grp.closed tr.row", table).length;
+    if (shown) shown.textContent = $$("tbody.grp tr.row, tbody.flat tr.row", table).length - hid;
+    const c = table.querySelector("caption .coll"); if (c) c.textContent = hid ? ` · ${hid} in collapsed stacks` : "";
   }
   if (bar) {
     view = readView();
@@ -435,11 +581,13 @@
     bar.addEventListener("submit", (e) => e.preventDefault());
     $("cq").addEventListener("input", (e) => { view.q = e.target.value.trim(); applyView(true); });
     $("cstack").addEventListener("change", (e) => { view.stack = e.target.value; applyView(true); });
+    $("csort") && $("csort").addEventListener("change", (e) => { view.sort = e.target.value === "name" ? "" : e.target.value; view.dir = ""; applyView(true); });
     bar.addEventListener("click", (e) => {
-      const a = e.target.closest("a[data-state], a[data-group]");
+      const a = e.target.closest("a[data-state], a[data-group], a[data-dir]");
       if (!a) return;
       e.preventDefault();
-      if ("state" in a.dataset) view.state = a.dataset.state; else view.group = a.dataset.group;
+      if ("dir" in a.dataset) { const def = view.sort === "cpu" || view.sort === "mem", d = !isDesc(); view.dir = d === def ? "" : d ? "desc" : "asc"; }
+      else if ("state" in a.dataset) view.state = a.dataset.state; else view.group = a.dataset.group;
       applyView(true);
     });
     doc.addEventListener("click", (e) => {
@@ -458,7 +606,9 @@
       if (gt) {
         const tb = gt.closest("tbody"), closed = !tb.classList.contains("closed");
         tb.classList.toggle("closed", closed); gt.setAttribute("aria-expanded", String(!closed));
+        if (!closed) HB.unfold($$("tr.row", tb));
         const c = store.get(COLL, {}); c[tb.dataset.k] = closed; store.set(COLL, c);
+        collCount(tb.closest("table"));
         return;
       }
       const clr = e.target.closest && e.target.closest("#ctable [data-clear]");
@@ -469,7 +619,7 @@
   // ---- command palette ----
   const pal = $("palette"), palQ = $("pal-q"), palList = $("pal-list");
   let palData = null, palAt = 0, palItems = [], palSel = 0, palReturn = null;
-  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", z: "Dozzle", w: "Search" };
+  const KIND = { p: "Page", s: "Settings", c: "Container", b: "Bookmark", a: "Action", l: "Logs", o: "Open", w: "Search" };
   async function palLoad() {
     if (palData && Date.now() - palAt < 30000) return;
     try {
@@ -477,14 +627,28 @@
       palData = (await r.json()).items || []; palAt = Date.now();
     } catch { palData = palData || []; }
   }
+  // A Settings dialog by its URL (NAV-52): opened in place when this page
+  // carries it (Alerts: channels and rules; Overview: bookmark, widget),
+  // else its page, which opens it on load.
+  function dialogAt(href) {
+    const want = new URLSearchParams(href.split("?")[1] || "");
+    const k = want.has("edit") ? "edit" : "add";
+    const t = window.HB && HB.open && $$("[data-dlg][href]").find((a) => new URLSearchParams((a.getAttribute("href").split("?")[1] || "").split("#")[0]).get(k) === want.get(k));
+    if (t) t.click(); else location.href = href;
+  }
   function actions() {
     const signed = !!doc.querySelector('meta[name="rh-csrf"]');
     const have = new Set((palData || []).filter((x) => x.t === "p").map((x) => x.u));
     const pages = [["Host", "/host"], ["Logs", "/logs"]].filter((p) => !have.has(p[1])).map((p) => ({ t: "p", n: p[0], u: p[1] }));
-    return pages.concat([
-      { t: "a", n: "Toggle theme", s: "auto / dark / light / ember / contrast", run: cycleTheme },
+    // The top tasks, signed in only (they open the Settings dialogs).
+    const tasks = signed ? [
+      ["Add bookmark", "/settings/bookmarks?add=bookmark"], ["Add widget", "/settings/widgets?add=widget"],
+      ["Add channel", "/alerts?add=channel"], ["Add alert rule", "/alerts?add=rule"],
+    ].map(([n, u]) => ({ t: "a", n, s: "Settings", k: "new create", run: () => dialogAt(u) })) : [];
+    // One action per theme (NAV-55).
+    const themes = THEMES.map((t) => ({ t: "a", n: "Theme: " + THEME_LABEL[t], k: "theme colour color " + t, run: () => setTheme(t, true) }));
+    return pages.concat(tasks, themes, [
       { t: "a", n: "Keyboard shortcuts", s: "?", run: keysOpen },
-      { t: "a", n: "Toggle sidebar", run: toggleSide },
       signed ? { t: "a", n: "Sign out", run: logout } : { t: "a", n: "Sign in", u: "/login?next=" + encodeURIComponent(location.pathname + location.search) },
     ]);
   }
@@ -494,44 +658,67 @@
     if (n === q) return 100;
     if (n.startsWith(q)) return 50;
     const i = n.indexOf(q);
-    if (i > 0 && /[\s\-_./]/.test(n[i - 1])) return 30;
+    if (i > 0 && /[\s\-_./:]/.test(n[i - 1])) return 30;
     if (i >= 0) return 20;
     if ((it.k || "").toLowerCase().includes(q) || (it.s || "").toLowerCase().includes(q)) return 8;
     return 0;
   }
+  // A container brings its own rows, right under it (NAV-50, NAV-51):
+  // "Logs: X", "Open service ↗" when it has a link, and, signed in,
+  // "Edit X" (its override dialog).
+  function withRows(x, signed) {
+    if (x.t !== "c") return [x];
+    const out = [x];
+    if (x.d) out.push({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs" });
+    if (x.u) out.push({ t: "o", n: "Open service ↗", s: x.n, u: x.u, ext: true });
+    if (signed && x.d) out.push({ t: "a", n: "Edit " + x.n, s: "name, group, icon, link", run: () => dialogAt("/settings/containers?edit=override:" + x.d.slice("/containers/".length)) });
+    return out;
+  }
   function palRender() {
     const q = palQ.value.trim().toLowerCase();
+    const signed = !!doc.querySelector('meta[name="rh-csrf"]');
     const base = (palData || []).concat(actions());
     let list;
     if (!q) {
-      const order = { p: 0, a: 1, c: 2, b: 3, s: 4 };
-      list = base.filter((x) => x.t !== "s").sort((a, b) => order[a.t] - order[b.t]);
+      // Pages, bookmarks and actions before the long container list (NAV-54).
+      const order = { p: 0, b: 1, a: 2, c: 3 };
+      list = base.filter((x) => x.t in order).sort((a, b) => order[a.t] - order[b.t]);
     } else {
+      // "Logs: X" and "Edit X" are found by typing them too.
       const ctrs = (palData || []).filter((x) => x.t === "c" && x.d);
-      const logs = ctrs.map((x) => ({ t: "l", n: "Logs: " + x.n, s: x.s, u: x.d + "/logs", k: x.k }))
-        .concat(ctrs.filter((x) => x.l).map((x) => ({ t: "z", n: "Open in Dozzle: " + x.n, s: x.s, u: x.l, k: x.k, ext: true })));
-      list = base.concat(logs).map((x) => [score(x, q) - (x.t === "l" || x.t === "z" ? 1 : 0), x]).filter((x) => x[0] > 0)
-        .sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+      const extra = ctrs.flatMap((x) => withRows(x, signed).slice(1).filter((r) => r.t !== "o"));
+      const ranked = (xs, min) => xs.map((x) => [score(x, q), x]).filter((x) => x[0] >= min).sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+      const seen = new Set();
+      const put = (r) => { const id = r.t + r.n + (r.u || ""); if (!seen.has(id)) { seen.add(id); list.push(r); } };
+      list = [];
+      for (const x of ranked(base, 1)) withRows(x, signed).forEach(put);
+      ranked(extra, 20).forEach(put);
       list.push({ t: "w", n: palQ.value.trim(), s: "search the web", web: true });
     }
     palItems = list.slice(0, 60);
-    palSel = 0;
+    // A query that matches nothing selects nothing: Enter never sends a
+    // typo to an outside search engine; arrow down to choose it (NAV-57).
+    palSel = q && palItems.length === 1 ? -1 : 0;
     palList.replaceChildren();
     palItems.forEach((it, i) => {
       const li = el("li"); li.id = "pal-" + i; li.setAttribute("role", "option");
-      const pt = el("span", "pt" + (it.t === "c" || it.t === "l" || it.t === "z" ? " mono" : ""));
+      const pt = el("span", "pt" + (it.t === "c" || it.t === "l" ? " mono" : ""));
       const n = it.n, at = q ? n.toLowerCase().indexOf(q) : -1;
       if (at >= 0 && it.t !== "w") pt.append(n.slice(0, at), el("b", "", n.slice(at, at + q.length)), n.slice(at + q.length)); else pt.textContent = n;
       li.append(el("span", "pk", KIND[it.t]), pt);
       if (it.s) li.append(el("span", "ps", it.t === "c" && it.r === false ? it.s + " · stopped" : it.s));
-      li.addEventListener("click", () => { palSel = i; palGo(false); });
+      li.addEventListener("click", () => { palSel = i; palGo(); });
       li.addEventListener("pointermove", () => { if (palSel !== i) { palSel = i; palMark(); } });
       palList.append(li);
     });
+    // Nothing in Hobnail matches: say so above the list (the web row stays).
+    let none = $("pal-none");
+    if (!none) { none = el("p", "pal-none", "No page, container, bookmark or action matches. Arrow down, then Enter, searches the web."); none.id = "pal-none"; none.setAttribute("role", "status"); palList.before(none); }
+    none.hidden = !(q && palItems.length === 1);
     palMark();
   }
   function palMark() {
-    $$("li", palList).forEach((li, i) => li.setAttribute("aria-selected", String(i === palSel)));
+    $$("li[role=option]", palList).forEach((li, i) => li.setAttribute("aria-selected", String(i === palSel)));
     const cur = $("pal-" + palSel);
     palQ.setAttribute("aria-activedescendant", cur ? cur.id : "");
     cur && cur.scrollIntoView({ block: "nearest" });
@@ -539,7 +726,7 @@
   function open(u, ext) {
     if (ext || /^[a-z][a-z0-9+.-]*:/i.test(u)) window.open(u, "_blank", "noopener"); else location.href = u;
   }
-  function palGo(alt) {
+  function palGo() {
     const it = palItems[palSel];
     if (!it) return;
     palClose();
@@ -549,13 +736,14 @@
       if (/^https?:\/\//i.test(v)) return open(v, true);
       return open((body.dataset.searchUrl || "https://duckduckgo.com/?q={q}").replace("{q}", encodeURIComponent(v)), true);
     }
-    if (it.t === "c") return alt || !it.u ? open(it.d) : open(it.u, true);
-    open(it.u, it.t === "b" || it.ext);
+    // A container opens its page in Hobnail; its service is its own row.
+    if (it.t === "c") return open(it.d || it.u, !it.d);
+    open(it.u === "/settings" ? setTab : it.u, it.t === "b" || it.ext);
   }
   async function palOpen() {
     if (!pal || !pal.hidden) return;
     palReturn = doc.activeElement;
-    pal.hidden = false; palQ.value = ""; palQ.focus();
+    pal.hidden = false; palQ.value = ""; palQ.focus(); palQ.setAttribute("aria-expanded", "true");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "true");
     palRender();
     await palLoad();
@@ -563,7 +751,7 @@
   }
   function palClose() {
     if (!pal || pal.hidden) return;
-    pal.hidden = true;
+    pal.hidden = true; palQ.setAttribute("aria-expanded", "false");
     $("cmd") && $("cmd").setAttribute("aria-expanded", "false");
     palReturn && palReturn.focus && palReturn.focus({ preventScroll: true });
   }
@@ -572,31 +760,52 @@
     palQ.addEventListener("input", palRender);
     pal.addEventListener("mousedown", (e) => { if (e.target === pal) palClose(); });
     pal.addEventListener("keydown", (e) => {
-      const n = palItems.length;
+      const n = palItems.length, to = (i) => { e.preventDefault(); palSel = Math.max(0, Math.min(n - 1, i)); palMark(); };
       if (e.key === "Escape") { e.preventDefault(); palClose(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); palSel = (palSel + 1) % Math.max(n, 1); palMark(); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); palSel = (palSel - 1 + n) % Math.max(n, 1); palMark(); }
-      else if (e.key === "Enter") { e.preventDefault(); palGo(e.shiftKey); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); palSel = palSel <= 0 ? n - 1 : palSel - 1; palMark(); }
+      else if (e.key === "Home" && n) to(0); // NAV-58
+      else if (e.key === "End" && n) to(n - 1);
+      else if (e.key === "PageDown" && n) to(palSel + 8);
+      else if (e.key === "PageUp" && n) to(palSel - 8);
+      else if (e.key === "Enter") { e.preventDefault(); palGo(); }
       else if (e.key === "Tab") { e.preventDefault(); palQ.focus(); } // focus stays in the dialog
     });
+    pal.addEventListener("click", (e) => { if (e.target.closest && e.target.closest("[data-act=pal-close]")) palClose(); });
   }
   // ---- keyboard map: g+key pages, j/k rows, / filter, l logs, ? help ----
   const keys = $("keys");
-  function keysOpen() { if (keys && !keys.open) { keys.showModal ? keys.showModal() : (keys.open = true); } }
+  // "/": the page's own filter when it has one (NAV-56), never the sidebar's.
+  const slashTarget = () => [$("cq"), $("lpq"), $("lq")].find((x) => x && shown(x));
+  function keysOpen() {
+    if (!keys || keys.open) return;
+    // The sheet says what "/" does on this page (NAV-62).
+    const f = slashTarget(), d = keys.querySelector("[data-k=slash]");
+    if (d) d.textContent = f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands (this page has no filter)";
+    keys.showModal ? keys.showModal() : (keys.open = true);
+  }
   doc.addEventListener("click", (e) => {
     const a = e.target.closest && e.target.closest("[data-act]");
     if (!a) return;
     if (a.dataset.act === "keys") keysOpen();
     else if (a.dataset.act === "keys-close") keys.close();
-    else if (a.dataset.act === "more") setOpen(true);
+    else if (a.dataset.act === "more" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) { e.preventDefault(); setOpen(true, a); }
+    else if (a.dataset.act === "side-close") setOpen(false);
+    else if (a.dataset.act === "rail-stacks" && !(e.ctrlKey || e.metaKey || e.shiftKey || e.button)) {
+      // NAV-27: from the rail to the stacks: expand, focus the filter.
+      e.preventDefault();
+      if (wide()) toggleSide(); else setOpen(true, a);
+      const f = $("tree-filter"); f && f.focus();
+    }
   });
-  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", a: "/alerts", s: "/settings" };
+  const GO = { o: "/", c: "/containers", h: "/host", l: "/logs", y: "/history", a: "/alerts", s: setTab };
   let gAt = 0;
   const shown = (x) => x.offsetParent !== null && !x.closest("[hidden]");
   function krows() {
     const t = $("ctable");
     const sel = t ? "#ctable tbody:not(.pool) tr.row" : "main .attn .rows li, main .strip-list li, main ul.events li, main .tbl tbody tr, main .incident";
-    return $$(sel).filter(shown);
+    // Only rows that open something: Enter follows the row's link (NAV-60).
+    return $$(sel).filter((r) => shown(r) && r.querySelector("a[href]"));
   }
   function kmove(d) {
     const rows = krows();
@@ -620,7 +829,7 @@
   doc.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); pal && pal.hidden ? palOpen() : palClose(); return; }
     if (e.key === "Escape" && keys && keys.open) { e.preventDefault(); keys.close(); return; }
-    if (e.key === "Escape" && root.classList.contains("side-open")) { setOpen(false); menuBtn && !wide() && menuBtn.focus(); return; }
+    if (e.key === "Escape" && root.classList.contains("side-open")) { setOpen(false); return; }
     if (typing() || e.ctrlKey || e.metaKey || e.altKey || (pal && !pal.hidden) || (keys && keys.open)) return;
     const k = e.key;
     if (Date.now() - gAt < 1200 && GO[k]) { e.preventDefault(); gAt = 0; location.href = GO[k]; return; }
@@ -628,14 +837,14 @@
     if (k === "g") { gAt = Date.now(); return; }
     if (k === "/") {
       e.preventDefault();
-      const f = [$("cq"), $("tree-filter")].find((x) => x && shown(x));
+      const f = slashTarget();
       f ? (f.focus(), f.select && f.select()) : palOpen();
     } else if (k === "?") { e.preventDefault(); keysOpen(); }
     else if (k === "j" || k === "k") { e.preventDefault(); kmove(k === "j" ? 1 : -1); }
     else if (k === "l") { const u = logsTarget(); if (u) { e.preventDefault(); location.href = u; } }
   });
   doc.addEventListener("focusin", (e) => { $$(".kfocus").forEach((r) => { if (!r.contains(e.target)) r.classList.remove("kfocus"); }); });
-  if (navigator.platform && /Mac/.test(navigator.platform)) $$(".cmd-k").forEach((k) => { k.textContent = "⌘K"; });
+  if (navigator.platform && /Mac/.test(navigator.platform)) { $$(".cmd-k").forEach((k) => { k.textContent = "⌘K"; }); $$("kbd.mod").forEach((k) => { k.textContent = "⌘"; }); }
 
   // ---- login: JSON post, then a same-origin redirect only ----
   // Rules from the security review (mirrored by ui::fmt::login_next): no
@@ -648,8 +857,10 @@
     let dec;
     try { dec = decodeURIComponent(n); } catch { return "/"; }
     if (!ok(n) || !ok(dec) || n.length > 512) return "/";
-    try { const u = new URL(n, location.origin); return u.origin === location.origin ? u.pathname + u.search + u.hash : "/"; } catch { return "/"; }
+    try { const u = new URL(n, location.origin); return u.origin === location.origin ? u.href : "/"; } catch { return "/"; }
   }
+  // A sign-in link carries the page's #t= fragment through the login (LG-11).
+  if (location.hash) $$("a.login-next, .acct-in").forEach((a) => { if (a.href.includes("?next=")) a.href += encodeURIComponent(location.hash); });
   const login = $("login");
   if (login) {
     login.addEventListener("submit", async (e) => {
@@ -669,18 +880,47 @@
           location.replace(safeNext(new URLSearchParams(location.search).get("next") || "/"));
           return;
         }
-        msg.textContent = j.error || (r.status === 429 ? "Too many attempts. Wait a moment and try again." : r.status === 401 ? "Wrong password." : `Sign-in failed (HTTP ${r.status}).`);
-      } catch { msg.textContent = "Could not reach the server."; }
+        $("pw").setAttribute("aria-invalid", "true");
+        // Too many attempts: the wait the server asks for, counted down, and
+        // the button off until then (ROB-18).
+        if (r.status === 429) {
+          let left = Math.max(1, Math.ceil(Number(j.retry_after || r.headers.get("retry-after")) || 1));
+          const say = () => { msg.textContent = `Too many attempts. Try again in ${left} s.`; };
+          say(); $("pw").select();
+          const t = setInterval(() => { if (--left > 0) return say(); clearInterval(t); msg.textContent = "You can try again now."; btn.disabled = false; }, 1000);
+          return;
+        }
+        msg.textContent = r.status === 401 ? "Wrong password." : `Sign-in failed (HTTP ${r.status}).`;
+      } catch { msg.textContent = "Could not reach the server. Your password was not sent; try again."; }
       btn.disabled = false; $("pw").select();
     });
+    $("pw").addEventListener("input", () => $("pw").removeAttribute("aria-invalid"));
   }
 
   // ---- live updates over SSE ----
   const live = $("live");
+  // Live updates that stop (stream refused, server gone) say so on every
+  // page, phones included, after a grace period that hides quick reconnects;
+  // the pill goes when the stream is back (ROB-13). A paused hidden tab is
+  // not stale. The stream is retried for as long as the page is open (see
+  // connect), so the pill says it is trying, and goes away by itself.
+  let offT = null, offPill = null;
   function setLive(on, text) {
-    if (!live) return;
-    live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
-    live.querySelector(".live-t").textContent = text;
+    window.HB_LIVE = 1; // the shell's "connecting" fallback stands down
+    if (live) {
+      live.querySelector(".dot").className = "dot " + (on ? "ok" : "off");
+      live.querySelector(".live-t").textContent = text;
+      live.title = "Live updates: " + text; // the rail shows only the dot
+    }
+    if (on || text !== "reconnecting") { clearTimeout(offT); offT = null; if (offPill) { offPill.remove(); offPill = null; root.classList.remove("stale"); } return; }
+    if (offT || offPill) return; // retries keep failing: the first one starts the clock
+    offT = setTimeout(() => {
+      offT = null;
+      const at = new Date(lastLive).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+      offPill = el("div", "live-off"); offPill.setAttribute("role", "status");
+      offPill.append(el("span", "dot"), el("span", "", `Live updates stopped at ${at}. Trying to reconnect; this page may be out of date.`));
+      body.append(offPill); root.classList.add("stale");
+    }, 4000);
   }
   // ---- keep the reader's place while live data changes the page ----
   // Live updates replace whole sections every few seconds. When a section
@@ -730,12 +970,32 @@
       // update after focus leaves brings it up to date.
       if ((fresh.id === "ctable" || fresh.id === "tree") && old.contains(active)) continue;
       const before = $$(".tw", old).map((x) => x.textContent);
-      old.replaceWith(fresh);
-      tween(fresh, before);
-      if (fresh.id === "tree") { treeApply(); fresh.scrollTop = treeTop; }
-      else if (fresh.id === "ctable") applyView(false);
-      else if (fresh.id === "ctr-live") { detailLive(); tableLive(); }
-      else { sparks(fresh); times(fresh); localTicks(fresh); }
+      // The live "Needs attention" is rendered without a session, so it has
+      // no probe lines (NAV-11): a signed-in page keeps the one it was
+      // served with only while the same failing run goes on (same
+      // `data-since`); a new run or a recovery drops it.
+      if (fresh.id === "ov-attn") $$(".probe[data-since]", old).forEach((p) => {
+        const c = p.closest("li") && p.closest("li").querySelector("[data-c]");
+        const n = c && $$("[data-c]", fresh).find((x) => x.dataset.c === c.dataset.c);
+        const why = n && n.parentNode.querySelector(".why");
+        if (why && !why.querySelector(".probe") && why.dataset.since === p.dataset.since) why.append(p.cloneNode(true));
+      });
+      // The firing list too: signed in, a rule's name opens its dialog.
+      if (fresh.id === "al-live" && $("ru-list")) $$("b[data-rule]", fresh).forEach((b) => {
+        const a = doc.createElement("a");
+        a.className = "inc-rule-a"; a.dataset.rule = b.dataset.rule; a.textContent = b.textContent;
+        a.href = "/alerts?edit=rule:" + encodeURIComponent(b.dataset.rule);
+        b.replaceWith(a);
+      });
+      // In place (HB.morph): focus, selection, scroll and open <details>
+      // stay. The table is rebuilt by the script from its rows, so it is
+      // swapped whole (it is skipped above while it holds focus).
+      const now = fresh.id === "ctable" ? (old.replaceWith(fresh), fresh) : HB.morph(old, fresh);
+      tween(now, before);
+      if (now.id === "tree") { treeApply(); now.scrollTop = treeTop; }
+      else if (now.id === "ctable") applyView(false);
+      else if (now.id === "ctr-live") { detailLive(); tableLive(); }
+      else { sparks(now); times(now); localTicks(now); }
     }
     keepAnchor(anchor);
     // Never scroll to restore focus (it used to pull the page to whatever
@@ -852,10 +1112,19 @@
   // HTTP/1.1 connections (6 per host), which stalled later navigations, and
   // a background tab would keep the server's refresh loop running.
   let es = null, hiddenAt = 0, hideTimer = null;
+  // A stream the server refused (a proxy's 502 while Hobnail restarts, a
+  // 401) is closed for good by the browser, which retries only dropped
+  // connections: so it is opened again here, after 5 s, then twice as long
+  // each time up to a minute, and never while the tab is hidden (showing it
+  // again connects at once). A stream that opens resets the wait.
+  let retryT = null, retryMs = 5000;
+  // Every logs page: a viewer (#lv) or the /logs list (#lpick).
+  const logsPage = !!($("lv") || $("lpick"));
   function connect() {
     if (!window.EventSource) { setLive(false, "no live updates"); return; }
     if (es) return;
-    es = new EventSource("/api/stream");
+    clearTimeout(retryT); retryT = null;
+    const s = (es = new EventSource("/api/stream"));
     es.addEventListener("hello", (e) => {
       if (e.data && e.data !== body.dataset.sha) { location.reload(); return; }
       setLive(true, "live");
@@ -865,15 +1134,29 @@
       lastLive = Date.now();
       if (i > 0) queue(e.data.slice(i + 1));
     });
-    es.addEventListener("reload", () => location.reload());
-    es.onerror = () => setLive(false, "reconnecting");
-    es.onopen = () => setLive(true, "live");
+    // A config change reloads the page, but never a log viewer: it would lose
+    // its search, filters, pause, range and scroll (owner decision Y12, LG-03).
+    es.addEventListener("reload", () => { if (!logsPage) location.reload(); });
+    es.onerror = () => {
+      if (es !== s) return;
+      setLive(false, "reconnecting");
+      if (s.readyState !== 2) return; // the browser retries this one itself
+      s.close(); es = null;
+      clearTimeout(retryT);
+      retryT = setTimeout(() => { retryT = null; if (!doc.hidden) connect(); }, retryMs);
+      retryMs = Math.min(60000, retryMs * 2);
+    };
+    es.onopen = () => { retryMs = 5000; setLive(true, "live"); };
   }
-  function disconnect(text) { if (es) { es.close(); es = null; } setLive(false, text); }
+  // Leaving the page (or into the back/forward cache) closes the stream
+  // without a word: the indicator keeps saying "live", so neither the last
+  // frame of this page nor its return from the cache flips it.
+  function disconnect(text) { clearTimeout(retryT); retryT = null; if (es) { es.close(); es = null; } if (text) setLive(false, text); }
   function resume() {
     clearTimeout(hideTimer);
-    // Paused for over a minute: reload for fresh data (widgets refresh slowly).
-    if (!es && hiddenAt && Date.now() - hiddenAt > 60000) { location.reload(); return; }
+    // Paused for over a minute: reload for fresh data (widgets refresh slowly),
+    // but never over an open dialog or unsaved input (owner decision Y12).
+    if (!es && hiddenAt && Date.now() - hiddenAt > 60000 && !logsPage && !(window.HB && HB.unsaved && HB.unsaved())) { location.reload(); return; }
     hiddenAt = 0;
     connect();
   }
@@ -881,8 +1164,29 @@
     if (doc.hidden) hideTimer = setTimeout(() => { hiddenAt = Date.now(); disconnect("paused"); alarmPoll = setInterval(pollAlarm, 60000); }, 10000);
     else { clearInterval(alarmPoll); resume(); }
   });
-  window.addEventListener("pagehide", () => { clearTimeout(hideTimer); hiddenAt = Date.now(); disconnect("paused"); });
+  window.addEventListener("pagehide", () => { clearTimeout(hideTimer); hiddenAt = Date.now(); disconnect(); });
   window.addEventListener("pageshow", (e) => { if (e.persisted) resume(); });
+
+  // ---- navigation feedback (ROB-12): a full page load shows a 2 px line
+  // after 150 ms (the CSS delay, so a fast load shows nothing), and a page
+  // tab or range that was clicked is marked at once. Runs after every other
+  // click handler: a click one of them took over is not a navigation.
+  const navbar = el("div", "navbar"); navbar.setAttribute("aria-hidden", "true"); body.append(navbar);
+  doc.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("a[href]");
+    if (!a || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || a.target || a.hasAttribute("download")) return;
+    const u = new URL(a.href, location.href);
+    if (u.origin !== location.origin || u.pathname.startsWith("/api/") || (u.pathname === location.pathname && u.search === location.search)) return;
+    navbar.classList.add("on"); clearTimeout(navT); navT = setTimeout(navOff, 10000);
+    if (a.matches(".tabs .tab, .cd-tabs a, .seg a")) a.setAttribute("data-pending", "");
+  });
+  // A navigation that does not happen (the "leave site?" prompt dismissed,
+  // a slow server given up on) must not leave the line on: the next press
+  // in this page, coming back from the cache, or 10 s end it.
+  let navT = null;
+  const navOff = () => { clearTimeout(navT); navT = null; navbar.classList.remove("on"); $$("[data-pending]").forEach((x) => x.removeAttribute("data-pending")); };
+  ["pointerdown", "keydown"].forEach((t) => doc.addEventListener(t, () => { if (navbar.classList.contains("on")) navOff(); }, true));
+  window.addEventListener("pageshow", navOff);
 
   sparks(doc);
   times(doc);

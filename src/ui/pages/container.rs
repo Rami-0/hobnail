@@ -19,8 +19,8 @@ use crate::db::ctrx::{self, NetSource, XMetric};
 use crate::db::{Agg, CtrMetric, EventFilter, Range, Series};
 use crate::docker::{HealthLog, Inspect, Top};
 use crate::model::Container;
-use crate::ui::chart::{line_chart, ChartSpec, Unit};
-use crate::ui::fmt::{parse_query, pct, query_get, short_utc, time_tag, url_decode, url_encode};
+use crate::ui::chart::{line_chart, seed, ChartSpec, Unit};
+use crate::ui::fmt::{clock_tag, parse_query, pct, query_get, time_tag, url_decode, url_encode};
 use crate::ui::pages::overview::{event_row, live_spark};
 use crate::ui::shell::{layout, Ctx, Nav};
 use crate::ui::view::{binding_link, card_for, CardView, GroupView};
@@ -103,34 +103,16 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
     let tab = query_get(&q, "tab")
         .and_then(Tab::parse)
         .unwrap_or(Tab::Overview);
+    // The Logs tab is the log viewer (owner decision Y2); old `?tab=logs`
+    // links still land on it.
+    if tab == Tab::Logs {
+        return crate::logs::container_page(ctx, name);
+    }
     let range = query_get(&q, "range")
         .and_then(Range::parse)
         .unwrap_or(Range::H6);
-    let socket = &ctx.state.env.docker_socket;
-    // One inspect per page view (a few ms on the socket); the page renders
-    // on the blocking pool.
-    let ins = crate::docker::inspect_blocking(socket, &c.id).map(|i| {
-        if ctx.user.is_some() {
-            i
-        } else {
-            redact_for_anonymous(i)
-        }
-    });
-    let now = ctx.now as i64;
-    let starts_10m = ctx
-        .state
-        .db
-        .events(&EventFilter {
-            subject: Some(name.to_string()),
-            kind_prefix: Some("container.start".into()),
-            limit: 50,
-            ..Default::default()
-        })
-        .iter()
-        .filter(|e| e.ts >= now - 600)
-        .count() as u32;
-    let unhealthy_since = last_unhealthy_event(ctx, name);
-    let why = why_red(c, ins.as_ref().ok(), starts_10m, unhealthy_since, now);
+    let ins = inspect_for(ctx, c);
+    let why = why_for(ctx, c, ins.as_ref().ok());
     let base = format!("/containers/{}", url_encode(name));
     let heading = html! {
         nav.crumb aria-label="Breadcrumb" {
@@ -140,51 +122,22 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
         }
     };
     let body_tab = match tab {
-        Tab::Overview => overview_tab(ctx, &card, c, range, &base),
-        Tab::Logs => logs_tab(ctx, c, range, &base),
+        Tab::Overview | Tab::Logs => overview_tab(ctx, &card, c, range, &base),
         Tab::Metrics => metrics_tab(ctx, c, ins.as_ref().ok(), range, &base),
         Tab::Inspect => inspect_tab(ctx, c, &ins),
         Tab::Processes => processes_tab(ctx, c, &q, &base),
         Tab::Events => events_tab(ctx, c, &q, &base),
     };
+    let docker_note = html! {
+        @if let Some(err) = &snap.error {
+            p.cd-why.warn role="status" {
+                (ic("alert")) span { "Docker is not reachable (" (err) "). Showing the last known state." }
+            }
+        }
+    };
     let body = html! {
         div.page.cd {
-            header.ctr-head {
-                (crate::ui::icon(card.icon.as_deref(), &card.title))
-                div.ctr-id {
-                    h2 { (status_dot(&card)) (card.title) }
-                    p.mono.muted {
-                        (c.name) " · " (c.image)
-                        @if card.stack != c.name { " · stack " a href={"/containers?stack=" (url_encode(&card.stack))} { (card.stack) } }
-                    }
-                }
-                div.ctr-actions {
-                    @if let Some(u) = &card.url { a.btn href=(u) target="_blank" rel="noopener noreferrer" { (ic("external")) "Open" } }
-                    a.btn href={(base) "/logs"} { (ic("logs")) "Logs" }
-                    @if let Some(u) = &card.metrics_url { a.btn href=(u) target="_blank" rel="noopener noreferrer" title="Open this host in Beszel" { (ic("activity")) "Beszel" } }
-                    @if ctx.user.is_some() {
-                        a.btn.primary href={"/settings/containers?name=" (url_encode(name))} { (ic("edit")) "Customize" }
-                    }
-                }
-            }
-            @if let Some(err) = &snap.error {
-                p.cd-why.warn role="status" {
-                    (ic("alert")) span { "Docker is not reachable (" (err) "). Showing the last known state." }
-                }
-            }
-            @if let Some(w) = &why {
-                p.cd-why.bad role="status" {
-                    (ic("alert"))
-                    span { strong { "Why is this red? " } (w.text) }
-                    a href={(base) "/logs" (w.ts.map(|t| format!("#t={t}")).unwrap_or_default())} { "Logs around then" }
-                }
-            }
-            nav.cd-tabs aria-label="Container sections" {
-                @for t in Tab::ALL {
-                    a href={(base) "?tab=" (t.slug()) @if matches!(t, Tab::Overview | Tab::Metrics | Tab::Logs) { "&range=" (range.as_str()) }}
-                        aria-current=[(t == tab).then_some("page")] { (t.label()) }
-                }
-            }
+            (head(ctx, c, &card, why.as_ref(), tab, range, docker_note))
             (body_tab)
         }
     };
@@ -194,12 +147,194 @@ pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
     )
 }
 
+/// One `docker inspect` (a few ms on the socket), redacted for a visitor.
+fn inspect_for(ctx: &Ctx, c: &Container) -> Result<Inspect, String> {
+    crate::docker::inspect_blocking(&ctx.state.env.docker_socket, &c.id).map(|i| {
+        if ctx.user.is_some() {
+            i
+        } else {
+            redact_for_anonymous(i)
+        }
+    })
+}
+
+/// The one-line "why is this red?" for `c`, if something is wrong.
+fn why_for(ctx: &Ctx, c: &Container, ins: Option<&Inspect>) -> Option<Why> {
+    let now = ctx.now as i64;
+    let starts_10m = ctx
+        .state
+        .db
+        .events(&EventFilter {
+            subject: Some(c.name.clone()),
+            kind_prefix: Some("container.start".into()),
+            limit: 50,
+            ..Default::default()
+        })
+        .iter()
+        .filter(|e| e.ts >= now - 600)
+        .count() as u32;
+    let started = ins.and_then(|i| crate::docker::parse_rfc3339(&i.state.started_at));
+    let since = unhealthy_since(&ctx.state.db, c, started);
+    why_red(c, ins, starts_10m, since, now)
+}
+
+/// The container header, "why is this red?" and the tabs, for the logs
+/// viewer (the Logs tab, `/containers/<name>/logs`). `None` when the
+/// container is not in the snapshot or the lists may not show it.
+pub fn logs_head(ctx: &Ctx, name: &str, range: Range, note: Markup) -> Option<Markup> {
+    let snap = ctx.state.snapshot();
+    let c = snap.containers.iter().find(|c| c.name == name)?;
+    let stats = crate::ui::view::stats_with_history(ctx.state, &snap);
+    let card = card_for(&ctx.cfg, &snap, &stats, ctx.host, name)?;
+    let ins = inspect_for(ctx, c);
+    let why = why_for(ctx, c, ins.as_ref().ok());
+    Some(head(ctx, c, &card, why.as_ref(), Tab::Logs, range, note))
+}
+
+/// Header (icon, status, name, image, stack; "Open" and, signed in, "Edit"),
+/// `note`, the "why is this red?" line and the tab strip. The Logs tab is
+/// the viewer page; the other tabs are `?tab=` on the detail page.
+fn head(
+    ctx: &Ctx,
+    c: &Container,
+    card: &CardView,
+    why: Option<&Why>,
+    tab: Tab,
+    range: Range,
+    note: Markup,
+) -> Markup {
+    let base = format!("/containers/{}", url_encode(&c.name));
+    let logs = crate::logs::logs_url(&c.name);
+    html! {
+        header.ctr-head {
+            (crate::ui::icon(card.icon.as_deref(), &card.title))
+            div.ctr-id {
+                // The display name is a title (UI sans, OV-39); the raw name
+                // is repeated below only when it differs (ROB-08).
+                h2 { (status_dot(card)) span.ctr-t { (card.title) } }
+                p.mono.muted {
+                    @if card.title != c.name { (c.name) " · " }
+                    (c.image)
+                    @if card.stack != c.name { " · stack " a href={"/containers?stack=" (url_encode(&card.stack))} { (card.stack) } }
+                    " · id " span title=(c.id) { (c.id.chars().take(12).collect::<String>()) }
+                }
+            }
+            div.ctr-actions {
+                @if let Some(u) = &card.url { a.btn href=(u) target="_blank" rel="noopener noreferrer" { (ic("external")) "Open" } }
+                @if ctx.user.is_some() {
+                    a.btn.ghost href={"/settings/containers?edit=override:" (url_encode(&c.name))} title="Display name, group, icon, link" { (ic("edit")) "Edit" }
+                }
+            }
+        }
+        (note)
+        @if let Some(w) = why { (why_note(ctx, c, w, &logs)) }
+        // On a phone the strip scrolls: the script fades the edge that has
+        // more tabs behind it and brings the current one into view (OV-36).
+        nav.cd-tabs aria-label="Container sections" {
+            @for t in Tab::ALL {
+                // Every tab keeps the chosen range, so Metrics at 30 d →
+                // Inspect → Metrics is still 30 d (OV-37).
+                @let href = if t == Tab::Logs { format!("{logs}?range={}", range.as_str()) } else {
+                    format!("{base}?tab={}&range={}", t.slug(), range.as_str())
+                };
+                a href=(href) aria-current=[(t == tab).then_some("page")] { (t.label()) }
+            }
+        }
+    }
+}
+
+/// "Why is this red?" on top of a container's pages (NAV-11). A failing
+/// health check says since when and how many in a row; signed in, with the
+/// probe's first line and Docker's last five checks; signed out, with a
+/// sign-in link instead and **no probe output anywhere in the page**.
+/// "Logs around HH:MM" opens the logs at the moment it started.
+fn why_note(ctx: &Ctx, c: &Container, w: &Why, logs: &str) -> Markup {
+    let signed = ctx.user.is_some();
+    let first_line = |o: &str| {
+        o.trim()
+            .lines()
+            .next()
+            .map(|l| truncate(l.trim(), 120))
+            .filter(|l| !l.is_empty())
+    };
+    let next = format!("/containers/{}", url_encode(&c.name));
+    html! {
+        div.cd-why.bad role="status" {
+            (ic("alert"))
+            div.cd-why-b {
+                p {
+                    strong { "Why is this red? " }
+                    @if let Some(h) = &w.health {
+                        "Health check failing"
+                        @if let Some(s) = h.since { " since " (clock_tag(s.max(0) as u64)) " (" (human_duration((ctx.now as i64 - s).max(0) as u64)) " ago)" }
+                        @if h.streak > 0 { ", " (h.streak) " in a row" }
+                        @if signed {
+                            @match h.probes.iter().find(|p| p.1 != 0).and_then(|p| first_line(&p.2)) {
+                                Some(l) => { ": " code.probe { (l) } }
+                                None => ".",
+                            }
+                        } @else {
+                            ". " a href={"/login?next=" (url_encode(&next))} { "Sign in to see the check's output." }
+                        }
+                        @if !w.text.is_empty() { " · " }
+                    }
+                    (w.text)
+                    @if let Some(t) = w.ts {
+                        " " a.cd-why-logs href={(logs) "#t=" (t.max(0) * 1000)} { "Logs around " (clock_tag(t.max(0) as u64)) }
+                    } @else {
+                        " " a.cd-why-logs href=(logs) { "Logs" }
+                    }
+                }
+                @if let Some(h) = w.health.as_ref().filter(|h| signed && !h.probes.is_empty()) {
+                    details.cd-probes open {
+                        summary { "Last " (h.probes.len()) " checks" }
+                        ol.cd-hlog {
+                            @for (t, code, out) in &h.probes {
+                                li {
+                                    div.cd-hl-h {
+                                        (pill(if *code == 0 { "ok" } else { "bad" }, &format!("exit {code}")))
+                                        @if let Some(t) = t { " " (clock_tag((*t).max(0) as u64)) }
+                                    }
+                                    @let out = truncate(out.trim(), HEALTH_OUTPUT_MAX);
+                                    @if out.is_empty() { p.muted.small { "(no output)" } } @else { pre.cd-out { (out) } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn range_picker(base: &str, tab: Tab, range: Range) -> Markup {
     html! {
         nav.seg aria-label="Range" {
             @for r in Range::ALL {
                 a href={(base) "?tab=" (tab.slug()) "&range=" (r.as_str())} aria-current=[(r == range).then_some("true")] { (r.as_str()) }
             }
+        }
+    }
+}
+
+/// A range that is mostly empty says how much history there is and links
+/// the shortest range that holds all of it (OV-43).
+fn history_note(s: &Series, range: Range, now: i64, base: &str, tab: Tab) -> Markup {
+    let Some(first) = s.points.first().map(|p| p.0) else {
+        return html! {};
+    };
+    let have = (now - first).max(0);
+    if have * 2 >= range.secs() {
+        return html! {};
+    }
+    let fit = Range::ALL
+        .into_iter()
+        .find(|r| r.secs() >= have)
+        .filter(|r| r.secs() < range.secs());
+    html! {
+        p.muted.small.cd-hnote {
+            "History for this container starts " (human_duration(have as u64)) " ago."
+            @if let Some(r) = fit { " " a href={(base) "?tab=" (tab.slug()) "&range=" (r.as_str())} { "Show " (r.as_str()) } }
         }
     }
 }
@@ -237,7 +372,8 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
         .find(|(n, _)| n == name)
         .map(|(_, n)| n);
     html! {
-        (head_live(card, c, restarts))
+        // The tile sparklines start from the newest history points (OV-46).
+        (head_live(card, c, restarts, [seed(&cpu, 40), seed(&mem, 40)]))
         // Filled by live updates (see `live_json`).
         div #ctr-live hidden data-j="{\"c\":{}}" {}
         section.sec aria-label="History" {
@@ -245,11 +381,11 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
                 h2 { "Usage" }
                 (range_picker(base, Tab::Overview, range))
             }
+            (history_note(&cpu, range, now, base, Tab::Overview))
             div.charts.two {
                 (line_chart(&spec("CPU", Unit::Percent, "--ch-cpu", range, now), &cpu, db.is_enabled()))
                 (line_chart(&spec("Memory", Unit::Bytes, "--ch-mem", range, now), &mem, db.is_enabled()))
             }
-            p.muted.cd-more { a href={(base) "?tab=metrics&range=" (range.as_str())} { "Network, disk I/O, PIDs and throttling on the Metrics tab" } }
         }
         div.cols {
             section.panel aria-label="Timeline" {
@@ -260,7 +396,7 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
                         @else { "Starts, stops and health changes appear here once history is recording." }
                     }
                 } @else {
-                    ul.events { @for e in &events { (event_row(ctx.now, e, false)) } }
+                    ul.events { @for e in &events { (event_row(ctx.now, e, false, None)) } }
                 }
             }
             section.panel aria-label="Ports and links" {
@@ -271,20 +407,6 @@ fn overview_tab(ctx: &Ctx, card: &CardView, c: &Container, range: Range, base: &
         div.cols {
             (rules_panel(ctx, c))
             (labels_panel(c))
-        }
-    }
-}
-
-fn logs_tab(ctx: &Ctx, c: &Container, range: Range, base: &str) -> Markup {
-    let _ = (ctx, range);
-    html! {
-        section.panel aria-label="Logs" {
-            (panel_head("Logs", None))
-            p {
-                "Live tail, search and download are on the logs page. "
-                a.btn.primary href={(base) "/logs"} { (ic("logs")) "Open logs of " span.mono { (c.name) } }
-            }
-            (crate::logs::level_chart(ctx.state, &c.name, range))
         }
     }
 }
@@ -331,13 +453,24 @@ fn metrics_tab(
     });
     let chart =
         |title, unit, color, s: &Series| line_chart(&spec(title, unit, color, range, now), s, on);
+    // Series that stayed at zero over the whole range (throttling, OOM
+    // kills, block I/O) are one line of text at the end, not a chart (OV-50).
+    let zeroed = std::cell::RefCell::new(Vec::<&str>::new());
+    let quiet = |title: &'static str, unit, color, s: &Series| {
+        if !s.points.is_empty() && s.points.iter().all(|p| p.1.abs() < 1e-9) {
+            zeroed.borrow_mut().push(title);
+            html! {}
+        } else {
+            chart(title, unit, color, s)
+        }
+    };
     let running = c.is_running();
     html! {
         section.strip.facts aria-label="Now" {
             div.cell {
                 div.cell-h { span.label { "Restarts" } }
                 div.big.num { (ins.map_or(0, |i| i.restart_count)) }
-                div.sub { "by policy · " (starts(86_400)) " starts in 24 h, " (starts(Range::D7.secs())) " in 7 d" }
+                div.sub { "by policy · starts " (starts(86_400)) " (24 h), " (starts(Range::D7.secs())) " (7 d)" }
             }
             div.cell {
                 div.cell-h { span.label { "OOM kills" } }
@@ -389,10 +522,11 @@ fn metrics_tab(
                 (range_picker(base, Tab::Metrics, range))
             }
             @if !running { p.muted { "The container is stopped: history up to when it stopped is shown below." } }
+            (history_note(&cpu, range, now, base, Tab::Metrics))
             h3.cd-group { "CPU" }
             div.charts.two {
                 (chart("CPU", Unit::Percent, "--ch-cpu", &cpu))
-                (chart("Throttled periods", Unit::Percent, "--ch-cpu", &x(XMetric::Throttled, Agg::Max)))
+                (quiet("Throttled periods", Unit::Percent, "--ch-cpu", &x(XMetric::Throttled, Agg::Max)))
             }
             h3.cd-group { "Memory" }
             div.charts.two {
@@ -406,7 +540,7 @@ fn metrics_tab(
                 @if mem_of_limit.is_some() {
                     (chart("Page cache", Unit::Bytes, "--ch-mem", &x(XMetric::Cache, Agg::Avg)))
                 } @else {
-                    (chart("OOM kills (this run)", Unit::Plain, "--bad", &x(XMetric::OomKills, Agg::Max)))
+                    (quiet("OOM kills (this run)", Unit::Plain, "--bad", &x(XMetric::OomKills, Agg::Max)))
                 }
             }
             h3.cd-group { "Network" }
@@ -420,13 +554,15 @@ fn metrics_tab(
             }
             h3.cd-group { "Disk and processes" }
             div.charts.two {
-                (chart("Block read", Unit::BytesPerSec, "--ch-rx", &x(XMetric::BlkRead, Agg::Avg)))
-                (chart("Block write", Unit::BytesPerSec, "--ch-tx", &x(XMetric::BlkWrite, Agg::Avg)))
+                (quiet("Block read", Unit::BytesPerSec, "--ch-rx", &x(XMetric::BlkRead, Agg::Avg)))
+                (quiet("Block write", Unit::BytesPerSec, "--ch-tx", &x(XMetric::BlkWrite, Agg::Avg)))
                 (chart("PIDs", Unit::Plain, "--ch-cpu", &x(XMetric::Pids, Agg::Max)))
                 @if mem_of_limit.is_some() {
-                    (chart("OOM kills (this run)", Unit::Plain, "--bad", &x(XMetric::OomKills, Agg::Max)))
+                    (quiet("OOM kills (this run)", Unit::Plain, "--bad", &x(XMetric::OomKills, Agg::Max)))
                 }
             }
+            @let z = zeroed.borrow();
+            @if !z.is_empty() { p.muted.small.cd-zero { "Zero over this range: " (z.join(", ")) "." } }
             (crate::logs::level_chart(ctx.state, &c.name, range))
         }
     }
@@ -466,6 +602,23 @@ fn kv_row(k: &str, v: Markup) -> Markup {
     html! { dt { (k) } dd { (v) } }
 }
 
+/// A value redacted for a visitor is one muted "Sign in to view" link, the
+/// same on every row of the tab, never the placeholder in quotes (OV-56).
+fn hidden_or(v: &str, signin: &str) -> Markup {
+    if v == HIDDEN {
+        html! { a.cd-hidden href=(signin) { "Sign in to view" } }
+    } else {
+        html! { (v) }
+    }
+}
+
+fn cmd_or(v: &Option<Vec<String>>, signin: &str) -> Markup {
+    match v.as_deref() {
+        Some([one]) if one == HIDDEN => hidden_or(one, signin),
+        _ => mono_or_none(&join_cmd(v)),
+    }
+}
+
 fn mono_or_none(s: &str) -> Markup {
     if s.is_empty() {
         html! { span.muted { "none" } }
@@ -488,6 +641,10 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
     let digests = crate::docker::image_digests_blocking(&ctx.state.env.docker_socket, &i.image)
         .unwrap_or_default();
     let signed_in = ctx.user.is_some();
+    let signin = format!(
+        "/login?next={}",
+        url_encode(&format!("{}?tab=inspect", ctx.path))
+    );
     let h = &i.host_config;
     let cpus = if h.nano_cpus > 0 {
         format!("{:.2}", h.nano_cpus as f64 / 1e9)
@@ -506,6 +663,9 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
     let rp = h.restart_policy.clone().unwrap_or_default();
     let env_keys = i.config.env_keys();
     let nets: Vec<_> = i.network_settings.networks.iter().flatten().collect();
+    // Mounts: one pill per row in one style, in a stable order (OV-55).
+    let mut mounts: Vec<_> = i.mounts.iter().collect();
+    mounts.sort_by(|a, b| a.destination.cmp(&b.destination));
     let started = crate::docker::parse_rfc3339(&i.state.started_at);
     let finished = crate::docker::parse_rfc3339(&i.state.finished_at);
     html! {
@@ -519,8 +679,8 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
                         @if digests.is_empty() { span.muted { "none (built locally)" } }
                         @for d in &digests { code { (d) } br; }
                     }))
-                    (kv_row("Command", mono_or_none(&join_cmd(&i.config.cmd))))
-                    (kv_row("Entrypoint", mono_or_none(&join_cmd(&i.config.entrypoint))))
+                    (kv_row("Command", cmd_or(&i.config.cmd, &signin)))
+                    (kv_row("Entrypoint", cmd_or(&i.config.entrypoint, &signin)))
                     (kv_row("Working dir", mono_or_none(&i.config.working_dir)))
                     (kv_row("User", if i.config.user.is_empty() { html! { span.muted { "image default (often root)" } } } else { html! { code { (i.config.user) } } }))
                 }
@@ -563,14 +723,14 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
         section.panel aria-label="Networks" {
             (panel_head("Networks", None))
             @if nets.is_empty() { p.muted { "Not attached to any network." } } @else {
-                div.cd-scroll { table.tbl.small {
+                div.cd-scroll { table.tbl.small.cd-stack {
                     thead { tr { th scope="col" { "Network" } th scope="col" { "IP" } th scope="col" { "Gateway" } th scope="col" { "MAC" } th scope="col" { "Aliases" } } }
                     tbody { @for (n, e) in &nets { tr {
-                        td.mono { (n) }
-                        td.mono { (e.ip_address) @if !e.ipv6_address.is_empty() { br; (e.ipv6_address) } }
-                        td.mono { (e.gateway) }
-                        td.mono { (e.mac_address) }
-                        td.mono { (e.aliases.as_deref().unwrap_or(&[]).join(", ")) }
+                        td.mono data-l="Network" { (n) }
+                        td.mono data-l="IP" { (e.ip_address) @if !e.ipv6_address.is_empty() { br; (e.ipv6_address) } }
+                        td.mono data-l="Gateway" { (e.gateway) }
+                        td.mono data-l="MAC" { (e.mac_address) }
+                        td.mono data-l="Aliases" { (e.aliases.as_deref().unwrap_or(&[]).join(", ")) }
                     } } }
                 } }
             }
@@ -578,13 +738,16 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
         section.panel aria-label="Mounts" {
             (panel_head("Mounts", None))
             @if i.mounts.is_empty() { p.muted { "No mounts." } } @else {
-                div.cd-scroll { table.tbl.small {
+                div.cd-scroll { table.tbl.small.cd-stack {
                     thead { tr { th scope="col" { "Type" } th scope="col" { "Source" } th scope="col" { "Destination" } th scope="col" { "Mode" } } }
-                    tbody { @for m in &i.mounts { tr {
-                        td { (m.kind) }
-                        td.mono { @if m.kind == "volume" && !m.name.is_empty() { (m.name) } @else { (m.source) } }
-                        td.mono { (m.destination) }
-                        td { @if m.rw { "read-write" } @else { (pill("ok", "read-only")) } @if !m.mode.is_empty() { span.muted.mono { " " (m.mode) } } }
+                    tbody { @for m in &mounts { tr {
+                        td data-l="Type" { (m.kind) }
+                        td.mono data-l="Source" { @if m.kind == "volume" && !m.name.is_empty() { (m.name) } @else { (hidden_or(&m.source, &signin)) } }
+                        td.mono data-l="Destination" { (m.destination) }
+                        td data-l="Mode" {
+                            (pill("", if m.rw { "read-write" } else { "read-only" }))
+                            @if !matches!(m.mode.as_str(), "" | "ro" | "rw") { span.muted.mono { " " (m.mode) } }
+                        }
                     } } }
                 } }
             }
@@ -595,7 +758,7 @@ pub fn inspect_tab(ctx: &Ctx, c: &Container, ins: &Result<Inspect, String>) -> M
                 @if signed_in && !env_keys.is_empty() {
                     button.btn.sm type="button" #cd-reveal data-url={"/api/containers/" (url_encode(&c.name)) "/env"} aria-pressed="false" { (ic("lock")) "Reveal values" }
                 } @else if !env_keys.is_empty() {
-                    a.more href={"/login?next=" (url_encode(ctx.path)) (url_encode("?tab=inspect"))} { "Sign in to reveal" }
+                    a.more href=(signin) { "Sign in to view" }
                 }
             }
             @if env_keys.is_empty() { p.muted { "No environment variables." } } @else {
@@ -627,6 +790,10 @@ fn health_panel(ctx: &Ctx, i: &Inspect) -> Markup {
     let hc = i.config.healthcheck.as_ref();
     let test = hc.map(|h| join_cmd(&h.test)).unwrap_or_default();
     let disabled = test.starts_with("NONE");
+    let signin = format!(
+        "/login?next={}",
+        url_encode(&format!("{}?tab=inspect", ctx.path))
+    );
     let logs: Vec<&HealthLog> = i
         .state
         .health
@@ -641,7 +808,7 @@ fn health_panel(ctx: &Ctx, i: &Inspect) -> Markup {
                 None => p.muted { "No health check configured." },
                 Some(h) => {
                     dl.kv.cd-kv {
-                        (kv_row("Test", html! { code { (test) } }))
+                        (kv_row("Test", cmd_or(&h.test, &signin)))
                         (kv_row("Timing", html! { "every " (ns(h.interval)) " · timeout " (ns(h.timeout)) " · start period " (ns(h.start_period)) " · " (if h.retries > 0 { h.retries } else { 3 }) " retries" }))
                         @if let Some(st) = &i.state.health {
                             (kv_row("Status", html! { (pill(match st.status.as_str() { "healthy" => "ok", "unhealthy" => "bad", _ => "warn" }, &st.status))
@@ -661,7 +828,8 @@ fn health_panel(ctx: &Ctx, i: &Inspect) -> Markup {
                                         }
                                     }
                                     @let out = truncate(l.output.trim(), HEALTH_OUTPUT_MAX);
-                                    @if out.is_empty() { p.muted.small { "(no output)" } } @else { pre.cd-out { (out) } }
+                                    @if out == HIDDEN { p.small { (hidden_or(&out, &signin)) } }
+                                    @else if out.is_empty() { p.muted.small { "(no output)" } } @else { pre.cd-out { (out) } }
                                 }
                             }
                         }
@@ -764,16 +932,31 @@ pub fn processes_view(
         sort_rows(&mut rows, col, desc);
     }
     let rss = t.titles.iter().position(|h| h == "RSS");
+    // Numbers (CPU, memory, RSS, VSZ, PIDs) are right-aligned under
+    // right-aligned headers, in one face (OV-60).
+    let numeric: Vec<bool> = (0..t.titles.len())
+        .map(|n| {
+            !rows.is_empty()
+                && rows.iter().all(|r| {
+                    r.get(n)
+                        .is_some_and(|v| v.trim().trim_end_matches('%').parse::<f64>().is_ok())
+                })
+        })
+        .collect();
+    let last = t.titles.len().saturating_sub(1);
+    let n_rows = rows.len();
     html! {
         section.panel aria-label="Processes" {
-            (panel_head(&format!("{} processes", rows.len()), None))
+            (panel_head(&format!("{n_rows} {}", if n_rows == 1 { "process" } else { "processes" }), None))
             div.cd-scroll {
-                table.tbl.small.cd-procs {
+                // Phones: each process is a block, its command line first and
+                // wrapped (OV-58).
+                table.tbl.small.cd-procs.cd-stack {
                     thead { tr {
                         @for (n, h) in t.titles.iter().enumerate() {
                             @let here = col == Some(n);
                             @let next = if here && desc { "asc" } else { "desc" };
-                            th scope="col" aria-sort=[here.then_some(if desc { "descending" } else { "ascending" })] {
+                            th.num[numeric[n]] scope="col" aria-sort=[here.then_some(if desc { "descending" } else { "ascending" })] {
                                 a href={(base) "?tab=processes&sort=" (n) "&dir=" (next)} {
                                     (h) @if here { span aria-hidden="true" { (if desc { " ↓" } else { " ↑" }) } }
                                 }
@@ -783,12 +966,13 @@ pub fn processes_view(
                     tbody {
                         @for r in &rows { tr {
                             @for (n, v) in r.iter().enumerate() {
+                                @let l = t.titles.get(n).map_or("", String::as_str);
                                 @if Some(n) == rss {
-                                    td.num title=(v) { (v.parse::<u64>().map(|k| human_bytes(k * 1024)).unwrap_or_else(|_| v.clone())) }
-                                } @else if n + 1 == r.len() {
-                                    td.mono.cd-args { (v) }
+                                    td.mono.num data-l=(l) title=(v) { (v.parse::<u64>().map(|k| human_bytes(k * 1024)).unwrap_or_else(|_| v.clone())) }
+                                } @else if n == last {
+                                    td.mono.cd-args data-l=(l) { (v) }
                                 } @else {
-                                    td.mono { (v) }
+                                    td.mono.num[numeric.get(n) == Some(&true)] data-l=(l) { (v) }
                                 }
                             }
                         } }
@@ -875,20 +1059,28 @@ fn events_tab(ctx: &Ctx, c: &Container, q: &[(String, String)], base: &str) -> M
         section.panel aria-label="Events" {
             div.panel-h {
                 h2 { "Events" }
-                nav.seg aria-label="Kind" {
-                    @for k in EVENT_KINDS {
-                        a href={(base) "?tab=events&kind=" (k.0)} aria-current=[(k.0 == kind.0).then_some("true")] { (k.1) }
+                // Nothing recorded at all: no filters over an empty list (OV-62).
+                @if !(events.is_empty() && kind.0 == "all" && before.is_none()) {
+                    nav.seg aria-label="Kind" {
+                        @for k in EVENT_KINDS {
+                            a href={(base) "?tab=events&kind=" (k.0)} aria-current=[(k.0 == kind.0).then_some("true")] { (k.1) }
+                        }
                     }
                 }
             }
             @if events.is_empty() {
-                p.muted {
-                    @if !ctx.state.db.is_enabled() { "History is off, so no events are recorded." }
-                    @else if before.is_some() { "No older events." }
-                    @else { "No " (kind.1.to_lowercase()) " events recorded for this container." }
+                // OV-61: the filter's name is never pasted into a sentence.
+                @if !ctx.state.db.is_enabled() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "History is off", html! { "No events are recorded while history is off." }, None))
+                } @else if before.is_some() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "No older events", html! { "This is where the recorded history of this container starts." }, None))
+                } @else if kind.2.is_empty() {
+                    (crate::ui::empty(crate::ui::Empty::First, "compact", "history", "No events yet", html! { "Starts, stops, health changes and alerts of this container appear here." }, None))
+                } @else {
+                    (crate::ui::empty(crate::ui::Empty::NoMatch, "compact", "search", "None of this kind", html! { "Nothing of this kind was recorded for this container. " a href={(base) "?tab=events"} { "Show all events" } }, None))
                 }
             } @else {
-                ul.events { @for e in &events { (event_row(ctx.now, e, false)) } }
+                ul.events { @for e in &events { (event_row(ctx.now, e, false, None)) } }
                 @if events.len() == PAGE {
                     @if let Some(last) = events.last() {
                         p { a.btn.sm href={(base) "?tab=events&kind=" (kind.0) "&before=" (last.id)} { "Older" } }
@@ -923,24 +1115,74 @@ pub fn exit_meaning(code: i64) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Why {
+    /// What is wrong apart from a failing health check ("" when that is all).
     pub text: String,
     /// When it happened (unix s), for the logs link.
     pub ts: Option<i64>,
+    /// A failing health check: since when, how many in a row, the probes.
+    pub health: Option<HealthWhy>,
 }
 
-/// The newest `container.health` event for `name` if it says unhealthy.
-fn last_unhealthy_event(ctx: &Ctx, name: &str) -> Option<i64> {
-    ctx.state
-        .db
-        .events(&EventFilter {
-            subject: Some(name.to_string()),
-            kind_prefix: Some("container.health".into()),
+/// A failing health check (NAV-11). `probes` carry Docker's last checks,
+/// newest first, **output included only when the viewer is signed in**
+/// (the anonymous `Inspect` is redacted, and the page renders no output
+/// without a session either).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HealthWhy {
+    pub since: Option<i64>,
+    pub streak: i64,
+    /// (start, exit code, output), newest first, at most five.
+    pub probes: Vec<(Option<i64>, i64, String)>,
+}
+
+/// The first line of the newest failing health probe's output (cut to 120
+/// characters), if the last probe failed and said something. Probe output
+/// can carry secrets: **for a session only** (an anonymous `Inspect` has it
+/// redacted already, and callers check the session as well).
+pub fn probe_line(i: &Inspect) -> Option<String> {
+    let logs = i.state.health.as_ref()?.log.as_deref()?;
+    let last = logs.last().filter(|l| l.exit_code != 0)?;
+    let line = last.output.trim().lines().next()?.trim();
+    (!line.is_empty()).then(|| truncate(line, 120))
+}
+
+/// Since when `c` has been unhealthy, from the event log, or `None` when
+/// the newest stored health event does not say "unhealthy". Never earlier
+/// than this run of the container: the recorder stores a health event only
+/// when it differs from the last one stored for the name, so a container
+/// recreated (or restarted) under the same name that turns unhealthy again
+/// finds the previous one's "unhealthy" event. The answer is clamped to
+/// the container's start (`started`, from an inspect, or else its creation
+/// time) and to any `container.start` event newer than that health event.
+/// One query; the Overview and the container page both use it.
+pub fn unhealthy_since(db: &crate::db::Db, c: &Container, started: Option<i64>) -> Option<i64> {
+    // Health and start events are looked up separately: a container that is
+    // recreated often has more start and die events than any fixed window
+    // since its last recorded health change.
+    let newest = |kind: &str| {
+        db.events(&EventFilter {
+            subject: Some(c.name.clone()),
+            kind_prefix: Some(kind.into()),
             limit: 1,
             ..Default::default()
         })
-        .first()
-        .filter(|e| e.detail == "unhealthy")
-        .map(|e| e.ts)
+        .into_iter()
+        .next()
+    };
+    let health = match newest("container.health") {
+        Some(h) if h.detail != "unhealthy" => return None,
+        Some(h) => h.ts,
+        // No health event on record: only a container that is unhealthy
+        // right now has a since-time, counted from its own start.
+        None if c.health.as_deref() == Some("unhealthy") => 0,
+        None => return None,
+    };
+    let restarted = newest("container.start").map_or(0, |e| e.ts);
+    let since = health
+        .max(restarted)
+        .max(started.unwrap_or(0))
+        .max(c.created);
+    (since > 0).then_some(since)
 }
 
 /// One line on what is wrong, or `None` when nothing is. `unhealthy_since`
@@ -954,6 +1196,7 @@ pub fn why_red(
 ) -> Option<Why> {
     let mut parts: Vec<String> = Vec::new();
     let mut ts = None;
+    let mut hw = None;
     let st = ins.map(|i| &i.state);
     let running = c.is_running();
     if st.is_some_and(|s| s.oom_killed) && !running {
@@ -981,28 +1224,31 @@ pub fn why_red(
         let first = run
             .last()
             .and_then(|l| crate::docker::parse_rfc3339(&l.start));
-        let since = unhealthy_since.or(first);
-        let streak = health.map_or(0, |h| h.failing_streak);
-        let mut t = String::from("Health check failing");
-        if let Some(s) = since {
-            t.push_str(&format!(
-                " since {} ({} ago)",
-                short_utc(s.max(0) as u64),
-                human_duration((now - s).max(0) as u64)
-            ));
-        }
-        if streak > 0 {
-            t.push_str(&format!(", {streak} in a row"));
-        }
-        if let Some(out) = run
-            .first()
-            .map(|l| l.output.trim())
-            .filter(|o| !o.is_empty())
-        {
-            let line = out.lines().next().unwrap_or("");
-            t.push_str(&format!(": {}", truncate(line, 120)));
-        }
-        parts.push(t);
+        // Never before this run of the container (a failing run in the
+        // log can predate a restart by a probe).
+        let start = st
+            .and_then(|s| crate::docker::parse_rfc3339(&s.started_at))
+            .unwrap_or(0)
+            .max(c.created);
+        let since = unhealthy_since.or(first).map(|s| s.max(start));
+        let streak = health.map_or(0, |h| h.failing_streak as i64);
+        let probes = logs
+            .iter()
+            .rev()
+            .take(HEALTH_LOGS)
+            .map(|l| {
+                (
+                    crate::docker::parse_rfc3339(&l.start),
+                    l.exit_code,
+                    l.output.clone(),
+                )
+            })
+            .collect();
+        hw = Some(HealthWhy {
+            since,
+            streak,
+            probes,
+        });
         ts = ts.or(since);
     }
     if starts_10m >= 3
@@ -1021,12 +1267,13 @@ pub fn why_red(
         parts.push(format!("Restart loop: {n} restarts in 10 min"));
         ts = ts.or_else(|| c.die_times.iter().max().map(|t| *t as i64));
     }
-    if parts.is_empty() {
+    if parts.is_empty() && hw.is_none() {
         return None;
     }
     Some(Why {
         text: parts.join(" · "),
         ts,
+        health: hw,
     })
 }
 
@@ -1114,16 +1361,7 @@ fn live_data(groups: &[GroupView]) -> (String, serde_json::Map<String, serde_jso
     for g in groups {
         g.name.hash(&mut h);
         for c in g.cards.iter().filter(|c| c.container) {
-            (
-                &c.name,
-                &c.title,
-                c.label,
-                &c.state_text,
-                &c.image,
-                &c.url,
-                &c.logs_url,
-            )
-                .hash(&mut h);
+            (&c.name, &c.title, c.label, &c.state_text, &c.image, &c.url).hash(&mut h);
             (c.restarts, c.exit_code, c.cpu.is_some()).hash(&mut h);
             for p in &c.ports {
                 (&p.label, &p.url, p.local).hash(&mut h);
@@ -1145,14 +1383,30 @@ fn live_data(groups: &[GroupView]) -> (String, serde_json::Map<String, serde_jso
     (format!("{:016x}", h.finish()), m)
 }
 
-fn head_live(card: &CardView, c: &Container, restarts_7d: Option<u32>) -> Markup {
+fn head_live(
+    card: &CardView,
+    c: &Container,
+    restarts_7d: Option<u32>,
+    [cpu_hist, mem_hist]: [Option<String>; 2],
+) -> Markup {
     let dot = card.dot.map(|d| d.class()).unwrap_or("off");
+    // With a health check, State says running and Health says healthy or
+    // not; without one there is no Health tile and four tiles fill the
+    // grid (OV-42, OV-46). The script keeps the same split live.
+    let health = c
+        .health
+        .as_deref()
+        .filter(|h| !h.is_empty() && *h != "none");
+    let (state_word, state_dot) = match health {
+        Some(_) if c.is_running() => ("running", "ok"),
+        _ => (card.label, dot),
+    };
     html! {
-        section.strip.facts data-cd-name=(c.name) aria-label="Status" {
+        section.strip.facts.n4[health.is_none()] data-cd-name=(c.name) aria-label="Status" {
             div.cell {
                 div.cell-h { span.label { "State" } }
                 div.big {
-                    span class={"st-l lg " (dot)} data-cd="l" { (card.label) }
+                    span class={"st-l lg " (state_dot)} data-cd="l" data-run[health.is_some()] { (state_word) }
                 }
                 div.sub data-cd="s" { (card.state_text.as_deref().unwrap_or("")) }
             }
@@ -1160,27 +1414,29 @@ fn head_live(card: &CardView, c: &Container, restarts_7d: Option<u32>) -> Markup
                 div.cell-h { (ic("cpu")) span.label { "CPU" } }
                 div.big.num data-cd="c" { @match card.cpu { Some(v) => (pct(v)), None => { "—" } } }
                 div.sub { "of one core" }
-                (live_spark(&format!("c:{}:cpu", c.name), card.cpu, "--ch-cpu", None))
+                (live_spark(&format!("c:{}:cpu", c.name), card.cpu, "--ch-cpu", cpu_hist))
             }
             div.cell {
                 div.cell-h { (ic("memory")) span.label { "Memory" } }
                 div.big.num data-cd="m" { @match card.mem { Some(m) => (human_bytes(m)), None => { "—" } } }
                 div.sub { "resident" }
-                (live_spark(&format!("c:{}:mem", c.name), card.mem.map(|m| m as f64), "--ch-mem", None))
+                (live_spark(&format!("c:{}:mem", c.name), card.mem.map(|m| m as f64), "--ch-mem", mem_hist))
             }
             div.cell {
-                div.cell-h { (ic("refresh")) span.label { "Exits, last hour" } }
+                div.cell-h { (ic("refresh")) span.label { "Restarts (1 h)" } }
                 div.big.num { (c.die_times.len()) }
                 div.sub {
-                    @if let Some(n) = restarts_7d { (n) " starts in 7 days" }
+                    @if let Some(n) = restarts_7d { (n) (if n == 1 { " start" } else { " starts" }) " in 7 days" }
                     @else if let Some(code) = card.exit_code { "last exit code " (code) }
-                    @else { "since the app started watching" }
+                    @else { "exits in the last hour" }
                 }
             }
-            div.cell {
-                div.cell-h { (ic("activity")) span.label { "Health check" } }
-                div.big { (c.health.as_deref().unwrap_or("none")) }
-                div.sub { "id " code { (c.id.chars().take(12).collect::<String>()) } }
+            @if let Some(h) = health {
+                div.cell {
+                    div.cell-h { (ic("activity")) span.label { "Health check" } }
+                    div.big { span class={"st-l lg " (dot)} data-cd="h" { (h) } }
+                    div.sub { "Docker health check" }
+                }
             }
         }
     }
@@ -1191,14 +1447,16 @@ fn ports_table(c: &Container, host: &str) -> Markup {
         return html! { p.muted { "No published ports." } };
     }
     html! {
-        table.tbl.small {
+        // Phones: each row stacks into label / value lines and long links
+        // wrap, so the table never widens the page (OV-40).
+        table.tbl.small.cd-stack {
             thead { tr { th scope="col" { "Host" } th scope="col" { "Container" } th scope="col" { "Link" } } }
             tbody {
                 @for p in &c.ports {
                     tr {
-                        td.mono { (if p.host_ip.is_empty() { "*" } else { p.host_ip.as_str() }) ":" (p.host_port) }
-                        td.mono { (p.container_port) "/" (p.proto) }
-                        td {
+                        td.mono data-l="Host" { (if p.host_ip.is_empty() { "*" } else { p.host_ip.as_str() }) ":" (p.host_port) }
+                        td.mono data-l="Container" { (p.container_port) "/" (p.proto) }
+                        td data-l="Link" {
                             @match binding_link(p, host) {
                                 Ok(u) => a.mono href=(u) target="_blank" rel="noopener noreferrer" { (u) },
                                 Err(why) => span.muted { (why) },
@@ -1218,15 +1476,42 @@ fn labels_panel(c: &Container) -> Markup {
             @if c.labels.is_empty() {
                 p.muted { "No labels." }
             } @else {
-                dl.kv {
-                    @for (k, v) in &c.labels {
-                        dt.mono { (k) }
-                        dd.mono { (v) }
+                // Compose and image bookkeeping (hashes, paths, versions) is
+                // behind a disclosure; the labels someone set stay in view (OV-44).
+                @let (book, own): (Vec<_>, Vec<_>) = c.labels.iter().partition(|(k, _)| is_bookkeeping_label(k));
+                @if !own.is_empty() {
+                    dl.kv {
+                        @for (k, v) in &own {
+                            dt.mono { (k) }
+                            dd.mono { (v) }
+                        }
+                    }
+                }
+                @if !book.is_empty() {
+                    details.cd-labels open[own.is_empty() && book.len() <= 3] {
+                        summary { (book.len()) " Compose and image " (if book.len() == 1 { "label" } else { "labels" }) }
+                        dl.kv {
+                            @for (k, v) in &book {
+                                dt.mono { (k) }
+                                dd.mono { (v) }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// Labels Docker Compose and image builds add on their own.
+fn is_bookkeeping_label(k: &str) -> bool {
+    [
+        "com.docker.compose.",
+        "org.opencontainers.image.",
+        "com.docker.desktop.",
+    ]
+    .iter()
+    .any(|p| k.starts_with(p))
 }
 
 /// Container alert rules that cover `name` (same include/exclude globs the
@@ -1256,7 +1541,8 @@ fn rules_panel(ctx: &Ctx, c: &Container) -> Markup {
             @if rules.is_empty() {
                 p.muted { "No alert rule covers this container." }
             } @else {
-                ul.rows {
+                // What a rule watches wraps instead of being cut (OV-45).
+                ul.rows.cd-rules {
                     @for r in rules {
                         @let firing = status.incidents.iter().find(|i| i.rule == r.name && i.subject == c.name);
                         li {
@@ -1552,6 +1838,32 @@ above = 90
         }
     }
 
+    /// OV-56: signed out, every redacted value is the same "Sign in to view"
+    /// link (never the quoted placeholder); OV-55: one mode pill per mount,
+    /// in destination order.
+    #[test]
+    fn redacted_values_are_sign_in_links() {
+        let st = state_with(sample(), "");
+        let i: Result<Inspect, String> = Ok(redact_for_anonymous(ins()));
+        let html = inspect_tab(&ctx_for(&st, "tab=inspect", false), &sample()[0], &i).into_string();
+        assert!(!html.contains(HIDDEN), "{html}");
+        assert!(
+            html.matches(">Sign in to view</a>").count() >= 3,
+            "command, entrypoint, test"
+        );
+        assert!(!html.contains("Sign in to reveal"));
+        let signed =
+            inspect_tab(&ctx_for(&st, "tab=inspect", true), &sample()[0], &Ok(ins())).into_string();
+        assert!(!signed.contains("Sign in to view") && signed.contains("serve --port 8080"));
+        let mounts = &signed[signed.find("aria-label=\"Mounts\"").unwrap()..];
+        let mounts = &mounts[..mounts.find("</section>").unwrap()];
+        assert_eq!(mounts.matches("class=\"pill").count(), 2, "{mounts}");
+        assert!(
+            !mounts.contains(" ro<") && !mounts.contains(" rw<"),
+            "{mounts}"
+        );
+    }
+
     #[test]
     fn env_api_needs_a_session() {
         let st = state_with(sample(), "");
@@ -1669,6 +1981,163 @@ above = 90
             .contains("boom"));
     }
 
+    /// "Why is this red?": signed in, the probe's first line and the last
+    /// checks; signed out, since when and how many, a sign-in link, and no
+    /// probe output anywhere (NAV-11).
+    #[test]
+    fn why_note_shows_probe_output_to_a_session_only() {
+        let st = state_with(sample(), "");
+        let c = sample()[0].clone();
+        let w = Why {
+            text: String::new(),
+            ts: Some(1_794_646_800),
+            health: Some(HealthWhy {
+                since: Some(1_794_646_800),
+                streak: 6,
+                probes: vec![
+                    (
+                        Some(1_794_646_900),
+                        1,
+                        "Sekrit-probe: <refused>\nmore".into(),
+                    ),
+                    (Some(1_794_646_870), 0, "ok".into()),
+                ],
+            }),
+        };
+        let mut ctx = Ctx::live(&st, "h");
+        ctx.now = 1_794_646_800 + 2460;
+        let out = why_note(&ctx, &c, &w, "/containers/x/logs").into_string();
+        assert!(out.contains("Health check failing since <time"), "{out}");
+        assert!(out.contains("(41m ago), 6 in a row. "), "{out}");
+        assert!(
+            out.contains("Sign in to see the check&#39;s output.")
+                || out.contains("Sign in to see the check's output."),
+            "{out}"
+        );
+        assert!(
+            !out.contains("Sekrit") && !out.contains("refused") && !out.contains("cd-probes"),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"href="/containers/x/logs#t=1794646800000""#)
+                && out.contains("Logs around <time"),
+            "{out}"
+        );
+        ctx.user = Some("admin".into());
+        let out = why_note(&ctx, &c, &w, "/containers/x/logs").into_string();
+        assert!(
+            out.contains(r#": <code class="probe">Sekrit-probe: &lt;refused&gt;</code>"#),
+            "{out}"
+        );
+        assert!(
+            out.contains("Last 2 checks") && out.contains("exit 1") && !out.contains("Sign in"),
+            "{out}"
+        );
+    }
+
+    /// A container recreated many times has more start and die events than
+    /// health events; its since-time is still found, from its newest start.
+    #[test]
+    fn unhealthy_since_survives_many_restarts() {
+        let st = state_with(sample(), "");
+        let ev = |action: &str, time: u64, detail: Option<&str>| crate::docker::Event {
+            action: action.into(),
+            name: Some("web".into()),
+            time,
+            detail: detail.map(Into::into),
+        };
+        let t0: u64 = 1_794_600_000;
+        let mut c = sample()[0].clone();
+        c.health = Some("unhealthy".into());
+        c.created = t0 as i64 - 10;
+        crate::db::record_docker_event(&st.db, &ev("health_status", t0, Some("unhealthy")));
+        // Recreated thirty times; the recorder keeps no second "unhealthy".
+        for i in 0..30u64 {
+            crate::db::record_docker_event(&st.db, &ev("die", t0 + 100 * i + 50, Some("137")));
+            crate::db::record_docker_event(&st.db, &ev("start", t0 + 100 * i + 60, None));
+        }
+        let last_start = (t0 + 100 * 29 + 60) as i64;
+        c.created = last_start - 1;
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(last_start));
+        // Not unhealthy and nothing on record: no since-time.
+        let st2 = state_with(sample(), "");
+        let mut ok = sample()[0].clone();
+        ok.health = Some("healthy".into());
+        assert_eq!(unhealthy_since(&st2.db, &ok, None), None);
+        ok.health = Some("unhealthy".into());
+        ok.created = 1234;
+        assert_eq!(unhealthy_since(&st2.db, &ok, None), Some(1234));
+    }
+
+    /// A container recreated under the same name that turns unhealthy again
+    /// gets no new "unhealthy" event (the recorder stores a health event
+    /// only when it differs from the last one for the name): the since-time
+    /// never predates the new container's start, on the Overview or here.
+    #[test]
+    fn unhealthy_since_never_predates_a_recreated_container() {
+        let st = state_with(sample(), "");
+        let ev = |action: &str, time: u64, detail: Option<&str>| crate::docker::Event {
+            action: action.into(),
+            name: Some("web".into()),
+            time,
+            detail: detail.map(Into::into),
+        };
+        let t0: u64 = 1_794_600_000;
+        let mut c = sample()[0].clone();
+        c.health = Some("unhealthy".into());
+        c.created = t0 as i64 - 10;
+        crate::db::record_docker_event(&st.db, &ev("start", t0, None));
+        crate::db::record_docker_event(&st.db, &ev("health_status", t0 + 60, Some("unhealthy")));
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(t0 as i64 + 60));
+        // Two hours later it is removed and created again, and fails again.
+        let t1 = t0 + 7200;
+        crate::db::record_docker_event(&st.db, &ev("die", t1 - 20, Some("137")));
+        crate::db::record_docker_event(&st.db, &ev("start", t1, None));
+        crate::db::record_docker_event(&st.db, &ev("health_status", t1 + 30, Some("unhealthy")));
+        let health: Vec<i64> = st
+            .db
+            .events(&EventFilter {
+                subject: Some("web".into()),
+                kind_prefix: Some("container.health".into()),
+                ..Default::default()
+            })
+            .iter()
+            .map(|e| e.ts)
+            .collect();
+        assert_eq!(
+            health,
+            vec![t0 as i64 + 60],
+            "the recorder skipped the second one"
+        );
+        c.created = t1 as i64 - 5;
+        let now = t1 as i64 + 180;
+        assert_eq!(unhealthy_since(&st.db, &c, None), Some(t1 as i64));
+        // Without the start event (missed), the creation time still bounds it.
+        let st2 = state_with(sample(), "");
+        crate::db::record_docker_event(&st2.db, &ev("health_status", t0 + 60, Some("unhealthy")));
+        assert_eq!(unhealthy_since(&st2.db, &c, None), Some(c.created));
+        // And an inspect's StartedAt, when there is one.
+        assert_eq!(
+            unhealthy_since(&st2.db, &c, Some(t1 as i64 + 2)),
+            Some(t1 as i64 + 2)
+        );
+        // The Overview row: "unhealthy for 3m", not "for 2h 3m".
+        let ctx = {
+            let mut x = Ctx::live(&st, "h");
+            x.now = now as u64;
+            x
+        };
+        let mut v = crate::ui::pages::overview::Live::new(&ctx);
+        let mut snap = (*v.snap).clone();
+        snap.containers = vec![c.clone()];
+        v.snap = Arc::new(snap);
+        let v = v.with_since(&ctx);
+        assert_eq!(v.unhealthy_since.get("web"), Some(&(t1 as i64)));
+        // The container page: since the new container's start, not 2h ago.
+        let w = why_red(&c, None, 0, unhealthy_since(&st.db, &c, None), now).unwrap();
+        assert_eq!(w.health.unwrap().since, Some(t1 as i64));
+    }
+
     #[test]
     fn why_is_this_red() {
         let now = 1_794_650_000;
@@ -1678,17 +2147,25 @@ above = 90
         // Unhealthy: since when, streak, last output.
         c.health = Some("unhealthy".into());
         let w = why_red(&c, Some(&ins()), 0, None, now).unwrap();
+        let h = w.health.as_ref().expect("a failing health check");
+        assert_eq!(w.text, "", "nothing else is wrong");
+        assert_eq!(h.streak, 4);
+        assert_eq!(h.since, Some(1_794_646_800));
         assert!(
-            w.text.starts_with("Health check failing since"),
-            "{}",
-            w.text
+            h.probes.len() <= 5 && h.probes[0].2.contains("<b>connection refused</b> on :8080"),
+            "{h:?}"
         );
-        assert!(w.text.contains("4 in a row"));
-        assert!(w.text.contains("<b>connection refused</b> on :8080"));
         assert_eq!(w.ts, Some(1_794_646_800)); // 10:00 +01:00, start of the failing run
                                                // The database event wins when there is one.
+        let w = why_red(&c, Some(&ins()), 0, Some(now - 600), now).unwrap();
+        assert_eq!(w.ts, Some(now - 600));
+        // ... but never one from before this run of the container.
         let w = why_red(&c, Some(&ins()), 0, Some(now - 7200), now).unwrap();
-        assert_eq!(w.ts, Some(now - 7200));
+        assert_eq!(
+            w.health.unwrap().since,
+            Some(1_794_646_800),
+            "clamped to StartedAt"
+        );
         // Exited 137 with OOMKilled.
         let mut i = ins();
         i.state.running = false;
@@ -1757,7 +2234,13 @@ above = 90
                 let q = format!("tab={}&range=7d", tab.slug());
                 let ctx = ctx_for(&st, &q, false);
                 let (s, html) = page(&ctx, name);
-                assert_eq!(s, StatusCode::OK, "{name} {tab:?}");
+                if tab == Tab::Logs {
+                    // The Logs tab is the viewer, which needs a sign-in by default.
+                    assert_eq!(s, StatusCode::UNAUTHORIZED, "{name} {tab:?}");
+                    assert!(html.contains("Sign in to read logs"));
+                } else {
+                    assert_eq!(s, StatusCode::OK, "{name} {tab:?}");
+                }
                 assert!(!html.contains(evil), "unescaped name on {tab:?}");
                 assert!(html.contains("aria-current=\"page\""));
                 if tab == Tab::Events && name == evil {

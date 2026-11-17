@@ -26,6 +26,7 @@ pub fn render(ctx: &Ctx) -> (StatusCode, String) {
         "/login" => ok(login::page(ctx)),
         "/host" => crate::host::page(ctx),
         "/logs" => crate::logs::split_page(ctx),
+        "/more" => ok(crate::ui::shell::more_page(ctx)),
         "/settings" | "/settings/" => ok(crate::ui::settings::page(ctx, None).unwrap_or_default()),
         p => {
             if let Some(slug) = p.strip_prefix("/settings/") {
@@ -91,11 +92,12 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
     use crate::ui::shell;
     Some(match event {
         "groups" => {
-            let v = overview::Live::new(ctx);
+            let v = overview::Live::new(ctx).with_since(ctx);
             html! {
                 (shell::tree(&ctx.cfg, &v.snap, &v.groups))
+                (shell::docker_banner(&ctx.cfg, &v.snap))
                 (overview::health(&v))
-                (overview::attention(ctx.now, &v))
+                (overview::attention(&ctx.cfg, ctx.now, &v))
                 (overview::top(&v, ctx.cfg.page.show_stats))
                 (container::live_json(&v.groups))
             }
@@ -108,11 +110,11 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
             }
         }
         "alerts" => {
-            let v = overview::Live::new(ctx);
+            let v = overview::Live::new(ctx).with_since(ctx);
             html! {
                 (shell::nav_alerts(v.status.incidents.len()))
                 (overview::health(&v))
-                (overview::attention(ctx.now, &v))
+                (overview::attention(&ctx.cfg, ctx.now, &v))
                 (alerts::fragment(ctx))
             }
         }
@@ -128,6 +130,30 @@ pub fn bundle(ctx: &Ctx, event: &str) -> Option<Markup> {
 /// The last part of an event kind ("container.die" -> "die").
 pub fn kind_label(kind: &str) -> &str {
     kind.rsplit('.').next().unwrap_or(kind)
+}
+
+/// An event kind in plain words for timelines (OV-05): "container.die" ->
+/// "exited", "app.start" -> "Hobnail started". Unknown kinds fall back to
+/// their last part.
+pub fn event_label(kind: &str) -> &str {
+    match kind {
+        "app.start" => "Hobnail started",
+        "container.start" => "started",
+        "container.die" => "exited",
+        "container.stop" => "stopped",
+        "container.health" => "health",
+        "container.oom" => "out of memory",
+        "alert.fired" => "alert fired",
+        "alert.resolved" => "alert resolved",
+        "alert.delivery_failed" => "delivery failed",
+        "alert.test" => "test sent",
+        "auth.login" => "signed in",
+        "auth.login_failed" => "sign-in failed",
+        "auth.password" | "auth.password_changed" => "password changed",
+        "config.saved" => "config saved",
+        "config.restored" => "config restored",
+        k => kind_label(k),
+    }
 }
 
 /// Said once per page when the history database is off (the charts then
