@@ -97,6 +97,9 @@ pub fn body(ctx: &Ctx) -> Markup {
                     div.sf-foot {
                         button.btn.primary type="submit" disabled data-ready { (ic("check")) "Save" }
                         button.btn type="button" data-act="css-revert" disabled data-ready { (ic("refresh")) "Revert" }
+                        // SET-59: after a save in this page, the text before
+                        // it (a save can keep a broken file, SET-44).
+                        button.btn.ghost type="button" data-act="css-prev" hidden { "Previous version" }
                         span.dlg-msg role="status" {}
                     }
                 },

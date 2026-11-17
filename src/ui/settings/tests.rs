@@ -194,6 +194,10 @@ fn command_widgets_are_read_only_with_no_controls() {
         "{locked}"
     );
     assert!(locked.contains("i-lock"), "lock icon");
+    assert!(
+        locked.contains(r#"<a href="/settings/config">See them in the config file</a>"#),
+        "SET-51: the sentence points at the file"
+    );
     for control in [
         "<button",
         "<input",

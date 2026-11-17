@@ -909,3 +909,39 @@ fn rename_reuses_legacy_database_without_losing_password_or_history() {
     assert_eq!(default_path(dir), current, "new filename has priority");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// The seek History's scan starts from: the newest id at or before a time,
+/// by a bounded binary search over the id (gaps from the cap included).
+#[test]
+fn event_id_at_or_before_seeks_by_id() {
+    let db = Db::open_in_memory().unwrap();
+    assert_eq!(db.event_id_at_or_before(100), None, "empty table");
+    for i in 0..1000 {
+        db.record_event(1_000 + 2 * i, "container.die", "warn", "web", "");
+    }
+    // Gaps in the ids, as the cap leaves them.
+    db.with((), |i| {
+        i.conn
+            .execute_batch("DELETE FROM events WHERE id % 7 = 0 OR (id > 400 AND id < 450)")
+    });
+    let all = db.events(&EventFilter {
+        limit: 500,
+        ..Default::default()
+    });
+    let newest = all[0].id;
+    assert_eq!(db.event_id_at_or_before(999), None, "every event is newer");
+    assert_eq!(db.event_id_at_or_before(i64::MAX), Some(newest));
+    let want = |t: i64| -> Option<i64> {
+        db.with(None, |i| {
+            i.conn
+                .query_row("SELECT MAX(id) FROM events WHERE ts <= ?1", [t], |r| {
+                    r.get(0)
+                })
+        })
+    };
+    for t in [
+        1_000, 1_001, 1_012, 1_013, 1_800, 1_850, 1_900, 2_500, 2_998, 2_999,
+    ] {
+        assert_eq!(db.event_id_at_or_before(t), want(t), "t = {t}");
+    }
+}

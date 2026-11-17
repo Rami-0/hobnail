@@ -263,11 +263,14 @@ fn memory(h: &Host) -> Markup {
                             @else { (human_bytes(m.swap_used())) " / " (human_bytes(m.swap_total)) }
                         }
                     }
+                    // The rates on a line of their own: their width changes
+                    // at every poll, and a sentence after them would re-wrap
+                    // (the panel's height moved on a phone).
                     p.hx-note {
                         "Swap activity: in " b.(lvl(h.swap_in, 1.0, 100.0)) { (page_rate(h.swap_in)) }
                         " · out " b.(lvl(h.swap_out, 1.0, 100.0)) { (page_rate(h.swap_out)) }
-                        ". Used swap alone is harmless; steady swapping in means memory is short."
                     }
+                    p.hx-note.hx-tight { "Used swap alone is harmless; steady swapping in means memory is short." }
                 }
             }
         }
@@ -317,7 +320,9 @@ fn ctr_link(
     logs: &HashSet<String>,
 ) -> Markup {
     match cid {
-        None => html! { span.muted { "host" } },
+        // `nm-l` like a container's cell: every row is one height on a
+        // phone, so re-ranking at each poll moves nothing below the table.
+        None => html! { span.nm-l.muted { "host" } },
         Some(id) => match names.get(id) {
             // The name opens the container; the icon, a sibling, its logs
             // (only when they may be read).
@@ -329,7 +334,7 @@ fn ctr_link(
                     }
                 }
             },
-            None => html! { span.muted title=(id) { (id.get(..12).unwrap_or(id)) } },
+            None => html! { span.nm-l.muted title=(id) { (id.get(..12).unwrap_or(id)) } },
         },
     }
 }
@@ -849,6 +854,8 @@ mod view_tests {
         assert!(html.contains(r#"<a class="ia logs" href="/containers/web%3C1%3E/logs" title="Logs" aria-label="Logs of web&lt;1&gt;">"#), "{html}");
         let host = ctr_link(&None, &names, &logs).into_string();
         assert!(!host.contains("href"), "host processes have no logs");
+        // Same row height as a container's cell (no move at each poll).
+        assert_eq!(host, r#"<span class="nm-l muted">host</span>"#);
         let unknown = ctr_link(&Some("ffffffffffffff".into()), &names, &logs).into_string();
         assert!(!unknown.contains("href"));
         // An excluded (or otherwise untailable) container: its name, no logs link.

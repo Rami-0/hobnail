@@ -44,11 +44,10 @@ struct Pane {
     href: Option<String>,
 }
 
-fn assets(ctx: &Ctx) -> Markup {
-    let sha = ctx.state.build.sha;
+fn assets(_ctx: &Ctx) -> Markup {
     html! {
-        link rel="stylesheet" href={"/static/logs.css?v=" (sha)};
-        script src={"/static/logs.js?v=" (sha)} defer {}
+        link rel="stylesheet" href={"/static/logs.css?v=" (crate::http::server::LOGS_CSS_V)};
+        script src={"/static/logs.js?v=" (crate::http::server::LOGS_JS_V)} defer {}
     }
 }
 

@@ -1048,6 +1048,20 @@ try {
   // ---- Config file ----
   await load("/settings/config");
   check(await ev("document.getElementById('raw-text').value") === (await fileText()), "config: the editor holds the file exactly");
+  // SET-66: changing a command widget in the editor points at its block
+  // (line, Go to) and a Save says "Not saved" once, in the same place.
+  const cw = await ev(`(() => { const t = document.getElementById('raw-text'), ls = t.value.split("\\n"); const i = ls.findIndex((l) => /^\\s*type\\s*=\\s*"command"/.test(l)); if (i < 0) return null; let j = i; while (j > 0 && !/^\\s*id\\s*=/.test(ls[j])) j--; let k = j; while (k < ls.length && !/^\\s*title\\s*=/.test(ls[k]) && !(k > j && /^\\s*\\[/.test(ls[k]))) k++; if (k < ls.length && /^\\s*title\\s*=/.test(ls[k])) ls[k] = 'title = "ui-check changed"'; else ls.splice(i + 1, 0, 'title = "ui-check changed"'); t.value = ls.join("\\n"); t.dispatchEvent(new Event("input", { bubbles: true })); return j + 1; })()`);
+  if (cw == null) console.log("skip SET-66: no command widget in the test config");
+  else {
+    await sleep(1200);
+    const r1 = await ev("({ s: document.getElementById('raw-status').textContent, go: !document.querySelector('[data-act=raw-goto]').hidden })");
+    check(new RegExp(`^Line ${cw}: Would be refused`).test(r1.s.trim()) && r1.go, `config: a changed command widget points at its block (line ${cw}) with Go to`, r1);
+    h0 = await fileHash();
+    await click("#f-raw [type=submit]"); await sleep(800);
+    const r2 = await ev("({ s: document.getElementById('raw-status').textContent, note: (document.querySelector('#f-raw .dlg-msg') || {}).textContent || '', other: [...document.querySelectorAll('#f-raw .dlg-note')].map((n) => n.textContent).join(' ') })");
+    check(/Not saved: this changes the command widget/.test(r2.s) && !/refused/i.test(r2.note + r2.other) && (await fileHash()) === h0, "config: its Save is refused with one message, nothing written", r2);
+    await click('[data-act="raw-revert"]'); await sleep(800);
+  }
   h0 = await fileHash(); await clearToasts();
   await click("#raw-text"); await ctrlS(); await sleep(300);
   check((await toasts()).includes("No changes") && (await fileHash()) === h0, "config: Ctrl+S unchanged: No changes, nothing written");
@@ -1172,6 +1186,12 @@ try {
   const at = await allToasts();
   check(at.filter((x) => /^Saved custom\.css/.test(x)).length === 2 && at.filter((x) => /^Default theme/.test(x)).length === 2 && !(await conflict()).length, "own save: theme, custom.css twice, theme again: every save goes through", at);
   check(!(await banners()).length && (await api("GET", "appearance")).data.css.endsWith("/* ui-check 2c b */"), "custom.css: its save is not an outside change (no Reloaded, no banner)", { at, b: await banners() });
+  // SET-59: after a save, "Previous version" puts the text before it back
+  // in the editor (not saved).
+  await click('[data-act="css-prev"]');
+  const pv = await ev("({ v: document.getElementById('css-text').value, save: !document.querySelector('#f-css [type=submit]').disabled })");
+  check(pv.v.endsWith("/* ui-check 2c a */") && pv.save && (await api("GET", "appearance")).data.css.endsWith("/* ui-check 2c b */"), "custom.css: Previous version brings back the text before the last save, unsaved", pv);
+  await click('[data-act="css-revert"]');
   // custom.css changed elsewhere: the note names custom.css.
   const cn = (await api("GET", "appearance")).data;
   await api("POST", "appearance", { base_hash: cn.hash, css: cn.css + "/* outside 2c */" });

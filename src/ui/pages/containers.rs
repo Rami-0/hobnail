@@ -559,7 +559,8 @@ fn row(c: &CardView, gi: usize, g: &GroupView, show_stats: bool, st: &Strips) ->
                     } @else if p.local {
                         span.port.local title={(p.detail) " (loopback only)"} { (p.label) " " small { "local" } }
                     } @else {
-                        span.port.plain title=(p.detail) { (p.label) }
+                        // OV-25: not a web address; says its protocol.
+                        span.port.plain title={(p.detail) " (not a web address)"} { (p.label) " " small { (p.proto) } }
                     }
                 }
                 @if c.ports.len() > 3 { a.port.more href=(href) title="More ports on the details page" { "+" (c.ports.len() - 3) } }

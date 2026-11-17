@@ -312,6 +312,28 @@ fn names_icons_order_size() {
     assert_eq!(z.search, "Zed proj-b-1 proj img/proj-b-1:latest");
 }
 
+/// OV-25: a chip that is not a link (not HTTP) carries its protocol, and the
+/// containers table shows it, so grey chips say what they are.
+#[test]
+fn plain_ports_say_their_protocol() {
+    let mut u = port("0.0.0.0", 5353, 53);
+    u.proto = "udp".into();
+    let v = port_views(&[port("0.0.0.0", 5432, 5432), u], "homelab");
+    assert_eq!((v[0].url.as_deref(), v[0].proto.as_str()), (None, "tcp"));
+    assert_eq!((v[1].url.as_deref(), v[1].proto.as_str()), (None, "udp"));
+    let mut c = ctr("db", None);
+    c.ports = vec![port("0.0.0.0", 5432, 5432)];
+    let st = crate::ui::testutil::state_with(vec![c], "");
+    let h = hyper::HeaderMap::new();
+    let ctx = crate::ui::shell::Ctx::new(&st, "h", "/containers", "", &h);
+    let html = crate::ui::pages::render(&ctx).1;
+    assert!(
+        html.contains(r#"<span class="port plain" title="5432 → 5432/tcp on 0.0.0.0 (not a web address)">5432 <small>tcp</small></span>"#),
+        "{}",
+        &html[html.rfind("c-ports").unwrap_or(0)..][..600]
+    );
+}
+
 #[test]
 fn links_any_address_uses_page_host() {
     let ps = vec![port("0.0.0.0", 3000, 3000)];

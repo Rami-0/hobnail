@@ -1,10 +1,10 @@
 /* Settings pages only (loaded by /settings/*, not inlined on other pages).
    Uses the tokens and components of app.css: panels, .btn, .pill, .tbl,
    .banner. Adds the tab list, form controls, editors and the diff view. */
-.page.set{max-width:1240px;grid-template-columns:200px minmax(0,1fr);align-items:start;gap:24px}
+.page.set{max-width:1240px;grid-template-columns:max(200px,calc(200rem/14)) minmax(0,1fr);align-items:start;gap:24px}
 .set-nav{position:sticky;top:calc(var(--top-h) + 20px)}
 .set-nav ul{list-style:none;margin:0;padding:0;display:grid;gap:1px}
-.set-nav a{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--r-sm);color:var(--text-2);font-size:.9286rem;font-weight:500;white-space:nowrap}
+.set-nav a{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14));padding:0 10px;border-radius:var(--r-sm);color:var(--text-2);font-size:.9286rem;font-weight:500;white-space:nowrap}
 .set-nav a:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
 .set-nav a[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
 .set-nav a[aria-current=page] svg{color:var(--accent)}
@@ -196,7 +196,9 @@ body:has(>.toasts>.toast) .set-main{padding-bottom:168px}
 /* config file editor */
 .raw-path{margin-left:auto;font-size:.8214rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .editor-wrap{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--bg);overflow:hidden}
-.editor-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+/* A11Y-06: the editor shows the shared 2 px ring itself; the frame only
+   takes the accent (no second, 1 px ring). */
+.editor-wrap:focus-within{border-color:var(--accent)}
 .gutter{contain:size;align-self:stretch;margin:0;padding:10px 8px 10px 12px;min-width:44px;text-align:right;font:.8929rem/20px var(--mono);color:var(--text-3);background:var(--surface);border-right:1px solid var(--line);overflow:hidden;user-select:none;white-space:pre}
 .editor-wrap textarea.code{border:0;border-radius:0;box-shadow:none!important;background:transparent;padding:10px 12px;font:.8929rem/20px var(--mono);white-space:pre;overflow:auto;resize:vertical;height:600px;min-height:240px;max-height:85vh;tab-size:2}
 textarea.code{font:.8929rem/20px var(--mono);white-space:pre;tab-size:2;min-height:300px}

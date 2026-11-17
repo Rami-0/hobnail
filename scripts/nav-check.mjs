@@ -519,19 +519,31 @@ try {
     await load("/host");
     const over = await ev(tablesFit);
     check(over.length === 0 && (await ev("document.documentElement.scrollWidth <= innerWidth")), `${w}: /host: every table fits its panel, signed in (LG-35, LG-36)`, over);
+    // The 3 s poll re-ranks the process tables and rewrites the figures:
+    // the page's height stays put (wave 5 review: Processes at 390 moved).
+    const hs = [];
+    for (let i = 0; i < 4; i++) { hs.push(await ev("document.documentElement.scrollHeight")); await sleep(3200); }
+    check(hs.every((h) => h === hs[0]), `${w}: /host: the page keeps its height across live updates (${hs.join(", ")})`, hs);
   }
   await view(390);
   await load("/history?range=24h&events=all");
   check(await ev("document.documentElement.scrollWidth <= innerWidth"), "390: /history does not scroll sideways (LG-45)", await ev("document.documentElement.scrollWidth"));
   // The timeline shows the chart window (LG-43).
-  const inWindow = "(() => { const f = document.querySelector('figure.chart[data-t0]'); if (!f) return null; const t0 = +f.dataset.t0, t1 = +f.dataset.t1; return [...document.querySelectorAll('.tl .ev time[data-t]')].every((t) => +t.dataset.t >= t0 && +t.dataset.t <= t1); })()";
+  // { chart, rows, ok }: no chart fails; no rows is a skip, never an ok.
+  const inWindow = "(() => { const f = document.querySelector('figure.chart[data-t0]'); if (!f) return { chart: false, rows: 0, ok: false }; const t0 = +f.dataset.t0, t1 = +f.dataset.t1, ts = [...document.querySelectorAll('.tl .ev time[data-t]')]; return { chart: true, rows: ts.length, ok: ts.every((t) => +t.dataset.t >= t0 && +t.dataset.t <= t1) }; })()";
+  const windowCheck = (w, what) => {
+    if (!w.chart) return check(false, `${what}: the chart is there`, w);
+    if (!w.rows) return console.log(`skip ${what}: no timeline rows in this window`);
+    check(w.ok, what, w);
+  };
   await view(1440);
   await load("/history?range=6h&events=all");
-  check(await ev(inWindow) !== false, "1440: /history: every timeline row is inside the chart window (LG-43)");
+  windowCheck(await ev(inWindow), "1440: /history: every timeline row is inside the chart window (LG-43)");
   // Zoom by a plain link: by touch and without the script too (LG-46).
   clicks = 0;
   await click(".zoom-nav a.btn:nth-child(2)");
-  check((await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)")) && (await ev(inWindow)) !== false && clicks === 1, "1440: Zoom in is one click, and the timeline follows the zoom (LG-43, LG-46)", await here());
+  check((await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)")) && clicks === 1, "1440: Zoom in is one click (LG-46)", await here());
+  windowCheck(await ev(inWindow), "1440: the timeline follows the zoom (LG-43)");
   await click(".zoom-nav a.btn:first-child", false);
   check(await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)") && (await ev("!!document.querySelector('.zoom-nav a[href*=\"to=\"]:last-child')")), "1440: Earlier moves the window back; Later is then a link");
   // A marker opens its event's row, highlighted (LG-44).
@@ -541,7 +553,7 @@ try {
     await click(".evm a.mk", false);
     const id = mk.split("#ev-")[1];
     check(await until(`location.hash === '#ev-${id}' && !!document.querySelector('.tl .ev:target')`, 6000), "1440: a chart marker opens its timeline row, as the target (LG-44)", { mk, at: await here() });
-  } else check(true, "1440: no event markers in 24 h (marker check skipped)");
+  } else console.log("skip 1440: a chart marker opens its timeline row (LG-44): no event markers in 24 h");
   // Legend toggles act on every chart and are remembered (LG-51).
   if (await ev("!!document.querySelector('.lg[data-ser=max]')")) {
     await click(".lg[data-ser=max]", false);
@@ -560,6 +572,24 @@ try {
   for (let i = 1; i <= 6; i++) { await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box[0] + box[2] * (0.3 + i * 0.07), y: box[1] }] }); await sleep(30); }
   await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   check(await landed("(l) => /from=\\d+&to=\\d+/.test(l.search)"), "390: a sideways touch drag across a chart zooms (LG-46)", await here());
+  // A stored legend choice that is not a known layer is ignored: it goes
+  // into a selector, and a throw there stopped the rest of app.js.
+  await view(1440);
+  await load("/history?range=24h");
+  await ev(`localStorage.setItem("hb.chartOff", JSON.stringify(['"]x', "max", 7]))`);
+  const err0 = errors.length;
+  await load("/history?range=24h");
+  const bad = await ev("({ off: !!document.querySelector('figure.chart.off-max') || !document.querySelector('.lg[data-ser=max]'), live: !!window.HB_LIVE || !!document.querySelector('#live .dot.ok') })");
+  check(errors.length === err0 && bad.off && bad.live, "a bad stored legend value is ignored; the known one still applies and the script runs on", { errors: errors.slice(err0), ...bad });
+  await ev(`localStorage.removeItem("hb.chartOff")`);
+  // Sign-out stays on this site, even on an address whose path starts with
+  // "//" (a 404 inside the shell). /api/logout is stubbed: no real sign-out.
+  await load("//example.invalid/x?y=1");
+  const lo = await ev(`(() => { const f = window.fetch; window.fetch = (u, o) => String(u).includes("/api/logout") ? Promise.resolve(new Response("{}", { status: 200 })) : f(u, o); const b = document.querySelector('[data-act="logout"]'); if (!b) return false; b.click(); return true; })()`);
+  await sleep(1500);
+  await until("document.readyState === 'complete'");
+  const at = await ev("({ origin: location.origin, path: location.pathname, search: location.search })");
+  check(lo && at.origin === ORIGIN && at.path === "//example.invalid/x" && at.search === "?y=1", "sign-out on a //host path stays on this origin (same page)", { lo, at });
   check(errors.length === 0, "no script errors", errors);
 } catch (e) {
   check(false, "the run finished", String(e.stack || e).slice(0, 600));

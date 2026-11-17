@@ -544,7 +544,7 @@
   const csrf = () => { const m = doc.querySelector('meta[name="rh-csrf"]'); return m ? m.content : ""; };
   async function freshToken() {
     try {
-      const r = await fetch(location.pathname, { credentials: "same-origin", cache: "no-store" });
+      const r = await fetch(location.origin + location.pathname, { credentials: "same-origin", cache: "no-store" });
       const m = new DOMParser().parseFromString(await r.text(), "text/html").querySelector('meta[name="rh-csrf"]');
       if (!m || !m.content || m.content === csrf()) return false;
       let mine = doc.querySelector('meta[name="rh-csrf"]');

@@ -402,6 +402,33 @@ if (PARTS.includes("features")) {
   const s3 = await ev("({ v: document.getElementById('lq').value, qn: document.getElementById('lqn').textContent })");
   check(s3.v === "short" && /\d+\/\d+/.test(s3.qn), "search: a reload keeps it and counts its matches", s3);
   await ev("(() => { const q = document.getElementById('lq'); q.value = ''; q.dispatchEvent(new Event('input')); })()"); await sleep(400);
+  // A regular expression in a shared link is not run on its own: the text
+  // comes back as plain text, ".*" stays off. A bad one typed with ".*" on
+  // says "Invalid regular expression" once.
+  await load(single + "?search=" + enc("(x+x+)+y") + "&re=1");
+  await until("window.__rhLogs.panes[0].lines.length > 0");
+  const rx = await ev("({ v: document.getElementById('lq').value, re: document.getElementById('lre').getAttribute('aria-pressed'), state: window.__rhLogs.state.re })");
+  check(rx.v === "(x+x+)+y" && rx.re === "false" && rx.state === false, "search: a regex from the address comes back as plain text, the regex toggle off", rx);
+  // (Cleared first: that pattern on these lines is the slow kind.)
+  await typeIn("#lq", "");
+  await click("#lre");
+  await typeIn("#lq", "a(");
+  const bt = await ev("({ inv: document.getElementById('lq').getAttribute('aria-invalid'), t: document.getElementById('lq').title })");
+  check(bt.inv === "true" && (bt.t.match(/Invalid regular expression/gi) || []).length === 1, "search: a bad regex says so once", bt);
+  await click("#lre");
+  await typeIn("#lq", "");
+  // The /logs list keeps its ticks (`sel=`) in the address, so a reload keeps them.
+  if (OTHER) {
+    await load("/logs?sel=" + enc(NAME) + "," + enc(OTHER));
+    await sleep(400);
+    const s1 = await ev("({ s: location.search, n: document.querySelectorAll('#lpick input[name=c]:checked').length })");
+    await send("Page.reload"); await until("document.readyState === 'complete'"); await sleep(500);
+    const s2 = await ev("({ s: location.search, n: document.querySelectorAll('#lpick input[name=c]:checked').length })");
+    check(/[?&]sel=/.test(s1.s) && s1.n === 2 && s2.n === 2 && /[?&]sel=/.test(s2.s), "/logs: the ticks stay in the address (sel=) and survive a reload", { s1, s2 });
+  }
+  await load(single);
+  await until("window.__rhLogs.panes[0].lines.length > 50");
+  await sleep(500);
   // LG-20: keyboard: Enter in a pane picks a line and focuses "Copy";
   // arrows move it; Esc goes back to the pane.
   await toBottom();
@@ -419,6 +446,20 @@ if (PARTS.includes("features")) {
   await ev("(() => { document.getElementById('lfrom').value = '2030-01-02T10:00'; document.getElementById('lto').value = '2030-01-01T10:00'; document.getElementById('lapply').click(); })()");
   const e1 = await ev("({ err: !document.getElementById('lrerr').hidden && document.getElementById('lrerr').textContent, inv: document.getElementById('lfrom').getAttribute('aria-invalid') })");
   check(e1.err && e1.inv === "true", "custom range: a From in the future is refused on its field", e1);
+  // A valid custom range on the busy container: either all of it (status
+  // "complete", no mark) or, past the server's cap, a visible mark at the
+  // cut and a status and counter that do not say "complete" (wave 5 review).
+  await load(single);
+  await until("window.__rhLogs.panes[0].lines.length > 0");
+  await ev("(() => { const s = document.getElementById('lrange'); s.value = 'custom'; s.dispatchEvent(new Event('change')); const f = (t) => new Date(t - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); document.getElementById('lfrom').value = f(Date.now() - 30 * 60000); document.getElementById('lto').value = f(Date.now() - 60000); document.getElementById('lapply').click(); })()");
+  const doneR = await until("(() => { const p = window.__rhLogs.panes[0]; return p.es && p.es.readyState === 2 && p.lines.length > 0; })()", 30000);
+  await sleep(500);
+  await ev("(() => { const p = window.__rhLogs.panes[0]; p.body.scrollTop = p.body.scrollHeight; })()");
+  await sleep(300);
+  const cr = await ev("(() => { const p = window.__rhLogs.panes[0], m = p.node.querySelector('.lcut'), b = p.body.getBoundingClientRect(), r = m && m.getBoundingClientRect(); return { lines: p.lines.length, ring: +document.getElementById('lv').dataset.ring, status: p.st ? p.st.textContent : null, count: document.getElementById('lcount').textContent, mark: m ? m.textContent : null, seen: !!r && r.height > 0 && r.top >= b.top - 1 && r.bottom <= b.bottom + 1 }; })()");
+  const whole = !cr.mark && (cr.status === null || cr.status === "complete") && cr.lines < cr.ring;
+  const marked = !!cr.mark && cr.seen && /Narrow the range/.test(cr.mark) && cr.status !== "complete" && /first [\d,.]+ of the range/.test(cr.count);
+  check(doneR && (whole || marked), `custom range: ${marked ? "cut at the cap, and the pane says where" : "read whole"} (${cr.lines} lines)`, cr);
   // LG-33: the single page does not scroll at 1440.
   await load(single); await sleep(1500);
   // (The main column: a sidebar taller than the window is the shell's.)
@@ -449,6 +490,29 @@ if (PARTS.includes("features")) {
     check(c1.panes === 1 && c1.dom === 1 && c1.url === "/logs?c=" + enc(NAME) && c1.lines > 0 && c1.add, "split view: closing a pane removes it in place, the address follows, the other keeps its lines", c1);
     const d = await dist();
     check(d[0] <= SLACK, `split view: the remaining pane still rests on the newest line (${d[0]} px)`, d);
+  }
+  // The search box keeps room to type (wave 5 review): real key presses into
+  // #lq, then its visible width in characters, at five widths in every view
+  // (single, stack, two and four panes). From 700 px up: 18 characters (the
+  // row wraps first) and a line counter that is not cut; on a phone (one row
+  // with Filters, and Add in a split view) at least 10.
+  const typeKeys = async (text) => { for (const ch of text) { await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: ch }); } await sleep(300); };
+  const others = await (async () => { await load("/logs"); return ev(`[...document.querySelectorAll('#lpick input[name=c]')].map((b) => b.value).filter((n) => n !== ${JSON.stringify(NAME)} && n !== ${JSON.stringify(OTHER || "")}).slice(0, 4 - ${OTHER ? 2 : 1})`); })();
+  const sviews = [["single", single]].concat(stackHref ? [["stack", stackHref]] : []);
+  if (OTHER) sviews.push(["2 panes", "/logs?c=" + [NAME, OTHER].map(enc).join(",")]);
+  if (others.length + (OTHER ? 2 : 1) === 4) sviews.push(["4 panes", "/logs?c=" + [NAME].concat(OTHER ? [OTHER] : [], others).map(enc).join(",")]);
+  else console.log("skip search width in 4 panes: fewer than four containers");
+  const SW = "(() => { const q = document.getElementById('lq'), cs = getComputedStyle(q), c = document.createElement('canvas').getContext('2d'); c.font = cs.font; const ch = c.measureText('0').width, r = q.getBoundingClientRect(), n = document.getElementById('lcount'); return { ch: +((r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) / ch).toFixed(1), v: q.value, cut: getComputedStyle(n).display !== 'none' && n.offsetParent !== null && n.scrollWidth > n.clientWidth + 1, wide: document.documentElement.scrollWidth > innerWidth }; })()";
+  for (const w of [1440, 1280, 1100, 900, 390].filter((x) => x > 390 || widths.includes(390))) {
+    for (const [v, path] of sviews) {
+      await load(path, { width: w, mobile: w === 390 });
+      await sleep(400);
+      await click("#lq");
+      await typeKeys("connection refused");
+      const m = await ev(SW);
+      const floor = w === 390 ? 10 : 17.9;
+      check(m.v === "connection refused" && m.ch >= floor && !m.wide && (w === 390 || !m.cut), `${w} px, ${v}: the search box shows ${m.ch} characters while typing (at least ${floor}), the line counter is not cut`, m);
+    }
   }
   // LG-19 / LG-20 on a phone: one toolbar row, the pane ends above the
   // bottom bar, Filters opens the rest, a tap shows Copy and Link.

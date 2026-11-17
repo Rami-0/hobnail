@@ -334,7 +334,7 @@ tr.moved>td{animation:row-new var(--dur-4) var(--ease-out)}
 @media (pointer:coarse),(max-width:699px){
  .tree .ia.logs,.stack summary .ia.logs,.nm-l .ia,.ev .ia,.incident .ia,.attn .rows .ia,.more-stack .ia,.icon-btn,.icon-btn.sm{width:44px;height:44px;margin-block:0}.ev{padding-block:0}
  .panel-h .more,.sec-h .more,.linkbtn,.brand,.stack-name,.cd-tabs a{display:inline-flex;align-items:center;min-height:44px}
- .crumb>a,.nm-l>a:first-child{min-height:44px;display:inline-flex;align-items:center}
+ .crumb>a,.nm-l>a:first-child{min-height:44px;display:inline-flex;align-items:center}.nm-l>a:first-child{min-width:44px}
  .panel-h .more,.sec-h .more,.linkbtn{min-width:44px}.panel-h .more,.sec-h .more{justify-content:flex-end}
  .seg a,.tab,.cd-tabs a,.lg,.tgl,.nav-item,.menu-item,.pal-list li,.tree-filter input{height:44px;min-width:44px;justify-content:center}
  .nav-item{justify-content:flex-start}.tree-filter svg{top:15px}

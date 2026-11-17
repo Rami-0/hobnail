@@ -976,6 +976,10 @@ fn event_row_n(
             .zip(cfg)
             .and_then(|((rule, _), cfg)| subject_href(cfg, rule, &e.subject))
             .or_else(|| Some(("/alerts".into(), false)))
+    } else if e.kind.starts_with("auth.") {
+        // OV-06: sign-in events (signed-in viewers only) lead to where the
+        // sessions are.
+        Some(("/settings/security".into(), false))
     } else {
         None
     };
@@ -1467,6 +1471,16 @@ mod tests {
         assert!(!html.contains("/logs"), "no logs link without the names");
         let plain = event_row(1_794_660_400, &e, false, None).into_string();
         assert!(!plain.contains("href="));
+        // OV-06: a sign-in row leads to the sessions; an alert row to Alerts.
+        let mut a = e.clone();
+        (a.kind, a.subject) = ("auth.login_failed".into(), "10.0.0.9".into());
+        assert!(event_row(1, &a, true, None)
+            .into_string()
+            .contains(r#"<a class="nm" href="/settings/security">10.0.0.9</a>"#));
+        (a.kind, a.detail) = ("alert.delivery_failed".into(), "slack: timeout".into());
+        assert!(event_row(1, &a, true, None)
+            .into_string()
+            .contains(r#"href="/alerts""#));
         // A container whose logs may be read: one click to its logs at that
         // moment (unix ms), a sibling of the name link, never inside it.
         let names: std::collections::HashSet<String> = ["web<1>".to_string()].into();

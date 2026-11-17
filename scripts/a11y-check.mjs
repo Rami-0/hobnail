@@ -120,9 +120,13 @@ const MEASURE = `((scope) => {
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     // A stretched row link is a target when some 44 px (24 px) square of
     // its row is its own: rows also hold their own 44 px secondary links (a
-    // rule, "alert firing", logs), which take part of the row.
-    if (el.classList.contains("row-link") && el.closest(".rl")) { const row = el.closest(".rl"), hit = (x, y) => { const h = document.elementFromPoint(x, y); return !!h && row.contains(h) && !h.closest("a,button,input,select,summary,label") || mine(el, x, y); };
-      const square = (d) => { for (let y = r.top + d; y <= r.bottom - d; y += 6) for (let x = r.left + d; x <= r.right - d; x += 8) if ([[0, 0], [-d, 0], [d, 0], [0, -d], [0, d]].every(([dx, dy]) => hit(x + dx, y + dy))) return true; return false; };
+    // rule, "alert firing", logs), which take part of the row. Every point
+    // of the square must resolve to the row's own link (a link that is not
+    // stretched, or text laid over it, does not count).
+    if (el.classList.contains("row-link") && el.closest(".rl")) { const hit = (x, y) => mine(el, x, y);
+      // (The row's middle is always tried: a 45 px row with a 1 px border
+      // has exactly 44 px of link, centred, which a 6 px step can miss.)
+      const square = (d) => { const ys = [r.top + r.height / 2]; for (let y = r.top + d; y <= r.bottom - d; y += 6) ys.push(y); for (const y of ys) for (let x = r.left + d; x <= r.right - d; x += 8) if ([[0, 0], [-d, 0], [d, 0], [0, -d], [0, d]].every(([dx, dy]) => hit(x + dx, y + dy))) return true; return false; };
       out.push({ sel: sel(el), name: name(el), w: Math.round(r.width), h: Math.round(r.height), ok44: square(21), ok24: square(11), shell: false }); continue; }
     out.push({ sel: sel(el), name: name(el), w: Math.round(r.width), h: Math.round(r.height), ok44: fits(el, cx, cy, 21), ok24: fits(el, cx, cy, 11),
       shell: !!el.closest("header.top, #bbar, #side, #palette") });
@@ -157,9 +161,7 @@ async function measure(label, scope) {
     // ROB-03: no blank scroll area under the page and no sideways scroll at 390.
     const [sh, col, sw, cw] = await ev(`[document.documentElement.scrollHeight, Math.ceil(document.querySelector(".col").getBoundingClientRect().height), document.documentElement.scrollWidth, document.documentElement.clientWidth]`);
     check(sh <= col + 1, `${label}: the document is as tall as the page (${sh} / ${col})`);
-    const own = /^\/(more|settings|login)/.test(label);
-    if (own) check(sw <= cw, `${label}: no sideways scroll at 390 (${sw} / ${cw})`);
-    else if (sw > cw) console.log(`note ${label}: scrolls sideways at 390 (${sw} / ${cw}), the page's own content`);
+    check(sw <= cw, `${label}: no sideways scroll at 390 (${sw} / ${cw})`);
   }
   if (process.env.REPORT) {
     const by = new Map();
@@ -282,6 +284,26 @@ for (let i = 0; i < 30; i++) { await key("Tab"); if (!(await ev("!!document.acti
 check(out === false, "390: Tab stays inside the open drawer", out);
 await key("Escape"); await sleep(300);
 check(await ev(`!document.documentElement.classList.contains('side-open') && document.activeElement.matches('[data-act="more"]')`), "390: Esc closes the drawer and focus returns to More");
+
+// ---- A11Y-20: a larger browser font (175 %: the root at 24.5 px instead
+// of 14) grows the boxes that hold text: nothing clipped in the top bar,
+// the nav items or the Settings tab column, which never overlaps the page.
+await view(1440, false);
+for (const path of ["/", "/settings/general"]) {
+  await load(path);
+  await ev("(() => { const s = document.createElement('style'); s.id = 'big-root'; s.textContent = 'html{font-size:153.125%!important}'; document.head.append(s); })()");
+  await sleep(300);
+  const b = await ev(`(() => {
+    const clip = (e) => e.getClientRects().length && (e.scrollHeight > e.clientHeight + 1);
+    const top = document.querySelector("header.top"), th = top.getBoundingClientRect();
+    const out = { nav: [...document.querySelectorAll(".nav-item, .set-nav a")].filter(clip).map((e) => e.textContent.trim()),
+      top: [...top.children].filter((c) => c.getClientRects().length).filter((c) => { const r = c.getBoundingClientRect(); return r.top < th.top - 1 || r.bottom > th.bottom + 1; }).map((c) => c.className || c.tagName),
+      skip: document.querySelector(".skip").getBoundingClientRect().bottom };
+    const sn = document.querySelector(".set-nav"), sm = document.querySelector(".set-main");
+    if (sn && sm) out.overlap = Math.round(sn.getBoundingClientRect().right - sm.getBoundingClientRect().left);
+    return out; })()`);
+  check(!b.nav.length && !b.top.length && b.skip <= 0 && !(b.overlap > 0), `${path} at a 175 % font size: nav items, top bar and Settings tabs hold their text, nothing overlaps (A11Y-20)`, b);
+}
 
 check(errors.length === 0, "no script errors", errors);
 ch.kill();

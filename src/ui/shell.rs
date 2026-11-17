@@ -30,9 +30,11 @@ const BOOT_JS: &str = "var d=document.documentElement;d.classList.add('js');try{
 /// container's item kept in view (NAV-24), and the live indicator, which the
 /// server renders as "live" and which says "connecting" only when the
 /// script has not reported the stream within 1.5 s (`app.js` sets
-/// `window.HB_LIVE` on its first word about the stream). `app.js` repeats
+/// `window.HB_LIVE` on its first word about the stream). When `app.js`
+/// never ran (blocked or failed: no `window.HB` once the document is
+/// parsed) the indicator is hidden: nothing would update the page. `app.js` repeats
 /// the tree part after live updates; the two must agree.
-const SHELL_JS: &str = "(function(){var d=document,t=d.getElementById('tree'),f=d.getElementById('tree-filter');setTimeout(function(){var l=d.getElementById('live');if(window.HB_LIVE||!l)return;l.firstChild.className='dot off';l.lastChild.textContent='connecting';l.title='Live updates: connecting'},1500);if(!t)return;var S=t.querySelectorAll('details.stack');try{var c=JSON.parse(localStorage.getItem('rh-tree')||'{}')||{};S.forEach(function(s){if(c[s.dataset.k]&&!s.querySelector('a[aria-current]'))s.open=false})}catch(e){}try{var q=sessionStorage.getItem('rh-tree-q')||'',v=q.trim().toLowerCase(),any=false;if(f&&v){f.value=q;S.forEach(function(s){var k=s.dataset.k.toLowerCase().indexOf(v)>=0,hit=false;s.querySelectorAll('li.ctr').forEach(function(li){var ok=k||li.dataset.s.indexOf(v)>=0;li.hidden=!ok;hit=hit||ok});s.hidden=!hit;any=any||hit;if(hit)s.open=true});var n=t.querySelector('.tree-none');if(n)n.hidden=any}}catch(e){}try{var y=+sessionStorage.getItem('rh-tree-y')||0;if(y)t.scrollTop=y;var a=t.querySelector('a[aria-current]');if(a&&t.clientHeight){var r=a.getBoundingClientRect(),b=t.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)t.scrollTop+=r.top-b.top-b.height/3}}catch(e){}})()";
+const SHELL_JS: &str = "(function(){var d=document,t=d.getElementById('tree'),f=d.getElementById('tree-filter');var nl=function(){var l=d.getElementById('live');if(l&&!window.HB)l.hidden=true;return!l||!window.HB};d.addEventListener('DOMContentLoaded',nl);setTimeout(function(){var l=d.getElementById('live');if(window.HB_LIVE||nl())return;l.firstChild.className='dot off';l.lastChild.textContent='connecting';l.title='Live updates: connecting'},1500);if(!t)return;var S=t.querySelectorAll('details.stack');try{var c=JSON.parse(localStorage.getItem('rh-tree')||'{}')||{};S.forEach(function(s){if(c[s.dataset.k]&&!s.querySelector('a[aria-current]'))s.open=false})}catch(e){}try{var q=sessionStorage.getItem('rh-tree-q')||'',v=q.trim().toLowerCase(),any=false;if(f&&v){f.value=q;S.forEach(function(s){var k=s.dataset.k.toLowerCase().indexOf(v)>=0,hit=false;s.querySelectorAll('li.ctr').forEach(function(li){var ok=k||li.dataset.s.indexOf(v)>=0;li.hidden=!ok;hit=hit||ok});s.hidden=!hit;any=any||hit;if(hit)s.open=true});var n=t.querySelector('.tree-none');if(n)n.hidden=any}}catch(e){}try{var y=+sessionStorage.getItem('rh-tree-y')||0;if(y)t.scrollTop=y;var a=t.querySelector('a[aria-current]');if(a&&t.clientHeight){var r=a.getBoundingClientRect(),b=t.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)t.scrollTop+=r.top-b.top-b.height/3}}catch(e){}})()";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Nav {
@@ -162,11 +164,11 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 @if let Some(t) = &ctx.csrf { meta name="rh-csrf" content=(t); }
                 title { (doc_title) " · " (site) " · Hobnail" }
                 link rel="icon" href=(crate::ui::FAVICON);
-                // One cached file (immutable, by build), not ~110 KB inlined
+                // One cached file (immutable, by content hash), not ~110 KB inlined
                 // in every page: each navigation parses that much less HTML
                 // (measured: no slower on a first visit, no unstyled frame,
                 // since a stylesheet in the head holds the first paint).
-                link rel="stylesheet" href={"/static/app.css?v=" (sha)};
+                link rel="stylesheet" href={"/static/app.css?v=" (crate::http::server::APP_CSS_V)};
                 @if has_custom_css { link rel="stylesheet" href="/custom.css"; }
                 script { (PreEscaped(BOOT_JS)) }
                 // One swap per page change: Chromium keeps the previous page
@@ -251,6 +253,9 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                                 span.th.th-ember { (ic("flame")) }
                                 span.th.th-contrast { (ic("contrast")) }
                             }
+                            // NAV-73: an installed app (standalone) has no
+                            // browser reload: a button, shown only there.
+                            button.icon-btn.pwa-reload.js-only type="button" data-act="reload" aria-label="Reload this page" title="Reload" { (ic("refresh")) }
                             (account(ctx))
                         }
                         main #main tabindex="-1" {
@@ -273,7 +278,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                 (keys_dialog())
                 // After the pages' own deferred scripts (settings.js wraps
                 // EventSource before this one opens the stream).
-                script src={"/static/app.js?v=" (sha)} defer {}
+                script src={"/static/app.js?v=" (crate::http::server::APP_JS_V)} defer {}
                 // The last element: first paint waits for it (see the head).
                 div #hb-end hidden {}
             }
@@ -1229,7 +1234,13 @@ mod tests {
             APP_CSS_SRC,
             "@media (pointer:coarse),(max-width:699px){:root{",
         );
-        for t in ["--ctl-h:44px", "--ctl-h-sm:44px", "--ia:44px", "--hit:44px"] {
+        // (Controls grow past 44 px with a larger root font, A11Y-20.)
+        for t in [
+            "--ctl-h:max(44px,",
+            "--ctl-h-sm:max(44px,",
+            "--ia:44px",
+            "--hit:44px",
+        ] {
             assert!(coarse.contains(t), "{t} in {coarse}");
         }
         let css = include_str!("../../static/components.css");
@@ -1326,6 +1337,14 @@ mod tests {
     /// a larger default font size in the browser or OS scales the UI.
     #[test]
     fn type_sizes_are_in_rem() {
+        // Every stylesheet in static/ is listed below.
+        let shipped: Vec<String> =
+            std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/static"))
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".css"))
+                .collect();
+        assert_eq!(shipped.len(), 9, "{shipped:?}");
         for (f, css) in [
             ("app.css", APP_CSS_SRC),
             (
@@ -1333,6 +1352,12 @@ mod tests {
                 include_str!("../../static/components.css"),
             ),
             ("settings.css", include_str!("../../static/settings.css")),
+            ("logs.css", include_str!("../../static/logs.css")),
+            ("widgets.css", include_str!("../../static/widgets.css")),
+            ("cards.css", include_str!("../../static/cards.css")),
+            ("alerts.css", include_str!("../../static/alerts.css")),
+            ("host.css", include_str!("../../static/host.css")),
+            ("detail.css", include_str!("../../static/detail.css")),
         ] {
             let mut rest = css;
             while let Some(i) = rest.find("font") {
@@ -1355,6 +1380,31 @@ mod tests {
                 assert!(!size.trim().ends_with("px"), "{f}: font{decl}");
             }
         }
+    }
+
+    /// A11Y-20: boxes that hold a line of text grow with the root font size
+    /// (the same px at the default 14 px root): controls, the top bar, nav
+    /// items and the Settings tab column.
+    #[test]
+    fn text_boxes_follow_the_root_font_size() {
+        use crate::http::server::{APP_CSS, SETTINGS_CSS};
+        for want in [
+            "--ctl-h:max(32px,calc(32rem/14))",
+            "--ctl-h-sm:max(28px,calc(28rem/14))",
+            "--top-h:max(52px,calc(52rem/14))",
+            "--ctl-h:max(44px,calc(32rem/14))",
+            ".nav-item{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14))",
+        ] {
+            assert!(APP_CSS.contains(want), "{want}");
+        }
+        assert!(
+            SETTINGS_CSS.contains("grid-template-columns:max(200px,calc(200rem/14)) minmax(0,1fr)")
+        );
+        // LG-41: no empty cells at the end of a chart group.
+        assert!(APP_CSS.contains(".charts>.chart:last-child{grid-column-end:-1}"));
+        assert!(SETTINGS_CSS.contains(
+            ".set-nav a{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14))"
+        ));
     }
 
     /// A11Y-17: brand Accent and Error have the same luminance, so the
@@ -1494,6 +1544,18 @@ mod tests {
     /// top bar and the content; it reads the keys `app.js` writes, and
     /// `app.js` no longer moves the tree or says "paused" on leaving.
     #[test]
+    fn reload_button_only_in_an_installed_app() {
+        let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
+        let h = hyper::HeaderMap::new();
+        let ctx = Ctx::new(&st, "h", "/containers/web", "tab=metrics", &h);
+        let html = layout(&ctx, Nav::Containers, "t", html! {}, html! { p { "x" } });
+        assert!(html.contains(r#"<button class="icon-btn pwa-reload js-only" type="button" data-act="reload" aria-label="Reload this page""#), "NAV-73");
+        let css = crate::http::server::APP_CSS;
+        assert!(css.contains(".pwa-reload{display:none!important}") && css.contains("@media (display-mode:standalone){.js .pwa-reload{display:inline-flex!important}}"));
+        assert!(crate::http::server::APP_JS.contains(r#"closest('[data-act="reload"]')"#));
+    }
+
+    #[test]
     fn shell_state_is_set_before_first_paint() {
         let st = crate::ui::testutil::state_with(vec![c("web", "shop", "running")], "");
         let h = hyper::HeaderMap::new();
@@ -1509,7 +1571,13 @@ mod tests {
             "boot and shell scripts"
         );
         let js = crate::http::server::APP_JS;
-        for k in ["'rh-tree'", "'rh-tree-q'", "'rh-tree-y'", "window.HB_LIVE"] {
+        for k in [
+            "'rh-tree'",
+            "'rh-tree-q'",
+            "'rh-tree-y'",
+            "window.HB_LIVE",
+            "if(l&&!window.HB)l.hidden=true",
+        ] {
             assert!(SHELL_JS.contains(k), "{k}");
         }
         for k in [

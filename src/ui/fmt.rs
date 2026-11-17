@@ -123,13 +123,17 @@ pub fn query_get<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str
 /// Rules (security review): no control character (TAB, CR, LF and NUL are
 /// stripped by browsers, so `/\t/evil` would become `//evil`) and no space;
 /// a leading `/`; no leading `//`; no backslash anywhere; and the
-/// percent-decoded form must pass the same checks.
+/// percent-decoded form must pass the same checks. No `.` or `..` path
+/// segment either: a browser resolves `/.//evil.example` to the path
+/// `//evil.example`, which a script navigation would read as another host.
 pub fn login_next(next: &str) -> Option<&str> {
     fn ok(s: &str) -> bool {
+        let path = s.split(['?', '#']).next().unwrap_or("");
         !s.chars().any(|c| c.is_control() || c == ' ')
             && s.starts_with('/')
             && !s.starts_with("//")
             && !s.contains('\\')
+            && !path.split('/').any(|seg| seg == "." || seg == "..")
     }
     (next.len() <= 512 && ok(next) && ok(&url_decode(next))).then_some(next)
 }
@@ -192,6 +196,9 @@ mod tests {
             "",
             "/a\nb",
             "/a\rb",
+            "/.//evil.example",
+            "/%2E//evil.example",
+            "/a/../..//evil.example",
         ] {
             assert_eq!(login_next(bad), None, "{bad:?}");
         }

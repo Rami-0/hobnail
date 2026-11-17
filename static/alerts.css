@@ -4,22 +4,22 @@
 .alerts{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 .alerts.bad{box-shadow:inset 3px 0 0 var(--bad)}
 .alerts-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;width:100%}
-.alerts .tile-title{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
-.alerts-sum{display:flex;align-items:center;gap:10px;font-size:12.5px}
-.alerts-counts{font-family:var(--mono);font-size:12px}
+.alerts .tile-title{font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.alerts-sum{display:flex;align-items:center;gap:10px;font-size:calc(12.5rem/14)}
+.alerts-counts{font-family:var(--mono);font-size:var(--fs-xs)}
 .alerts-chans{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
-.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--text-2);white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--border);border-radius:999px;font-size:var(--fs-xs);color:var(--text-2);white-space:nowrap}
 .badge.ok{color:var(--ok-fg)}.badge.warn{color:var(--warn-fg)}.badge.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
 .chan{font-family:var(--mono)}
-.chan-state{font-family:var(--font);font-size:11px}
+.chan-state{font-family:var(--font);font-size:var(--fs-micro)}
 .incidents{list-style:none;margin:0;padding:0;width:100%}
-.incident{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
+.incident{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
 .inc-subject{font-family:var(--mono)}
 .inc-state{color:var(--text-2)}
-.inc-since{margin-left:auto;font-family:var(--mono);font-size:12px}
-.alerts-err,.err-line{font-size:12px;color:var(--bad-fg)}
-td .k,.k{font-size:11px}
-.chip-s{display:inline-block;padding:0 6px;border-radius:4px;background:var(--surface-2);font:12px/20px var(--mono);color:var(--text-2)}
+.inc-since{margin-left:auto;font-family:var(--mono);font-size:var(--fs-xs)}
+.alerts-err,.err-line{font-size:var(--fs-xs);color:var(--bad-fg)}
+td .k,.k{font-size:var(--fs-micro)}
+.chip-s{display:inline-block;padding:0 6px;border-radius:4px;background:var(--surface-2);font:var(--fs-xs)/20px var(--mono);color:var(--text-2)}
 .panel .tbl th:first-child,.panel .tbl td:first-child{padding-left:0}
 .panel .tbl .nm{font-family:var(--mono);color:var(--text)}
 .panel .tbl td.wrap{max-width:320px}
@@ -29,7 +29,7 @@ td .k,.k{font-size:11px}
 /* history */
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .heat td.hot{background:color-mix(in srgb,var(--warn) calc(var(--h)*45%),transparent);color:var(--text);font-family:var(--mono)}
-.heat th[scope=row]{text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:500}
+.heat th[scope=row]{text-transform:none;letter-spacing:0;font-size:calc(12.5rem/14);font-weight:500}
 .heat th[scope=row] a{font-family:var(--mono)}
 .heat td,.heat th{white-space:nowrap}
 @media (max-width:699px){.heat .hm{display:none}.heat td,.heat th{padding-inline:3px}.heat th[scope=row]{white-space:normal;overflow-wrap:anywhere;min-width:7em}.heat th[scope=row] .nm-l{display:flex;align-items:center;justify-content:space-between}}
@@ -38,14 +38,14 @@ td .k,.k{font-size:11px}
 .login{display:grid;gap:12px;padding:22px 24px;max-width:440px;margin:6vh auto 0;width:100%}
 .login-h{display:flex;align-items:center;gap:10px}
 .login-h svg{width:20px;height:20px;color:var(--accent-fg)}
-.login-h h2{font-size:18px}
+.login-h h2{font-size:var(--fs-h2)}
 .login form{display:grid;gap:8px;margin-top:4px}
-.login label{font-size:12px;font-weight:600;color:var(--text-2)}
-.login input[type=password]{height:38px;padding:0 12px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--bg);font-size:14px}
+.login label{font-size:var(--fs-xs);font-weight:600;color:var(--text-2)}
+.login input[type=password]{height:38px;padding:0 12px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--bg);font-size:var(--fs-body)}
 .login input:focus{border-color:var(--accent)}
 .login input[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
 .login .btn{justify-self:start;height:36px}
-.form-msg{min-height:18px;font-size:12.5px;color:var(--bad-fg)}
+.form-msg{min-height:18px;font-size:calc(12.5rem/14);color:var(--bad-fg)}
 .form-msg.ok{color:var(--ok-fg)}
 
 /* settings placeholder */
@@ -58,8 +58,8 @@ td .k,.k{font-size:11px}
 .panel.primary.login{padding:24px 26px}
 /* the firing list and the alert log: rows open their subject (LG-55) and
    name the rule (LG-56); on a phone they wrap instead of widening the page */
-.inc-rule,.ev-rule{color:var(--text-2);font-size:12px;white-space:nowrap}
-.inc-rule b,.ev-rule b{font:500 12px var(--mono);color:var(--text)}
+.inc-rule,.ev-rule{color:var(--text-2);font-size:var(--fs-xs);white-space:nowrap}
+.inc-rule b,.ev-rule b{font:500 var(--fs-xs) var(--mono);color:var(--text)}
 .incident{flex-wrap:wrap;row-gap:2px}
 .incident.rl:hover,.al-log .ev.rl:hover{background:var(--tint)}
 .al-log .ev .when{flex-basis:auto;min-width:96px}
@@ -72,7 +72,7 @@ td .k,.k{font-size:11px}
 .incident .inc-since{margin-left:auto;text-align:right;white-space:nowrap}
 .incident:not(:has(.ia.logs))::after{content:"";flex:none;width:var(--ia)}
 @media (pointer:coarse){.incident:not(:has(.ia.logs))::after{width:44px}}
-.incident .inc-rule a{pointer-events:auto;font:500 12px var(--mono)}
+.incident .inc-rule a{pointer-events:auto;font:500 var(--fs-xs) var(--mono)}
 @media (pointer:coarse),(max-width:699px){.incident .inc-rule a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}}
 /* The read-only rules and channels tables fit 390 px (LG-58): tighter
    cells, headers and figures that wrap. */

@@ -57,7 +57,8 @@ fn locked(ws: &[&WidgetConfig]) -> Markup {
     html! {
         section.panel #w-locked aria-labelledby="wl-h" {
             div.panel-h { h2 #wl-h { "Defined on the host" } span.count-pill { (ws.len()) } }
-            p.lock-note { (ic("lock")) span { (LOCKED_TEXT) } }
+            // SET-51: where they are, read only: the file's own view.
+            p.lock-note { (ic("lock")) span { (LOCKED_TEXT) " " a href="/settings/config" { "See them in the config file" } "." } }
             ul.locked-list {
                 @for w in ws {
                     li.locked-w data-id=(w.id) {

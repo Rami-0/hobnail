@@ -16,7 +16,9 @@
 /* space: 4 px grid */
 --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:20px;--s-6:24px;--s-8:32px;--s-10:40px;
 /* control sizes */
---ctl-h:32px;--ctl-h-sm:28px;--ia:28px;--hit:24px;
+/* A11Y-20: boxes that hold text grow with the root font size (same px at
+   the default 14 px root). */
+--ctl-h:max(32px,calc(32rem/14));--ctl-h-sm:max(28px,calc(28rem/14));--ia:28px;--hit:24px;
 /* radius */
 --r-xs:4px;--r-sm:6px;--r:10px;--r-lg:14px;--r-pill:999px;
 /* motion: four durations, three easings; all become 0 under reduced motion */
@@ -24,7 +26,7 @@
 --ease-out:cubic-bezier(.2,.7,.3,1);--ease-in:cubic-bezier(.5,0,.75,0);--ease-io:cubic-bezier(.45,0,.25,1);
 /* layers */
 --z-top:20;--z-side:30;--z-pop:40;--z-toast:70;
---side-w:240px;--top-h:52px;--row:36px;
+--side-w:240px;--top-h:max(52px,calc(52rem/14));--row:36px;
 /* older names the page CSS still uses */
 --t:var(--dur-2);--ease:var(--ease-out);--fs-label:var(--fs-micro)}
 /* retired names, kept as aliases so a user custom.css that reads them keeps working (§11.2) */
@@ -73,7 +75,7 @@
 --tint:rgb(43 25 18/.045);--tint-2:rgb(43 25 18/.09);--scrim:rgb(43 25 18/.38);
 --shadow-1:0 1px 2px rgb(60 30 20/.06);--shadow-2:0 10px 28px -8px rgb(60 30 20/.22),0 2px 6px rgb(60 30 20/.08);--shadow-3:0 24px 60px -14px rgb(60 30 20/.32),0 4px 12px rgb(60 30 20/.1)}}
 /* phones and touch: 16 px inputs (no iOS zoom), 44 px targets */
-@media (pointer:coarse),(max-width:699px){:root{--fs-input:calc(16rem/14);--ctl-h:44px;--ctl-h-sm:44px;--ia:44px;--hit:44px}}
+@media (pointer:coarse),(max-width:699px){:root{--fs-input:calc(16rem/14);--ctl-h:max(44px,calc(32rem/14));--ctl-h-sm:max(44px,calc(28rem/14));--ia:44px;--hit:44px}}
 @media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms;--dur-4:0ms}
  *,*::before,*::after{animation-duration:0ms!important;animation-iteration-count:1!important;transition-duration:0ms!important;scroll-behavior:auto!important}}
 
@@ -96,8 +98,8 @@ code{color:var(--text-2)}
 kbd{display:inline-block;min-width:18px;padding:0 4px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--r-xs);font-size:.7857rem;line-height:16px;text-align:center;color:var(--text-2);background:var(--surface)}
 .num{font-variant-numeric:tabular-nums}
 .wrap{overflow-wrap:anywhere;white-space:normal}
-.skip{position:absolute;left:8px;top:-40px;z-index:100;padding:6px 10px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent)}
-.skip:focus{top:8px}
+.skip{position:absolute;left:8px;top:-40px;translate:0 -100%;z-index:100;padding:6px 10px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent)}
+.skip:focus{top:8px;translate:none}
 .muted{color:var(--text-3)}
 .label{font-size:var(--fs-micro);font-weight:600;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
 svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
@@ -116,7 +118,7 @@ svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
 .brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .brand-site{display:block;overflow:hidden;text-overflow:ellipsis;font-size:.7143rem;font-weight:500;color:var(--text-3);margin-top:2px}
 .nav{display:grid;gap:1px;padding:8px;flex:none}
-.nav-item{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--r-sm);color:var(--text-2);font-weight:500}
+.nav-item{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14));padding:0 10px;border-radius:var(--r-sm);color:var(--text-2);font-weight:500}
 .nav-item:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
 .nav-item[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
 .nav-item[aria-current=page] svg{color:var(--accent)}
@@ -234,6 +236,9 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .chip.warn b{color:var(--warn-fg)}.chip.bad b{color:var(--bad-fg)}
 .chip .spark{grid-column:1/-1;width:100%;height:10px;align-self:end}
 @media (max-width:699px){.vitals{display:none}}
+/* NAV-73: only in an installed app (no browser reload there). */
+.pwa-reload{display:none!important}
+@media (display-mode:standalone){.js .pwa-reload{display:inline-flex!important}}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-2);cursor:pointer;flex:none;position:relative}
 .icon-btn:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
 .icon-btn.sm{width:26px;height:26px}
@@ -387,11 +392,6 @@ span.sk{display:inline-block;width:2.6ch;height:.72em;vertical-align:baseline}
 .lg-cmp i{background:none;border-top:1.5px dashed var(--text-3);height:0}
 .lg[aria-pressed=false]{opacity:.5;text-decoration:line-through}
 .evm{position:absolute;inset:0;pointer-events:none}
-.mk{position:absolute;top:-6px;bottom:0;width:11px;margin-left:-5px;pointer-events:auto;z-index:3}
-.mk::before{content:"";position:absolute;left:5px;top:6px;bottom:0;border-left:1px dashed color-mix(in srgb,var(--bad) 45%,transparent)}
-.mk::after{content:"";position:absolute;left:2px;top:0;width:7px;height:7px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 2px var(--surface)}
-.mk.warn::before{border-color:color-mix(in srgb,var(--warn) 70%,transparent)}.mk.warn::after{background:var(--warn)}
-.mk:hover::after,.mk:focus-visible::after{transform:scale(1.35)}
 .chart[data-zoom] .canvas{cursor:crosshair;touch-action:pan-y}
 .sel{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--accent) 16%,transparent);border-inline:1px solid var(--accent);pointer-events:none}
 .cursor{background:color-mix(in srgb,var(--text-2) 60%,transparent)}

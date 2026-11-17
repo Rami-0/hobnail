@@ -788,6 +788,14 @@ async fn closed_window_stops_at_the_cap() {
     let got = read_until(&mut s, "event: done", Duration::from_secs(5)).await;
     assert!(got.contains("event: done"), "{got}");
     assert!(got.contains("line 3 ") && !got.contains("line 4 "), "{got}");
+    // More lines were in the window: the end event says the read was cut.
+    assert!(
+        got.contains(
+            r#"event: end
+data: {"c":0,"cut":true}"#
+        ),
+        "{got}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

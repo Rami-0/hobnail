@@ -349,20 +349,25 @@ for (const path of ["/", "/host", "/alerts", `/containers/${encodeURIComponent(C
     busy: [...document.querySelectorAll('[aria-busy="true"]')].map((x) => x.id || x.className),
     sk: [...document.querySelectorAll(".sk")].filter((x) => x.getClientRects().length).length,
     words: [...document.querySelectorAll(".sk-t")].filter((x) => x.getClientRects().length && x.getBoundingClientRect().width <= 2).length,
-    pane: (() => { const p = document.querySelector(".lmsg .js-late"); return p ? [getComputedStyle(p).visibility, p.innerText.slice(0, 40)] : null; })() }))()`);
+    pane: (() => { const p = document.querySelector(".lmsg .js-late"); return p ? [getComputedStyle(p).visibility, p.innerText.slice(0, 40)] : null; })(),
+    live: (() => { const l = document.getElementById("live"); return !l || !l.getClientRects().length ? "hidden" : l.textContent.trim(); })() }))()`);
   const paneOk = !path.endsWith("/logs") || (r.pane && r.pane[0] === "visible" && /needs JavaScript/.test(r.pane[1]));
   check(r.js && !r.ready && r.HB === "undefined" && r.busy.length === 0 && r.sk === 0 && r.words === 0 && paneOk, `scripts blocked: ${path} shows its plain text, no skeleton, nothing busy`, r);
+  // Nothing would update the page: the live indicator claims neither
+  // "live" nor "connecting".
+  check(r.live === "hidden", `scripts blocked: ${path}: no live indicator`, r.live);
 }
 await send("Network.setBlockedURLs", { urls: [] });
 
 // ---- 5. focus is visible in every theme ----
-const RING = `((sel) => { const e = document.querySelector(sel); if (!e) return null; e.focus(); const s = getComputedStyle(e);
+// "a|b": focus a, the ring is drawn by b (the log search box, A11Y-06).
+const RING = `((sel) => { const [fs, rs] = sel.split("|"), e = document.querySelector(fs); if (!e) return null; e.focus(); const s = getComputedStyle(rs ? e.closest(rs) : e);
   const ring = e.matches(":focus-visible") && s.outlineStyle !== "none" && parseFloat(s.outlineWidth) >= 2;
   const c = (v) => (v.match(/[\\d.]+/g) || []).slice(0, 3).map(Number);
   const lum = (v) => { const [r, g, b] = c(v).map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
   const bg = getComputedStyle(document.body).backgroundColor, a = lum(s.outlineColor), b = lum(bg);
   return { ring, ratio: +((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2) }; })`;
-const SAMPLE = { "/": [".nav-item", "#theme", ".cmd", ".hs-cell", "a.ia.logs", "#tree-filter", ".stack-name"], [`/containers/${encodeURIComponent(CTR)}`]: [".cd-tabs a", ".seg a"], "/containers": ["#cq", ".ctbl th a", ".btn.sm"] };
+const SAMPLE = { "/": [".nav-item", "#theme", ".cmd", ".hs-cell", "a.ia.logs", "#tree-filter", ".stack-name"], [`/containers/${encodeURIComponent(CTR)}`]: [".cd-tabs a", ".seg a"], "/containers": ["#cq", ".ctbl th a", ".btn.sm"], [`/containers/${encodeURIComponent(CTR)}/logs`]: ["#lq|.lsearch"] };
 for (const theme of ["dark", "light", "ember", "contrast"]) {
   const bad = [];
   for (const [path, sels] of Object.entries(SAMPLE)) {

@@ -22,7 +22,14 @@
       groups.forEach(function (g) { g.hidden = !g.querySelector("li[data-s]:not([hidden])"); });
       document.getElementById("lpick-n").textContent = (n === rows.length ? rows.length : n + " of " + rows.length) + " containers";
       document.getElementById("lpick-none").hidden = n > 0;
-      try { history.replaceState(history.state, "", v ? "?q=" + encodeURIComponent(v) : location.pathname); } catch (e) {}
+      addr();
+    };
+    // The address keeps the filter (`q=`) and the ticks (`sel=`, which the
+    // server ticks again), so a reload or a shared link keeps both.
+    var addr = function () {
+      var v = pq.value.trim(), sel = [].map.call(pick.querySelectorAll("input[name=c]:checked"), function (b) { return encodeURIComponent(b.value); });
+      var u = location.origin + location.pathname + (v || sel.length ? "?" : "") + (v ? "q=" + encodeURIComponent(v) : "") + (v && sel.length ? "&" : "") + (sel.length ? "sel=" + sel.join(",") : "");
+      try { if (u !== location.href.split("#")[0]) history.replaceState(history.state, "", u + location.hash); } catch (e) {}
     };
     // LG-05: the button counts the ticks and stays off below two; at four the
     // other boxes are off and the hint says why.
@@ -34,6 +41,7 @@
       document.getElementById("lpick-k").textContent = n ? " · " + n : "";
       hint.textContent = n >= 4 ? "Four at a time: untick one to choose another." : hint0;
       [].forEach.call(pick.querySelectorAll("input[name=c]:not(:checked)"), function (b) { b.disabled = n >= 4; });
+      addr();
     };
     // A short address (`/logs?c=a,b`) instead of the form's `go=1&c=a&c=b`.
     document.getElementById("lpick-c").addEventListener("submit", function (e) {
@@ -81,7 +89,11 @@
   // LG-13: the search lives in the address (`search=`, `re=1`, `case=1`), so
   // a reload or a shared link keeps it. Other parameters are left as they are.
   function param(k) { var m = new RegExp("[?&]" + k + "=([^&]*)").exec(location.search); return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : ""; }
-  S.q = param("search"); S.re = param("re") === "1"; S.cs = param("case") === "1";
+  // A regular expression from the address is not run on its own (a shared
+  // link could hold one that takes the tab down): its text comes back as
+  // plain text and the reader turns ".*" on to use it.
+  S.q = param("search"); S.cs = param("case") === "1";
+  var reFromLink = !!S.q && param("re") === "1";
   function keepSearch() {
     var rest = location.search.replace(/^\?/, "").split("&").filter(function (x) { return x && !/^(search|re|case)=/.test(x); });
     if (S.q) rest.push("search=" + encodeURIComponent(S.q));
@@ -111,7 +123,7 @@
   }
   // LG-23: names in a stack often differ only at the end ("web-app-1",
   // "web-app-2"), so a long chip keeps both ends: "web-ap…pp-2".
-  var CHIP = window.innerWidth <= 700 ? 12 : 20;
+  var CHIP = window.innerWidth <= 699 ? 12 : 20;
   function chipName(n) {
     n = shortName(n);
     return n.length <= CHIP ? n : n.slice(0, Math.ceil(CHIP / 2) - 1) + "…" + n.slice(n.length - Math.floor(CHIP / 2));
@@ -227,7 +239,8 @@
       } catch (e) { err = e.message; }
     }
     box.setAttribute("aria-invalid", err ? "true" : "false");
-    box.title = err ? "Invalid regular expression: " + err : "";
+    // The engine's message already starts with "Invalid regular expression".
+    box.title = err ? (/^invalid regular expression/i.test(err) ? err : "Invalid regular expression: " + err) : "";
     var m = $("lqerr");
     if (!m) { m = el("span", "lqerr"); m.id = "lqerr"; m.setAttribute("role", "status"); box.parentNode.appendChild(m); }
     m.textContent = err ? "Invalid regex" : "";
@@ -290,7 +303,7 @@
     this.older.addEventListener("click", function () { self.loadOlder(); });
     this.chips = node.querySelector(".lchipd");
     // LG-19: the chip list of a stack is open on wide screens only.
-    if (this.chips && window.innerWidth > 700) this.chips.open = true;
+    if (this.chips && window.innerWidth > 699) this.chips.open = true;
     // LG-23: the chip column is as wide as the longest (shortened) name.
     var w = 0;
     [].forEach.call(node.querySelectorAll(".lcn[data-name]"), function (c) { w = Math.max(w, chipName(c.dataset.name).length); });
@@ -443,15 +456,28 @@
       self.status(m.kind === "notfound" ? "not found" : "error", "bad");
       if (!self.lines.length) self.message(m.kind === "notfound" ? "Container not found" : "Could not read the logs", { tone: "bad", icon: "alert", body: m.kind === "notfound" ? "It may have been removed or renamed." : t });
     });
+    var cut = false;
     es.addEventListener("end", function (e) {
       var m = JSON.parse(e.data);
       self.ended[m.c] = 1;
+      if (m.cut) cut = true;
     });
     es.addEventListener("done", function () {
       done = true;
       es.close();
       var live = S.range !== "custom" || !S.to;
-      self.status(live && !MERGED ? "stopped" : "complete", "off");
+      // A closed range with more lines than the server reads at once: say
+      // where it stops instead of calling it complete.
+      if (cut) {
+        self.cut = true;
+        self.status("first " + RING.toLocaleString() + " lines", "warn");
+        var cm = el("div", "lmark lcut", "Showing the first " + RING.toLocaleString() + " lines of this range. Narrow the range to see the rest.");
+        cm.setAttribute("role", "note");
+        // Lines still waiting to be drawn go in front of it (see `add`).
+        self.cutEl = cm;
+        self.box.appendChild(cm);
+        if (self.follow) self.stick();
+      } else self.status(live && !MERGED ? "stopped" : "complete", "off");
       // LG-15: a range without lines says so, whatever the pane said before.
       if (!self.lines.length && !self.pending.length && (self.waiting() || self.msg.hidden || self.msg.dataset.t === "No lines yet")) self.message("No lines in this range", { icon: "history", body: "Pick a longer range, or Start for everything Docker kept." });
       counter();
@@ -488,6 +514,7 @@
   };
 
   Pane.prototype.reset = function () {
+    this.cut = false; this.cutEl = null;
     if (this.es) this.es.close();
     clearTimeout(this.retry);
     clearTimeout(this.quiet);
@@ -554,6 +581,7 @@
       }
     }
     this.box.appendChild(frag);
+    if (this.cutEl) this.box.appendChild(this.cutEl);
     if (!this.follow) this.unseen += batch.length;
     this.trim();
     if (HL && S.q) highlightAll();
@@ -593,13 +621,15 @@
   };
   // The window before the oldest line is guessed from the pace of the lines
   // held (about twice `want` lines); the server reads it from its start and
-  // stops at CAP. A full CAP means the window was too wide (a gap could be
-  // left): try a narrower one; too few lines: a wider one, three times.
+  // stops at CAP, and says so (`cut` on its end event). A cut window would
+  // leave a gap in front of the oldest line: never prepend it, ask for a
+  // narrower one (up to six times), then refuse. Too few lines: a wider one,
+  // three times.
   var CAP = 5000;
   Pane.prototype.loadOlder = function (span, tries) {
     var self = this, first = this.lines[0], last = this.lines[this.lines.length - 1];
     if (!first || (this.loading && !tries)) return;
-    var want = Math.min(TAIL, RING - this.lines.length), got = [], lab = this.older.lastChild;
+    var want = Math.min(TAIL, RING - this.lines.length), got = [], lab = this.older.lastChild, cut = false;
     tries = tries || 0;
     span = span || Math.min(86400, Math.max(60, (last.t - first.t) / 1000 / this.lines.length * want * 2));
     this.loading = true; this.older.disabled = true; lab.textContent = "Loading older lines…";
@@ -608,11 +638,14 @@
     var end = function (ok) {
       es.close(); self.oes = null;
       got = got.filter(function (x) { return x.t < first.t; });
-      if (ok && tries < 3 && (got.length >= CAP - 1 || (got.length < want && since > 0))) return self.loadOlder(got.length >= CAP - 1 ? span / 8 : span * 8, tries + 1);
+      if (ok && cut && tries < 6) return self.loadOlder(span / 8, tries + 1);
+      if (ok && !cut && tries < 3 && got.length < want && since > 0) return self.loadOlder(span * 8, tries + 1);
       self.loading = false; self.older.disabled = false; lab.textContent = "Load older lines";
-      if (ok) self.prepend(got, want, got.length < want);
+      if (ok && cut) say("Too many lines just before these to load them here. Pick a custom range instead.");
+      else if (ok) self.prepend(got, want, got.length < want);
       else say("Could not load older lines.");
     };
+    es.addEventListener("end", function (e) { if (JSON.parse(e.data).cut) cut = true; });
     es.addEventListener("l", function (e) { got = got.concat(JSON.parse(e.data)); });
     es.addEventListener("done", function () { end(true); });
     es.onerror = function () { end(false); };
@@ -916,6 +949,7 @@
     $("lprev").disabled = $("lnext").disabled = !hits;
     if (S.paused) t += " · paused" + (pend ? ", " + pend + " waiting" : "");
     if (down) t += " · disconnected, retrying";
+    if (panes.some(function (p) { return p.cut; })) t += " · first " + RING.toLocaleString() + " of the range";
     // On a phone the counter is in the Filters panel; a paused or broken
     // tail shows it anyway.
     root.classList.toggle("lstate", !!(S.paused || down));
@@ -1172,7 +1206,7 @@
   // a single pane ends above the bottom bar (LG-19); stacked panes keep
   // their own height and the page scrolls between them.
   function fit() {
-    var foot = root.querySelector(".lfoot"), phone = window.innerWidth <= 700;
+    var foot = root.querySelector(".lfoot"), phone = window.innerWidth <= 699;
     var bb = document.querySelector(".bbar"), bbH = phone && bb && bb.offsetHeight ? bb.offsetHeight : 0;
     panes.forEach(function (p) {
       if (phone && panes.length > 1) { p.body.style.height = ""; return; }
@@ -1221,6 +1255,7 @@
   applyView();
   fit();
   compile();
+  if (reFromLink) say("The search from the link is applied as plain text. Turn on .* to use it as a regular expression.");
   lastQ = S.q + "\n" + S.re + S.cs;
   dlHref();
   panes.forEach(function (p) { p.pill(); p.connect(false); });

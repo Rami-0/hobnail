@@ -793,6 +793,50 @@ impl Db {
         })
     }
 
+    /// The newest event id with `ts <= t`, or `None` when every event is
+    /// newer. Ids and timestamps both grow, so this is a binary search over
+    /// the id (each step one primary-key lookup, at most 64 of them) instead
+    /// of a walk back from the newest event: a History window far in the
+    /// past starts its scan at the window. No index on `ts` needed.
+    pub fn event_id_at_or_before(&self, t: i64) -> Option<i64> {
+        self.with(None, |i| {
+            let (lo, hi): (Option<i64>, Option<i64>) =
+                i.conn
+                    .query_row("SELECT MIN(id), MAX(id) FROM events", [], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })?;
+            let (Some(mut lo), Some(mut hi)) = (lo, hi) else {
+                return Ok(None);
+            };
+            let mut st = i
+                .conn
+                .prepare("SELECT id, ts FROM events WHERE id >= ?1 ORDER BY id LIMIT 1")?;
+            let mut at = |id: i64| -> rusqlite::Result<Option<(i64, i64)>> {
+                st.query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map(Some)
+                    .or_else(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                        e => Err(e),
+                    })
+            };
+            let mut best = None;
+            for _ in 0..64 {
+                if lo > hi {
+                    break;
+                }
+                let mid = lo + (hi - lo) / 2;
+                match at(mid)? {
+                    Some((id, ts)) if id <= hi && ts <= t => {
+                        best = Some(id);
+                        lo = id + 1;
+                    }
+                    _ => hi = mid - 1,
+                }
+            }
+            Ok(best)
+        })
+    }
+
     /// Containers with their number of `container.start` events since `since`
     /// (unix seconds): restart counts.
     pub fn restart_counts(&self, since: i64) -> Vec<(String, u32)> {

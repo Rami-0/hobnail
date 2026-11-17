@@ -1005,6 +1005,9 @@
         },
         discard: () => discardForm(form, o),
       });
+      // A refused change the form shows itself (the raw editor's status
+      // line, SET-66): one message, not a second box under the form.
+      if (!r.ok && o.refused && res.status === 403 && res.data && res.data.locked) return o.refused(res.data);
       if (!r.ok) {
         // custom.css: the note names its own file.
         if (o.file && r.note) r.note[1] = r.note[1].replace("the config file", o.file);
@@ -1040,7 +1043,7 @@
   const PARTS = {};
   async function refreshForms(ids, force) {
     let r;
-    try { r = await fetch(location.pathname, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
+    try { r = await fetch(location.origin + location.pathname, { credentials: "same-origin", cache: "no-store" }); } catch { return false; }
     if (r.status === 401) banner("expired");
     if (!r.ok) return false;
     const page = new DOMParser().parseFromString(await r.text(), "text/html");
@@ -1332,7 +1335,9 @@
         $("th-local").hidden = true;
       });
       const fc = $("f-css"), ta = $("css-text");
+      let cssSaved = null, cssPrev = null;
       if (!fc) return;
+      cssSaved = ta.value;
       const max = Number($("css-size").dataset.max) || 65536;
       const size = () => { const n = new Blob([ta.value]).size, s = $("css-size"); s.textContent = `${bytes(n)} of ${bytes(max)}`; s.classList.toggle("over", n > max); };
       // Apply the editor to the page (or `null`: back to the saved custom.css).
@@ -1368,10 +1373,17 @@
           const r = await call("GET", "appearance");
           if (r.status !== 200) return false;
           ta.value = r.data.css; f.dataset.hash = r.data.hash; f._init(); size(); preview($("css-live").checked ? ta.value : null);
+          if (cssSaved == null) cssSaved = ta.value;
           return true;
         },
         ownWarnings: true,
         done: (d) => {
+          // SET-59: the text before this save stays at hand (in this page
+          // only: custom.css has no revisions), so a save that kept a
+          // broken file can be undone.
+          if (!d.unchanged && cssSaved !== ta.value) { cssPrev = cssSaved; cssSaved = ta.value; }
+          const pb = fc.querySelector('[data-act="css-prev"]');
+          if (pb) pb.hidden = cssPrev == null;
           cssWarnings(d.warnings || []);
           // The saved file applies from now on, preview or not.
           const link = doc.querySelector('link[href^="/custom.css"]');
@@ -1380,6 +1392,7 @@
         saved: () => "Saved custom.css",
       });
       // The page form's base is custom.css, not the config file.
+      onAct("css-prev", () => { if (cssPrev == null) return; ta.value = cssPrev; ta.dispatchEvent(new Event("input", { bubbles: true })); size(); preview($("css-live").checked ? ta.value : null); toast("The version before your last save is in the editor: Save to keep it", "info"); });
       onAct("css-revert", () => { ta.value = fc._open.css; size(); preview($("css-live").checked ? ta.value : null); HB.noteIn(fc, ""); toast("Back to the saved custom.css", "info"); });
     },
     load() { return refreshForms(["th-box"]); },
@@ -1462,6 +1475,7 @@
         fresh: async () => ({ hash: "", values: null }),
         load: (form) => raw.reload(form),
         done: async () => { this.status({ ok: true }); this.validate(); await refreshList("rev-list"); },
+        refused: (d) => { this.status({ ok: false, locked: true, error: d.error, saved: true }); return { ok: false }; },
         saved: (d) => `Saved config.toml${revNo(d)}`,
         // Saved from the editor (Ctrl+S): back to it, caret where it was.
         refocus: () => { const r = raw.fromEditor; raw.fromEditor = false; return r ? ta : null; },
@@ -1564,6 +1578,16 @@
     },
     status(v) {
       const box = $("raw-status"), go = main.querySelector("[data-act=raw-goto]");
+      // SET-66: a refused command widget has no parse position: point at
+      // its block (the `id = "…"` line of that widget) instead.
+      if (!v.ok && v.locked && !v.line) {
+        const m = /command widget "((?:[^"\\]|\\.)*)"/.exec(String(v.error || ""));
+        if (m) {
+          const id = m[1].replace(/\\(.)/g, "$1"), ls = $("raw-text").value.split("\n");
+          const at = ls.findIndex((l) => { const k = /^\s*id\s*=\s*["']([^"']*)["']/.exec(l); return !!k && k[1] === id; });
+          if (at >= 0) { v = Object.assign({}, v, { line: at + 1, col: 1 }); }
+        }
+      }
       this.err = v.ok ? null : v;
       go.hidden = !v.line;
       $("raw-text").toggleAttribute("aria-invalid", !v.ok);
@@ -1573,7 +1597,7 @@
         box.replaceChildren(...[icon(w.length ? "alert" : "check"), el("span", { text: w.length ? "Valid, with warnings:" : "Valid: this config loads." }), w.length ? el("ul", null, w.map((m) => el("li", { text: m }))) : null].filter(Boolean));
       } else if (v.locked) {
         box.className = "raw-status lock";
-        box.replaceChildren(icon("lock"), el("span", { text: "Would be refused: " + String(v.error).replace(/^refused:\s*/i, "") }));
+        box.replaceChildren(icon("lock"), el("span", null, v.line ? el("b", { text: `Line ${v.line}: ` }) : null, (v.saved ? "Not saved: " : "Would be refused: ") + String(v.error).replace(/^refused:\s*/i, "")));
       } else {
         box.className = "raw-status bad";
         box.replaceChildren(icon("alert"), el("span", null, v.line ? el("b", { text: `Line ${v.line}, column ${v.col}: ` }) : null, plainErr(v.error)));

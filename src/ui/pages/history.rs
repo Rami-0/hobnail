@@ -254,7 +254,14 @@ pub fn window_events(db: &crate::db::Db, signed: bool, from: i64, to: i64) -> Ve
 
 fn scan(db: &crate::db::Db, signed: bool, from: i64, to: i64, before: Option<i64>) -> Scan {
     let mut out = Scan::default();
-    let mut cursor = before;
+    // Start at the window's end, not at the newest event: one bounded seek
+    // (ids and timestamps both grow) instead of walking every newer event,
+    // which could use up the page limit before the window (no markers, an
+    // empty first page).
+    let Some(end) = db.event_id_at_or_before(to) else {
+        return out;
+    };
+    let mut cursor = Some(before.map_or(end + 1, |b| b.min(end + 1)));
     for _ in 0..SCAN_PAGES {
         let page = db.events(
             &EventFilter {
@@ -734,6 +741,32 @@ mod tests {
         assert!(s.events.iter().all(|e| !e.kind.starts_with("auth.")));
         let s = scan(&db, true, 0, 30_000, None);
         assert!(s.events.iter().any(|e| e.kind == "auth.login"));
+    }
+
+    /// A window with more events after it than the scan's page limit
+    /// (10,000) still gets its events: the scan seeks to the window's end.
+    #[test]
+    fn scan_starts_at_the_window_not_the_newest_event() {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        db.with((), |i| i.conn.execute_batch("BEGIN"));
+        for i in 0..300 {
+            db.record_event(1_000 + i, "container.die", "warn", "web", "");
+        }
+        for i in 0..12_000 {
+            db.record_event(50_000 + i, "container.start", "info", "web", "");
+        }
+        db.with((), |i| i.conn.execute_batch("COMMIT"));
+        let s = scan(&db, false, 1_000, 1_299, None);
+        assert_eq!(s.events.len(), 300);
+        assert_eq!((s.events[0].ts, s.cut), (1_299, None));
+        // Paging below an id inside the window, and a `before` past it.
+        let s2 = scan(&db, false, 1_000, 1_299, Some(s.events[99].id));
+        assert_eq!(s2.events.len(), 200);
+        let s3 = scan(&db, false, 1_000, 1_299, Some(i64::MAX));
+        assert_eq!(s3.events.len(), 300);
+        // Before every event: nothing, without a walk.
+        assert!(scan(&db, false, 0, 999, None).events.is_empty());
+        assert_eq!(window_events(&db, false, 1_000, 1_299).len(), 300);
     }
 
     /// Rows: an anchor for the marker, a clock time, the subject linked,

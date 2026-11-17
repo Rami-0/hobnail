@@ -253,10 +253,14 @@
       await fetch("/api/logout", { method: "POST", credentials: "same-origin", headers: { "X-RH-CSRF": m ? m.content : "" } });
     } catch {}
     try { sessionStorage.setItem("rh-out", "1"); } catch {}
-    location.replace(/^\/settings(\/|$)/.test(location.pathname) ? "/" : location.pathname + location.search);
+    // Built on the origin: a path that starts with "//" must not become
+    // another host (a 404 at "//example.invalid/x" is still this site).
+    location.replace(location.origin + (/^\/settings(\/|$)/.test(location.pathname) ? "/" : location.pathname + location.search));
   }
   try { if (sessionStorage.getItem("rh-out")) { sessionStorage.removeItem("rh-out"); window.HB && HB.toast && HB.toast("Signed out", { kind: "info" }); } } catch {}
   doc.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest('[data-act="logout"]'); if (b) { e.preventDefault(); logout(); } });
+  // NAV-73: the installed app's reload button (no browser bar there).
+  doc.addEventListener("click", (e) => { if (e.target.closest && e.target.closest('[data-act="reload"]')) location.reload(); });
 
   // ---- live sparklines: a ring buffer per key, drawn zero based ----
   const series = new Map(), MAXP = 40;
@@ -375,7 +379,7 @@
     p.delete("range"); p.set("from", at(Math.min(d.x, e.clientX))); p.set("to", at(Math.max(d.x, e.clientX)));
     // Charts lower on a page (Host's history, LG-39) come back into view.
     const sec = d.fig.closest("[data-zoom-hash][id]");
-    location.href = location.pathname + "?" + p.toString() + (sec ? "#" + sec.id : "");
+    location.href = location.origin + location.pathname + "?" + p.toString() + (sec ? "#" + sec.id : "");
   });
 
   // Legend buttons toggle a layer (avg, max band, yesterday) on every chart
@@ -383,7 +387,10 @@
   function legend(ser, on) {
     $$(`.lg[data-ser="${ser}"]`).forEach((b) => { b.setAttribute("aria-pressed", String(on)); b.closest("figure").classList.toggle("off-" + ser, !on); });
   }
-  const chartOff = () => { const v = store.get("hb.chartOff", []); return Array.isArray(v) ? v : []; };
+  // Only the known layers: the stored value goes into a selector, and a bad
+  // one must not stop the rest of this script.
+  const SERIES = ["avg", "max", "cmp"];
+  const chartOff = () => { const v = store.get("hb.chartOff", []); return Array.isArray(v) ? v.filter((s) => SERIES.includes(s)) : []; };
   chartOff().forEach((s) => legend(s, false));
   doc.addEventListener("click", (e) => {
     const b = e.target.closest && e.target.closest(".lg[data-ser]");
@@ -850,7 +857,7 @@
     let dec;
     try { dec = decodeURIComponent(n); } catch { return "/"; }
     if (!ok(n) || !ok(dec) || n.length > 512) return "/";
-    try { const u = new URL(n, location.origin); return u.origin === location.origin ? u.pathname + u.search + u.hash : "/"; } catch { return "/"; }
+    try { const u = new URL(n, location.origin); return u.origin === location.origin ? u.href : "/"; } catch { return "/"; }
   }
   // A sign-in link carries the page's #t= fragment through the login (LG-11).
   if (location.hash) $$("a.login-next, .acct-in").forEach((a) => { if (a.href.includes("?next=")) a.href += encodeURIComponent(location.hash); });

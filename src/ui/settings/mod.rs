@@ -121,7 +121,6 @@ pub struct Embed {
 /// dialog-only tabs ("bookmarks widgets": their dialogs, no list).
 pub fn embed(ctx: &Ctx, tabs: &str) -> Option<Embed> {
     ctx.user.as_ref()?;
-    let sha = ctx.state.build.sha;
     let first = tabs.split(' ').next().unwrap_or("");
     let frag = format!("/settings/{first}");
     let hash = disk::Disk::read(ctx.state).hash;
@@ -134,7 +133,7 @@ pub fn embed(ctx: &Ctx, tabs: &str) -> Option<Embed> {
         _ => return None,
     };
     Some(Embed {
-        head: html! { link rel="stylesheet" href={"/static/settings.css?v=" (sha)}; },
+        head: html! { link rel="stylesheet" href={"/static/settings.css?v=" (crate::http::server::SETTINGS_CSS_V)}; },
         body: html! {
             div.set-main.set-embed.bare[body.0.is_empty()] #set-main data-tab=(tabs) data-signed="1" data-frag=(frag) {
                 div.set-banners #set-banners aria-live="assertive" {}
@@ -144,7 +143,7 @@ pub fn embed(ctx: &Ctx, tabs: &str) -> Option<Embed> {
         tail: html! {
             (dlg::confirm())
             (dialogs)
-            script src={"/static/settings.js?v=" (sha)} defer {}
+            script src={"/static/settings.js?v=" (crate::http::server::SETTINGS_JS_V)} defer {}
         },
         hash,
     })
@@ -192,7 +191,6 @@ pub fn fragment(ctx: &Ctx) -> Option<(StatusCode, String)> {
 }
 
 fn shell(ctx: &Ctx, tab: &Tab, content: Markup, dialogs: Markup, acts: Option<Markup>) -> String {
-    let sha = ctx.state.build.sha;
     let (name, slug, desc) = *tab;
     let signed = ctx.user.is_some();
     // Signed out every tab is the same lock panel: no tab strip of links
@@ -209,7 +207,7 @@ fn shell(ctx: &Ctx, tab: &Tab, content: Markup, dialogs: Markup, acts: Option<Ma
         html! { h1.title { "Settings" } }
     };
     let body = html! {
-        link rel="stylesheet" href={"/static/settings.css?v=" (sha)};
+        link rel="stylesheet" href={"/static/settings.css?v=" (crate::http::server::SETTINGS_CSS_V)};
         div.page.set.locked[!signed] {
             @if signed {
                 nav.set-nav #set-nav aria-label="Settings sections" {
@@ -244,7 +242,7 @@ fn shell(ctx: &Ctx, tab: &Tab, content: Markup, dialogs: Markup, acts: Option<Ma
             (dlg::confirm())
             (dialogs)
         }
-        script src={"/static/settings.js?v=" (sha)} defer {}
+        script src={"/static/settings.js?v=" (crate::http::server::SETTINGS_JS_V)} defer {}
     };
     let title = if signed { name } else { "Settings" };
     layout(ctx, Nav::Settings, title, heading, body)
