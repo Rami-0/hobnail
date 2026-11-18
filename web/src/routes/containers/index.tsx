@@ -393,7 +393,7 @@ export default function ContainersPage() {
   );
 
   return (
-    <div className="page wide ctr-page">
+    <div className="page wide ctr-page ct">
       <h1 className="sr">Containers</h1>
       <search className="bar">
         <div className="search-in">
