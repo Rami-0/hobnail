@@ -152,3 +152,4 @@ tbody.none td{padding:0}
 }
 .ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 .port{height:max(24px,var(--hit));min-width:var(--hit);line-height:calc(max(24px,var(--hit)) - 2px);text-align:center}
+@media(pointer:coarse),(max-width:699px){.ctr-page .seg>:is(a,button){height:44px}.ctr-page .sortctl .btn{min-width:44px}}

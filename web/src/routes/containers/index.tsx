@@ -304,7 +304,7 @@ export default function ContainersPage() {
         onPointerLeave={() => setInTable((s) => (s.pointer ? { ...s, pointer: false } : s))}
       >
         <table ref={tableRef} className={grouped ? "tbl ctbl grouped" : "tbl ctbl"} data-testid="containers">
-          <caption className="count" aria-live="polite" data-testid="showing">
+          <caption className="count" role="status" aria-live="polite" data-testid="showing">
             Showing <b className="num">{shown}</b> of <span className="num">{total}</span> containers
             {hiddenInFolded > 0 ? ` · ${hiddenInFolded} in collapsed stacks` : ""}
           </caption>

@@ -196,3 +196,4 @@ main>.banner{max-width:1480px;margin:0 auto 16px}
 }
 /* Compact text actions retain a keyboard and pointer target. */
 a.stack-name,.side-foot .keys-btn{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+.top-brand .brand{min-width:var(--hit);justify-content:center}
