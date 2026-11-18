@@ -571,7 +571,14 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
     for (method, route) in ROUTES
         .iter()
         .filter(|r| r.access == Access::Admin)
-        .map(|r| (r.method, r.pattern.replace("<id>", "outside")))
+        .map(|r| {
+            (
+                r.method,
+                r.pattern
+                    .replace("<id>", "outside")
+                    .replace("<name>", "web"),
+            )
+        })
         .chain(
             WRITES
                 .iter()

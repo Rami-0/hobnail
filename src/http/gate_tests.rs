@@ -2085,6 +2085,14 @@ async fn invite_roles_and_account_management() {
         let bootstrap = json_of(&r, "role in bootstrap");
         assert_eq!(bootstrap["role"], role);
         assert_eq!(bootstrap["scoped"], true);
+        for resource in ["inspect", "metrics", "events"] {
+            let path = format!("/api/v1/containers/no-grant/{resource}");
+            assert_eq!(req(addr, "GET", &path, &h, "").await.status, 404, "{path}");
+        }
+        for resource in ["top", "env"] {
+            let path = format!("/api/v1/containers/no-grant/{resource}");
+            assert_eq!(req(addr, "GET", &path, &h, "").await.status, 403, "{path}");
+        }
         assert_eq!(
             req(addr, "GET", "/api/v1/history", &h, "").await.status,
             403
@@ -2302,6 +2310,30 @@ async fn viewer_cannot_read_administrative_details() {
     );
     assert!(state["config"]["error"].is_null());
     assert!(state["config"]["path"].is_null());
+    for path in ["/api/v1/containers/web/env", "/api/v1/containers/web/top"] {
+        assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
+    }
+    let inspect = req(addr, "GET", "/api/v1/containers/web/inspect", &h, "").await;
+    assert_eq!(
+        json_of(&inspect, "viewer inspect")["env_keys"],
+        serde_json::json!(["PASSWORD"])
+    );
+    assert!(!inspect.body.contains("SECRET-CMD"));
+    assert!(!inspect.body.contains("hunter2"));
+    let metrics = req(addr, "GET", "/api/v1/containers/web/metrics", &h, "").await;
+    assert_eq!(
+        json_of(&metrics, "viewer metrics")
+            .as_array()
+            .unwrap()
+            .len(),
+        10
+    );
+    let events = req(addr, "GET", "/api/v1/containers/web/events", &h, "").await;
+    assert_eq!(
+        json_of(&events, "viewer events")["events"][0]["kind"],
+        "container.start"
+    );
+    assert!(!events.body.contains("auth.login_failed"));
     let detail = json_of(
         &req(addr, "GET", "/api/v1/containers/web", &h, "").await,
         "viewer detail",
@@ -2361,6 +2393,26 @@ async fn viewer_cannot_read_administrative_details() {
         "to"
     );
     let (owner, _) = login(addr).await;
+    let admin_headers = [("Cookie", owner.as_str())];
+    let inspect = req(
+        addr,
+        "GET",
+        "/api/v1/containers/web/inspect",
+        &admin_headers,
+        "",
+    )
+    .await;
+    assert!(inspect.body.contains("SECRET-CMD"));
+    assert!(!inspect.body.contains("hunter2"));
+    let env = req(
+        addr,
+        "GET",
+        "/api/v1/containers/web/env",
+        &admin_headers,
+        "",
+    )
+    .await;
+    assert_eq!(json_of(&env, "revealed env")["env"][0][1], "hunter2");
     let owner_overview = req(
         addr,
         "GET",

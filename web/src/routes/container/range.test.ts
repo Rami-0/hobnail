@@ -23,22 +23,23 @@ test("links keep the rest of the query", () => {
   assert.equal(withParams("?edit=override", { edit: null }), "");
 });
 
-test("tabs keep the range and point at the old UI", () => {
-  const t = tabs("my app", "24h");
+test("tabs keep the range in the app", () => {
+  const t = tabs("my app", "?range=24h");
   assert.deepEqual(
     t.map((x) => x.href),
     [
       "/app/containers/my%20app?range=24h",
-      "/containers/my%20app/logs?range=24h",
-      "/containers/my%20app?tab=metrics&range=24h",
-      "/containers/my%20app?tab=inspect&range=24h",
-      "/containers/my%20app?tab=processes&range=24h",
-      "/containers/my%20app?tab=events&range=24h",
+      "/app/containers/my%20app/logs?range=24h",
+      "/app/containers/my%20app?tab=metrics&range=24h",
+      "/app/containers/my%20app?tab=inspect&range=24h",
+      "/app/containers/my%20app?tab=processes&range=24h",
+      "/app/containers/my%20app?tab=events&range=24h",
     ],
   );
-  assert.equal(tabs("x", "6h")[0]?.href, "/app/containers/x");
-  assert.equal(logsAt("web", 100), "/containers/web/logs#t=100000");
-  assert.equal(logsAt("web", null), "/containers/web/logs");
+  assert.equal(tabs("x", "?range=6h")[0]?.href, "/app/containers/x");
+  assert.equal(tabs("x", "?from=10&to=20&tab=inspect")[2]?.href, "/app/containers/x?tab=metrics&from=10&to=20");
+  assert.equal(logsAt("web", 100), "/app/containers/web/logs#t=100000");
+  assert.equal(logsAt("web", null), "/app/containers/web/logs");
 });
 
 test("history note (OV-43)", () => {

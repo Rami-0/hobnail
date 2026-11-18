@@ -67,20 +67,18 @@ export interface Tab {
   href: string;
 }
 
-/**
- * The six tabs. Overview is this page; the others are the old UI's pages
- * (full loads) and keep the range, as the old tab strip did (OV-37).
- */
-export function tabs(name: string, range: string): Tab[] {
-  const n = encodeURIComponent(name);
-  const r = isRange(range) ? range : "6h";
+/** Keep the exact preset or zoom when moving between detail tabs. */
+export function tabs(name: string, query: string): Tab[] {
+  const root = `/app/containers/${encodeURIComponent(name)}`;
+  const win = parseWindow(query);
+  const parameters = win.kind === "range" && win.range === "6h" ? "" : apiQuery(win);
   return [
-    { id: "overview", label: "Overview", href: `/app/containers/${n}${r === "6h" ? "" : `?range=${r}`}` },
-    { id: "logs", label: "Logs", href: `/containers/${n}/logs?range=${r}` },
-    { id: "metrics", label: "Metrics", href: `/containers/${n}?tab=metrics&range=${r}` },
-    { id: "inspect", label: "Inspect", href: `/containers/${n}?tab=inspect&range=${r}` },
-    { id: "processes", label: "Processes", href: `/containers/${n}?tab=processes&range=${r}` },
-    { id: "events", label: "Events", href: `/containers/${n}?tab=events&range=${r}` },
+    { id: "overview", label: "Overview", href: root + (parameters ? `?${parameters}` : "") },
+    { id: "logs", label: "Logs", href: `${root}/logs${parameters ? `?${parameters}` : ""}` },
+    { id: "metrics", label: "Metrics", href: `${root}?tab=metrics${parameters ? `&${parameters}` : ""}` },
+    { id: "inspect", label: "Inspect", href: `${root}?tab=inspect${parameters ? `&${parameters}` : ""}` },
+    { id: "processes", label: "Processes", href: `${root}?tab=processes${parameters ? `&${parameters}` : ""}` },
+    { id: "events", label: "Events", href: `${root}?tab=events${parameters ? `&${parameters}` : ""}` },
   ];
 }
 
@@ -97,8 +95,8 @@ export function historyNote(firstPoint: number | null, range: string, now: numbe
   return { have, fit: fit !== null && SECS[fit] < secs ? fit : null };
 }
 
-/** Old UI's log viewer at a moment: `#t=` in milliseconds (LG-11). */
+/** Log viewer at a moment: `#t=` in milliseconds (LG-11). */
 export function logsAt(name: string, at: number | null): string {
-  const base = `/containers/${encodeURIComponent(name)}/logs`;
+  const base = `/app/containers/${encodeURIComponent(name)}/logs`;
   return at === null ? base : `${base}#t=${Math.max(0, at) * 1000}`;
 }

@@ -54,6 +54,10 @@ const HISTORY: Record<string, [string, Unit]> = {
   cpu: ["CPU", "pct"], load1: ["Load (1 min)", "scalar"], mem: ["Memory", "bytes"],
   swap: ["Swap", "bytes"], disk: ["Disk used", "pct"], temp: ["Temperature", "temp"],
   net_rx: ["Network in", "rate"], net_tx: ["Network out", "rate"],
+  throttled: ["Throttled periods", "pct"], cache: ["Page cache", "bytes"],
+  anon: ["Anonymous memory", "bytes"], memory_limit: ["Memory limit", "bytes"],
+  oom: ["OOM kills", "scalar"], block_read: ["Block read", "rate"],
+  block_write: ["Block write", "rate"], pids: ["PIDs", "scalar"],
 };
 
 /** The old UI's key: layers switched off on every chart ("avg", "max", "cmp"). */

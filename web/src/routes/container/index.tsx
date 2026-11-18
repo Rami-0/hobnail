@@ -26,10 +26,11 @@ import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { Why } from "../../api/gen/Why.ts";
 import { api, useSession } from "../../api/session.ts";
 import { navigate, useRoute } from "../../app/router.ts";
-import { ago, bindingLink, bytes, duration, localTime, pct, rowLink, viewerHost } from "../../format/index.ts";
+import { bindingLink, bytes, duration, localTime, pct, rowLink, viewerHost } from "../../format/index.ts";
 import { onConfigChange, useBootstrap, useContainers, useNow, useStat } from "../../live/index.ts";
 import { EmptyState } from "../../ui/Note.tsx";
 import { Sparkline } from "../../ui/Sparkline.tsx";
+import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import { ServiceIcon, StatusDot } from "../containers/parts.tsx";
 import { SPARK_POINTS } from "../containers/liveCells.ts";
@@ -49,10 +50,12 @@ import {
 } from "./range.ts";
 import "../containers/containers.css";
 import "./container.css";
+import "../history/history.css";
 
 // Memoised: the charts re-render only when their series (or handlers) change.
 // The chunk is asked for when this page's module loads, so it downloads
 // while the detail is fetched.
+const ExtraTab = lazy(() => import("./Tabs.tsx"));
 const chartsChunk = import("../../charts/RechartsUsage.tsx");
 const UsageCharts = memo(lazy(() => chartsChunk));
 
@@ -76,7 +79,6 @@ export default function ContainerPage() {
   const q = apiQuery(win);
   const session = useSession();
   const role = session.session?.user?.role;
-  const signed = role !== undefined;
   const bootstrap = useBootstrap();
   const canEdit = !!bootstrap && !bootstrap.scoped && (role === "admin" || role === "owner");
   const live = useContainers();
@@ -149,9 +151,9 @@ export default function ContainerPage() {
       return;
     }
     if (bootstrap?.scoped) return;
-    // Not among the 12 newest: the old History timeline around it.
+    // Open the matching row in History when it is outside the overview timeline.
     const ev = detail?.series.markers.find((m) => m.id === id);
-    window.location.assign(historyHref(id, at, ev?.level ?? "warn"));
+    navigate(historyHref(id, at, ev?.level ?? "warn"));
   }, [bootstrap?.scoped, detail]);
 
   if (load.kind === "missing" && !detail) {
@@ -186,6 +188,10 @@ export default function ContainerPage() {
   const row: ContainerRow = liveRow ? { ...liveRow, started_at: detail.row.started_at ?? liveRow.started_at } : detail.row;
   const s = detail.series;
   const range = s.range;
+  const visibleTabs = tabs(row.name, loc.query).filter((item) =>
+    (item.id !== "processes" || canEdit) && (item.id !== "logs" || !bootstrap?.scoped));
+  const tab = visibleTabs.find((item) => item.id !== "logs" && item.id === loc.search.get("tab"))?.id ?? "overview";
+  const charts = tab === "overview" || tab === "metrics";
   const zoomed = win.kind === "zoom";
   const open = rowLink(row, host);
   const loading = load.kind === "ok" && load.key !== key;
@@ -244,8 +250,8 @@ export default function ContainerPage() {
           <span>Docker is not reachable ({dockerError}). Showing the last known state.</span>
         </output>
       )}
-      {detail.why && <WhyNote why={detail.why} name={row.name} signed={signed} scoped={!!bootstrap?.scoped} now={now} />}
-      <TabNav label="Container sections" items={tabs(row.name, range).filter((tab) => !bootstrap?.scoped || tab.id === "overview")} current="overview" testId="ctr-tabs" />
+      {detail.why && <WhyNote why={detail.why} name={row.name} admin={canEdit} scoped={!!bootstrap?.scoped} />}
+      <TabNav label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
         <div className="cell">
@@ -255,7 +261,7 @@ export default function ContainerPage() {
           <div className="big">
             <span className={`st-l lg ${stateDot}`}>{stateWord}</span>
           </div>
-          <div className="sub">{up ? `up ${up}` : row.state === "exited" ? "stopped" : row.state}</div>
+          <div className="sub" title={row.started_at ? new Date(row.started_at * 1000).toLocaleString() : undefined}>{up ? `up ${up}` : row.state === "exited" ? "stopped" : row.state}</div>
         </div>
         <StatTile key={`cpu:${row.name}`} name={row.name} kind="cpu" seed={seedCpu} />
         <StatTile key={`mem:${row.name}`} name={row.name} kind="mem" seed={seedMem} />
@@ -287,9 +293,9 @@ export default function ContainerPage() {
         )}
       </section>
 
-      <section className="sec" aria-labelledby="cd-usage">
+      {charts && <section className="sec" aria-labelledby="cd-usage">
         <div className="panel-h">
-          <h2 id="cd-usage">Usage</h2>
+          <h2 id="cd-usage">{tab === "metrics" ? "Metrics" : "Usage"}</h2>
           <nav className="seg" aria-label="Range" data-testid="range">
             {RANGES.map((r) => (
               <a key={r} href={loc.pathname + rangeSearch(loc.query, r)} aria-current={!zoomed && r === range ? "true" : undefined}>
@@ -322,7 +328,7 @@ export default function ContainerPage() {
             )}
           </p>
         )}
-        <Suspense
+        {tab === "overview" && <Suspense
           fallback={
             <div className="charts two" aria-busy="true">
               <div className="chart ch-wait" />
@@ -331,16 +337,20 @@ export default function ContainerPage() {
           }
         >
           <UsageCharts series={s} onZoom={onZoom} onMarker={onMarker} />
-        </Suspense>
-      </section>
+        </Suspense>}
+      </section>}
+      {tab !== "overview" && <Suspense fallback={<p role="status">Loading tab…</p>}>
+        <ExtraTab key={tab} tab={tab} detail={detail} admin={canEdit} scoped={!!bootstrap?.scoped} recording={!!bootstrap?.features.history} onZoom={onZoom} onMarker={onMarker} />
+      </Suspense>}
+      {tab === "overview" && <>
 
       <div className="cols">
         <section className="panel" aria-labelledby="cd-tl" data-testid="timeline">
           <div className="panel-h">
             <h2 id="cd-tl">Timeline</h2>
-            {!bootstrap?.scoped && <a className="panel-a" href={`/containers/${encodeURIComponent(row.name)}?tab=events`}>
+            <a className="panel-a" href={visibleTabs.find((item) => item.id === "events")?.href}>
               All events
-            </a>}
+            </a>
           </div>
           {detail.events.length === 0 ? (
             <p className="muted">No events recorded for this container yet.</p>
@@ -348,9 +358,7 @@ export default function ContainerPage() {
             <ul className="events">
               {detail.events.map((e) => (
                 <li key={e.id} id={`ev-${e.id}`} className="ev" tabIndex={-1}>
-                  <time className="when" dateTime={new Date(e.at * 1000).toISOString()} title={ago(e.at, now)}>
-                    {localTime(e.at)}
-                  </time>
+                  <span className="when"><RelativeTime at={e.at} /></span>
                   <span className={`pill ${levelClass(e.level)}`}>{eventLabel(e.kind)}</span>
                   {e.message && <span className="muted detail">{e.message}</span>}
                   {!bootstrap?.scoped && e.kind.startsWith("container.") && (
@@ -410,7 +418,7 @@ export default function ContainerPage() {
         <section className="panel" aria-labelledby="cd-rules">
           <div className="panel-h">
             <h2 id="cd-rules">Alert rules</h2>
-            {!bootstrap?.scoped && <a className="panel-a" href="/alerts">
+            {!bootstrap?.scoped && <a className="panel-a" href="/app/alerts">
               All alerts
             </a>}
           </div>
@@ -467,6 +475,7 @@ export default function ContainerPage() {
           )}
         </section>
       </div>
+      </>}
       <EditDialog
         open={editOpen}
         name={row.name}
@@ -483,10 +492,8 @@ export default function ContainerPage() {
  * that moment; signed in, the probe's first line and the last checks
  * (folded on a phone); signed out, a sign-in link and no probe output.
  */
-function WhyNote({ why, name, signed, scoped, now }: { why: Why; name: string; signed: boolean; scoped: boolean; now: number }) {
-  const healthFailing = /health check/i.test(why.title);
+function WhyNote({ why, name, admin, scoped }: { why: Why; name: string; admin: boolean; scoped: boolean }) {
   const phone = typeof window !== "undefined" && window.matchMedia?.("(max-width: 640px)").matches;
-  const next = `/app/containers/${encodeURIComponent(name)}`;
   return (
     // A status region of blocks (an <output> holds phrasing only).
     <div className={`cd-why ${why.severity}`} role={STATUS} data-testid="why">
@@ -498,8 +505,7 @@ function WhyNote({ why, name, signed, scoped, now }: { why: Why; name: string; s
           {why.since !== null && (
             <>
               {" since "}
-              <time dateTime={new Date(why.since * 1000).toISOString()}>{localTime(why.since)}</time>
-              {` (${duration(Math.max(0, now - why.since))} ago)`}
+              <RelativeTime at={why.since} />
             </>
           )}
           {why.probe ? (
@@ -507,18 +513,13 @@ function WhyNote({ why, name, signed, scoped, now }: { why: Why; name: string; s
               {": "}
               <code className="probe">{why.probe}</code>
             </>
-          ) : healthFailing && !signed ? (
-            <>
-              {". "}
-              <a href={`/app/login?next=${encodeURIComponent(next)}`}>Sign in to see the check&apos;s output.</a>
-            </>
           ) : null}
           {why.detail && <> · {why.detail}</>}{" "}
           {!scoped && <a className="cd-why-logs" href={logsAt(name, why.logs_at)}>
             {why.logs_at !== null ? `Logs around ${localTime(why.logs_at)}` : "Logs"}
           </a>}
         </p>
-        {signed && why.checks.length > 0 && (
+        {admin && why.checks.length > 0 && (
           <details className="cd-probes" open={!phone}>
             <summary>Last {why.checks.length} checks</summary>
             <ol className="cd-hlog">

@@ -16,6 +16,7 @@ mod alerts;
 mod boards;
 mod bookmarks;
 pub mod bootstrap;
+mod container_tabs;
 pub mod containers;
 mod dashboard_settings;
 pub mod error;
@@ -119,6 +120,20 @@ pub(crate) async fn route(
                     .expect("viewer gate")
                     .account
                     .container_visibility(state),
+            )
+            .await
+        }
+        handler @ (Handler::ContainerInspect
+        | Handler::ContainerMetrics
+        | Handler::ContainerEvents
+        | Handler::ContainerEnv
+        | Handler::ContainerTop) => {
+            container_tabs::get(
+                state,
+                principal.expect("container gate").account,
+                m.param("name").unwrap_or_default(),
+                query,
+                handler,
             )
             .await
         }
