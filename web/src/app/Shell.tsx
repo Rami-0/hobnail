@@ -12,18 +12,20 @@
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS, as before.
 import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
-import { Banner, Button, Toaster } from "../ui/index.ts";
+import { Banner, Button } from "../ui/index.ts";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
 import { interceptedPath } from "./paths.ts";
 import { local, readRail, settingsHref, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
-import { pageFilter, Shortcuts } from "./Shortcuts.tsx";
+import { pageFilter } from "./page-filter.ts";
+const Shortcuts = lazy(() => import("./Shortcuts.tsx").then((m) => ({ default: m.Shortcuts })));
+const Toaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
 import { Brand, Sidebar } from "./Sidebar.tsx";
 import { applyDefaultTheme } from "./theme.ts";
 import { ThemeButton } from "./ThemeButton.tsx";
@@ -273,7 +275,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       const a = document.activeElement;
       const typing =
         a instanceof HTMLElement && isTyping(a.tagName, a instanceof HTMLInputElement ? a.type : "", a.isContentEditable);
-      const blocked = !!document.querySelector("dialog[open]") || document.documentElement.classList.contains("side-open");
+      const blocked = !!document.querySelector('[role="dialog"][data-open]') || document.documentElement.classList.contains("side-open");
       const r = keyAction(e, keyState.current, Date.now(), typing, blocked);
       keyState.current = r.state;
       const act = r.action;
@@ -431,9 +433,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>More</span>
         </button>
       </nav>
-      <Shortcuts open={keys} onClose={() => setKeys(false)} />
+      {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}
       <StalePill />
-      <Toaster />
+      <Suspense fallback={null}><Toaster /></Suspense>
     </>
   );
 }

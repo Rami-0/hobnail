@@ -78,8 +78,8 @@ select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45
 /* switch: a checkbox with role=switch */
 .sw{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:36px;height:20px;margin:0;border-radius:var(--r-pill);border:1px solid var(--ctl-border);background:var(--field);cursor:pointer;transition:background-color var(--dur-2) var(--ease-out)}
 .sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
-.sw:checked{background:var(--accent);border-color:var(--accent)}
-.sw:checked::after{transform:translateX(16px);background:var(--on-accent)}
+.sw[data-checked]{background:var(--accent);border-color:var(--accent)}
+.sw[data-checked]::after{transform:translateX(16px);background:var(--on-accent)}
 .sw:disabled{opacity:.5;cursor:not-allowed}
 .sw[aria-busy=true]{cursor:progress}
 .sw[aria-busy=true]::after{animation:sw-wait .8s var(--ease-io) infinite alternate}
@@ -88,7 +88,7 @@ select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45
  /* the switch keeps its look inside a 44 px box (transparent border) */
  .sw{width:52px;height:44px;border:13px solid transparent;border-width:13px 9px;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
  .sw::after{left:11px;top:15px}
- .sw:checked{box-shadow:none}
+ .sw[data-checked]{box-shadow:none}
 }
 
 /* ---- notes: a message in a panel or dialog not tied to one field ---- */
@@ -115,17 +115,17 @@ select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45
 pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg);border:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
 
 /* ---- dialog ---- */
-dialog.dlg{flex-direction:column;width:min(560px,calc(100vw - 32px));max-height:88vh;max-height:min(88dvh,780px);margin:auto;padding:0;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);color:var(--text);box-shadow:var(--shadow-3);overflow:hidden}
-dialog.dlg[open]{display:flex}
-dialog.dlg.wide{width:min(760px,calc(100vw - 32px))}
-dialog.dlg::backdrop{background:var(--scrim)}
-dialog.dlg{opacity:0;transform:translateY(12px) scale(.97);
+.dlg{flex-direction:column;width:min(560px,calc(100vw - 32px));max-height:88vh;max-height:min(88dvh,780px);margin:auto;padding:0;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);color:var(--text);box-shadow:var(--shadow-3);overflow:hidden}
+.dlg[data-open]{display:flex}
+.dlg.wide{width:min(760px,calc(100vw - 32px))}
+.dlg::backdrop{background:var(--scrim)}
+.dlg{opacity:0;transform:translateY(12px) scale(.97);
  transition:opacity var(--dur-2) var(--ease-in),transform var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
-dialog.dlg[open]{opacity:1;transform:none;transition-duration:var(--dur-3);transition-timing-function:var(--ease-out)}
-@starting-style{dialog.dlg[open]{opacity:0;transform:translateY(12px) scale(.97)}}
-dialog.dlg::backdrop{opacity:0;transition:opacity var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
-dialog.dlg[open]::backdrop{opacity:1;transition-duration:var(--dur-3)}
-@starting-style{dialog.dlg[open]::backdrop{opacity:0}}
+.dlg[data-open]{opacity:1;transform:none;transition-duration:var(--dur-3);transition-timing-function:var(--ease-out)}
+@starting-style{.dlg[data-open]{opacity:0;transform:translateY(12px) scale(.97)}}
+.dlg::backdrop{opacity:0;transition:opacity var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
+.dlg[data-open]::backdrop{opacity:1;transition-duration:var(--dur-3)}
+@starting-style{.dlg[data-open]::backdrop{opacity:0}}
 .dlg-h{display:flex;align-items:flex-start;gap:var(--s-3);padding:var(--s-4) var(--s-4) var(--s-3) var(--s-5);flex:none}
 .dlg-t{flex:1;min-width:0;display:grid;gap:2px}
 .dlg-h h2{font:650 var(--fs-h2)/1.25 var(--font);letter-spacing:-.015em;overflow-wrap:anywhere}
@@ -140,20 +140,20 @@ dialog.dlg[open]::backdrop{opacity:1;transition-duration:var(--dur-3)}
 .dlg-guard>span{flex:1;font-weight:600}
 @media (max-width:699px){
  /* phones: a bottom sheet with its actions always in view */
- dialog.dlg,dialog.dlg.wide{width:100%;max-width:100%;max-height:94vh;max-height:94dvh;margin:auto 0 0;border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0;transform:translateY(40px)}
- @starting-style{dialog.dlg[open]{transform:translateY(40px)}}
+ .dlg,.dlg.wide{width:100%;max-width:100%;max-height:94vh;max-height:94dvh;margin:auto 0 0;border-radius:var(--r-lg) var(--r-lg) 0 0;border-bottom:0;transform:translateY(40px)}
+ @starting-style{.dlg[data-open]{transform:translateY(40px)}}
  .dlg-ft{flex-wrap:wrap;padding-bottom:calc(var(--s-3) + env(safe-area-inset-bottom))}
  .dlg-ft .btn{flex:1}
  .dlg-ft .grow:empty{display:none}
  .dlg-guard{flex-wrap:wrap}.dlg-guard>span{flex-basis:100%}
 }
 /* the shortcuts sheet: a narrow dialog */
-dialog.dlg.keys{width:min(440px,calc(100vw - 32px))}
+.dlg.keys{width:min(440px,calc(100vw - 32px))}
 .keys-l{margin:0;display:grid;gap:2px}
 .kr{display:grid;grid-template-columns:110px 1fr;align-items:center;min-height:28px;font-size:var(--fs-sm)}
 .kr dt kbd{margin-right:2px}
 .kr dd{margin:0;color:var(--text-2)}
-@media (max-width:699px){dialog.dlg.keys{width:100%}}
+@media (max-width:699px){.dlg.keys{width:100%}}
 
 /* ---- toast ---- */
 .toasts{position:fixed;inset:auto var(--s-4) var(--s-4) auto;z-index:var(--z-toast);display:grid;gap:var(--s-2);justify-items:end;width:max-content;max-width:calc(100vw - 32px);pointer-events:none;color:var(--text)}
@@ -243,3 +243,11 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--accent)}
  .ia,.icon-btn{width:44px;height:44px}
  .tab,.menu-item{height:44px;min-width:44px}
 }
+
+/* SDK positions top-layer menus relative to their trigger. */
+.menu-body[data-slot="menu-content"]{position:fixed;top:auto;right:auto;left:auto}
+
+.dlg[data-slot="dialog-content"]{position:fixed;inset:0;display:flex}
+
+.sdk-select-list{padding:6px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);color:var(--text);max-height:min(360px,70dvh);overflow:auto;min-width:var(--anchor-width);box-shadow:var(--shadow-2)}
+.sdk-select-list [data-highlighted]{background:var(--hover)}

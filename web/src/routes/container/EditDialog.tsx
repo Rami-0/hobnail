@@ -308,7 +308,7 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
           <Button
             onClick={(e) => {
               // Cancel is a close request like Esc: the dialog asks first when there is input.
-              e.currentTarget.closest("dialog")?.dispatchEvent(new Event("cancel", { cancelable: true }));
+              e.currentTarget.closest('[role="dialog"]')?.dispatchEvent(new Event("cancel", { cancelable: true }));
             }}
           >
             Cancel

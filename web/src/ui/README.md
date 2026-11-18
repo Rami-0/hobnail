@@ -11,54 +11,30 @@ Why: one place decides how a primitive looks, which tokens it uses, how it
 behaves under CSP, and which library (if any) implements it. Swapping or
 upgrading the library touches this folder only.
 
-## UI SDK is not installed yet
+## Installed SDK
 
-The decision (docs/decisions/react-client-and-dashboard.md §1) names UI SDK
-(`@ui-sdk/react`, `@ui-sdk/core`) for these primitives. It is **not
-installed**: on 2026-11-17 every published version was younger than 7 days
-(oldest `0.1.0-beta.0`, published 2026-11-12; `0.1.0-beta.6`, the `latest`
-tag, published 2026-11-16), and the release-age rule (owner decision D3,
-`min-release-age=7` in `web/.npmrc`) allows no exception.
+`@ui-sdk/react` and `@ui-sdk/core` are pinned to `0.1.0-beta.10` under
+D2's explicit age exception (see `web/AGENTS.md` for publication metadata).
+The installed docs were read before adapting the wrappers. Imports use
+individual entries, only here. `main.tsx` imports `@ui-sdk/core/web.css`
+once; the global layer declaration and CSP meta tag remain in place.
 
-When it is installed (with the lead, once a version is old enough):
+| Wrapper | Implementation |
+|---|---|
+| Button | SDK Button; preserves busy and token styling |
+| Dialog | SDK Dialog, Content, Title, Description; Hobnail guard and Back handling |
+| Field / TextInput | SDK Field, Label, Description, Error and Input |
+| Select | SDK Select, Trigger, Content and Item |
+| Switch | SDK Switch; button semantics and controlled checked value |
+| Menu | SDK Menu, Trigger, Content and Item |
+| Toaster | SDK ToastRegion, Toast, Title, Action and Close; keeps the app's dialog queue |
+| TabNav | Platform links: URL navigation uses aria-current, not role=tab |
+| Note / Banner / EmptyState | Platform status and content markup |
+| Sparkline / HealthStrip / Meter | Platform SVG and meter markup |
 
-- these wrappers switch to its documented per-component entries
-  (`@ui-sdk/react/<component>`, e.g. `@ui-sdk/react/dialog`; there is no
-  root import) and keep their own props, so callers do not change;
-- `@ui-sdk/core/web.css` is imported once, in `src/main.tsx`;
-  `src/styles/global.css` already declares `@layer ui-sdk;` first;
-- `index.html` already carries `<meta property="csp-nonce" />`, which makes
-  UI SDK use constructed style sheets instead of `<style>` elements
-  (needed under `style-src 'self'`, plan 4.3);
-- read `web/AGENTS.md` (UI SDK reading instructions) before writing a new
-  wrapper.
-
-## Contents (Phase 1)
-
-Hand-written on platform elements (UI SDK is not installed), with the props
-below; pages use exactly these. Styles: `src/styles/ui.css`. Each row names
-the UI SDK entry that replaces the hand-written part once a version passes
-the release-age rule; the props stay, so callers do not change. Entries are
-the SDK's documented per-component imports (`@ui-sdk/react/<component>`);
-check the installed `docs/llms.txt` for the exact names before switching.
-
-| Wrapper | Props | Built on | Replaced by (when installable) |
-|---|---|---|---|
-| `Button` | `variant` (`primary`/`secondary`/`ghost`), `busy`, `icon`, `ref`, button props | `<button>` | `@ui-sdk/react/button` |
-| `Dialog` | `open`, `title`, `description?`, `onClose(reason: "escape"\|"cancel"\|"backdrop"\|"done")`, `guard?()`, `footer?`, `children`, `initialFocus?`, `testId?`, `wide?`, `className?` | `<dialog>` + `showModal()` | `@ui-sdk/react/dialog` (the guard bar and Back handling stay ours) |
-| `Field` | `label`, `hint?`, `error?`, `children` (the control), `id`, `wide?` | `<label>` + context | `@ui-sdk/react/field` |
-| `TextInput` | input props, `mono?`, `ref` (id / describedby / invalid from the Field) | `<input>` | `@ui-sdk/react/input` |
-| `Select` | `label`, `value`, `onChange(value)`, `options: {value,label}[]`, `hideLabel?`, select props | native `<select>` | `@ui-sdk/react/select` (keep native on touch) |
-| `Switch` | `checked`, `onChange(checked)`, `label`, `busy?`, input props | `<input type=checkbox role=switch>` | `@ui-sdk/react/switch` |
-| `Note` | `kind` (`ok`/`warn`/`bad`/`info`), `children`, `action?`, `testId?`, `id?` | `<div role=status\|alert>` | stays (no SDK equivalent needed) |
-| `Banner` | `kind`, `children`, `action?`, `testId?` | `<div role=status\|alert>` | stays |
-| `EmptyState` | `icon`, `title`, `children?`, `tone?` (`good`/`bad`), `actions?`, `compact?`, `testId?` | markup | stays |
-| `toast(text, {kind?, action?, ms?, sticky?})`, `<Toaster/>` | three at most; "bad" stays until closed; queued while a dialog is open | `toast.ts` store + `<output>` region | `@ui-sdk/react/toast` (keep the dialog queue) |
-| `Menu` | `label`, `trigger`, `items: {label, onSelect, icon?, testId?, danger?}[]`, `header?`, `testId?`, `triggerClassName?`, `align?` | `<button aria-haspopup=menu>` + list | `@ui-sdk/react/menu` |
-| `TabNav` | `label`, `items: {id, label, href, extra?}[]`, `current`, `testId?` | links, `aria-current="page"` | stays (URL tabs are links, not role=tab) |
-| `Sparkline` | `values: (number\|null)[]`, `max?`, `label` ("" hides it), `width?`, `height?`, `color?` (a token name), `className?` | plain SVG (`svg.ts`) | stays (no Recharts here) |
-| `HealthStrip` | `codes: number[]`, `label`, `step?` (s per cell, 900), `cells?`, `className?` | plain SVG (`svg.ts`) | stays |
-| `Meter` | `value`, `max`, `label`, `className?` | `<div role=meter>` | stays |
+No SDK component has been kept on a platform fallback due to a release defect.
+No separate tooltip or popover wrapper is currently used by the pages.
+All visual styling uses Hobnail tokens in `src/styles/ui.css`.
 
 Behaviour notes:
 

@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 
 import { Dialog } from "../ui/index.ts";
+import { pageFilter } from "./page-filter.ts";
 import { modName } from "./keys.ts";
 
 function Row({ k, children }: { k: string[]; children: ReactNode }) {
@@ -22,12 +23,6 @@ function Row({ k, children }: { k: string[]; children: ReactNode }) {
 }
 
 const OLD = <span className="muted"> (current interface)</span>;
-
-/** The placeholder of this page's filter, if it has one on screen. */
-export function pageFilter(): HTMLInputElement | null {
-  const f = document.querySelector<HTMLInputElement>('main input[data-testid="filter"]');
-  return f && f.offsetParent !== null && !f.closest("[hidden]") ? f : null;
-}
 
 export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => void }) {
   const mod = modName(navigator.platform || navigator.userAgent);

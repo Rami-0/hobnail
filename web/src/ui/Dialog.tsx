@@ -19,8 +19,9 @@
 // Toasts wait while any dialog is open (layers.ts). Ctrl/⌘ Enter submits the
 // first <form> inside the dialog. Footer buttons that submit a form in the
 // body use the `form="<form id>"` attribute.
+import { Dialog as SdkDialog, DialogContent, DialogTitle, DialogDescription } from "@ui-sdk/react/dialog";
 import { XIcon } from "lucide-react";
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { Button } from "./Button.tsx";
 import { dialogOpened } from "./layers.ts";
@@ -46,11 +47,6 @@ export interface DialogProps {
 const FOCUSABLE =
   'input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
 
-function outside(el: HTMLElement, x: number, y: number): boolean {
-  const r = el.getBoundingClientRect();
-  return x < r.left || x > r.right || y < r.top || y > r.bottom;
-}
-
 export function Dialog({
   open,
   title,
@@ -64,10 +60,9 @@ export function Dialog({
   wide,
   className,
 }: DialogProps) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const [asking, setAsking] = useState(false);
-  const id = useId();
   // The latest props and state, for the listeners added once per opening.
   const live = useRef({ onClose, guard, open, asking });
   useLayoutEffect(() => {
@@ -99,7 +94,6 @@ export function Dialog({
     if (!el || !open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const openUrl = window.location.href;
-    if (!el.open) el.showModal();
     const release = dialogOpened();
     const first =
       initialFocus?.current ?? el.querySelector<HTMLElement>(`.dlg-b :is(${FOCUSABLE})`) ?? el.querySelector<HTMLElement>(FOCUSABLE);
@@ -118,31 +112,6 @@ export function Dialog({
           form.requestSubmit();
         }
       }
-    };
-    // Backdrop: a click that both starts and ends outside the box.
-    let downOut = false;
-    const onDown = (e: PointerEvent) => {
-      downOut = e.target === el && outside(el, e.clientX, e.clientY);
-    };
-    const onClick = (e: MouseEvent) => {
-      if (downOut && e.target === el && outside(el, e.clientX, e.clientY)) request("backdrop");
-      downOut = false;
-    };
-    // Esc is handled on keydown; a cancel from elsewhere (a phone's back
-    // gesture) is the same request.
-    const onCancel = (e: Event) => {
-      e.preventDefault();
-      if (!live.current.asking) request("escape");
-    };
-    // The browser closed it anyway (a forced close request): keep the input
-    // if there is any.
-    const onNativeClose = () => {
-      if (!live.current.open) return;
-      if (live.current.guard?.()) {
-        el.showModal();
-        pending.current = "escape";
-        setAsking(true);
-      } else live.current.onClose("escape");
     };
     const onFocusIn = (e: FocusEvent) => {
       if (e.target instanceof HTMLElement && e.target.closest(".dlg-b")) lastField.current = e.target;
@@ -163,23 +132,17 @@ export function Dialog({
       }
       live.current.onClose("cancel");
     };
+    const cancel = (e: Event) => { e.preventDefault(); request("cancel"); };
+    el.addEventListener("cancel", cancel);
     el.addEventListener("keydown", onKey);
-    el.addEventListener("pointerdown", onDown);
-    el.addEventListener("click", onClick);
-    el.addEventListener("cancel", onCancel);
-    el.addEventListener("close", onNativeClose);
     el.addEventListener("focusin", onFocusIn);
     window.addEventListener("popstate", onPop);
     return () => {
+      el.removeEventListener("cancel", cancel);
       el.removeEventListener("keydown", onKey);
-      el.removeEventListener("pointerdown", onDown);
-      el.removeEventListener("click", onClick);
-      el.removeEventListener("cancel", onCancel);
-      el.removeEventListener("close", onNativeClose);
       el.removeEventListener("focusin", onFocusIn);
       window.removeEventListener("popstate", onPop);
       release();
-      if (el.open) el.close();
       setAsking(false);
       if (opener?.isConnected && !opener.closest("[inert]")) opener.focus({ preventScroll: true });
     };
@@ -192,19 +155,23 @@ export function Dialog({
 
   const cls = ["dlg", wide ? "wide" : "", className ?? ""].filter(Boolean).join(" ");
   return (
-    <dialog
+    <SdkDialog open={open} onOpenChange={(next, details) => {
+      if (next) return;
+      details.cancel();
+      if (asking && details.reason === "escape-key") keepEditing();
+      else request(details.reason === "escape-key" ? "escape" : "backdrop");
+    }}>
+    <DialogContent
       ref={ref}
       className={cls}
-      aria-labelledby={`${id}-t`}
-      aria-describedby={description ? `${id}-d` : undefined}
       data-testid={testId}
     >
       {open && (
         <>
           <div className="dlg-h">
             <div className="dlg-t">
-              <h2 id={`${id}-t`}>{title}</h2>
-              {description && <p id={`${id}-d`}>{description}</p>}
+              <DialogTitle>{title}</DialogTitle>
+              {description && <DialogDescription>{description}</DialogDescription>}
             </div>
             <button type="button" className="btn icon ghost" aria-label="Close" onClick={() => request("cancel")}>
               <XIcon aria-hidden="true" />
@@ -236,6 +203,7 @@ export function Dialog({
           )}
         </>
       )}
-    </dialog>
+    </DialogContent>
+    </SdkDialog>
   );
 }

@@ -4,7 +4,9 @@
 // writes <Field label="Name" id="name" error={e}><TextInput name="name"/></Field>.
 // Text is 16 px on touch screens (no iOS zoom on focus) and controls are
 // 44 px high there (tokens.css --fs-input, --ctl-h).
-import { createContext, useContext, useId, useMemo, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from "react";
+import { Field as SdkField, FieldLabel, FieldDescription, FieldError } from "@ui-sdk/react/field";
+import { Input } from "@ui-sdk/react/input";
+import { createContext, useContext, useMemo, type InputHTMLAttributes, type ReactNode, type Ref } from "react";
 
 interface FieldCtx {
   id: string;
@@ -12,7 +14,7 @@ interface FieldCtx {
   invalid: boolean;
 }
 
-const Ctx = createContext<FieldCtx | null>(null);
+export const Ctx = createContext<FieldCtx | null>(null);
 
 export interface FieldProps {
   label: ReactNode;
@@ -33,20 +35,20 @@ export function Field({ label, hint, error, children, id, wide }: FieldProps) {
   const invalid = !!error;
   const ctx = useMemo(() => ({ id, describedBy, invalid }), [id, describedBy, invalid]);
   return (
-    <div className={wide ? "fld wide" : "fld"}>
-      <label htmlFor={id}>{label}</label>
+    <SdkField invalid={invalid} className={wide ? "fld wide" : "fld"}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Ctx.Provider value={ctx}>{children}</Ctx.Provider>
       {error && (
-        <p className="fld-err" id={errId}>
+        <FieldError className="fld-err" id={errId}>
           {error}
-        </p>
+        </FieldError>
       )}
       {hint && (
-        <p className="hint" id={hintId}>
+        <FieldDescription className="hint" id={hintId}>
           {hint}
-        </p>
+        </FieldDescription>
       )}
-    </div>
+    </SdkField>
   );
 }
 
@@ -56,12 +58,14 @@ export interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   mono?: boolean;
 }
 
-export function TextInput({ className, mono, type = "text", ...rest }: TextInputProps) {
+export function TextInput({ className, mono, type = "text", value, defaultValue, ...rest }: TextInputProps) {
   const f = useContext(Ctx);
   const cls = ["in", mono ? "mono" : "", className ?? ""].filter(Boolean).join(" ");
   return (
-    <input
+    <Input
       type={type}
+      value={value === undefined ? undefined : String(value)}
+      defaultValue={defaultValue === undefined ? undefined : String(defaultValue)}
       id={f?.id}
       aria-describedby={f?.describedBy}
       aria-invalid={f?.invalid || rest["aria-invalid"] || undefined}
@@ -71,83 +75,3 @@ export function TextInput({ className, mono, type = "text", ...rest }: TextInput
   );
 }
 
-export interface SelectOption {
-  value: string;
-  label: string;
-}
-
-export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value"> {
-  label: ReactNode;
-  value: string;
-  onChange: (value: string) => void;
-  options: SelectOption[];
-  ref?: Ref<HTMLSelectElement>;
-  /** The label is for screen readers only (a toolbar select). */
-  hideLabel?: boolean;
-}
-
-/** A native <select> with its own label (inside a Field, the Field's label is used instead). */
-export function Select({ label, value, onChange, options, className, hideLabel, id, ...rest }: SelectProps) {
-  const f = useContext(Ctx);
-  const auto = useId();
-  const sid = f?.id ?? id ?? auto;
-  const control = (
-    <select
-      {...rest}
-      id={sid}
-      className={["in", className ?? ""].filter(Boolean).join(" ")}
-      value={value}
-      aria-describedby={f?.describedBy}
-      aria-invalid={f?.invalid || undefined}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
-  if (f) return control;
-  return (
-    <span className="sel">
-      <label htmlFor={sid} className={hideLabel ? "sr" : "sel-l"}>
-        {label}
-      </label>
-      {control}
-    </span>
-  );
-}
-
-export interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "onChange" | "checked" | "type"> {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: ReactNode;
-  /** Saved at once and waiting for the answer: shown busy, presses ignored (§11.1). */
-  busy?: boolean;
-  ref?: Ref<HTMLInputElement>;
-}
-
-/** A checkbox with role=switch, its label beside it. */
-export function Switch({ checked, onChange, label, busy, className, ...rest }: SwitchProps) {
-  const f = useContext(Ctx);
-  return (
-    <label className={["cb", className ?? ""].filter(Boolean).join(" ")}>
-      <input
-        {...rest}
-        type="checkbox"
-        role="switch"
-        aria-checked={checked}
-        className="sw"
-        id={rest.id ?? f?.id}
-        aria-describedby={f?.describedBy}
-        aria-busy={busy || undefined}
-        checked={checked}
-        onChange={(e) => {
-          if (!busy) onChange(e.target.checked);
-        }}
-      />
-      <span>{label}</span>
-    </label>
-  );
-}

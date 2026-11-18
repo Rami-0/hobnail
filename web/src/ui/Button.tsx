@@ -1,11 +1,8 @@
-// Button: the app's only button primitive (DESIGN.md §11.4). Hand-written for
-// Phase 0; when UI SDK is installed this wraps its button entry instead and
-// keeps these props.
-//
 // Busy (§11.4): `aria-busy` and `aria-disabled`, not `disabled`, so the
 // button keeps focus while its action runs; clicks are ignored meanwhile.
 // Touch target: the height is `--ctl-h`, which tokens.css raises to 44 px
 // on touch screens and narrow windows.
+import { Button as SdkButton } from "@ui-sdk/react/button";
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost";
@@ -31,15 +28,15 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const cls = ["btn", variant === "secondary" ? "" : variant, className ?? ""].filter(Boolean).join(" ");
-  const click = (e: MouseEvent<HTMLButtonElement>) => {
+  const click = (e: MouseEvent<HTMLElement>) => {
     if (busy) {
       e.preventDefault();
       return;
     }
-    onClick?.(e);
+    onClick?.(e as MouseEvent<HTMLButtonElement>);
   };
   return (
-    <button
+    <SdkButton
       {...rest}
       type={type}
       className={cls}
@@ -49,6 +46,6 @@ export function Button({
     >
       {icon}
       {children}
-    </button>
+    </SdkButton>
   );
 }
