@@ -256,7 +256,7 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--accent)}
 /* Keep pending notifications out of the active modal's focus and reading order. */
 body:has(.dlg[data-open]) .toasts{visibility:hidden}
 /* Text actions outside prose use the same real hit box as icon actions. */
-.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row)>a,.page>a,.panel>a,.overview-strips>a,.log-pane-head>a,.log-pane-tools a,.crumb a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row,.overview-counts)>a,.page>a,.panel>a,.overview-strips>a,.log-pane-head>a,.log-pane-tools a,.crumb a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 .page summary{min-height:var(--hit);line-height:var(--hit)}
 @media(pointer:coarse),(max-width:699px){.in.mono{font-size:var(--fs-input)}}
 
