@@ -9,7 +9,8 @@ export class Ring {
   constructor(cap: number) { this.cap = cap; }
   append(lines: LogLine[], older = false): void {
     const incoming = lines.map((l) => ({ ...l, id: this.next++, plain: ansi(l.m).map((s) => s.text).join("") }));
-    this.rows = older ? [...incoming.slice(0, Math.max(0, this.cap - this.rows.length)), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
+    const room = Math.max(0, this.cap - this.rows.length);
+    this.rows = older ? [...(room ? incoming.slice(-room) : []), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
     this.rows.sort((a, b) => a.t - b.t || a.id - b.id);
   }
 }

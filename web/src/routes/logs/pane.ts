@@ -73,6 +73,7 @@ export class LogPane {
     if (box.closest(".logs-page")) this.observer.observe(box.closest(".logs-page") as Element);
     window.addEventListener("resize", this.resize);
     box.addEventListener("touchstart", this.touch, { passive: true });
+    box.addEventListener("touchmove", this.touch, { passive: true });
     window.addEventListener("pagehide", this.pagehide);
     window.addEventListener("pageshow", this.pageshow);
     document.addEventListener("visibilitychange", this.visibility);
@@ -80,6 +81,7 @@ export class LogPane {
   }
   update(options: ViewOptions): void {
     const changed = options.wrap !== this.options.wrap || options.time !== this.options.time;
+    if (!this.following) this.mark();
     this.restoring = true;
     this.options = options;
     if (changed) { this.heights.clear(); this.signature = ""; }
@@ -98,6 +100,7 @@ export class LogPane {
     this.observer.disconnect();
     window.removeEventListener("resize", this.resize);
     this.box.removeEventListener("touchstart", this.touch);
+    this.box.removeEventListener("touchmove", this.touch);
     this.box.removeEventListener("scroll", this.scroll); this.box.removeEventListener("wheel", this.wheel);
     this.box.removeEventListener("keydown", this.key); this.box.removeEventListener("click", this.click);
     window.removeEventListener("pagehide", this.pagehide); window.removeEventListener("pageshow", this.pageshow);
@@ -192,6 +195,15 @@ export class LogPane {
   };
   private mark(): void {
     if (this.following) { this.anchor = null; return; }
+    const edge = this.box.getBoundingClientRect().top;
+    for (const child of this.content.children) {
+      const element = child as HTMLElement;
+      const bounds = element.getBoundingClientRect();
+      if (bounds.bottom > edge + 0.5) {
+        this.anchor = { id: Number(element.dataset.logId), offset: edge - bounds.top };
+        return;
+      }
+    }
     let i = this.indexAt(this.box.scrollTop);
     i = Math.min(i, this.visible.length - 1);
     const row = this.visible[i];
