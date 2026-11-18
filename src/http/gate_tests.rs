@@ -19,6 +19,12 @@ const PUBLIC_WRITES: &[(&str, &str)] = &[
 ];
 
 const WRITES: &[(&str, &str)] = &[
+    ("POST", "/api/v1/integrations"),
+    ("PUT", "/api/v1/integrations/sample-1"),
+    ("DELETE", "/api/v1/integrations/sample-1"),
+    ("PUT", "/api/v1/integrations/sample-1/secret"),
+    ("DELETE", "/api/v1/integrations/sample-1/secret"),
+    ("POST", "/api/v1/integrations/sample-1/test"),
     ("POST", "/api/login"),
     ("POST", "/api/v1/onboarding/owner"),
     ("POST", "/api/v1/invites/accept"),

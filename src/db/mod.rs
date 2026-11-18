@@ -319,6 +319,27 @@ pub struct Db {
     path: Option<PathBuf>,
 }
 
+impl Db {
+    pub(crate) fn dashboard<T, E>(
+        &self,
+        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<rusqlite::Error>,
+    {
+        let mut inner = self
+            .inner
+            .as_ref()
+            .ok_or(rusqlite::Error::InvalidQuery)?
+            .lock()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let tx = inner.conn.transaction()?;
+        let result = operation(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
+}
+
 pub(crate) struct Inner {
     pub(crate) conn: Connection,
     /// Container name -> `ctr_names.id`.

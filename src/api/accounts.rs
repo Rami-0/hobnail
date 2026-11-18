@@ -1,7 +1,6 @@
 //! Owner account administration and self-service session management.
 use std::sync::Arc;
 
-use http_body_util::{BodyExt, Limited};
 use hyper::{body::Incoming, Request, Response, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
@@ -110,31 +109,7 @@ impl From<AccountError> for ApiError {
 }
 
 async fn body<T: DeserializeOwned>(req: Request<Incoming>) -> Result<T, ApiError> {
-    let json = req
-        .headers()
-        .get(hyper::header::CONTENT_TYPE)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.split(';').next())
-        .is_some_and(|h| h.trim().eq_ignore_ascii_case("application/json"));
-    if !json {
-        return Err(ApiError::new(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "unsupported_media_type",
-            "send application/json",
-        ));
-    }
-    let bytes = Limited::new(req.into_body(), MAX_BODY)
-        .collect()
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "body_too_large",
-                "request too large",
-            )
-        })?;
-    serde_json::from_slice(&bytes.to_bytes())
-        .map_err(|_| ApiError::bad_request("invalid JSON body", None))
+    super::read_json(req, MAX_BODY).await
 }
 
 fn validate_scopes(scopes: Option<&Scopes>) -> Result<(), ApiError> {

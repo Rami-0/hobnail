@@ -90,6 +90,55 @@ pub async fn send(req: Request, policy: &HttpPolicy) -> Result<Response, String>
     }
 }
 
+/// Canonical origin for a dashboard connection URL. Credentials belong in the
+/// separate credential field, so URLs with user information or queries are rejected.
+pub(crate) fn origin(url: &str) -> Option<String> {
+    if url.len() > 2048 || url.contains(['#', '?', '\\']) {
+        return None;
+    }
+    let uri: hyper::Uri = url.parse().ok()?;
+    let scheme = uri.scheme_str()?;
+    let default = match scheme {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let authority = uri.authority()?;
+    let host = authority.host();
+    let port = uri.port_u16().unwrap_or(default);
+    if host.is_empty()
+        || authority.as_str().contains(['@', '%'])
+        || port == 0
+        || (authority.as_str() != host && uri.port_u16().is_none())
+    {
+        return None;
+    }
+    let host = host.to_ascii_lowercase();
+    Some(if port == default {
+        format!("{scheme}://{host}")
+    } else {
+        format!("{scheme}://{host}:{port}")
+    })
+}
+
+/// One request to the saved destination. Redirects are terminal responses.
+/// Recheck the actual request URI before a credential can become a header.
+pub(crate) async fn send_bound(
+    url: String,
+    credential: Option<(String, String)>,
+    policy: &HttpPolicy,
+) -> Result<Response, String> {
+    let destination = origin(&url).ok_or("blocked invalid destination")?;
+    let mut req = Request::get(url);
+    if let Some((bound_origin, secret)) = credential {
+        if destination != bound_origin {
+            return Err("blocked credential destination".into());
+        }
+        req = req.header("authorization", format!("Bearer {secret}"));
+    }
+    send(req, policy).await
+}
+
 async fn send_inner(req: Request, policy: &HttpPolicy) -> Result<Response, String> {
     let uri: hyper::Uri = req.url.parse().map_err(|_| "invalid URL".to_string())?;
     let scheme = uri.scheme_str().unwrap_or("http").to_ascii_lowercase();
@@ -116,7 +165,14 @@ async fn send_inner(req: Request, policy: &HttpPolicy) -> Result<Response, Strin
         .map(|p| p.as_str().to_string())
         .unwrap_or_else(|| "/".into());
 
-    let tcp = TcpStream::connect((host_bare.as_str(), port))
+    let addresses: Vec<_> = tokio::net::lookup_host((host_bare.as_str(), port))
+        .await
+        .map_err(|e| format!("resolve {host_bare}: {e}"))?
+        .collect();
+    if addresses.is_empty() {
+        return Err(format!("resolve {host_bare}: no addresses"));
+    }
+    let tcp = TcpStream::connect(addresses.as_slice())
         .await
         .map_err(|e| format!("connect {host_bare}:{port}: {e}"))?;
     let _ = tcp.set_nodelay(true);
@@ -187,7 +243,13 @@ pub async fn read_body(body: Incoming, limit: usize) -> Result<Bytes, String> {
         .collect()
         .await
         .map(|c| c.to_bytes())
-        .map_err(|e| format!("reading body: {e}"))
+        .map_err(|e| {
+            if e.is::<http_body_util::LengthLimitError>() {
+                "response too large".into()
+            } else {
+                format!("reading body: {e}")
+            }
+        })
 }
 
 fn tls_config() -> Arc<rustls::ClientConfig> {

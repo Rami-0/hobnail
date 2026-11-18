@@ -15,6 +15,7 @@ mod accounts;
 pub mod bootstrap;
 pub mod containers;
 pub mod error;
+mod integrations;
 pub mod session;
 pub mod stream;
 pub mod strips;
@@ -42,6 +43,18 @@ pub(crate) async fn route(
     };
     let query = req.uri().query().unwrap_or("");
     match m.route.handler {
+        Handler::Integrations
+        | Handler::IntegrationCreate
+        | Handler::Integration
+        | Handler::IntegrationUpdate
+        | Handler::IntegrationDelete
+        | Handler::IntegrationSetSecret
+        | Handler::IntegrationClearSecret
+        | Handler::IntegrationTest => {
+            integrations::route(state, req, m, &principal.expect("integration gate").account)
+                .await
+                .unwrap_or_else(ApiError::response)
+        }
         Handler::Session => session::get(state, req.headers()),
         Handler::Bootstrap => bootstrap::get(state, principal.expect("viewer gate").account.role),
         Handler::Onboard => {
@@ -89,4 +102,78 @@ pub fn json(status: StatusCode, v: &impl Serialize) -> Response<Body> {
     set(&mut r, CONTENT_TYPE, "application/json");
     set(&mut r, CACHE_CONTROL, "no-store");
     r
+}
+
+async fn read_json<T: serde::de::DeserializeOwned>(
+    req: Request<Incoming>,
+    limit: usize,
+) -> Result<T, ApiError> {
+    use http_body_util::{BodyExt, Limited};
+    let json = req
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.split(';').next())
+        .is_some_and(|h| h.trim().eq_ignore_ascii_case("application/json"));
+    if !json {
+        return Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "send application/json",
+        ));
+    }
+    let bytes = Limited::new(req.into_body(), limit)
+        .collect()
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "body_too_large",
+                "request too large",
+            )
+        })?;
+    serde_json::from_slice(&bytes.to_bytes())
+        .map_err(|_| ApiError::bad_request("invalid JSON body", None))
+}
+
+impl From<rusqlite::Error> for ApiError {
+    fn from(_: rusqlite::Error) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "dashboard storage unavailable",
+        )
+    }
+}
+
+fn no_content() -> Response<Body> {
+    let mut response = full(StatusCode::NO_CONTENT, "");
+    set(&mut response, CACHE_CONTROL, "no-store");
+    response
+}
+
+fn validate_label(value: &str, field: &str) -> Result<(), ApiError> {
+    if value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(
+            "must be non-empty, at most 256 bytes, and contain no control characters",
+            Some(field),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_icon(icon: Option<&str>) -> Result<(), ApiError> {
+    if icon.is_some_and(|name| {
+        name.is_empty()
+            || name.len() > 96
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    }) {
+        return Err(ApiError::bad_request(
+            "use a dashboard-icons name",
+            Some("icon"),
+        ));
+    }
+    Ok(())
 }

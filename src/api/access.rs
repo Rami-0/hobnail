@@ -42,6 +42,14 @@ pub enum Access {
 /// Which handler answers a matched route (dispatched in `api::route`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handler {
+    Integrations,
+    IntegrationCreate,
+    Integration,
+    IntegrationUpdate,
+    IntegrationDelete,
+    IntegrationSetSecret,
+    IntegrationClearSecret,
+    IntegrationTest,
     Session,
     Bootstrap,
     Containers,
@@ -78,6 +86,54 @@ pub struct Route {
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
 pub const ROUTES: &[Route] = &[
+    Route {
+        method: "GET",
+        pattern: "/api/v1/integrations",
+        access: Access::Viewer,
+        handler: Handler::Integrations,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/integrations",
+        access: Access::Admin,
+        handler: Handler::IntegrationCreate,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/integrations/<id>",
+        access: Access::Viewer,
+        handler: Handler::Integration,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/integrations/<id>",
+        access: Access::Admin,
+        handler: Handler::IntegrationUpdate,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/integrations/<id>",
+        access: Access::Admin,
+        handler: Handler::IntegrationDelete,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/integrations/<id>/secret",
+        access: Access::Admin,
+        handler: Handler::IntegrationSetSecret,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/integrations/<id>/secret",
+        access: Access::Admin,
+        handler: Handler::IntegrationClearSecret,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/integrations/<id>/test",
+        access: Access::Admin,
+        handler: Handler::IntegrationTest,
+    },
     Route {
         method: "GET",
         pattern: "/api/v1/session",
