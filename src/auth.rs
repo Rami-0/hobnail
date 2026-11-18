@@ -83,12 +83,6 @@ impl WriteDenied {
     }
 }
 
-pub fn require_write(state: &AppState, headers: &HeaderMap) -> Result<String, WriteDenied> {
-    let session = request_session(state, headers).ok_or(WriteDenied::NoSession)?;
-    check_write(&session, headers)?;
-    Ok(session.account.name)
-}
-
 pub(crate) fn check_write(session: &Session, headers: &HeaderMap) -> Result<(), WriteDenied> {
     let got = headers
         .get(CSRF_HEADER)
@@ -908,7 +902,7 @@ fn authenticate(
 }
 
 fn logout(state: &AppState, headers: &HeaderMap) -> Response<Body> {
-    // The router already ran `require_write` (session + CSRF + Origin).
+    // The router already checked the session, CSRF and Origin.
     if let Some(s) = session_of(&state.db, headers, now_s()) {
         state.db.delete_session(&s.hash);
     }

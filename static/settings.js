@@ -1678,7 +1678,7 @@
         f.reset();
         S.leaving = true;
         setTimeout(() => { location.href = "/login?next=" + encodeURIComponent("/settings/security"); }, 2500);
-        return { ok: true, toast: "Password changed", note: ["ok", "Password changed. Every session was signed out, this one too: sign in again with the new password."] };
+        return { ok: true, toast: "Password changed", note: ["ok", "Password changed. Your other sessions were signed out."] };
       };
       onAct("sign-out-others", async (e) => {
         const b = e.currentTarget;

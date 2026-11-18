@@ -1,7 +1,4 @@
-//! `/api/v1`: the JSON API of the React client (docs/plans/react-port.md
-//! 4.2). Every route is a row of [`access::ROUTES`], whose access is checked
-//! before the handler runs; errors use the shape in [`error`]. Writes reach
-//! [`route`] only after `auth::require_write` (in `http::server::route`).
+//! The JSON API of the React client. Routes reach this dispatcher after the shared HTTP gate.
 use std::sync::Arc;
 
 use hyper::body::Incoming;
@@ -72,7 +69,7 @@ pub(crate) async fn route(
         Handler::Containers => containers::list(state).await,
         Handler::Container => {
             let name = m.param("name").unwrap_or_default();
-            containers::get(state, req.headers(), name, query).await
+            containers::get(state, name, query).await
         }
         Handler::Strips => strips::get(state).await,
         Handler::Stream => stream::get(

@@ -2,7 +2,7 @@
 //! deployed config (comments, a command widget, two alert rules).
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::BodyExt;
 use hyper::{HeaderMap, Method, StatusCode};
 use serde_json::{json, Value as J};
 use std::path::PathBuf;
@@ -903,37 +903,6 @@ async fn raw_editor_guard_and_allowed_cases() {
 }
 
 // ------------------------------------------------------------ pipeline
-
-#[tokio::test]
-async fn unauthenticated_requests_are_refused() {
-    let (dir, st) = state_with(Some(FIXTURE));
-    for path in [
-        "/api/settings/config",
-        "/api/settings/general",
-        "/api/settings/widgets",
-        "/api/settings/notifications",
-        "/api/settings/env",
-        "/api/settings/revisions",
-        "/api/settings/security",
-        "/api/settings/nope",
-    ] {
-        let req = hyper::Request::get(path)
-            .body(Full::new(Bytes::new()))
-            .unwrap();
-        let resp = super::route(&st, req).await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{path}");
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        assert!(!String::from_utf8_lossy(&body).contains("homelab"));
-    }
-    // Writes are refused by the auth guard as well (defense in depth).
-    let body = json!({"base_hash": hash(FIXTURE), "page": {"title": "x"}}).to_string();
-    let req = hyper::Request::post("/api/settings/general")
-        .body(Full::new(Bytes::from(body)))
-        .unwrap();
-    let resp = super::route(&st, req).await;
-    assert!(resp.status() == StatusCode::FORBIDDEN || resp.status() == StatusCode::UNAUTHORIZED);
-    assert_eq!(file(&dir), FIXTURE);
-}
 
 #[tokio::test]
 async fn invalid_input_is_never_written() {

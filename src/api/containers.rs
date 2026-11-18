@@ -652,16 +652,14 @@ pub async fn list(state: &std::sync::Arc<AppState>) -> hyper::Response<crate::ht
 
 pub async fn get(
     state: &std::sync::Arc<AppState>,
-    headers: &hyper::HeaderMap,
     name: &str,
     query: &str,
 ) -> hyper::Response<crate::http::server::Body> {
-    let signed = crate::auth::current_user(state, headers).is_some();
     let (st, name, query) = (state.clone(), name.to_string(), query.to_string());
     let now = crate::util::unix_now() as i64;
     let job = move || {
         let socket = st.env.docker_socket.clone();
-        detail(&st, signed, &name, &query, now, &|id| {
+        detail(&st, true, &name, &query, now, &|id| {
             crate::docker::inspect_blocking(&socket, id)
         })
     };

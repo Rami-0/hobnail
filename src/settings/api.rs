@@ -235,8 +235,19 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             if r.new.is_empty() || r.new.len() > 1024 {
                 return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
             }
-            crate::auth::change_password(state, &call.headers, &r.current, &r.new)
-                .map_err(password_error)?;
+            let state = state.clone();
+            let headers = call.headers.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::auth::change_password(&state, &headers, &r.current, &r.new)
+            })
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "could not change password",
+                )
+            })?
+            .map_err(password_error)?;
             json(json!({"ok": true}))
         }
         (_, true, ["security", "sign-out-others"]) => {

@@ -9,11 +9,8 @@
 //!
 //! # Access
 //!
-//! Every endpoint needs a signed-in user. Writes already passed
-//! `auth::require_write` (session + `X-RH-CSRF` + same Origin) in
-//! `http::server::route`; `route` checks it again (defense in depth). GETs
-//! are not covered by the central guard, so `route` answers 401 without a
-//! session.
+//! The central HTTP router requires a signed-in user for reads and Admin
+//! access, CSRF and same Origin for writes.
 //!
 //! # Conventions
 //!
@@ -58,31 +55,14 @@ pub(crate) use ops::css_token_warnings;
 /// the save pipeline checks `base_hash` against.
 pub(crate) use store::read_current;
 
-/// Everything under `/api/settings/`. Generic over the body so tests can
-/// call it with a `Full<Bytes>`; the server passes `Incoming`.
-pub async fn route<B>(state: &Arc<AppState>, req: Request<B>) -> Response<Body>
-where
-    B: hyper::body::Body<Data = Bytes>,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
+/// Everything under `/api/settings/`, after the shared access check.
+pub(crate) async fn route(
+    state: &Arc<AppState>,
+    req: Request<hyper::body::Incoming>,
+    principal: crate::api::access::Principal,
+) -> Response<Body> {
     let (parts, body) = req.into_parts();
     let read = parts.method == Method::GET || parts.method == Method::HEAD;
-    let user = if read {
-        match crate::auth::current_user(state, &parts.headers) {
-            Some(u) => u,
-            None => {
-                return api::error(store::ApiError::new(
-                    StatusCode::UNAUTHORIZED,
-                    "sign in required",
-                ))
-            }
-        }
-    } else {
-        match crate::auth::require_write(state, &parts.headers) {
-            Ok(u) => u,
-            Err(d) => return d.response(),
-        }
-    };
     let declared = parts
         .headers
         .get(hyper::header::CONTENT_LENGTH)
@@ -122,7 +102,7 @@ where
             segs,
             headers: parts.headers,
             body,
-            user,
+            user: principal.name,
         },
     )
     .await
