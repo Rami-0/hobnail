@@ -99,6 +99,17 @@ try {
         }
         await tab.shot(path.join(out, `${label}-${slug}.png`));
       }
+      await go("/app/settings/config", present('textarea[name="text"]'));
+      const raw = 'textarea[name="text"]';
+      const original = await tab.ev(`document.querySelector(${q(raw)}).value`);
+      await fill(raw, original + '\n[[widgets]]\nid = "settings-command-refusal"\ntype = "command"\ncommand = ["true"]\n');
+      await button(".settings-form", "Validate");
+      await wait(text('[role="alert"]', "command widgets can only be added"), "command widget guard reason is visible");
+      if (original.includes("settings-bound.example")) {
+        await fill(raw, original.replace("settings-bound.example", "settings-other.example"));
+        await button(".settings-form", "Validate");
+        await wait(text('[role="alert"]', "would send header secrets to a new destination"), "destination guard reason is visible");
+      }
       await go("/app/account", present('[data-testid="account-password"]'));
       await tab.shot(path.join(out, `${label}-account.png`));
       await go("/app/settings/bookmarks?add=bookmark", present(editor));
@@ -178,6 +189,18 @@ try {
           ok(await call(userRoute, "DELETE", undefined, owner), "delete account");
           assert.ok(!ok(await call("/api/v1/users", "GET", undefined, owner), "list remaining accounts").some((entry) => entry.id === account.id));
         }
+        await go("/app/account", present('[data-testid="account-password"]'));
+        const otherOwner = await credentials("/api/login", { username: "admin", password });
+        const newPassword = password + "-changed";
+        const form = '[data-testid="account-password"]';
+        for (const [field, value] of [["current", password], ["new", newPassword], ["confirm", newPassword]]) {
+          await fill(`${form} input[name="${field}"]`, value);
+        }
+        await button(form, "Change password");
+        await wait(text('[data-testid="toast"]', "Password changed"), "password form succeeds");
+        assert.equal(ok(await call("/api/v1/session", "GET", undefined, owner), "current owner session").user.name, "admin");
+        assert.equal(ok(await call("/api/v1/session", "GET", undefined, otherOwner), "other owner session").user, null);
+        ok(await call("/api/v1/account/password", "POST", { current: newPassword, new: password }, owner), "restore fixture password");
       }
       assert.deepEqual([...rec.csp, ...rec.exceptions, ...rec.console, ...rec.failed], [], `${label} browser diagnostics`);
       console.log(`ok ${label}: Settings tabs, Account, Users and signed-in editing`);
