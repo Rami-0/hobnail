@@ -21,7 +21,7 @@ const activeSource = (item: Values) => {
 const channelFields: Control[] = [
   { key: "name", label: "Name", required: true, validate: named },
   { key: "type", label: "Type", default: "webhook", options: ["webhook", "slack", "telegram"], locked: bound },
-  { key: "source", label: "Secret source", default: "env", options: ["env", "file", "plain"], locked: bound,
+  { key: "source", label: "Secret source", default: "env", options: (input) => input.type === "webhook" ? ["env", "file", "plain"] : ["env", "file"], locked: bound,
     validate: (value) => ["env", "file", "plain"].includes(value) ? undefined : "Select a secret source." },
   ...sourceKeys.map((key): Control => ({
     key, label: key.endsWith("_env") ? "Environment variable name" : key.endsWith("_file") ? "Secret file path" : "Plain URL",
@@ -61,7 +61,8 @@ const ruleFields: Control[] = [
   { key: "enabled", label: "Enabled", format: "switch", default: true },
   { key: "containers", label: "Containers", format: "list", show: ofType("container", "log_match") },
   { key: "exclude", label: "Except", format: "list", show: ofType("container", "log_match") },
-  { key: "on", label: "Fire on", format: "list", show: ofType("container"), hint: "stopped, exit_nonzero, unhealthy, restarting" },
+  { key: "on", label: "Fire on", format: "choices", show: ofType("container"),
+    options: ["stopped", "exit_nonzero", "unhealthy", "restarting"], default: ["stopped", "unhealthy", "restarting"] },
   { key: "restarts", label: "Restarts", format: "number", show: ofType("container") },
   { key: "window", format: "duration", label: "Window", show: ofType("container", "log_match") },
   { key: "pattern", label: "Pattern", required: true, show: ofType("log_match") },
@@ -82,7 +83,7 @@ const ruleFields: Control[] = [
   { key: "equals", label: "Equals", show: ofType("widget") },
   { key: "not_equals", label: "Does not equal", show: ofType("widget") },
   { key: "on_error", label: "Fire when the widget fails", format: "switch", show: ofType("widget") },
-  { key: "channels", label: "Channels", format: "list", hint: "Separate channel names with commas." },
+  { key: "channels", label: "Channels", format: "choices" },
   { key: "for", format: "duration", label: "For" },
   { key: "cooldown", format: "duration", label: "Cooldown" },
   { key: "message", label: "Message" },
@@ -155,7 +156,8 @@ export default function Notifications({ editorOnly }: { editorOnly?: boolean }) 
         renameRules={(id) => data.rules.filter((rule) => Array.isArray(rule.item.channels) && rule.item.channels.includes(id)).map((rule) => String(rule.id))}
         row={channelDetails}
         extra={sendTest} refresh={refresh(channels)} />
-      <Collection kind="rule" title="Alert rules" path="alerts" fields={ruleFields} hash={data.hash} entries={rules(data)}
+      <Collection kind="rule" title="Alert rules" path="alerts" fields={ruleFields.map((field) => field.key === "channels" ? { ...field, options: data.channels.map((channel) => String(channel.id)) } : field)}
+        hash={data.hash} entries={rules(data)}
         editorOnly={editorOnly} reorder body={ruleBody} create={newRule} validate={validateRule} renameKey="name" row={ruleRow} refresh={refresh(rules)} />
     </>}
   </>;
@@ -182,6 +184,7 @@ function validateRule(input: Values): Record<string, string> {
   if (input.type === "widget" && count(["above", "below", "equals", "not_equals"]) !== 1) {
     errors.above = "Set exactly one of Above, Below, Equals and Does not equal.";
   }
+  if (input.type === "container" && !input.on) errors.on = "Pick at least one condition.";
   if (input.type === "log_match" && !input.containers && !input.stack) errors.containers = "Set Containers, Compose stack, or both.";
   return errors;
 }

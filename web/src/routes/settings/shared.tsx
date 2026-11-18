@@ -65,8 +65,8 @@ export type Control = {
   required?: boolean;
   default?: unknown;
   max?: number;
-  format?: "url" | "link" | "duration" | "number" | "list" | "paths" | "rows" | "text" | "switch" | "code";
-  options?: readonly string[];
+  format?: "url" | "link" | "duration" | "number" | "list" | "choices" | "paths" | "rows" | "text" | "switch" | "code";
+  options?: readonly string[] | ((values: Values) => readonly string[]);
   show?: (values: Values) => boolean;
   locked?: (base: Values) => boolean;
   validate?: (value: string) => string | undefined;
@@ -80,7 +80,7 @@ function pairs(input: unknown): Pair[] {
 
 function displayValue(field: Control, value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (field.format === "list" && Array.isArray(value)) return value.join(", ");
+  if ((field.format === "list" || field.format === "choices") && Array.isArray(value)) return value.join(", ");
   if (field.format === "paths" || field.format === "rows") {
     const entries = Array.isArray(value) ? value : Object.entries(value).map(([label, path]) => ({ label, value: path }));
     return JSON.stringify(entries.map(({ label, value: entry }, index) => ({ key: String(index), label, value: entry })));
@@ -144,7 +144,7 @@ export function collectFields(fields: Control[], input: Values) {
     const custom = field.validate?.(text);
     if (custom) errors[key] = custom;
     values[key] = text;
-    if (format === "list") values[key] = text.split(",").map((entry) => entry.trim()).filter(Boolean);
+    if (format === "list" || format === "choices") values[key] = text.split(",").map((entry) => entry.trim()).filter(Boolean);
     if (format === "duration") {
       if (/^\d+$/.test(text)) values[key] = Number(text);
       else if (!/^(?:(?:\d+(?:\.\d*)?|\.\d+)(?:ms|[smhd]))+$/.test(text)) errors[key] = "Enter a duration such as 30s or 5m.";
@@ -178,16 +178,28 @@ export function Controls({ fields, input, base, errors, onChange }: {
   return fields.filter((field) => !field.show || field.show(input)).map((field) => {
     const { key, format, label } = field;
     const disabled = field.locked?.(base);
+    const options = typeof field.options === "function" ? field.options(input) : field.options;
     const change = (value: string | boolean) => onChange({ ...input, [key]: value });
     const value = String(input[key] ?? "");
+    if (format === "choices") {
+      const selected = value.split(",").map((entry) => entry.trim()).filter(Boolean);
+      return <fieldset className="settings-form" key={key}>
+        <legend>{label}</legend>
+        {(options ?? []).map((option) => <Switch label={option} key={option} disabled={disabled}
+          checked={selected.includes(option)} onChange={(checked) =>
+            change((checked ? [...selected, option] : selected.filter((entry) => entry !== option)).join(", "))} />)}
+        {!options?.length && <p className="muted">No choices available.</p>}
+        {errors[key] && <Note kind="bad">{errors[key]}</Note>}
+      </fieldset>;
+    }
     if (format === "paths" || format === "rows") return <PairFields key={key} id={`${id}-${key}`} field={field} value={value} error={errors[key]} change={change} />;
     if (format === "switch") return <div key={key}>
       <Switch label={label} checked={input[key] === true} onChange={change} disabled={disabled} />
       {errors[key] && <Note kind="bad">{errors[key]}</Note>}
     </div>;
     return <Field key={key} id={`${id}-${key}`} label={label} error={errors[key]} hint={field.hint}>
-      {field.options ? <Select label={label} value={value} onChange={change} disabled={disabled}
-        options={field.options.map((option) => ({ value: option, label: option || "Default" }))} />
+      {options ? <Select label={label} value={value} onChange={change} disabled={disabled}
+        options={options.map((option) => ({ value: option, label: option || "Default" }))} />
         : format === "code"
           ? <Textarea name={key} className="settings-code mono" rows={14}
               wrap="soft" spellCheck={false} value={value} onChange={(event) => change(event.target.value)} disabled={disabled} />

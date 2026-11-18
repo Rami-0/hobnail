@@ -10,8 +10,11 @@ test("send changed values and rebase without trampling untouched fields", () => 
     { name: "draft", visible: false, list: ["one", "two"] });
 });
 
-test("map field and file position from an invalid response", () => {
-  assert.deepEqual(fieldErrors({ message: "Bad token", field: "text", line: 2, col: 4 }), { text: "Bad token (line 2, column 4)" });
+test("map simultaneous form problems and exact positions from invalid responses", () => {
+  assert.deepEqual(fieldErrors([
+    { message: "Bad token", field: "text", line: 2, col: 4 },
+    { message: "Required", field: "name" },
+  ]), { text: "Bad token (line 2, column 4)", name: "Required" });
 });
 
 test("open only the active collection and keep colons in an item ID", () => {

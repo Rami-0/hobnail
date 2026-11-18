@@ -26,8 +26,13 @@ function CssDetails({ source, cap, dirty }: { source: string; cap: number; dirty
     if (!preview || !dirty || typeof CSSStyleSheet.prototype.replaceSync !== "function") return;
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(source);
+    const savedSheet = document.querySelector<HTMLLinkElement>('link[href^="/custom.css"]');
+    if (savedSheet) savedSheet.disabled = true;
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    return () => { document.adoptedStyleSheets = document.adoptedStyleSheets.filter((item) => item !== sheet); };
+    return () => {
+      if (savedSheet) savedSheet.disabled = false;
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((item) => item !== sheet);
+    };
   }, [source, preview, dirty]);
   const clean = source.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "");
   const sets = (name: string) => new RegExp(`(^|[^\\w-])${name}\\s*:`).test(clean);

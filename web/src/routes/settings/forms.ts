@@ -15,8 +15,13 @@ export function dialogState(search: URLSearchParams, kind: string): { id: string
   return edit?.startsWith(prefix) && edit.length > prefix.length ? { id: edit.slice(prefix.length) } : null;
 }
 
-export function fieldErrors(error: { message: string; field?: string; line?: number; col?: number }): Record<string, string> {
-  return { [error.field ?? "form"]: error.line === undefined ? error.message : `${error.message} (line ${error.line}, column ${error.col ?? 1})` };
+type Problem = { message: string; field?: string; line?: number; col?: number };
+
+export function fieldErrors(input: Problem | Problem[]): Record<string, string> {
+  return Object.fromEntries((Array.isArray(input) ? input : [input]).map((error) => [
+    error.field ?? "form",
+    error.line === undefined ? error.message : `${error.message} (line ${error.line}, column ${error.col ?? 1})`,
+  ]));
 }
 
 /** A rebase must not silently overwrite another save to the same field. */
