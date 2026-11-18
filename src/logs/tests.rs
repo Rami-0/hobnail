@@ -701,11 +701,15 @@ fn state_on(socket: &std::path::Path, tag: &str) -> Arc<AppState> {
     st
 }
 
-async fn serve(st: Arc<AppState>) -> std::net::SocketAddr {
+async fn serve(st: Arc<AppState>) -> (std::net::SocketAddr, String) {
+    let token = "ab".repeat(32);
+    let hash = crate::auth::sha256_hex(token.as_bytes());
+    let now = crate::auth::now_s();
+    assert!(st.db.create_session(&hash, now, now + 60));
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = l.local_addr().unwrap();
     tokio::spawn(crate::http::server::serve_listener(st, l));
-    addr
+    (addr, format!("rh_session={token}"))
 }
 
 async fn read_until(s: &mut TcpStream, needle: &str, limit: Duration) -> String {
@@ -726,9 +730,9 @@ async fn read_until(s: &mut TcpStream, needle: &str, limit: Duration) -> String 
 async fn stream_tails_and_stops_after_disconnect() {
     let fake = fake_docker("sse").await;
     let st = state_on(&fake.path, "sse");
-    let addr = serve(st).await;
+    let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(b"GET /api/logs/stream?c=web&tail=10 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    s.write_all(format!("GET /api/logs/stream?c=web&tail=10 HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "event: l", Duration::from_secs(5)).await;
@@ -780,9 +784,9 @@ fn closed_window_is_cut_by_the_server() {
 async fn closed_window_stops_at_the_cap() {
     let fake = fake_docker("cap").await;
     let st = state_on(&fake.path, "cap");
-    let addr = serve(st).await;
+    let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(b"GET /api/logs/stream?c=web&since=100&until=200&tail=3 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    s.write_all(format!("GET /api/logs/stream?c=web&since=100&until=200&tail=3 HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "event: done", Duration::from_secs(5)).await;
@@ -802,17 +806,22 @@ data: {"c":0,"cut":true}"#
 async fn stream_reports_missing_container_and_bad_request() {
     let fake = fake_docker("missing").await;
     let st = state_on(&fake.path, "missing");
-    let addr = serve(st).await;
+    let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
     // A name that is not a shown container is refused before any Docker call.
-    s.write_all(b"GET /api/logs/stream?c=ghost HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-        .await
-        .unwrap();
+    s.write_all(
+        format!(
+            "GET /api/logs/stream?c=ghost HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n"
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
     let got = read_until(&mut s, "\r\n\r\n", Duration::from_secs(5)).await;
     assert!(got.starts_with("HTTP/1.1 400"), "{got}");
     assert_eq!(fake.open.load(Ordering::SeqCst), 0, "Docker was not asked");
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(b"GET /api/logs/stream?c=..%2Fetc HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    s.write_all(format!("GET /api/logs/stream?c=..%2Fetc HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "\r\n\r\n", Duration::from_secs(5)).await;
@@ -825,9 +834,9 @@ async fn download_streams_text_with_disposition() {
     let st = state_on(&fake.path, "dl");
     // The fake never ends a log, so ask for a stopped-style read: the
     // download uses follow=0, and the fake closes nothing; read a bit.
-    let addr = serve(st).await;
+    let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(b"GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+    s.write_all(format!("GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "line 2", Duration::from_secs(8)).await;

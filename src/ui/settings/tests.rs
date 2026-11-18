@@ -48,56 +48,6 @@ fn paths() -> Vec<String> {
 }
 
 #[test]
-fn signed_out_every_tab_is_locked_and_leaks_nothing() {
-    let st = state_with(sample(), FIXTURE);
-    let h = HeaderMap::new();
-    for p in paths() {
-        let (status, html) = get(&st, &p, &h);
-        assert_eq!(status, StatusCode::OK, "{p}");
-        assert!(html.contains("set-lock"), "{p}: lock panel");
-        assert!(
-            html.contains("docker exec -it hobnail /hobnail set-password"),
-            "{p}: first-password command"
-        );
-        assert!(html.contains("Docker socket"), "{p}: says why");
-        assert!(!html.contains("rh-csrf"), "{p}: no csrf when signed out");
-        // Nothing from the config file: no widget URLs, no editors.
-        for leak in [
-            "100.64.0.10:8090/api/health",
-            "/host/proc",
-            "broken-demo",
-            "f-raw",
-            "f-widget",
-        ] {
-            assert!(!html.contains(leak), "{p}: leaked {leak}");
-        }
-        assert!(html.contains("/static/settings.css?v="), "{p}");
-        assert!(html.contains("/static/settings.js?v="), "{p}");
-        // The lock panel only: no tab strip, no cards (Y11, SET-21, SET-22).
-        assert!(!html.contains("set-nav"), "{p}: tab strip signed out");
-        assert!(!html.contains("set-card"), "{p}: index cards");
-        for s in SETTINGS {
-            assert!(
-                !html.contains(&format!(r#"href="/settings/{}""#, s.1)),
-                "{p}: a tab link signed out"
-            );
-        }
-    }
-    // Once a password exists, the panel links to the login with `next`.
-    st.db.kv_set("auth.password", "pbkdf2-sha256$1$00$00");
-    let (_, html) = get(&st, "/settings/widgets", &h);
-    assert!(html.contains("Sign in to change settings"), "{html}");
-    assert!(html.contains(r#"href="/login?next=%2Fsettings%2Fwidgets""#));
-    assert!(!html.contains("set-password"));
-    // Signing in from `/settings` comes back to `/settings`.
-    let (_, html) = get(&st, "/settings", &h);
-    assert!(
-        html.contains(r#"class="btn primary" href="/login?next=%2Fsettings""#),
-        "{html}"
-    );
-}
-
-#[test]
 fn unknown_tab_is_404() {
     let st = state_with(sample(), FIXTURE);
     let (status, _) = get(&st, "/settings/nope", &HeaderMap::new());

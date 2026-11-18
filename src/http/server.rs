@@ -474,11 +474,15 @@ mod tests {
     async fn get(path: &str) -> (u16, String, String) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
+        let token = "ab".repeat(32);
+        let hash = crate::auth::sha256_hex(token.as_bytes());
+        let now = crate::auth::now_s();
+        assert!(st.db.create_session(&hash, now, now + 60));
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = l.local_addr().unwrap();
         tokio::spawn(serve_listener(st, l));
         let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
-        let r = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+        let r = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nCookie: rh_session={token}\r\nConnection: close\r\n\r\n");
         s.write_all(r.as_bytes()).await.unwrap();
         let mut out = Vec::new();
         s.read_to_end(&mut out).await.unwrap();
@@ -495,7 +499,7 @@ mod tests {
         let (status, head, body) = get(&format!("/static/app.js?v={APP_JS_V}")).await;
         assert_eq!(status, 200);
         assert!(head.contains("content-type: text/javascript"), "{head}");
-        assert!(head.contains("immutable"), "{head}");
+        assert!(head.contains("cache-control: no-store"), "{head}");
         assert!(body.contains(APP_JS), "the whole bundle, unchunked");
         let hb = body
             .find("const HB = (window.HB = {});")
@@ -545,7 +549,7 @@ mod tests {
         let (status, head, css) = get(&format!("/static/app.css?v={APP_CSS_V}")).await;
         assert_eq!(status, 200);
         assert!(head.contains("content-type: text/css"), "{head}");
-        assert!(head.contains("max-age=31536000, immutable"), "{head}");
+        assert!(head.contains("cache-control: no-store"), "{head}");
         assert_eq!(css, APP_CSS);
         let tokens = css.find("\n:root,[data-theme=dark]{").expect("dark tokens");
         let comp = css.find("dialog.dlg{").expect("dialog");
@@ -589,10 +593,9 @@ mod tests {
         );
     }
 
-    /// Asset URLs carry a hash of the bytes; only that exact `v` is cached
-    /// for good. A wrong or missing `v` must be revalidated (`no-cache`).
+    /// Protected legacy assets carry content hashes and are never cached.
     #[tokio::test]
-    async fn assets_are_immutable_only_for_their_own_hash() {
+    async fn protected_assets_are_no_store() {
         assert_eq!(APP_CSS_V.len(), 16);
         assert_eq!(fnv1a(""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a("a"), 0xaf63_dc4c_8601_ec8c);
@@ -607,14 +610,11 @@ mod tests {
         ] {
             let (st, head, _) = get(&format!("{path}?v={v}")).await;
             assert_eq!(st, 200);
-            assert!(
-                head.contains("cache-control: public, max-age=31536000, immutable"),
-                "{path}: {head}"
-            );
+            assert!(head.contains("cache-control: no-store"), "{path}: {head}");
             for q in ["", "?v=dev", "?v=0000000000000000", &format!("?x=1&v={v}x")] {
                 let (_, head, _) = get(&format!("{path}{q}")).await;
                 assert!(
-                    head.contains("cache-control: no-cache"),
+                    head.contains("cache-control: no-store"),
                     "{path}{q}: {head}"
                 );
                 assert!(!head.contains("immutable"), "{path}{q}");
