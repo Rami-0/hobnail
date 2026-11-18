@@ -109,7 +109,7 @@ export default function Users() {
     {failure && <Note kind="bad">{failure}</Note>}
     <div className="settings-list">{users.map((user) => {
       const granted = [...(user.scope_targets?.boards ?? []), ...(user.scope_targets?.integrations ?? [])];
-      return <div className="settings-row" key={user.id} data-testid="user-row">
+      return <div className="settings-row" key={user.id} data-testid="user-row" data-user-id={user.id}>
         <div><h3>{user.name}</h3>
           <p><span className="settings-role">{user.role}</span> · {user.disabled ? "Disabled" : "Active"}</p>
           <p>{user.scopes ? granted.map((target) => target.name).join(", ") || "No boards or integrations" : "Everything"}</p>

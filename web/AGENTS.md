@@ -282,7 +282,7 @@ request's cursor and backoff; it does not change the SSE protocol.
 | `[data-testid="settings-<kind>-list"]` | Collection and row controls |
 | `[data-testid="settings-containers"]` | Filterable overrides list and bulk bar |
 | `[data-testid="account-page"]`, `[data-testid="account-password"]`, `[data-testid="account-sessions"]` | Account, password form and other sessions |
-| `[data-testid="settings-users"]`, `[data-testid="user-row"]` | Owner management and its account rows |
+| `[data-testid="settings-users"]`, `[data-testid="user-row"][data-user-id]` | Owner management and its account rows |
 | `[data-testid="invite-create"]`, `[data-testid="invite-row"]`, `[data-testid="invite-link"]` | Invitation creation, status rows and one-time copy field |
 
 Run `web/e2e/settings-check.mjs` through `scripts/e2e.sh` on a throwaway port

@@ -1,7 +1,7 @@
 // Run against a throwaway fake instance through scripts/e2e.sh.
 import assert from "node:assert/strict";
 import path from "node:path";
-import { CSP_LISTENER, input, launch, q, recorder } from "./cdp.mjs";
+import { CSP_LISTENER, input, launch, q, recorder, sleep } from "./cdp.mjs";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3396");
 assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
@@ -30,7 +30,11 @@ function ok(result, action) {
   return result.data;
 }
 async function credentials(pathname, body) {
-  const result = await call(pathname, "POST", body);
+  let result = await call(pathname, "POST", body);
+  for (let attempt = 0; result.status === 429 && attempt < 3; attempt++) {
+    await sleep(Math.min(30, Math.max(1, Number(result.data?.retry_after ?? 2))) * 1000);
+    result = await call(pathname, "POST", body);
+  }
   return { cookie: result.cookie, csrf: ok(result, pathname).csrf };
 }
 const boot = ok(await call("/api/v1/session"), "read session");
@@ -181,15 +185,30 @@ try {
           createdUsers.push(account.id);
           assert.equal(account.role, role);
           assert.equal(role === "viewer" ? account.scopes.boards.length : account.scopes, role === "viewer" ? 1 : null);
-          const userRoute = `/api/v1/users/${account.id}`;
-          ok(await call(userRoute + "/role", "PATCH", { role: role === "viewer" ? "admin" : "viewer" }, owner), "change role");
+          await go("/app/settings/users", text('[data-testid="user-row"]', username));
+          const row = `[data-testid="user-row"][data-user-id="${account.id}"]`;
+          await button(row, "Change role");
+          await inp.click(dialog + ' button[aria-label="Role"]');
+          await inp.click(`[role="option"][data-value="${role === "viewer" ? "admin" : "viewer"}"]`);
+          await button(dialog, "Change role");
+          await wait(`!${present(dialog)}`, "role editor closes");
           const changed = ok(await call("/api/v1/session", "GET", undefined, other), "read role change");
           if (changed.user) assert.notEqual(changed.user.role, role);
-          ok(await call(userRoute + "/sign-out", "POST", undefined, owner), "force sign-out");
-          assert.equal(ok(await call("/api/v1/session", "GET", undefined, other), "read revoked session").user, null);
-          ok(await call(userRoute + "/disabled", "PATCH", { disabled: true }, owner), "disable account");
-          assert.notEqual((await call("/api/login", "POST", { username, password })).status, 200);
-          ok(await call(userRoute, "DELETE", undefined, owner), "delete account");
+          await button(row, "Disable");
+          await button(dialog, "Disable account");
+          await wait(text(row, "Disabled"), "account becomes disabled");
+          assert.equal(ok(await call("/api/v1/session", "GET", undefined, other), "read disabled session").user, null);
+          await button(row, "Enable");
+          await button(dialog, "Enable account");
+          await wait(text(row, "Active"), "account becomes active");
+          const enabled = await credentials("/api/login", { username, password });
+          await button(row, "Force sign-out");
+          await button(dialog, "Force sign-out");
+          await wait(`!${present(dialog)}`, "force sign-out closes");
+          assert.equal(ok(await call("/api/v1/session", "GET", undefined, enabled), "read revoked session").user, null);
+          await button(row, "Delete");
+          await button(dialog, "Delete account");
+          await wait(`!${present(row)}`, "deleted account leaves the list");
           assert.ok(!ok(await call("/api/v1/users", "GET", undefined, owner), "list remaining accounts").some((entry) => entry.id === account.id));
         }
         await go("/app/account", present('[data-testid="account-password"]'));
