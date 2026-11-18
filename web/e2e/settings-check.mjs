@@ -256,7 +256,7 @@ try {
         await wait(present(dialog + " pre"), "revision text is shown");
         await inp.key("Escape");
 
-        await button(".settings-row", "Restore…");
+        await button(".settings-row:nth-child(2)", "Restore…");
         await wait(text(dialog, "Replace the current config"), "restore opens a revision confirmation");
         await button(dialog, "Restore revision");
         await wait(`!${present(dialog)}`, "revision restore completes");
