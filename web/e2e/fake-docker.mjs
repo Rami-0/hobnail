@@ -241,20 +241,35 @@ if (CHURN > 0) {
 
 // ---- logs ----
 const LEVELS = ["INFO", "INFO", "INFO", "DEBUG", "WARN", "INFO", "ERROR"];
-const logLine = (c, unix, k) => `${new Date(unix * 1000).toISOString().replace("Z", "000000Z")} ${LEVELS[k % LEVELS.length]} ${c.name}: request ${k} handled in ${(k * 37) % 900} ms\n`;
+const logLine = (c, unix, k) => {
+  const sample = k % 10 === 4 ? '<script id="hostile-log">globalThis.logPwned=1</script><img id="hostile-img" src=x onerror=alert(1)> & hostile text'
+    : k % 10 === 5 ? '\x1b[1;31mERROR ANSI red\x1b[0m plain https://example.com/log'
+    : k % 10 === 6 ? JSON.stringify({msg: "JSON request", request: k, ok: true, nested: {safe: "<b>text</b>"}})
+    : `${LEVELS[k % LEVELS.length]} ${c.name}: request ${k} handled in ${(k * 37) % 900} ms`;
+  return `${new Date(unix * 1000).toISOString().replace("Z", "000000Z")} ${sample}\n`;
+};
+const logConnections = [];
+const logReport = path.join(path.dirname(SOCK), "log-connections.json");
+const saveLogReport = () => fs.writeFileSync(logReport, JSON.stringify(logConnections));
+
 function logs(c, q, res) {
   const now = Math.floor(Date.now() / 1000);
   const since = q.get("since") ? parseFloat(q.get("since")) : 0, until = q.get("until") ? parseFloat(q.get("until")) : Infinity;
   let lines = [];
-  for (let k = 0; k < 300; k++) { const at = now - (300 - k) * 10; if (at >= since && at <= until) lines.push(logLine(c, at, k)); }
+  for (let k = 0; k < 5000; k++) { const at = now - (5000 - k) * 2; if (at >= since && at <= until) lines.push(logLine(c, at, k)); }
   const tail = q.get("tail");
   if (tail && tail !== "all") lines = Number(tail) > 0 ? lines.slice(-Number(tail)) : [];
   res.writeHead(200, { "Content-Type": "application/vnd.docker.raw-stream", "Api-Version": "1.47" });
   res.write(lines.join(""));
   if (q.get("follow") === "1" && running(c)) {
-    let k = 300;
+    const connection = { name: c.name, opened: Date.now(), closed: null };
+    logConnections.push(connection); saveLogReport();
+    let k = 5000;
+    const burst = setTimeout(() => {
+      if (c.name === "svc001") res.write(Array.from({ length: 1500 }, (_, i) => logLine(c, Date.now() / 1000 + i / 10000, k++)).join(""));
+    }, 6000);
     const t = setInterval(() => res.write(logLine(c, Math.floor(Date.now() / 1000), k++)), 2000);
-    res.on("close", () => clearInterval(t));
+    res.on("close", () => { clearInterval(t); clearTimeout(burst); connection.closed = Date.now(); saveLogReport(); });
   } else res.end();
 }
 
