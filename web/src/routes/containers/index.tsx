@@ -31,6 +31,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
@@ -531,10 +532,11 @@ interface SectionProps {
  * Rows not drawn yet hold their place (an empty row as tall as they will
  * be), so the next slice fills it and nothing below moves (no layout shift).
  */
-function Waiting({ rows }: { rows: ContainerRow[] }) {
-  return rows.map((row) => <tr key={row.name} className="row-wait" aria-hidden="true">
-    {["c-name", "c-stack", "c-image", "c-state", "c-up", "c-hist", "c-num c-cpu", "c-num c-mem", "c-ports", "c-act"].map((className) => <td key={className} className={className}><span className="sr">Loading</span></td>)}
-  </tr>);
+function Waiting({ n, grouped = false }: { n: number; grouped?: boolean }) {
+  if (n <= 0) return null;
+  return <tr className="row-wait" aria-hidden="true" style={{ "--n": n } as CSSProperties}>
+    <td colSpan={grouped ? 9 : 10}><span className="sr">Loading</span></td>
+  </tr>;
 }
 
 function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
@@ -546,7 +548,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
         {rows.map((r) => (
           <Row key={r.name} row={r} strip={rowStrips?.[r.name]} stripStep={stripStep} now={now} host={host} cells={cells} />
         ))}
-        <Waiting rows={waiting ? section.rows.slice(rows.length) : []} />
+        <Waiting n={waiting} />
       </tbody>
     );
   }
@@ -581,7 +583,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
         rows.map((r) => (
           <Row key={r.name} row={r} strip={rowStrips?.[r.name]} stripStep={stripStep} now={now} host={host} cells={cells} />
         ))}
-      <Waiting rows={waiting ? section.rows.slice(rows.length) : []} />
+      <Waiting n={waiting} grouped />
     </tbody>
   );
 }

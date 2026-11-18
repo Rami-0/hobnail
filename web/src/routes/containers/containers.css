@@ -110,7 +110,7 @@ tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
 .grp-strip .hstrip{height:8px}
 tbody.none td{padding:0}
 /* rows still to come (index.tsx Waiting): their height, so nothing moves when they arrive */
-.ctbl tr.row-wait td{height:var(--row);padding:0;border-bottom:1px solid var(--line)}
+.ctbl tr.row-wait td{height:calc(var(--n) * var(--row));padding:0;border:0}
 @media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
 @media (max-width:900px){.c-num .cell-spark{display:none}.c-num{width:80px}.ctbl .c-ports,.ctbl .c-hist{display:none}}
 
@@ -143,7 +143,7 @@ tbody.none td{padding:0}
  .ctbl tr.grp-h th{display:block;height:auto}
  .ctbl tbody.none tr,.ctbl tbody.none td{display:block}
  .ctbl tr.row-wait,.ctbl tr.row-wait td{display:block}
- .ctbl tr.row-wait{height:130px}.ctbl tr.row-wait td{display:none}
+ .ctbl tr.row-wait{height:calc(var(--n) * 130px)}.ctbl tr.row-wait td{display:none}
 }
 @media (pointer:coarse),(max-width:640px){
  .port{margin-block:2px}
