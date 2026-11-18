@@ -3,28 +3,28 @@
    static/components.css and static/app.css; scoped to the two pages so the
    shell's own styles are not touched. Phones (<= 640 px) get stacked rows
    that skip layout and paint while off screen (content-visibility). */
-:is(.ctr-page,.cd-page) .icon{width:20px;height:20px;border-radius:5px;flex:none;object-fit:contain}
-:is(.ctr-page,.cd-page) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
-:is(.ctr-page,.cd-page) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
-:is(.ctr-page,.cd-page) .ra .btn.sm{gap:6px}
-:is(.ctr-page,.cd-page) fieldset.seg{margin:0;min-inline-size:0}
-:is(.ctr-page,.cd-page) .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
-:is(.ctr-page,.cd-page) .seg>:is(a,button){display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:.8929rem;font-weight:500;white-space:nowrap;cursor:pointer;text-decoration:none}
-:is(.ctr-page,.cd-page) .seg>:is(a,button):hover{color:var(--text)}
-:is(.ctr-page,.cd-page) .seg>:is([aria-current],[aria-pressed=true]){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
-:is(.ctr-page,.cd-page) .seg svg{width:14px;height:14px}
-:is(.ctr-page,.cd-page) .seg .n{font:.7857rem var(--mono);color:var(--text-3)}
-:is(.ctr-page,.cd-page) .st-l{font-size:calc(12.5rem/14);color:var(--text-2)}
-:is(.ctr-page,.cd-page) .st-l.warn{color:var(--warn-fg)}
-:is(.ctr-page,.cd-page) .st-l.bad{color:var(--bad-fg);font-weight:600}
-:is(.ctr-page,.cd-page) .st-l.off{color:var(--text-3)}
-:is(.ctr-page,.cd-page) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
-:is(.ctr-page,.cd-page) .mono.img{color:var(--text-2)}
-:is(.ctr-page,.cd-page) .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
-:is(.ctr-page,.cd-page) .tbl th{height:32px;padding:0 10px;text-align:left;font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
-:is(.ctr-page,.cd-page) .tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-:is(.ctr-page,.cd-page) .tbl tbody tr:last-child td{border-bottom-color:transparent}
-.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/18px var(--mono);color:var(--accent-fg);white-space:nowrap}
+:is(.ct,.cd) .icon{width:20px;height:20px;border-radius:5px;flex:none;object-fit:contain}
+:is(.ct,.cd) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
+:is(.ct,.cd) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
+:is(.ct,.cd) .ra .btn.sm{gap:6px}
+:is(.ct,.cd) fieldset.seg{margin:0;min-inline-size:0}
+:is(.ct,.cd) .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+:is(.ct,.cd) .seg>:is(a,button){display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:.8929rem;font-weight:500;white-space:nowrap;cursor:pointer;text-decoration:none}
+:is(.ct,.cd) .seg>:is(a,button):hover{color:var(--text)}
+:is(.ct,.cd) .seg>:is([aria-current],[aria-pressed=true]){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
+:is(.ct,.cd) .seg svg{width:14px;height:14px}
+:is(.ct,.cd) .seg .n{font:.7857rem var(--mono);color:var(--text-3)}
+:is(.ct,.cd) .st-l{font-size:calc(12.5rem/14);color:var(--text-2)}
+:is(.ct,.cd) .st-l.warn{color:var(--warn-fg)}
+:is(.ct,.cd) .st-l.bad{color:var(--bad-fg);font-weight:600}
+:is(.ct,.cd) .st-l.off{color:var(--text-3)}
+:is(.ct,.cd) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
+:is(.ct,.cd) .mono.img{color:var(--text-2)}
+:is(.ct,.cd) .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+:is(.ct,.cd) .tbl th{height:32px;padding:0 10px;text-align:left;font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
+:is(.ct,.cd) .tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+:is(.ct,.cd) .tbl tbody tr:last-child td{border-bottom-color:transparent}
+.port{display:inline-block;height:max(24px,var(--hit));min-width:var(--hit);text-align:center;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/calc(max(24px,var(--hit)) - 2px) var(--mono);color:var(--accent-fg);white-space:nowrap}
 .port:hover{border-color:var(--accent);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
 .port.local small,.port.plain small{font-size:calc(10rem/14);font-family:var(--font)}
@@ -32,19 +32,19 @@
 .port.more{color:var(--text-3)}
 
 /* ---- toolbar ---- */
-.ctr-page{display:grid;gap:var(--s-3)}
-.ctr-page search.bar{display:flex}
-.ctr-page .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.ctr-page .search-in{position:relative;flex:1 1 240px;max-width:360px}
-.ctr-page .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
-.ctr-page .search-in input{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-input)}
-.ctr-page .search-in input:focus{border-color:var(--accent)}
-.ctr-page .bar select{height:var(--ctl-h);padding:0 8px;max-width:220px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font-size:var(--fs-input)}
-.ctr-page .sortctl{display:none;gap:4px;align-items:center}
+.ct{display:grid;gap:var(--s-3)}
+.ct search.bar{display:flex}
+.ct .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ct .search-in{position:relative;flex:1 1 240px;max-width:360px}
+.ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
+.ct .search-in input{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-input)}
+.ct .search-in input:focus{border-color:var(--accent)}
+.ct .bar select{height:var(--ctl-h);padding:0 8px;max-width:220px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font-size:var(--fs-input)}
+.ct .sortctl{display:none;gap:4px;align-items:center}
 .ctbl-loading{padding:var(--s-4)}
 
 /* ---- table ---- */
-.ctr-page .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;contain:paint}
+.ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;contain:paint}
 .ctbl{table-layout:fixed}
 .ctbl .c-name{width:auto}
 .ctbl .c-stack{width:90px}
@@ -116,9 +116,9 @@ tbody.none td{padding:0}
 
 /* ---- phones: stacked rows, a sort control in the toolbar ---- */
 @media (max-width:640px){
- .ctr-page .seg{overflow-x:auto;max-width:100%}
- .ctr-page .search-in{max-width:none;flex-basis:100%}
- .ctr-page .sortctl{display:flex}
+ .ct .seg{overflow-x:auto;max-width:100%}
+ .ct .search-in{max-width:none;flex-basis:100%}
+ .ct .sortctl{display:flex}
  .ctbl,.ctbl tbody{display:block}
  .ctbl thead{display:none}
  .ctbl caption{display:block}
@@ -146,10 +146,9 @@ tbody.none td{padding:0}
  .ctbl tr.row-wait{height:130px}.ctbl tr.row-wait td{display:none}
 }
 @media (pointer:coarse),(max-width:640px){
- .port{height:44px;min-width:44px;line-height:42px;text-align:center;margin-block:2px}
+ .port{margin-block:2px}
  .grp-t{height:44px}
- :is(.ctr-page,.cd-page) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
+ :is(.ct,.cd) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
 }
 .ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
-.port{height:max(24px,var(--hit));min-width:var(--hit);line-height:calc(max(24px,var(--hit)) - 2px);text-align:center}
-@media(pointer:coarse),(max-width:699px){.ctr-page .seg>:is(a,button){height:44px}.ctr-page .sortctl .btn{min-width:44px}}
+@media(pointer:coarse),(max-width:699px){.ct .seg>:is(a,button){height:44px}.ct .sortctl .btn{min-width:44px}}
