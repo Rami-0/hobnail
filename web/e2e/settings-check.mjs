@@ -39,6 +39,7 @@ async function credentials(pathname, body) {
 }
 const boot = ok(await call("/api/v1/session"), "read session");
 const owner = await credentials(boot.owner_exists ? "/api/login" : "/api/v1/onboarding/owner", { username: "admin", password });
+const cssInitial = ok(await call("/api/settings/appearance", "GET", undefined, owner), "read CSS");
 const initial = ok(await call("/api/settings/config", "GET", undefined, owner), "read config");
 const run = Date.now().toString(36);
 const board = ok(await call("/api/v1/boards", "POST", { name: `Settings scope ${run}` }, owner), "create scope target");
@@ -61,11 +62,12 @@ try {
     const label = `${width}-${scheme}`;
     const tab = await browser.tab();
     const inp = input(tab);
+    inp.touch = width < 700;
     const rec = recorder(tab, base.origin);
     const wait = async (expression, message) => assert.ok(await tab.until(expression, 10000), `${label}: ${message}`);
     const go = async (route, expression) => {
       await tab.send("Page.navigate", { url: new URL(route, base).href });
-      await wait(`location.pathname === ${q(route.split("?")[0])} && (${expression})`, route);
+      await wait(`location.pathname === ${q(route.split("?")[0])} && (${expression})`, route.startsWith("/app/invite/") ? "invitation page" : route);
     };
     const fill = async (selector, value) => {
       await inp.clear(selector);
@@ -95,16 +97,17 @@ try {
         ? "expected Settings refusal" : false);
       await cookie(owner);
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 844 : 900, deviceScaleFactor: 1, mobile: width === 390 });
+      await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: 5 });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }, { name: "prefers-reduced-motion", value: "reduce" }] });
       for (const [slug, heading] of pages) {
         await go(`/app/settings/${slug}`, text("h2", heading));
         await wait("document.documentElement.scrollWidth <= innerWidth + 1", `${slug} fits the viewport`);
+        await tab.shot(path.join(out, `${label}-${slug}.png`));
         if (slug === "config") {
           await wait('document.querySelector("textarea").wrap === "soft"', "raw editor wraps");
           await button(".settings-form", "Validate");
           await wait(text('[role="status"]', "Configuration is valid"), "raw validation works");
         }
-        await tab.shot(path.join(out, `${label}-${slug}.png`));
       }
       await go("/app/settings/config", present('textarea[name="text"]'));
       const raw = 'textarea[name="text"]';
@@ -141,6 +144,68 @@ try {
       await wait(text(dialog, "Secret source"), "Alerts shares the channel editor");
       await inp.key("Escape");
 
+      if (scheme === "dark") {
+        await go("/app/settings/general", present('input[name="greeting"]'));
+        const greeting = `Hello from ${label}`;
+        await fill('input[name="greeting"]', greeting);
+        const before = ok(await call("/api/settings/general", "GET", undefined, owner), "read current page settings");
+        ok(await call("/api/settings/general", "POST", { base_hash: before.hash, values: { title: "Concurrent title" } }, owner), "save a concurrent change");
+        await button(".settings-form", "Save");
+        await wait(text(".settings-form", "Reload and keep my input"), "409 offers a rebase");
+        await button(".settings-form", "Reload and keep my input");
+        await wait(`document.querySelector('input[name="greeting"]').value === ${q(greeting)} && !(${text(".settings-form", "Reload and keep my input")})`, "rebase retains input");
+        await button(".settings-form", "Save");
+        await wait(text('[data-testid="toast"]', "Saved revision"), "general save announces its revision");
+        const saved = ok(await call("/api/settings/general", "GET", undefined, owner), "read rebased settings");
+        assert.equal(saved.page.greeting, greeting);
+        assert.equal(saved.page.title, "Concurrent title");
+        ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
+
+        await go("/app/settings/containers?add=pattern", present(editor));
+        await fill(editor + ' input[name="pattern"]', "settings-check-missing*");
+        await wait(text(editor + ' [role="status"]', "0 matching containers"), "exclude dialog shows a match count");
+        await button(editor, "Save");
+        await wait(text(".settings-row", "settings-check-missing*"), "pattern is saved");
+        await inp.click('button[aria-label="Delete settings-check-missing*"]');
+        await button(dialog, "Delete");
+        await wait(`!${text(".settings-row", "settings-check-missing*")}`, "pattern deletion refreshes the list");
+        await go("/app/settings/containers?edit=override:svc001", present('[data-testid="edit-dialog"]'));
+        await wait(text('[data-testid="edit-dialog"]', "Save"), "Settings reuses the override editor");
+        await inp.key("Escape");
+
+        await go("/app/settings/widgets?add=widget", present(editor));
+        const widget = `browser-widget-${width}`;
+        await fill(editor + ' input[name="id"]', widget);
+        await fill(editor + ' input[name="url"]', "http://127.0.0.1:3200/healthz");
+        await button(editor, "Add field");
+        await wait(text(editor, "Path in the response"), "widget supports named fields");
+        await button(editor, "Fetch now");
+        await wait(present(editor + " .note"), "widget fetch shows its result");
+        await button(editor, "Save");
+        await wait(text(".settings-row", widget), "custom API widget is saved");
+
+        await go("/app/settings/appearance", present('textarea[name="css"]'));
+        await fill('textarea[name="css"]', width === 1440 ? ":root{--border-2:#123456}" : ":root{--border-2:#345678}");
+        await wait(text('[role="alert"]', "--ctl-border"), "CSS warns about a retired token");
+        await button(".settings-form", "Save");
+        await wait(text(".settings-form", "Previous version"), "CSS retains its previous version");
+
+        await go("/app/settings/config", text("h2", "Revisions"));
+        await wait(text(".settings-row", "bookmarks"), "revisions are listed");
+        await button(".settings-row", "Diff");
+        await wait(text(dialog, "removed"), "revision diff is shown");
+        await inp.key("Escape");
+        await button(".settings-row", "View");
+        await wait(present(dialog + " pre"), "revision text is shown");
+        await inp.key("Escape");
+
+        await go("/app/settings/history", present('a[download]'));
+        assert.equal((await call("/api/settings/history/export", "GET", undefined, owner)).status, 200);
+        await button(".settings-section", "Clear history…");
+        await wait(`document.querySelector(${q(dialog + " .dlg-ft button")}).disabled`, "history clear requires a typed phrase");
+        await inp.key("Escape");
+      }
+
       if (width === 1440 && scheme === "dark") {
         for (const role of ["viewer", "admin"]) {
           await go("/app/settings/users", present('[data-testid="invite-create"]'));
@@ -149,7 +214,7 @@ try {
             await inp.click(dialog + ' button[aria-label="Access"]');
             await inp.click('[role="option"][data-value="limited"]');
             await wait(present(dialog + ' [role="switch"]'), "scope targets show by name");
-            await inp.click(dialog + ' [role="switch"]');
+            await inp.click(dialog + ` [role="switch"][aria-label=${q(board.name)}]`);
           } else {
             await inp.click(dialog + ' button[aria-label="Role"]');
             await inp.click('[role="option"][data-value="admin"]');
@@ -228,7 +293,7 @@ try {
       console.log(`ok ${label}: Settings tabs, Account, Users and signed-in editing`);
     } catch (error) {
       failures.push(`${label}: ${error.stack}`);
-      await tab.shot(path.join(out, `${label}-failure.png`));
+      if (!(await tab.ev(present('[data-testid="invite-link"]')))) await tab.shot(path.join(out, `${label}-failure.png`));
     } finally {
       await tab.close();
     }
@@ -238,6 +303,8 @@ try {
   for (const id of createdUsers) await call(`/api/v1/users/${id}`, "DELETE", undefined, owner);
   const final = ok(await call("/api/settings/config", "GET", undefined, owner), "read final config");
   if (final.hash !== initial.hash) ok(await call("/api/settings/config", "POST", { base_hash: final.hash, text: initial.text }, owner), "restore config");
+  const css = ok(await call("/api/settings/appearance", "GET", undefined, owner), "read final CSS");
+  if (css.hash !== cssInitial.hash) ok(await call("/api/settings/appearance", "POST", { base_hash: css.hash, css: cssInitial.css }, owner), "restore CSS");
   await call(`/api/v1/boards/${board.id}`, "DELETE", undefined, owner);
 }
 assert.deepEqual(failures, []);

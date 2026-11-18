@@ -39,7 +39,7 @@ function ScopeFields({ scopes, targets, onChange }: { scopes: Scopes | null; tar
     {scopes && (["boards", "integrations"] as const).map((kind) => <fieldset key={kind} className="settings-form">
       <legend className="settings-role">{kind}</legend>
       {targets[kind].length === 0 && <p className="muted">No {kind} available.</p>}
-      {targets[kind].map((target) => <Switch key={target.id} label={target.name} checked={scopes[kind].includes(target.id)}
+      {targets[kind].map((target) => <Switch key={target.id} label={target.name} aria-label={target.name} checked={scopes[kind].includes(target.id)}
         onChange={(checked) => onChange(toggleScope(scopes, kind, target.id, checked))} />)}
     </fieldset>)}
   </>;
