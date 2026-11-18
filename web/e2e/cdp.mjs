@@ -102,7 +102,8 @@ export function input(tab) {
     },
     // The centre of the first visible match (scrolled into view), or null.
     async box(sel, scroll = true) {
-      return tab.ev(`(() => { const e = document.querySelector(${q(sel)}); if (!e) return null; ${scroll ? 'e.scrollIntoView({ block: "center" });' : ""} const b = e.getBoundingClientRect(); if (!b.width || !b.height) return null; return { x: b.left + b.width / 2, y: b.top + b.height / 2, left: b.left, top: b.top, width: b.width, height: b.height }; })()`);
+      if (scroll) await tab.ev(`new Promise(resolve => { const e=document.querySelector(${q(sel)}); e?.scrollIntoView({block:"center"}); requestAnimationFrame(()=>requestAnimationFrame(resolve)); })`);
+      return tab.ev(`(() => { const e = document.querySelector(${q(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); if (!b.width || !b.height) return null; return { x: b.left + b.width / 2, y: b.top + b.height / 2, left: b.left, top: b.top, width: b.width, height: b.height }; })()`);
     },
     async click(sel) {
       const b = await self.box(sel);
