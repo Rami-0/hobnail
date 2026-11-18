@@ -7,6 +7,8 @@
 //   localStorage   rh-set-tab   the Settings tab used last (raw, read only here)
 // Pure functions over a Storage-like object (prefs.test.ts).
 
+import { isSettingsTab, type SettingsTab } from "./settings-tabs.ts";
+
 export interface KV {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -75,22 +77,14 @@ export function writeTreeQuery(s: KV | null, q: string): void {
   write(s, TREE_Q_KEY, q);
 }
 
-/** The old UI's Settings tabs (routes::SETTINGS); the link opens the one used last. */
-export const SETTINGS_TABS = [
-  "general",
-  "containers",
-  "bookmarks",
-  "widgets",
-  "notifications",
-  "appearance",
-  "history",
-  "config",
-  "security",
-] as const;
+export function settingsHref(s: KV | null, owner = false, scoped = false): string {
+  const tab = read(s, SET_TAB_KEY);
+  if (scoped) return tab === "integrations" ? "/settings/integrations" : "/settings/boards";
+  return tab && isSettingsTab(tab) && (tab !== "users" || owner) ? `/settings/${tab}` : "/settings";
+}
 
-export function settingsHref(s: KV | null): string {
-  const t = read(s, SET_TAB_KEY);
-  return t && (SETTINGS_TABS as readonly string[]).includes(t) ? `/settings/${t}` : "/settings";
+export function rememberSettingsTab(s: KV | null, tab: SettingsTab): void {
+  write(s, SET_TAB_KEY, tab);
 }
 
 export function local(): KV | null {

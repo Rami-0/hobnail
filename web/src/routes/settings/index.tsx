@@ -4,6 +4,8 @@ import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
 import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
+import { local, rememberSettingsTab } from "../../app/prefs.ts";
+import { settingsTabs, type SettingsTab } from "../../app/settings-tabs.ts";
 import { useRoute } from "../../app/router.ts";
 import { fetchBootstrap, onConfigChange, useBootstrap } from "../../live/index.ts";
 import { needsSecret } from "../../boards/document.ts";
@@ -18,15 +20,24 @@ import "./settings.css";
 
 export default function SettingsPage() {
   const { route } = useRoute();
-  const b = useBootstrap();
-  const tab = route.name === "settings" ? route.tab : "boards";
-  const admin = b?.role === "owner" || b?.role === "admin";
-  if (!b) return null;
-  if (b.scoped && !admin) return <div className="page"><h1>Settings</h1><p>Settings require administrative access.</p></div>;
-  const manage = admin && !b.scoped;
-  return <div className="page settings-page"><h1>Settings</h1><TabNav label="Settings" current={tab} items={[
-    { id: "boards", label: "Boards", href: "/app/settings/boards" }, { id: "integrations", label: "Integrations", href: "/app/settings/integrations" },
-  ]} />{tab === "boards" ? <Boards admin={admin} manage={manage} /> : <Integrations admin={admin} manage={manage} />}</div>;
+  const boot = useBootstrap();
+  const tab = route.name === "settings" ? route.tab : "general";
+  const owner = boot?.role === "owner";
+  const admin = owner || boot?.role === "admin";
+  const manage = admin && !boot?.scoped;
+  const available = (Object.keys(settingsTabs) as SettingsTab[]).filter((id) =>
+    id === "users" ? owner : manage || (!!boot?.scoped && (id === "boards" || id === "integrations")));
+  const allowed = available.includes(tab);
+  useEffect(() => { if (allowed) rememberSettingsTab(local(), tab); }, [allowed, tab]);
+  return <div className="page settings-page"><h1>Settings</h1>
+    {boot && !allowed && <Note kind="warn" testId="settings-locked">
+      {tab === "users" ? "Only the owner can manage users." : "These settings require an administrator with access to everything."}
+    </Note>}
+    {available.length > 0 && <TabNav label="Settings" current={tab} testId="settings-tabs"
+      items={available.map((id) => ({ id, label: settingsTabs[id], href: `/app/settings/${id}` }))} />}
+    {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
+    {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
+  </div>;
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);

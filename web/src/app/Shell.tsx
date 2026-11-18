@@ -22,7 +22,7 @@ import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
 import { interceptedPath, logsHref } from "./paths.ts";
-import { local, readRail, writeRail } from "./prefs.ts";
+import { settingsHref, local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
 const Palette = lazy(() => import("./Palette.tsx"));
@@ -62,7 +62,7 @@ const GO_HREF: Record<GoPage, () => string> = {
   logs: () => "/app/logs",
   history: () => "/app/history",
   alerts: () => "/app/alerts",
-  settings: () => "/app/settings/boards",
+  settings: () => `/app${settingsHref(local())}`,
 };
 
 const visible = (el: Element) => el instanceof HTMLElement && el.offsetParent !== null && !el.closest("[hidden]");

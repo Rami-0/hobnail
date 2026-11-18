@@ -1,3 +1,5 @@
+import { local as localStoragePrefs, settingsHref } from "./prefs.ts";
+import { settingsTabs } from "./settings-tabs.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import { signOut } from "./Account.tsx";
 import { containerHref, logsHref } from "./paths.ts";
@@ -14,12 +16,6 @@ import "./palette.css";
 
 const page = (name: string, path: string, kind: PaletteKind = "Page"): PaletteItem => ({ name, href: `/app/${path}`, kind });
 const PAGES = [["Overview", "overview"], ["Host", "host"], ["History", "history"], ["Alerts", "alerts"], ["Logs", "logs"]];
-const SETTINGS = [
-  ["General", "general"], ["Containers and groups", "containers"], ["Bookmarks", "bookmarks"],
-  ["Widgets", "widgets"], ["Notifications", "notifications"], ["Appearance", "appearance"],
-  ["History and data", "history"], ["Config file", "config"], ["Security", "security"],
-  ["Boards", "boards"], ["Integrations", "integrations"],
-];
 const ADD = [["Add bookmark", "bookmarks?add=bookmark"], ["Add widget", "widgets?add=widget"],
   ["Add channel", "notifications?add=channel"], ["Add alert rule", "notifications?add=rule"]];
 
@@ -58,8 +54,8 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
   const base: PaletteItem[] = [
     page("Containers", "containers"),
     ...(!scoped ? PAGES.map(([name, path]) => page(name ?? "", path ?? "")) : []),
-    ...(boot && boot.role !== "viewer" ? [page("Settings", "settings/boards")] : []),
-    ...(edit ? SETTINGS.map(([name, path]) => page(name ?? "", `settings/${path}`, "Settings")) : []),
+    ...(boot && boot.role !== "viewer" ? [{ kind: "Page" as const, name: "Settings", href: `/app${settingsHref(localStoragePrefs(), boot.role === "owner", scoped)}` }] : []),
+    ...(edit ? Object.entries(settingsTabs).filter(([path]) => path !== "users" || boot.role === "owner").map(([path, name]) => page(name, `settings/${path}`, "Settings")) : []),
     ...bookmarks,
     ...boot?.boards.map((b) => page(b.name, `boards/${b.id}`, "Board")) ?? [],
     ...(edit ? ADD.map(([name, path]) => ({ kind: "Action" as const, name: name ?? "", href: `/app/settings/${path}`, keywords: "new create" })) : []),

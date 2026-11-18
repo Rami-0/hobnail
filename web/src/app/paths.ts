@@ -1,3 +1,5 @@
+import { isSettingsTab, type SettingsTab } from "./settings-tabs.ts";
+
 // Pure path logic of the client router: no DOM, no React, so Node's test
 // runner can load it (paths.test.ts). router.ts wires it to the History API.
 
@@ -18,7 +20,7 @@ export type Route =
   | { name: "host" }
   | { name: "alerts" }
   | { name: "board"; id: string }
-  | { name: "settings"; tab: "boards" | "integrations" }
+  | { name: "settings"; tab: SettingsTab }
   /** One container's page; `ctr` is the decoded container name. */
   | { name: "container"; ctr: string }
   | { name: "not_found"; path: string };
@@ -75,7 +77,9 @@ export function matchRoute(pathname: string): Route {
   }
   const board = /^\/boards\/([a-f0-9]{32})$/.exec(clean);
   if (board?.[1]) return { name: "board", id: board[1] };
-  if (clean === "/settings/boards" || clean === "/settings/integrations") return { name: "settings", tab: clean.endsWith("integrations") ? "integrations" : "boards" };
+  const tab = clean.startsWith("/settings/") ? clean.slice(10) : "";
+  if (clean === "/settings") return { name: "settings", tab: "general" };
+  if (isSettingsTab(tab)) return { name: "settings", tab };
   const invite = /^\/invite\/([a-f0-9]{64})$/.exec(clean);
   if (invite?.[1]) return { name: "invite", token: invite[1] };
   const m = /^\/containers\/([^/]+)$/.exec(clean);
