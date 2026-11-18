@@ -189,6 +189,13 @@ try {
         for (const name of ['svc001','svc002']) await inp.click(`[role="switch"][aria-label="${name}"]`);
         await button('[aria-label="Bulk edit"]', "Remove overrides"); await button(dialog, "Remove overrides");
         await wait(`!${present(dialog)}`, "bulk removal confirms and saves");
+        let groupState = ok(await call("/api/settings/containers", "GET", undefined, owner), "read group order");
+        for (const name of [`browser-group-a-${width}`, `browser-group-b-${width}`]) {
+          groupState = ok(await call("/api/settings/groups", "POST", { base_hash: groupState.hash, action: "add", item: { name } }, owner), "seed ordered group");
+        }
+        await go("/app/settings/containers", text('.settings-row', `browser-group-b-${width}`));
+        await inp.click(`button[aria-label=${q(`Move browser-group-b-${width} up`)}]`);
+        await wait(`[...document.querySelectorAll('[data-testid="settings-group-list"] h3')].findIndex(e=>e.textContent===${q(`browser-group-b-${width}`)}) < [...document.querySelectorAll('[data-testid="settings-group-list"] h3')].findIndex(e=>e.textContent===${q(`browser-group-a-${width}`)})`, "group order is saved");
         await go("/app/settings/containers?add=pattern", present(editor));
         await fill(editor + ' input[name="pattern"]', "settings-check-missing*");
         await wait(text(editor + ' [role="status"]', "0 matching containers"), "exclude dialog shows a match count");
@@ -204,14 +211,23 @@ try {
         await go("/app/settings/widgets?add=widget", present(editor));
         const widget = `browser-widget-${width}`;
         await fill(editor + ' input[name="id"]', widget);
-        await fill(editor + ' input[name="url"]', "http://127.0.0.1:3200/healthz");
+        await fill(editor + ' input[name="url"]', "http://127.0.0.1:3200/api/v1/session");
         await button(editor, "Add field");
         await wait(text(editor, "Path in the response"), "widget supports named fields");
+        await fill(editor + ' .settings-pair input[id$="-label"]', "owner");
+        await fill(editor + ' .settings-pair input[id$="-value"]', "owner_exists");
+        await fill(editor + ' input[name="template"]', "Owner exists: {{owner}}");
         await button(editor, "Fetch now");
         await wait(present(editor + " .note"), "widget fetch shows its result");
         await button(editor, "Save");
         await wait(text(".settings-row", widget), "custom API widget is saved");
 
+        const widgetsState = ok(await call("/api/settings/widgets", "GET", undefined, owner), "read widget order");
+        ok(await call("/api/settings/widgets", "POST", { base_hash: widgetsState.hash, action: "add", item: { id: `browser-order-${width}`, type: "custom-api", url: "http://127.0.0.1:3200/api/v1/session", fields: { owner: "owner_exists" }, template: "Order target" } }, owner), "seed widget order target");
+        await go("/app/settings/widgets", text('.settings-row', `browser-order-${width}`));
+        await inp.click(`button[aria-label=${q(`Move browser-order-${width} up`)}]`);
+        await wait(`[...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(`browser-order-${width}`)}) < [...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(widget)})`, "widget order is saved");
+        await go("/app/overview", text(`#w-${widget}`, "Owner exists: true"));
         const notifications = ok(await call("/api/settings/notifications", "GET", undefined, owner), "read notification fixtures");
         const channel = `browser-refused-${width}`;
         const addedChannel = ok(await call("/api/settings/channels", "POST", { base_hash: notifications.hash, action: "add", item: { name: channel, type: "webhook", url: "http://127.0.0.1:1/refused", timeout: "1s" } }, owner), "seed refused channel");
