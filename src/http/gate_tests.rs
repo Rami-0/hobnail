@@ -2071,6 +2071,11 @@ async fn invite_roles_and_account_management() {
         let bootstrap = json_of(&r, "role in bootstrap");
         assert_eq!(bootstrap["role"], role);
         assert_eq!(bootstrap["scoped"], true);
+        assert_eq!(
+            req(addr, "GET", "/api/v1/history", &h, "").await.status,
+            403
+        );
+
         let r = req(
             addr,
             "POST",
@@ -2290,7 +2295,26 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let path = "/api/v1/history?range=24h&cmp=1&events=all";
+    let history = req(addr, "GET", path, &h, "").await;
+    assert!(history
+        .head
+        .to_ascii_lowercase()
+        .contains("cache-control: no-store"));
+    let history = json_of(&history, "viewer history");
+    assert_eq!(history["metrics"].as_array().unwrap().len(), 8);
+    assert!(history["metrics"][0]["yesterday"].is_array());
+    assert!(!history.to_string().contains("auth.login_failed"));
+    let bad = req(addr, "GET", "/api/v1/history?from=1", &h, "").await;
+    assert_eq!(bad.status, 400);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&bad.body).unwrap()["error"]["field"],
+        "to"
+    );
     let (owner, _) = login(addr).await;
+    let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
+    assert_eq!(owner_history.status, 200);
+    assert!(owner_history.body.contains("auth.login_failed"));
     for name in ["secret-ovr", "secret-lbl", "secret-exc"] {
         for endpoint in ["env", "health", "top"] {
             let path = format!("/api/containers/{name}/{endpoint}");

@@ -17,6 +17,7 @@ pub mod bootstrap;
 pub mod containers;
 mod dashboard_settings;
 pub mod error;
+mod history;
 mod integrations;
 pub mod session;
 pub mod stream;
@@ -126,6 +127,9 @@ pub(crate) async fn route(
             }
             let admin = !account.is_scoped() && account.role >= crate::db::accounts::Role::Admin;
             containers::get(state, name, query, admin).await
+        }
+        Handler::History => {
+            history::get(state, query, principal.expect("viewer gate").account.role).await
         }
         Handler::Strips => {
             strips::get(

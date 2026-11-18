@@ -374,10 +374,18 @@ pub fn started_from_status(status: &str, fetched_at: u64) -> Option<i64> {
 /// last 30 days, served from the smallest preset covering it. Bad input is
 /// a 400 naming the field.
 pub fn parse_window(query: &str, now: i64) -> Result<Window, ApiError> {
+    parse_window_with_default(query, now, Range::H6)
+}
+
+pub(super) fn parse_window_with_default(
+    query: &str,
+    now: i64,
+    default: Range,
+) -> Result<Window, ApiError> {
     let q = crate::ui::fmt::parse_query(query);
     let get = |k| crate::ui::fmt::query_get(&q, k);
     let preset = match get("range") {
-        None => Range::H6,
+        None => default,
         Some(r) => Range::parse(r).ok_or_else(|| {
             ApiError::bad_request("range must be one of 1h, 6h, 24h, 7d, 30d", Some("range"))
         })?,
@@ -537,7 +545,7 @@ pub fn detail(
     })
 }
 
-fn event_row(e: &Event) -> EventRow {
+pub(super) fn event_row(e: &Event) -> EventRow {
     EventRow {
         id: e.id,
         at: e.ts,

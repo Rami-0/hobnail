@@ -96,6 +96,8 @@ fn files() -> Vec<(String, String)> {
         render::<Features>(),
         render::<GroupRow>(),
         render::<Hello>(),
+        render::<super::history::HistoryView>(),
+        render::<super::history::HistoryMetric>(),
         render::<PortBinding>(),
         render::<Refresh>(),
         render::<RuleRow>(),

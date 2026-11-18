@@ -153,6 +153,9 @@ pub(crate) fn check_scope(
                     return Err(Denied::Role);
                 }
             }
+            if m.route.handler == Handler::History {
+                return Err(Denied::Role);
+            }
             if m.route.handler == Handler::Stream && super::stream::Topics::requested(query).system
             {
                 return Err(Denied::Role);
@@ -214,6 +217,7 @@ pub enum Handler {
     Bootstrap,
     Containers,
     Container,
+    History,
     Strips,
     Stream,
     Onboard,
@@ -401,6 +405,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/strips",
         access: Access::Viewer,
         handler: Handler::Strips,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/history",
+        access: Access::Viewer,
+        handler: Handler::History,
     },
     Route {
         method: "GET",
