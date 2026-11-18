@@ -99,6 +99,7 @@ pub struct Topics {
     pub boards: bool,
     pub widget: bool,
     pub alerts: bool,
+    pub host: bool,
 }
 
 impl Topics {
@@ -109,6 +110,7 @@ impl Topics {
         boards: true,
         widget: false,
         alerts: false,
+        host: false,
     };
 
     pub(super) fn requested(query: &str) -> Topics {
@@ -120,6 +122,7 @@ impl Topics {
             boards: false,
             widget: false,
             alerts: false,
+            host: false,
         };
         for v in q.iter().filter(|(k, _)| k == "topics").map(|(_, v)| v) {
             for name in v.split(',').map(str::trim) {
@@ -130,6 +133,7 @@ impl Topics {
                     "boards" => t.boards = true,
                     "widget" => t.widget = true,
                     "alerts" => t.alerts = true,
+                    "host" => t.host = true,
                     _ => {}
                 }
             }
@@ -139,7 +143,7 @@ impl Topics {
 
     pub fn parse(query: &str) -> Topics {
         let t = Self::requested(query);
-        if t.containers || t.stats || t.system || t.boards || t.widget || t.alerts {
+        if t.containers || t.stats || t.system || t.boards || t.widget || t.alerts || t.host {
             t
         } else {
             Topics::ALL
@@ -286,6 +290,8 @@ async fn run(
             }
         }
     }
+    let mut host_tick = tokio::time::interval(Duration::from_secs(3));
+    host_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ping = tokio::time::interval(PING);
     ping.tick().await;
     loop {
@@ -339,6 +345,14 @@ async fn run(
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
+            _ = host_tick.tick(), if topics.host => {
+                let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
+                if account.is_scoped() { continue; }
+                let admin = account.role >= crate::db::accounts::Role::Admin;
+                let state = st.clone();
+                let Ok(view) = tokio::task::spawn_blocking(move || super::host::live(&state, admin, true)).await else { continue; };
+                event("host", &view)
+            }
             _ = ping.tick() => Bytes::from_static(b": ping\n\n"),
             _ = tx.closed() => break,
         };

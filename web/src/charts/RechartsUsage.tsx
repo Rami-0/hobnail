@@ -60,6 +60,17 @@ const HISTORY: Record<string, [string, Unit]> = {
   block_write: ["Block write", "rate"], pids: ["PIDs", "scalar"],
 };
 
+function metricLabel(key: string): [string, Unit] {
+  const known = HISTORY[key];
+  if (known) return known;
+  const prefix = key.split(".")[0];
+  if (prefix === "cpu" || prefix === "psi" || key.endsWith(".util")) return [key, "pct"];
+  if (prefix === "temp") return [key.slice(5), "temp"];
+  if (prefix === "mount" || prefix === "mem") return [key, "bytes"];
+  if (prefix === "net" || prefix === "disk") return [key, "rate"];
+  return [key, "scalar"];
+}
+
 /** The old UI's key: layers switched off on every chart ("avg", "max", "cmp"). */
 const OFF_KEY = "hb.chartOff";
 const LAYERS = new Set(["avg", "max", "cmp"]);
@@ -126,7 +137,7 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   const common = { rows, series, markers, xt, off, toggle, onZoom, onMarker, recording };
   if (metrics) return <div className="charts two">
     {metrics.map((metric, i) => {
-      const [title, unit] = HISTORY[metric.key] ?? [metric.key, "scalar"];
+      const [title, unit] = metricLabel(metric.key);
       return i < stage
         ? <HistoryChart key={metric.key} metric={metric} title={title} unit={unit} {...common} />
         : <div key={metric.key} className="chart ch-wait" aria-busy="true" />;

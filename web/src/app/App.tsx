@@ -15,6 +15,7 @@ import { Shell } from "./Shell.tsx";
 
 const AlertsPage = lazy(() => import("../routes/alerts/index.tsx"));
 const OverviewPage = lazy(() => import("../routes/overview/index.tsx"));
+const HostPage = lazy(() => import("../routes/host/index.tsx"));
 const HistoryPage = lazy(() => import("../routes/history/index.tsx"));
 const SettingsPage = lazy(() => import("../routes/settings/index.tsx"));
 const BoardPage = lazy(() => import("../routes/board/index.tsx"));
@@ -34,6 +35,7 @@ function titleOf(r: Route): string {
       return "Home";
     case "alerts": return "Alerts";
     case "overview": return "Overview";
+    case "host": return "Host";
     case "history": return "History";
     case "board": return "Board";
     case "settings": return "Settings";
@@ -133,6 +135,9 @@ export function App() {
       break;
     case "overview":
       page = <OverviewPage />;
+      break;
+    case "host":
+      page = <HostPage />;
       break;
     case "history":
       page = <HistoryPage />;

@@ -160,12 +160,14 @@ pub(crate) fn check_scope(
                     | Handler::Widgets
                     | Handler::Alerts
                     | Handler::Overview
+                    | Handler::Host
+                    | Handler::HostHistory
             ) {
                 return Err(Denied::Role);
             }
             if m.route.handler == Handler::Stream && {
                 let topics = super::stream::Topics::requested(query);
-                topics.system || topics.widget || topics.alerts
+                topics.system || topics.widget || topics.alerts || topics.host
             } {
                 return Err(Denied::Role);
             }
@@ -236,6 +238,8 @@ pub enum Handler {
     Widgets,
     Alerts,
     Overview,
+    Host,
+    HostHistory,
     Strips,
     Stream,
     Onboard,
@@ -483,6 +487,18 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/overview",
         access: Access::Viewer,
         handler: Handler::Overview,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/host",
+        access: Access::Viewer,
+        handler: Handler::Host,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/host/history",
+        access: Access::Viewer,
+        handler: Handler::HostHistory,
     },
     Route {
         method: "GET",

@@ -38,7 +38,8 @@ struct Live {
     paths: (String, String),
     host: Collector,
     procs: ProcScan,
-    last: Option<(Instant, Arc<Host>, Arc<ProcReport>)>,
+    last: Option<(Instant, Arc<Host>)>,
+    report: Option<(Instant, Arc<ProcReport>)>,
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -53,7 +54,8 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub fn page(ctx: &Ctx) -> (StatusCode, String) {
     let q = crate::ui::fmt::parse_query(ctx.query);
     let frag = crate::ui::fmt::query_get(&q, "frag") == Some("live");
-    let (host, procs) = live(ctx.state);
+    let (host, procs) = live_sample(ctx.state, true);
+    let procs = procs.expect("the classic host page requests a process scan");
     let names: std::collections::HashMap<String, String> = ctx
         .state
         .snapshot()
@@ -76,7 +78,7 @@ pub fn page(ctx: &Ctx) -> (StatusCode, String) {
 }
 
 /// A current reading with rates, and the process table.
-fn live(state: &AppState) -> (Arc<Host>, Arc<ProcReport>) {
+pub(crate) fn live_sample(state: &AppState, scan: bool) -> (Arc<Host>, Option<Arc<ProcReport>>) {
     let paths = (state.env.host_proc.clone(), state.env.host_sys.clone());
     let mut g = lock(&LIVE);
     if g.as_ref().is_none_or(|l| l.paths != paths) {
@@ -85,34 +87,41 @@ fn live(state: &AppState) -> (Arc<Host>, Arc<ProcReport>) {
             procs: ProcScan::new(&paths.0),
             paths,
             last: None,
+            report: None,
         });
     }
     let l = g.as_mut().expect("set above");
-    if let Some((at, h, p)) = &l.last {
-        if at.elapsed().as_secs_f64() < REUSE_SECS {
-            return (h.clone(), p.clone());
+    let fresh = |at: &Instant| at.elapsed().as_secs_f64() < REUSE_SECS;
+    let h = if let Some((_, cached)) = l.last.as_ref().filter(|(at, _)| fresh(at)) {
+        cached.clone()
+    } else {
+        let mut h = l.host.collect();
+        if h.window == 0.0 {
+            // First view: borrow the sampler's rates (15 s window), keep the
+            // fresh levels.
+            let key = format!("{}\0{}", l.paths.0, l.paths.1);
+            if let Some((_, t)) = lock(&LAST_TICK).as_ref().filter(|t| t.0 == key) {
+                let mut t = (**t).clone();
+                t.mem = h.mem;
+                t.mem_ok = h.mem_ok;
+                t.load = h.load;
+                t.uptime = h.uptime;
+                t.sensors = std::mem::take(&mut h.sensors);
+                t.mounts = std::mem::take(&mut h.mounts);
+                h = t;
+            }
         }
+        let h = Arc::new(h);
+        l.last = Some((Instant::now(), h.clone()));
+        h
+    };
+    if scan && l.report.as_ref().is_none_or(|(at, _)| !fresh(at)) {
+        l.report = Some((Instant::now(), Arc::new(l.procs.scan(h.uptime, TOP_N))));
     }
-    let mut h = l.host.collect();
-    if h.window == 0.0 {
-        // First view: borrow the sampler's rates (15 s window), keep the
-        // fresh levels.
-        let key = format!("{}\0{}", l.paths.0, l.paths.1);
-        if let Some((_, t)) = lock(&LAST_TICK).as_ref().filter(|t| t.0 == key) {
-            let mut t = (**t).clone();
-            t.mem = h.mem;
-            t.mem_ok = h.mem_ok;
-            t.load = h.load;
-            t.uptime = h.uptime;
-            t.sensors = std::mem::take(&mut h.sensors);
-            t.mounts = std::mem::take(&mut h.mounts);
-            h = t;
-        }
-    }
-    let p = l.procs.scan(h.uptime, TOP_N);
-    let (h, p) = (Arc::new(h), Arc::new(p));
-    l.last = Some((Instant::now(), h.clone(), p.clone()));
-    (h, p)
+    let report = scan
+        .then(|| l.report.as_ref().map(|(_, p)| p.clone()))
+        .flatten();
+    (h, report)
 }
 
 /// Called by the history sampler every `[history] sample_interval`, after

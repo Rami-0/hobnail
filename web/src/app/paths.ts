@@ -11,6 +11,7 @@ export type Route =
   | { name: "containers" }
   | { name: "history" }
   | { name: "overview" }
+  | { name: "host" }
   | { name: "alerts" }
   | { name: "board"; id: string }
   | { name: "settings"; tab: "boards" | "integrations" }
@@ -48,6 +49,8 @@ export function matchRoute(pathname: string): Route {
       return { name: "login" };
     case "/alerts":
       return { name: "alerts" };
+    case "/host":
+      return { name: "host" };
     case "/overview":
       return { name: "overview" };
     case "/history":

@@ -2106,6 +2106,9 @@ async fn invite_roles_and_account_management() {
             "/api/v1/widgets",
             "/api/v1/stream?topics=widget",
             "/api/v1/alerts",
+            "/api/v1/host",
+            "/api/v1/host/history",
+            "/api/v1/stream?topics=host",
             "/api/v1/overview",
             "/api/v1/stream?topics=alerts",
         ] {
@@ -2354,6 +2357,17 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let facts = req(addr, "GET", "/api/v1/host", &h, "").await;
+    let facts = json_of(&facts, "viewer host");
+    assert_eq!(facts["hostname"], "testhost");
+    assert!(facts["processes"].is_null());
+    let series = req(addr, "GET", "/api/v1/host/history", &h, "").await;
+    assert!(json_of(&series, "viewer host history")["metrics"].is_array());
+    let (mut stream, _) = Stream::open(addr, "/api/v1/stream?topics=host", &cookie).await;
+    assert_eq!(stream.next().await.0, "hello");
+    let (topic, live) = stream.next().await;
+    assert_eq!(topic, "host");
+    assert!(live["processes"].is_null());
     let overview = req(addr, "GET", "/api/v1/overview?probes=1", &h, "").await;
     assert_eq!(
         json_of(&overview, "viewer overview")["attention"][0]["reason"],
