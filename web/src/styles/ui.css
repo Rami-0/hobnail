@@ -259,3 +259,7 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .page :is(li,header,strong,h2,h3,nav,.panel-h,.settings-row)>a,.page>a,.panel>a,.overview-strips>a,.log-pane-head>a,.log-pane-tools a,.crumb a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 .page summary{min-height:var(--hit);line-height:var(--hit)}
 @media(pointer:coarse),(max-width:699px){.in.mono{font-size:var(--fs-input)}}
+
+/* Reserve chart grid layout before its lazy implementation arrives. */
+.charts.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-3)}
+@media (max-width:900px){.charts.two{grid-template-columns:minmax(0,1fr)}}

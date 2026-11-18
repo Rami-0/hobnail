@@ -96,6 +96,4 @@
 .ov-form .grid-2>.wide{grid-column:1/-1}
 @media (max-width:560px){.ov-form .grid-2{grid-template-columns:minmax(0,1fr)}}
 .dlg-note-slot:empty{display:none}
-.cd .charts.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-3)}
-@media (max-width:900px){.cd .charts.two{grid-template-columns:minmax(0,1fr)}}
 .detail-table { overflow-x: auto; }

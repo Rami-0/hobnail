@@ -1,8 +1,6 @@
 /* Usage charts (Recharts) on the container page. Colours are the chart
    tokens (tokens.css --ch-*): the SVG draws in currentColor. Ported from
    static/app.css `.chart`, `.canvas`, `.tip`, `.mk`, `.lg`. */
-.charts.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-3)}
-@media (max-width:900px){.charts.two{grid-template-columns:minmax(0,1fr)}}
 .chart{margin:0;min-width:0;padding:10px 12px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 .chart.ch-cpu{color:var(--ch-cpu)}
 .chart.ch-mem{color:var(--ch-mem)}
