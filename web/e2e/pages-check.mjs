@@ -41,8 +41,21 @@ url = "https://example.com"
 [[alerts]]
 name = "Browser check rule"
 type = "container"
-containers = ["svc006"]
-on = ["unhealthy"]
+containers = ["svc004"]
+on = ["stopped"]
+for = "0s"
+
+[channels.pages-hook]
+type = "webhook"
+url = "https://example.com/hook"
+
+[[widgets]]
+id = "pages-health"
+type = "custom-api"
+url = "http://127.0.0.1:3200/healthz"
+output = "text"
+template = "Health check: {{_text}}"
+refresh = "3s"
 `;
 let browser;
 const failures = [];
@@ -78,11 +91,12 @@ try {
 
       await load("/app/overview", ".overview-map rect");
       await wait('document.querySelector("[data-testid=overview]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
+      await wait('document.querySelector("#w-pages-health")?.textContent.includes("Health check: ok")', "widget renders a structured body");
       await tab.shot(path.join(out, `${label}-overview.png`));
 
       const palette = '[data-testid="palette"] [role="combobox"]';
       await inp.click('[data-testid="palette-open"]');
-      await wait(exists(palette), "palette opens from the button");
+      await wait(`document.activeElement?.matches(${q(palette)})`, "palette opens and focuses the query");
       await inp.type("no-local-result-xyz");
       await wait(`!document.querySelector(${q(palette)})?.hasAttribute("aria-activedescendant")`, "external search stays unselected");
       await inp.key("Enter");
@@ -90,8 +104,9 @@ try {
       await inp.key("Escape");
       await wait(`!${exists(palette)} && document.activeElement?.dataset.testid === "palette-open"`, "Escape restores focus");
       await inp.key("k", { modifiers: 2 });
-      await wait(exists(palette), "Ctrl+K opens");
+      await wait(`document.activeElement?.matches(${q(palette)})`, "Ctrl+K opens and focuses the query");
       await inp.type("browser check bookmark");
+      assert.equal(await tab.ev(`document.querySelector(${q(palette)})?.value`), "browser check bookmark");
       await wait('Array.from(document.querySelectorAll("[role=option]")).some((e) => e.textContent.includes("Browser check bookmark"))', "palette finds a bookmark");
       await inp.clear(palette);
       await inp.type("logs: svc002");
@@ -105,9 +120,13 @@ try {
       await inp.key("a");
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
 
-      await load("/app/alerts", ".history-events li", "alerts");
+      await load("/app/alerts", ".history-events li");
+      await wait(`document.querySelector(${q('[aria-label="Firing now"]')})?.textContent.includes("svc004")`, "firing alert arrives through the live model", 15000);
+      await tab.shot(path.join(out, `${label}-alerts.png`));
       await wait('document.querySelector("[data-testid=alerts]")?.textContent.includes("Browser check rule")', "alert rule renders");
-      await load("/app/history?range=1h&level=all", '[data-testid="chart-cpu"] .ch-canvas', "history");
+      await load("/app/history?range=1h&level=all", '[data-testid="chart-cpu"] .ch-canvas');
+      await wait(exists('[data-testid="chart-net_tx"]'), "History chart group mounts");
+      await tab.shot(path.join(out, `${label}-history.png`));
       const plot = await inp.box('[data-testid="chart-cpu"] .ch-canvas');
       assert.ok(plot, "CPU chart has a plot");
       const from = plot.left + plot.width * .28;
@@ -145,10 +164,21 @@ try {
       await wait(exists('[data-testid="container-events"]'), "opens the container event page");
       assert.equal(await tab.ev('new URLSearchParams(location.search).get("range")'), "24h");
       await tab.shot(path.join(out, `${label}-events.png`));
+      const churn = await api("/api/v1/containers/svc008/events");
+      if (churn.events.length) {
+        await load("/app/containers/svc008?tab=events", '[data-testid="container-events"] .history-events li');
+        await tab.shot(path.join(out, `${label}-events.png`));
+      }
       await wait("document.documentElement.scrollWidth <= innerWidth + 1", "container tabs fit the viewport");
       await sleep(150);
     } catch (error) {
       failures.push(`${label} ${error.message}`);
+      console.log(await tab.ev(`JSON.stringify({
+        url: location.pathname + location.search,
+        active: document.activeElement?.outerHTML.slice(0, 200),
+        paletteQuery: document.querySelector("[data-testid=palette] input")?.value,
+        paletteRows: Array.from(document.querySelectorAll("[data-testid=palette] [role=option]"), el => el.textContent).slice(0, 8)
+      })`).catch(() => "Browser state unavailable"));
       await tab.shot(path.join(out, `${label}-failed.png`));
     } finally {
       const problems = [...rec.csp, ...rec.console, ...rec.exceptions, ...rec.failed];
