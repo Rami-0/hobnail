@@ -23,7 +23,7 @@ type Props = Snapshot & {
   reorder?: boolean;
   row?: (entry: Entry) => ReactNode;
   extra?: (entry: Entry) => ReactNode;
-  preview?: (item: Values) => Promise<string>;
+  preview?: (item: Values, entry?: Entry) => Promise<string>;
   body?: (changes: Values, input: Values) => Values;
   create?: (input: Values) => Values;
   renameKey?: string;
@@ -202,7 +202,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
         const item = check();
         if (item && props.preview) {
           setBusy(true);
-          setPreview(await props.preview(props.create?.(item) ?? item));
+          setPreview(await props.preview(props.create?.(item) ?? item, base.entry));
           setBusy(false);
         }
       }}>Fetch now</Button>}
