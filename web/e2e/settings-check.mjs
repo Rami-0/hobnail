@@ -293,6 +293,7 @@ try {
             await wait(present(dialog + ' [role="switch"]'), "scope targets show by name");
             await inp.click(dialog + ` [role="switch"][aria-label=${q(board.name)}]`);
           } else {
+            await wait(present(dialog + ' button[aria-label="Role"]'), "invitation role control is ready");
             await inp.click(dialog + ' button[aria-label="Role"]');
             await inp.click('[role="option"][data-value="admin"]');
           }
@@ -330,6 +331,7 @@ try {
           await go("/app/settings/users", text('[data-testid="user-row"]', username));
           const row = `[data-testid="user-row"][data-user-id="${account.id}"]`;
           await button(row, "Change role");
+          await wait(present(dialog + ' button[aria-label="Role"]'), "account role control is ready");
           await inp.click(dialog + ' button[aria-label="Role"]');
           await inp.click(`[role="option"][data-value="${role === "viewer" ? "admin" : "viewer"}"]`);
           await button(dialog, "Change role");
