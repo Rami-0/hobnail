@@ -87,8 +87,11 @@ mod tests {
 
     #[test]
     fn includes_stopped_but_never_hidden_excluded_or_invalid_names() {
+        let mut hidden = ctr("hidden", None, "running");
+        hidden.labels.insert("hobnail.hide".into(), "true".into());
         let st = state_with(
             vec![
+                hidden,
                 ctr("web", Some("shop"), "running"),
                 ctr("db", Some("shop"), "exited"),
                 ctr("secret", None, "running"),
