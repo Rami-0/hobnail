@@ -102,6 +102,33 @@ if (!OTHER) {
   OTHER = known.map((k) => k.name).find((n) => n !== CTR) || "";
 }
 
+// A fresh database needs two sampling intervals to discover and then
+// record container CPU and memory. Wait for the data before opening charts.
+async function waitForHistory() {
+  const deadline = Date.now() + 60000;
+  do {
+    const responses = await Promise.all(["1h", "24h"].map((range) =>
+      fetch(`${base}/api/v1/containers/${enc}?range=${range}`, {
+        headers: { Cookie: me.cookie },
+        signal: AbortSignal.timeout(5000),
+      }),
+    ));
+    if (responses.some((r) => !r.ok)) {
+      throw new Error(`container history request failed: HTTP ${responses.map((r) => r.status).join(", ")}`);
+    }
+    const details = await Promise.all(responses.map((r) => r.json()));
+    if (details.every(({ series }) => series?.cpu.length && series?.mem.length)) return;
+    await sleep(1000);
+  } while (Date.now() < deadline);
+  throw new Error(`no CPU and memory history for ${CTR} after 60 seconds`);
+}
+try {
+  await waitForHistory();
+} catch (e) {
+  console.error(e.message);
+  process.exit(1);
+}
+
 // ---- the browser ----
 const browser = await launch();
 const tab = await browser.tab();
