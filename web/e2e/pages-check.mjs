@@ -116,6 +116,7 @@ try {
       await inp.key("k", { modifiers: 4 });
       await wait(exists(palette), "Meta+K opens the palette");
       await inp.clear(palette);
+      await inp.key("Tab"); await wait(`document.activeElement?.matches(${q(palette)})`, "Tab stays in the palette query");
       for (const key of ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp"]) {
         await inp.key(key);
         await wait(`!!document.querySelector(${q(palette)})?.getAttribute('aria-activedescendant')`, `palette ${key} selects a result`);
@@ -134,6 +135,25 @@ try {
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
       await wait('Number(localStorage.getItem("rh-seen")) > 0', "leaving Overview remembers the visit");
 
+      await load("/app/containers", '[data-testid="row"]');
+      await inp.key('/'); await wait(`document.activeElement?.matches('[data-testid="filter"]')`, "slash focuses the table filter");
+      for (const key of ['g','a','j','k','l','?']) await inp.key(key);
+      assert.equal(await tab.ev('location.pathname'), '/app/containers', "global keys stay off while typing");
+      assert.ok(!await tab.ev(`!!document.querySelector('[data-testid="shortcuts"],[data-testid="palette"]')`));
+      await inp.clear('[data-testid="filter"]');
+      if (inp.touch) await inp.click('[data-testid="drawer-open"]');
+      await wait(`!!document.querySelector('#tree-filter')`, "tree filter is mounted");
+      await inp.click('#tree-filter'); await inp.type('svc00');
+      await inp.key('ArrowDown'); await wait(`document.activeElement?.matches('#tree li.ctr>a:first-child')`, "tree Down focuses its first result");
+      const treeFirst = await tab.ev('document.activeElement.href');
+      await inp.key('ArrowDown'); await wait(`document.activeElement?.href!==${q(treeFirst)}`, "tree Down advances");
+      await inp.key('ArrowUp'); await wait(`document.activeElement?.href===${q(treeFirst)}`, "tree Up returns");
+      await inp.key('ArrowUp'); await wait(`document.activeElement?.id==='tree-filter'`, "tree Up returns to the filter");
+      await inp.key('Enter'); await wait(`location.pathname===${q(new URL(treeFirst).pathname)}`, "tree Enter opens its first result");
+      if (inp.touch) await inp.click('[data-testid="drawer-open"]');
+      await wait(`!!document.querySelector('#tree-filter')`, "tree filter returns with stored input");
+      await inp.clear('#tree-filter');
+      if (inp.touch) await inp.key('Escape');
       await load("/app/containers", '[data-testid="row"]');
       await tab.ev('document.activeElement?.blur()');
       await inp.key('j'); await wait(`!!document.querySelector('tr.kfocus a:focus')`, "j focuses the first actionable row");

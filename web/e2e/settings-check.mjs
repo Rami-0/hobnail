@@ -119,6 +119,15 @@ try {
       await go("/app/settings/config", present('textarea[name="text"]'));
       const raw = 'textarea[name="text"]';
       const original = await tab.ev(`document.querySelector(${q(raw)}).value`);
+      await inp.click(raw);
+      await tab.ev(`{const editor=document.querySelector(${q(raw)});editor.setSelectionRange(editor.value.length,editor.value.length);}`);
+      await inp.key("Tab");
+      await wait(`document.activeElement===document.querySelector(${q(raw)}) && document.querySelector(${q(raw)}).value.endsWith('  ')`, "Tab indents the raw editor");
+      await inp.key("Escape"); await inp.key("Tab");
+      await wait(`document.activeElement!==document.querySelector(${q(raw)})`, "Escape releases Tab for focus navigation");
+      await fill(raw, original + `\n# Keyboard save ${label}\n`);
+      await inp.key("s", { modifiers: width===1440 ? 2 : 4 });
+      await wait(text('[data-testid="toast"]', "Saved revision"), "Ctrl or Command S saves raw config");
       await fill(raw, original + '\n[[widgets]]\nid = "settings-command-refusal"\ntype = "command"\ncommand = ["true"]\n');
       await button(".settings-form", "Validate");
       await wait(text('[role="alert"]', "command widgets can only be added"), "command widget guard reason is visible");
