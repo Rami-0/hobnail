@@ -58,6 +58,12 @@ export const hiddenProblems: Store<number | null> = createStore<number | null>(n
 /** Server time minus browser time, seconds (from bootstrap.now). */
 export const skew: Store<number> = createStore(0);
 
+const boardListeners = new Set<(event: { id: string; version: number }) => void>();
+export function watchBoards(cb: (event: { id: string; version: number }) => void): () => void {
+  boardListeners.add(cb); const off = wantTopic("boards");
+  return () => { boardListeners.delete(cb); off(); };
+}
+
 const configListeners = new Set<() => void>();
 
 /** Called after the server's config changed (and after a resync): refetch what depends on it. */
@@ -189,6 +195,10 @@ function refetchAll(): void {
 
 function onMessage(m: StreamMessage): void {
   switch (m.type) {
+    case "boards":
+      void fetchBootstrap();
+      for (const cb of boardListeners) cb(m.data as { id: string; version: number });
+      return;
     case "hello":
       checkBuild(m.data as Hello);
       return;

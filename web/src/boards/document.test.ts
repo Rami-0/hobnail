@@ -41,3 +41,10 @@ test("a credential follows its origin, including scheme and effective port", () 
   assert.equal(needsSecret("https://example.com", "https://example.com:443/path"), false);
   assert.equal(needsSecret("https://example.com", "http://example.com"), true); assert.equal(needsSecret("https://example.com", "https://example.com:444"), true); assert.equal(needsSecret(null, "https://example.com"), false);
 });
+
+test("rebase preserves remote item moves when local layout is unchanged", () => {
+  const original = reduceDocument(base, { type: "section", title: "Other" }); if (original.sections[1]) original.sections[1].id = "other";
+  const remote = reduceDocument(original, { type: "move", section: 0, item: 0, toSection: 1, to: 0 }); remote.version++;
+  const merged = rebase(original, original, remote);
+  assert.equal(merged.sections[0]?.items.length, 0); assert.equal(merged.sections[1]?.items[0]?.id, "i");
+});

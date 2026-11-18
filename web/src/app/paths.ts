@@ -9,6 +9,8 @@ export type Route =
   | { name: "login" }
   | { name: "invite"; token: string }
   | { name: "containers" }
+  | { name: "board"; id: string }
+  | { name: "settings"; tab: "boards" | "integrations" }
   /** One container's page; `ctr` is the decoded container name. */
   | { name: "container"; ctr: string }
   | { name: "not_found"; path: string };
@@ -44,6 +46,9 @@ export function matchRoute(pathname: string): Route {
     case "/containers":
       return { name: "containers" };
   }
+  const board = /^\/boards\/([a-f0-9]{32})$/.exec(clean);
+  if (board?.[1]) return { name: "board", id: board[1] };
+  if (clean === "/settings/boards" || clean === "/settings/integrations") return { name: "settings", tab: clean.endsWith("integrations") ? "integrations" : "boards" };
   const invite = /^\/invite\/([a-f0-9]{64})$/.exec(clean);
   if (invite?.[1]) return { name: "invite", token: invite[1] };
   const m = /^\/containers\/([^/]+)$/.exec(clean);

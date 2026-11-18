@@ -13,6 +13,8 @@ import { Button } from "../ui/Button.tsx";
 import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
+const SettingsPage = lazy(() => import("../routes/settings/index.tsx"));
+const BoardPage = lazy(() => import("../routes/board/index.tsx"));
 const loadContainers = () => import("../routes/containers/index.tsx");
 const loadContainer = () => import("../routes/container/index.tsx");
 // The page this document opened on is fetched at once (its script and
@@ -27,6 +29,8 @@ function titleOf(r: Route): string {
   switch (r.name) {
     case "home":
       return "Home";
+    case "board": return "Board";
+    case "settings": return "Settings";
     case "login":
       return "Sign in";
     case "containers":
@@ -117,6 +121,12 @@ export function App() {
   switch (route.name) {
     case "home":
       page = <Home />;
+      break;
+    case "settings":
+      page = <SettingsPage key={route.tab} />;
+      break;
+    case "board":
+      page = <BoardPage key={route.id} />;
       break;
     case "containers":
       page = <ContainersPage />;

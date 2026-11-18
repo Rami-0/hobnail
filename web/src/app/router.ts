@@ -40,12 +40,23 @@ function notify(): void {
   for (const l of listeners) l();
 }
 
+function permitNavigation(to: string): boolean {
+  return window.dispatchEvent(new CustomEvent("rh:navigate", { cancelable: true, detail: to }));
+}
+function onPop(): void {
+  const previous = current;
+  if (!permitNavigation(window.location.href)) {
+    if (previous) window.history.pushState(null, "", previous.pathname + previous.query + previous.hash);
+    return;
+  }
+  notify();
+}
 function subscribe(fn: () => void): () => void {
   listeners.add(fn);
-  if (listeners.size === 1) window.addEventListener("popstate", notify);
+  if (listeners.size === 1) window.addEventListener("popstate", onPop);
   return () => {
     listeners.delete(fn);
-    if (listeners.size === 0) window.removeEventListener("popstate", notify);
+    if (listeners.size === 0) window.removeEventListener("popstate", onPop);
   };
 }
 
@@ -55,6 +66,7 @@ function subscribe(fn: () => void): () => void {
  */
 export function navigate(to: string, opts: { replace?: boolean; keepScroll?: boolean } = {}): void {
   const u = new URL(to, window.location.href);
+  if (u.href !== window.location.href && !permitNavigation(u.href)) return;
   if (u.origin !== window.location.origin || stripBase(u.pathname) === null) {
     window.location.assign(u.href);
     return;

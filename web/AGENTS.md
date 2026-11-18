@@ -169,11 +169,49 @@ Before using the installed SDK:
 5. Install the project-local skill when the SDK goes in:
    `npx skills@latest add vercel-labs/ui --skill ui-sdk` (project-local,
    non-interactive options), through `scripts/web.sh`, with the lead.
-6. Respect the release-age policy (`web/.npmrc`). If it blocks a required
-   installation, stop and ask; never weaken or bypass it.
+6. Respect the release-age policy (`web/.npmrc`). D2 authorizes only the
+   documented exact SDK exceptions in `scripts/ages.mjs`; all other packages
+   must be at least seven days old.
 7. Pin the reviewed set in `package-lock.json`. UI SDK was beta when chosen;
    validate the installed version's APIs instead of assuming examples for
    another version apply.
 8. SDK behaviour and its optional default styles are not the product design.
    Wrap them in `src/ui/` with Hobnail's tokens (`tokens.css`) so the whole
    app reads as one design system (DESIGN.md §11).
+
+## M2 boards and integrations
+
+Board and Settings routes are lazy. Import specific wrapper modules from
+`src/ui/` when possible; importing the barrel can eagerly evaluate SDK entries
+and preload popup code onto the first route. No SDK imports outside wrappers.
+
+`src/boards/document.ts` owns document actions, rebase, dirty tracking, icon
+fallback and credential-origin comparison. New entries omit server IDs.
+Board saves serialize the document only; drafts use the separate debounced
+server draft endpoint. Never put credentials in drafts, URLs or storage.
+`watchBoards` shares the existing stream and releases its topic on unmount.
+
+| Selector | Meaning |
+|---|---|
+| `[data-testid="board"]`, `[data-testid="board-empty"]` | board read page and empty state |
+| `button[data-testid="board-edit"]` | Admin/Owner edit entry |
+| `[data-testid="board-editor"]` | active editor |
+| `[data-testid="board-save"]`, `[data-testid="board-cancel"]` | explicit save / discard |
+| `[data-testid="board-add-section"]`, `[data-testid="board-add-item"]` | add a section / open picker |
+| `[data-testid="board-picker"]`, `form[data-testid="board-link-form"]` | searchable suggestions and manual link form |
+| `[data-section="<index>"][data-item="<index>"] .drag-handle` | item Move / Resize controls; Alt+arrows moves, Shift+arrows resizes |
+| `[data-testid="draft-status"]` | pending / saved / failed server draft status |
+| `[data-testid="board-draft"]`, `[data-testid="draft-resume"]`, `[data-testid="draft-discard"]` | draft recovery choices |
+| `[data-testid="board-conflict"]`, `[data-testid="board-rebase"]` | explicit conflict recovery |
+| `[data-testid="settings-boards"]`, `[data-testid="board-create"]`, `[data-testid="board-form"]` | board management and dialog |
+| `[data-testid="settings-integrations"]`, `[data-testid="integration-create"]`, `[data-testid="integration-form"]` | integration management and dialog |
+| `[data-testid="integration-row"]`, `[data-testid="integration-test"]`, `[data-testid="integration-verdict"]` | connection and test evidence |
+| `[role="dialog"][data-open][data-testid="edit-dialog"]` | existing container editor, now SDK dialog |
+| `[data-testid="sort-select"] button`, `[role="option"][data-value="cpu"]` | SDK sort trigger and option |
+
+`web/e2e/board-check.mjs` runs with `scripts/e2e.sh` against throwaway ports
+3395–3399, like app-check and slice-check. It writes screenshots and recorder
+data to OUT. Saved link metadata never counts as health evidence. Widgets
+currently show their configured identity and an explicit unavailable-data
+message: the existing backend widget renderer returns HTML, not a structured
+React data contract, and injecting that HTML is prohibited.

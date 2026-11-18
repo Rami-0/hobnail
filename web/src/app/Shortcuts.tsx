@@ -44,6 +44,9 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["/"]}>
           {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "This page's filter (this page has none)"}
         </Row>
+        <Row k={["Alt", "↑ / ↓"]}>Board edit: move an item within its section</Row>
+        <Row k={["Alt", "← / →"]}>Board edit: move an item between sections</Row>
+        <Row k={["Shift", "arrows"]}>Board edit: resize width or rows on a focused Move or Resize control</Row>
         <Row k={[mod, "↵"]}>Save, in a dialog</Row>
         <Row k={["?"]}>This list</Row>
         <Row k={["Esc"]}>Close</Row>

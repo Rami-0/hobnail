@@ -31,13 +31,13 @@ export function Select({ label, value, onChange, options, className, hideLabel, 
         {options.find((o) => o.value === value)?.label ?? value}
       </SelectTrigger>
       <SelectContent className="sdk-select-list">
-        {options.map((o) => <SelectItem key={o.value} value={o.value} className="menu-item">{o.label}</SelectItem>)}
+        {options.map((o) => <SelectItem key={o.value} value={o.value} data-value={o.value} className="menu-item">{o.label}</SelectItem>)}
       </SelectContent>
     </SdkSelect>
   );
   if (f) return control;
   return (
-    <span className="sel">
+    <span className="sel" data-testid={"data-testid" in rest ? String(rest["data-testid"]) : undefined}>
       <label htmlFor={sid} className={hideLabel ? "sr" : "sel-l"}>
         {label}
       </label>

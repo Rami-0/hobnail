@@ -50,22 +50,47 @@ export function rebase(base: BoardDocument, mine: BoardDocument, current: BoardD
   for (const local of mine.sections) {
     const before = local.id ? base.sections.find((s) => s.id === local.id) : undefined;
     const remote = local.id ? current.sections.find((s) => s.id === local.id) : undefined;
-    if (!before) { sections.push(structuredClone(local)); continue; }
+    if (!before) {
+      const { id: _id, ...entry } = local;
+      const validItems = new Set(current.sections.flatMap((s) => s.items).map((i) => i.id));
+      sections.push({ ...entry, ...(remote?.id ? { id: remote.id } : {}), items: local.items.map((i) => {
+        if (!i.id || validItems.has(i.id)) return i;
+        const { id: _itemId, ...newItem } = i; return newItem;
+      }) });
+      continue;
+    }
     if (!remote) {
       if (JSON.stringify(before) !== JSON.stringify(local)) sections.push({ title: local.title, position: local.position, items: local.items.map(({ id: _id, ...i }) => i) });
       continue;
     }
     const items: BoardItem[] = [];
-    const oldIds = new Set(before.items.map((i) => i.id).filter(Boolean));
+    const originalItems = base.sections.flatMap((s) => s.items);
+    const localItems = mine.sections.flatMap((s) => s.items);
     for (const item of local.items) {
-      const old = item.id ? before.items.find((i) => i.id === item.id) : undefined;
-      const latest = item.id ? current.sections.flatMap((s) => s.items).find((i) => i.id === item.id) : undefined;
-      if (!old || JSON.stringify(old) !== JSON.stringify(item)) {
-        if (item.id && !latest) { const { id: _id, ...newItem } = item; items.push(newItem); }
-        else items.push(item);
-      } else if (latest) items.push(latest);
+      const old = item.id ? originalItems.find((i) => i.id === item.id) : undefined;
+      const currentSection = item.id ? current.sections.find((s) => s.items.some((i) => i.id === item.id)) : undefined;
+      const latest = currentSection?.items.find((i) => i.id === item.id);
+      const originalSection = old ? base.sections.find((s) => s.items.some((i) => i.id === old.id)) : undefined;
+      const moved = !!old && (originalSection?.id !== local.id || old.position !== item.position);
+      if (!old) { items.push(item); continue; }
+      const payloadChanged = JSON.stringify(old.payload) !== JSON.stringify(item.payload);
+      const spansChanged = JSON.stringify(old.spans) !== JSON.stringify(item.spans);
+      if (!latest) {
+        if (moved || payloadChanged || spansChanged) { const { id: _id, ...newItem } = item; items.push(newItem); }
+        continue;
+      }
+      if (!moved && currentSection?.id !== local.id) continue;
+      items.push({ ...latest, ...(payloadChanged ? { payload: item.payload } : {}), ...(spansChanged ? { spans: item.spans } : {}), ...(moved ? { position: item.position } : {}) });
     }
-    for (const item of remote.items) if (!oldIds.has(item.id) && !mine.sections.some((s) => s.items.some((i) => i.id === item.id))) items.push(item);
+    for (const item of remote.items) {
+      if (items.some((i) => i.id === item.id)) continue;
+      const old = originalItems.find((i) => i.id === item.id);
+      const localItem = localItems.find((i) => i.id === item.id);
+      const originalSection = old ? base.sections.find((s) => s.items.some((i) => i.id === old.id)) : undefined;
+      const localSection = localItem ? mine.sections.find((s) => s.items.some((i) => i.id === item.id)) : undefined;
+      if (!old || (localItem && localItem.position === old.position && localSection?.id === originalSection?.id)) items.push(item);
+    }
+    if (JSON.stringify(before.items.map((i) => i.id)) === JSON.stringify(local.items.map((i) => i.id))) items.sort((a, b) => a.position - b.position);
     sections.push({ ...remote, title: local.title === before.title ? remote.title : local.title, items });
   }
   for (const remote of current.sections) if (!baseIds.has(remote.id)) sections.push(remote);

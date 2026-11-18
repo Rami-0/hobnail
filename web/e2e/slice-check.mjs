@@ -176,8 +176,8 @@ const visibleRows = `[...document.querySelectorAll(${q(ROW)})].filter((r) => r.g
 const rowNames = () => ev(`${visibleRows}.map((r) => r.dataset.name)`);
 const showing = () => ev(`(() => { const t = document.querySelector('[data-testid="showing"]')?.textContent || ""; const m = t.match(/Showing\\s+(\\d+)\\s+of\\s+(\\d+)/i); return m ? { n: +m[1], m: +m[2], text: t.trim() } : { text: t.trim() }; })()`);
 const apiContainers = () => ev(`fetch("/api/v1/containers", { cache: "no-store" }).then((r) => r.json())`);
-const DIALOG = 'dialog[data-testid="edit-dialog"]';
-const dialogOpen = `!!document.querySelector(${q(DIALOG)})?.open`;
+const DIALOG = '[role="dialog"][data-testid="edit-dialog"]';
+const dialogOpen = `!!document.querySelector(${q(DIALOG)})?.hasAttribute("data-open")`;
 const NAME_IN = `${DIALOG} input[name="name"]`;
 const note = () => ev(`document.querySelector('[data-testid="dialog-note"]')?.textContent?.trim() ?? null`);
 const headText = () => ev(`document.querySelector('[data-testid="ctr-head"]')?.textContent ?? ""`);
@@ -278,8 +278,10 @@ async function containersPage(size) {
     });
   } else {
     await step("phone: the sort control sorts by cpu and the direction button flips it (URL follows)", async () => {
-      const okSel = await ev(`(() => { const s = document.querySelector('[data-testid="sort-select"] select, select[data-testid="sort-select"]'); if (!s) return false; s.value = "cpu"; s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
-      if (!okSel) return { ok: false, got: "no sort select" };
+      await inp.click('[data-testid="sort-select"] button');
+      const okSel = await until(`!!document.querySelector('[role="option"][data-value="cpu"]')`, 3000);
+      if (!okSel) return { ok: false, got: "no SDK sort option" };
+      await inp.click('[role="option"][data-value="cpu"]');
       const s1 = await until(`new URLSearchParams(location.search).get("sort") === "cpu"`, 3000);
       await inp.click('[data-testid="sort-dir"]');
       const s2 = await until(`new URLSearchParams(location.search).get("dir") === "asc"`, 3000);
