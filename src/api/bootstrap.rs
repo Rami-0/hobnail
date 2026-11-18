@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 
+use super::{access::Principal, error::ApiError};
 use crate::db::accounts::Role;
 use crate::state::AppState;
 
@@ -12,6 +13,9 @@ pub const STATS_SECS: u64 = 5;
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Bootstrap {
     pub role: Role,
+    pub boards: Vec<BoardNavigation>,
+    pub default_board: Option<String>,
+    pub remote_icons: bool,
     /// `[page] title`, else the host name.
     pub title: String,
     pub hostname: String,
@@ -28,6 +32,14 @@ pub struct Bootstrap {
     pub alerts_firing: u32,
     pub refresh: Refresh,
     pub now: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BoardNavigation {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -52,7 +64,22 @@ pub struct Refresh {
     pub stats_secs: u64,
 }
 
-pub fn bootstrap(state: &AppState, role: Role, now: i64) -> Bootstrap {
+fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, ApiError> {
+    let role = user.role;
+    let (boards, default_board) = state.db.dashboard(|c| -> Result<_, ApiError> {
+        let boards = super::boards::list(c, user)?
+            .into_iter()
+            .map(|b| BoardNavigation {
+                id: b.id,
+                name: b.name,
+                icon: b.icon,
+            })
+            .collect();
+        Ok((
+            boards,
+            super::dashboard_settings::get(c, user)?.default_board,
+        ))
+    })?;
     let loaded = state.config.snapshot();
     let cfg = &loaded.config;
     let theme = match cfg.page.theme.as_str() {
@@ -60,8 +87,11 @@ pub fn bootstrap(state: &AppState, role: Role, now: i64) -> Bootstrap {
         _ => "auto",
     };
     let snap = state.snapshot();
-    Bootstrap {
+    Ok(Bootstrap {
         role,
+        boards,
+        default_board,
+        remote_icons: cfg.icons.remote,
         title: cfg
             .page
             .title
@@ -84,10 +114,13 @@ pub fn bootstrap(state: &AppState, role: Role, now: i64) -> Bootstrap {
             stats_secs: STATS_SECS,
         },
         now,
-    }
+    })
 }
 
-pub fn get(state: &AppState, role: Role) -> hyper::Response<crate::http::server::Body> {
+pub fn get(state: &AppState, user: &Principal) -> hyper::Response<crate::http::server::Body> {
     let now = crate::util::unix_now() as i64;
-    super::json(hyper::StatusCode::OK, &bootstrap(state, role, now))
+    match bootstrap(state, user, now) {
+        Ok(view) => super::json(hyper::StatusCode::OK, &view),
+        Err(error) => error.response(),
+    }
 }

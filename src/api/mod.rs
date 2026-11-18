@@ -15,6 +15,7 @@ mod accounts;
 mod boards;
 pub mod bootstrap;
 pub mod containers;
+mod dashboard_settings;
 pub mod error;
 mod integrations;
 pub mod session;
@@ -71,7 +72,28 @@ pub(crate) async fn route(
                 .unwrap_or_else(ApiError::response)
         }
         Handler::Session => session::get(state, req.headers()),
-        Handler::Bootstrap => bootstrap::get(state, principal.expect("viewer gate").account.role),
+        Handler::Bootstrap => bootstrap::get(state, &principal.expect("viewer gate").account),
+        Handler::DashboardSettings => {
+            dashboard_settings::route(state, req, &principal.expect("settings gate").account)
+                .await
+                .unwrap_or_else(ApiError::response)
+        }
+        Handler::DashboardIcon => {
+            let name = m.param("name").unwrap_or_default();
+            if !state.config.current().icons.remote || validate_icon(Some(name)).is_err() {
+                return ApiError::not_found().response();
+            }
+            let mut response =
+                crate::ui::icons::dashboard_icon(state, &format!("{name}.svg"), None).await;
+            if response
+                .headers()
+                .get(CACHE_CONTROL)
+                .is_some_and(|v| v == "public, max-age=86400")
+            {
+                set(&mut response, CACHE_CONTROL, "private, max-age=86400");
+            }
+            response
+        }
         Handler::Onboard => {
             crate::auth::credential_route(state, req, CredentialAction::Onboard).await
         }

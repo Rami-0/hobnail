@@ -82,6 +82,8 @@ fn files() -> Vec<(String, String)> {
         render::<ApiErrorBody>(),
         render::<Attention>(),
         render::<Bootstrap>(),
+        render::<super::bootstrap::BoardNavigation>(),
+        render::<super::dashboard_settings::DashboardSettings>(),
         render::<BuildInfoView>(),
         render::<ContainerDetail>(),
         render::<ContainerRow>(),

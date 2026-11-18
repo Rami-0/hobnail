@@ -58,6 +58,8 @@ pub enum Handler {
     BoardDraft,
     BoardDraftSave,
     BoardDraftDelete,
+    DashboardSettings,
+    DashboardIcon,
     Session,
     Bootstrap,
     Containers,
@@ -94,6 +96,24 @@ pub struct Route {
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
 pub const ROUTES: &[Route] = &[
+    Route {
+        method: "GET",
+        pattern: "/api/v1/settings",
+        access: Access::Viewer,
+        handler: Handler::DashboardSettings,
+    },
+    Route {
+        method: "PATCH",
+        pattern: "/api/v1/settings",
+        access: Access::Admin,
+        handler: Handler::DashboardSettings,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/icons/<name>",
+        access: Access::Viewer,
+        handler: Handler::DashboardIcon,
+    },
     Route {
         method: "GET",
         pattern: "/api/v1/boards",
