@@ -217,7 +217,7 @@ export class LogPane {
     const older: LogLine[] = [];
     const es = this.older = new EventSource(`/api/logs/stream?${p}`);
     es.addEventListener("l", (e) => older.push(...this.decode((e as MessageEvent<string>).data)));
-    const finish = () => { es.close(); this.older = null; this.pendingOlder = older.sort((a, b) => a.t - b.t); if (!older.length) this.message = "No older lines in this window."; this.schedule(); };
+    const finish = () => { es.close(); this.older = null; this.pendingOlder = older.toSorted((a, b) => a.t - b.t); if (!older.length) this.message = "No older lines in this window."; this.schedule(); };
     es.addEventListener("done", finish); es.addEventListener("error", finish);
   }
   latest(): void { this.following = true; this.unseen = 0; this.anchor = null; this.schedule(); }
