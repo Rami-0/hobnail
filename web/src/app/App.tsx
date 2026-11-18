@@ -10,6 +10,7 @@ import { Login } from "../routes/Login.tsx";
 import { NotFound } from "../routes/NotFound.tsx";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
+import { SignInPrompt } from "../ui/SignInPrompt.tsx";
 import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
@@ -87,7 +88,7 @@ export function App() {
   // long task on a slow phone).
   const ready = useDeferredValue(true, false);
   const authPage = route.name === "login" || route.name === "invite";
-  const redirect = s.session && !s.session.user && !authPage
+  const redirect = s.session && !s.session.user && !authPage && route.name !== "settings"
     ? `/app/login?next=${encodeURIComponent(pathname + query + hash)}`
     : null;
   useEffect(() => {
@@ -120,6 +121,12 @@ export function App() {
     return <Login token={route.name === "invite" ? route.token : undefined} />;
   }
   if (!s.session?.user) {
+    if (s.session && route.name === "settings") return <main className="page narrow" id="main">
+      <h1>Settings</h1>
+      <Banner kind="warn" testId="settings-locked" action={<SignInPrompt retry={() => window.location.reload()} />}>
+        Sign in to access Settings.
+      </Banner>
+    </main>;
     return s.status === "error" ? (
       <main id="main" className="page narrow">
         <Banner kind="bad" action={<Button className="sm" onClick={() => window.location.reload()}>Reload</Button>}>

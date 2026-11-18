@@ -52,9 +52,20 @@ export function refreshSession(): Promise<SessionState> {
   return inflight;
 }
 
+/** Retry an in-progress write only for the same principal. Keep the editor
+ * mounted when the new tab has yet to finish signing in. */
+export async function refreshEditingSession(): Promise<Session | null> {
+  const principal = state.session?.user?.name;
+  if (!principal) return null;
+  const reply = await api.get<Session>("/api/v1/session");
+  if (reply.kind !== "ok" || reply.data.user?.name !== principal || state.session?.user?.name !== principal) return null;
+  set({ status: "ready", session: reply.data });
+  return reply.data;
+}
+
 export const api = createClient({
   csrf: () => state.session?.csrf ?? null,
-  refreshCsrf: async () => (await refreshSession()).session?.csrf ?? null,
+  refreshCsrf: async () => (await refreshEditingSession())?.csrf ?? null,
 });
 
 /** The current session state; re-renders on every change. */

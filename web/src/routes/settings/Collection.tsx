@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useId, type ReactNode } from "react";
-import { api, getSession, refreshSession } from "../../api/session.ts";
+import { api, getSession, refreshEditingSession } from "../../api/session.ts";
 import { useRoute } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
@@ -61,8 +61,8 @@ export function Collection(props: Props) {
           action: { label: "Undo", run: () => {
             dismiss();
             void (async () => {
-              const session = await refreshSession();
-              if (!owner || session.session?.user?.name !== owner) return;
+              const session = await refreshEditingSession();
+              if (!owner || session?.user?.name !== owner) return;
               const restored = await api.post<Save>(endpoint(path), { base_hash: deletedHash, action: "add", item: undo.original ?? undo.item });
               if (restored.kind !== "ok") { toast(restored.message, { kind: "bad" }); return; }
               saved(restored.data);
@@ -84,7 +84,7 @@ export function Collection(props: Props) {
     order[index + offset] = from;
     void run({ action: "reorder", id: from, order });
   }
-  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
+  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
       <header className="board-heading"><h2>{title}</h2>
@@ -213,7 +213,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
       <Controls fields={fields} input={input} base={base.entry?.item ?? {}} errors={errors} onChange={(values) => { setInput(values); setRename(false); }} />
       {rename && base.entry && <Note kind="warn">The rename also updates these rules: {props.renameRules?.(base.entry.id).join(", ")}</Note>}
       {errors.form && failure?.kind !== "invalid" && <Note kind="bad">{errors.form}</Note>}
-      <FailureNote failure={failure} busy={busy} retry={() => { void refreshSession().then((session) => { if (session.session?.user) void save(); }); }} rebase={() => { void rebase(); }} />
+      <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); }); }} rebase={() => { void rebase(); }} />
       {preview && <Note kind="info">{preview}</Note>}
     </form>
   </Dialog>;
