@@ -54,7 +54,7 @@
 .ctbl .c-hist{width:110px}
 .ctbl .c-hist .hstrip{width:100%}
 .ctbl .c-num:not(.c-up){width:110px}
-.ctbl .c-ports{width:74px}
+.ctbl .c-ports{width:168px}
 .ctbl .c-act{width:64px}
 .ctbl .c-num .cell-spark{width:30px;margin-left:4px}
 .ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
