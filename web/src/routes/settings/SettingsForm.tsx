@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { api, refreshEditingSession } from "../../api/session.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Note } from "../../ui/Note.tsx";
-import { changedFields, fieldErrors, rebaseFields, type Values } from "./forms.ts";
+import { changedFields, conflictingFields, fieldErrors, rebaseFields, type Values } from "./forms.ts";
 import { collectFields, Controls, endpoint, FailureNote, initialFields, saved, type Control, type Failure, type Save } from "./shared.tsx";
 
 type Snapshot = { hash: string; values: Values };
@@ -58,6 +58,10 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     const fresh = await reload();
     if (!fresh) return;
     const values = initialFields(fields, fresh.values);
+    if (conflictingFields(base.values, input, values).length) {
+      setFailure({ kind: "error", status: 409, message: "A field you edited also changed on disk. Copy your input or discard it to load the latest values." });
+      return;
+    }
     setDraft({ base: { hash: fresh.hash, values }, input: rebaseFields(base.values, input, values) });
     setFailure(undefined);
     setErrors({});

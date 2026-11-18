@@ -18,3 +18,19 @@ export function dialogState(search: URLSearchParams, kind: string): { id: string
 export function fieldErrors(error: { message: string; field?: string; line?: number; col?: number }): Record<string, string> {
   return { [error.field ?? "form"]: error.line === undefined ? error.message : `${error.message} (line ${error.line}, column ${error.col ?? 1})` };
 }
+
+/** A rebase must not silently overwrite another save to the same field. */
+export function conflictingFields(base: Values, input: Values, latest: Values): string[] {
+  const edited = changedFields(base, input);
+  const unresolved = changedFields(input, latest);
+  return Object.keys(changedFields(base, latest)).filter((key) => Object.hasOwn(unresolved, key) && Object.hasOwn(edited, key));
+}
+
+export function undoOnce(run: () => void): () => void {
+  let pending = true;
+  return () => {
+    if (!pending) return;
+    pending = false;
+    run();
+  };
+}

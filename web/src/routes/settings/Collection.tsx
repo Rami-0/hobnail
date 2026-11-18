@@ -6,7 +6,7 @@ import { Dialog } from "../../ui/Dialog.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { toast } from "../../ui/toast.ts";
-import { changedFields, dialogState, fieldErrors, rebaseFields, type Values } from "./forms.ts";
+import { changedFields, conflictingFields, dialogState, fieldErrors, rebaseFields, undoOnce, type Values } from "./forms.ts";
 import { collectFields, Controls, endpoint, FailureNote, initialFields, saved, type Control, type Failure, type Save } from "./shared.tsx";
 
 export type Entry = { id: string | number; item: Values; locked?: boolean; locked_reason?: string; enabled?: boolean; original?: Values };
@@ -65,7 +65,7 @@ export function Collection(props: Props) {
         const owner = getSession().session?.user?.name;
         const deletedHash = result.data.hash;
         const dismiss = toast(result.data.revision ? `Deleted in revision #${result.data.revision}.` : "Deleted.", {
-          action: { label: "Undo", run: () => {
+          action: { label: "Undo", run: undoOnce(() => {
             dismiss();
             void (async () => {
               const session = await refreshEditingSession();
@@ -75,7 +75,7 @@ export function Collection(props: Props) {
               saved(restored.data);
               await refresh();
             })();
-          } },
+          }) },
         });
       } else saved(result.data);
       focus(operation.action === "delete" ? latest?.entries[0]?.id : operation.id);
@@ -207,6 +207,10 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
       return;
     }
     const values = initialFields(fields, latest?.item ?? {});
+    if (conflictingFields(base.values, input, values).length) {
+      setFailure({ kind: "error", status: 409, message: "A field you edited also changed on disk. Copy your input before closing." });
+      return;
+    }
     setInput(rebaseFields(base.values, input, values));
     setBase({ entry: latest, hash: snapshot.hash, values });
     setErrors({});

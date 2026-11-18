@@ -18,16 +18,18 @@ import { Note, EmptyState } from "../../ui/Note.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
 
-const Users = lazy(() => import("./Users.tsx"));
-const Config = lazy(() => import("./Config.tsx"));
-const Security = lazy(() => import("./Security.tsx"));
-const History = lazy(() => import("./History.tsx"));
-const Appearance = lazy(() => import("./Appearance.tsx"));
-const Containers = lazy(() => import("./Containers.tsx"));
-const Notifications = lazy(() => import("./Notifications.tsx"));
-const Widgets = lazy(() => import("./Widgets.tsx"));
-const General = lazy(() => import("./General.tsx"));
-const Bookmarks = lazy(() => import("./Bookmarks.tsx"));
+const panels = {
+  users: lazy(() => import("./Users.tsx")),
+  config: lazy(() => import("./Config.tsx")),
+  security: lazy(() => import("./Security.tsx")),
+  history: lazy(() => import("./History.tsx")),
+  appearance: lazy(() => import("./Appearance.tsx")),
+  containers: lazy(() => import("./Containers.tsx")),
+  notifications: lazy(() => import("./Notifications.tsx")),
+  widgets: lazy(() => import("./Widgets.tsx")),
+  general: lazy(() => import("./General.tsx")),
+  bookmarks: lazy(() => import("./Bookmarks.tsx")),
+};
 
 export default function SettingsPage() {
   const { route } = useRoute();
@@ -39,6 +41,7 @@ export default function SettingsPage() {
   const available = (Object.keys(settingsTabs) as SettingsTab[]).filter((id) =>
     id === "users" ? owner : manage || (!!boot?.scoped && (id === "boards" || id === "integrations")));
   const allowed = available.includes(tab);
+  const Panel = tab !== "boards" && tab !== "integrations" ? panels[tab] : null;
   useEffect(() => { if (allowed) rememberSettingsTab(local(), tab); }, [allowed, tab]);
   return <div className="page settings-page"><h1>Settings</h1>
     {boot && !allowed && <Note kind="warn" testId="settings-locked">
@@ -48,16 +51,7 @@ export default function SettingsPage() {
       items={available.map((id) => ({ id, label: settingsTabs[id], href: `/app/settings/${id}` }))} />}
     {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
     {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
-    {allowed && tab === "users" && <Suspense fallback={<p role="status">Loading users…</p>}><Users /></Suspense>}
-    {allowed && tab === "config" && <Suspense fallback={<p role="status">Loading config…</p>}><Config /></Suspense>}
-    {allowed && tab === "security" && <Suspense fallback={<p role="status">Loading settings…</p>}><Security /></Suspense>}
-    {allowed && tab === "history" && <Suspense fallback={<p role="status">Loading settings…</p>}><History /></Suspense>}
-    {allowed && tab === "appearance" && <Suspense fallback={<p role="status">Loading settings…</p>}><Appearance /></Suspense>}
-    {allowed && tab === "containers" && <Suspense fallback={<p role="status">Loading containers…</p>}><Containers /></Suspense>}
-    {allowed && tab === "notifications" && <Suspense fallback={<p role="status">Loading notifications…</p>}><Notifications /></Suspense>}
-    {allowed && tab === "widgets" && <Suspense fallback={<p role="status">Loading widgets…</p>}><Widgets /></Suspense>}
-    {allowed && tab === "general" && <Suspense fallback={<p role="status">Loading general settings…</p>}><General /></Suspense>}
-    {allowed && tab === "bookmarks" && <Suspense fallback={<p role="status">Loading bookmarks…</p>}><Bookmarks /></Suspense>}
+    {allowed && Panel && <Suspense fallback={<p role="status">Loading settings…</p>}><Panel /></Suspense>}
   </div>;
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
