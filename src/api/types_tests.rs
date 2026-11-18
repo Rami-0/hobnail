@@ -94,6 +94,7 @@ fn files() -> Vec<(String, String)> {
         render::<super::bookmarks::BookmarkView>(),
         render::<ContainerDetail>(),
         render::<super::container_tabs::ContainerInspect>(),
+        render::<super::container_tabs::ContainerMetrics>(),
         render::<super::container_tabs::ContainerMount>(),
         render::<super::container_tabs::ContainerEnvironment>(),
         render::<super::container_tabs::ContainerProcesses>(),

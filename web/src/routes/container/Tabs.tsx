@@ -4,9 +4,10 @@ import type { ContainerInspect } from "../../api/gen/ContainerInspect.ts";
 import type { ContainerEnvironment } from "../../api/gen/ContainerEnvironment.ts";
 import type { ContainerProcesses } from "../../api/gen/ContainerProcesses.ts";
 import type { ContainerEvents } from "../../api/gen/ContainerEvents.ts";
+import type { ContainerMetrics } from "../../api/gen/ContainerMetrics.ts";
 import type { HistoryMetric } from "../../api/gen/HistoryMetric.ts";
 import { useRoute } from "../../app/router.ts";
-import { bytes } from "../../format/index.ts";
+import { bytes, duration } from "../../format/index.ts";
 import { useRead } from "../../live/read.ts";
 import { Button } from "../../ui/Button.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
@@ -40,17 +41,30 @@ export default function ExtraTab(props: Props) {
 function Metrics({ root, detail, recording, onZoom, onMarker }: Props & { root: string }) {
   const { query } = useRoute();
   const win = apiQuery(parseWindow(query));
-  const { data, error } = useRead<HistoryMetric[]>(`${root}/metrics?${win}`);
+  const { data, error } = useRead<ContainerMetrics>(`${root}/metrics?${win}`);
   const s = detail.series;
   const quiet = new Set(["throttled", "oom", "block_read", "block_write"]);
-  const zeroed = data?.filter((m) => quiet.has(m.key) && m.points.length && m.points.every(([, v]) => v === 0)) ?? [];
+  const zeroed = data?.series?.filter((m) => quiet.has(m.key) && m.points.length && m.points.every(([, v]) => v === 0)) ?? [];
   const metrics: HistoryMetric[] = [
     { key: "cpu", step: s.step, points: s.cpu, max: s.cpu_max, yesterday: null },
     { key: "mem", step: s.step, points: s.mem, max: s.mem_max, yesterday: null },
-    ...data?.filter((m) => !zeroed.includes(m)) ?? [],
+    ...data?.series?.filter((m) => !zeroed.includes(m) && (data.network === "container" || !m.key.startsWith("net_"))) ?? [],
   ];
   return <>
     {error && <p role="alert">{error}</p>}
+    {data?.series && <section className="panel history-block">
+      <h3>Current limits and activity</h3>
+      <Pairs rows={[
+        ["Policy restarts", data.policy_restarts ?? "—"],
+        ["Starts", `${data.starts_24h} in 24 h · ${data.starts_7d} in 7 days`],
+        ["OOM kills", data.oom_killed ? "Last exit was an OOM kill" : data.oom_kills ?? "—"],
+        ["PIDs", `${data.pids ?? "—"} / ${data.pid_limit ?? "unlimited"}`],
+        ["Memory limit", data.memory_limit_bytes ? bytes(data.memory_limit_bytes) : "Unlimited"],
+        ["CPU throttling", data.throttled_periods === null ? "—" : `${data.throttled_periods} of ${data.cpu_periods ?? "—"} periods · ${duration((data.throttled_usec ?? 0) / 1e6)} throttled`],
+      ]} />
+      {data.network === "host" && <p>Traffic is counted on the <a href="/app/host">host</a>.</p>}
+      {data.network === "shared" && <p>Traffic is counted in the shared network namespace.</p>}
+    </section>}
     <Suspense fallback={<p role="status">Loading charts…</p>}>
       <Charts series={s} metrics={metrics} recording={recording} onZoom={onZoom} onMarker={onMarker} />
     </Suspense>
@@ -109,7 +123,7 @@ function Processes({ root }: { root: string }) {
   const dir = search.get("dir") === "asc" ? "asc" : "desc";
   const { data, error } = useRead<ContainerProcesses>(`${root}/top?${new URLSearchParams({ sort, dir })}`, undefined, 3000);
   return <section className="panel history-block" data-testid="container-processes">
-    <h2>Processes</h2>
+    <h2>{data ? `${data.processes.length} ${data.processes.length === 1 ? "process" : "processes"}` : "Processes"}</h2>
     {!data ? <p role={error ? "alert" : "status"}>{error || "Loading processes…"}</p> :
       <div className="detail-table"><table className="tbl">
         <thead><tr>{data.titles.map((title, i) => <th key={title} scope="col" aria-sort={String(i) === sort ? (dir === "asc" ? "ascending" : "descending") : undefined}>

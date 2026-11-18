@@ -2326,7 +2326,7 @@ async fn viewer_cannot_read_administrative_details() {
     assert!(!inspect.body.contains("hunter2"));
     let metrics = req(addr, "GET", "/api/v1/containers/web/metrics", &h, "").await;
     assert_eq!(
-        json_of(&metrics, "viewer metrics")
+        json_of(&metrics, "viewer metrics")["series"]
             .as_array()
             .unwrap()
             .len(),

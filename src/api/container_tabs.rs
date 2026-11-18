@@ -7,7 +7,11 @@ use super::access::{Handler, Principal};
 use super::containers::{event_row, internal, parse_window, EventRow};
 use super::error::ApiError;
 use super::history::HistoryMetric;
-use crate::db::{accounts::Role, ctrx::XMetric, Agg, EventFilter};
+use crate::db::{
+    accounts::Role,
+    ctrx::{self, NetSource, XMetric},
+    Agg, EventFilter,
+};
 use crate::docker;
 use crate::http::server::Body;
 use crate::state::AppState;
@@ -65,6 +69,24 @@ pub(super) struct ContainerProcesses {
 pub(super) struct ContainerEvents {
     events: Vec<EventRow>,
     older: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct ContainerMetrics {
+    series: Vec<HistoryMetric>,
+    policy_restarts: Option<u64>,
+    starts_24h: u32,
+    starts_7d: u32,
+    oom_kills: Option<u64>,
+    oom_killed: bool,
+    pids: Option<u64>,
+    pid_limit: Option<u64>,
+    memory_limit_bytes: Option<u64>,
+    throttled_periods: Option<u64>,
+    cpu_periods: Option<u64>,
+    throttled_usec: Option<u64>,
+    network: &'static str,
 }
 
 fn upstream() -> ApiError {
@@ -236,7 +258,8 @@ fn run(
             super::json(ok, &ContainerEvents { events, older })
         }
         Handler::ContainerMetrics => {
-            let window = parse_window(query, crate::util::unix_now() as i64)?;
+            let now = crate::util::unix_now() as i64;
+            let window = parse_window(query, now)?;
             let keys = [
                 ("throttled", XMetric::Throttled),
                 ("cache", XMetric::Cache),
@@ -274,7 +297,48 @@ fn run(
                     }
                 })
                 .collect();
-            super::json(ok, &metrics)
+            let current = docker::container_cgroup_dir(&state.env.host_sys, &c.id)
+                .filter(|_| c.is_running())
+                .map(|dir| ctrx::read_cgroup(&dir))
+                .unwrap_or_default();
+            let ins = inspect().ok();
+            let positive = |value| u64::try_from(value).ok().filter(|v| *v > 0);
+            let starts = |span| {
+                state
+                    .db
+                    .restart_counts(now - span)
+                    .into_iter()
+                    .find(|(n, _)| n == name)
+                    .map_or(0, |(_, total)| total)
+            };
+            let network =
+                match ctrx::net_source(&c.id).or_else(|| ins.as_ref().map(ctrx::net_source_of)) {
+                    Some(NetSource::Host) => "host",
+                    Some(NetSource::Shared) => "shared",
+                    _ => "container",
+                };
+            super::json(
+                ok,
+                &ContainerMetrics {
+                    series: metrics,
+                    policy_restarts: ins.as_ref().map(|i| i.restart_count),
+                    starts_24h: starts(86_400),
+                    starts_7d: starts(7 * 86_400),
+                    oom_kills: current.oom_kills,
+                    oom_killed: ins.as_ref().is_some_and(|i| i.state.oom_killed),
+                    pids: current.pids,
+                    pid_limit: current
+                        .pids_max
+                        .or_else(|| ins.as_ref()?.host_config.pids_limit.and_then(positive)),
+                    memory_limit_bytes: current
+                        .limit
+                        .or_else(|| positive(ins.as_ref()?.host_config.memory)),
+                    throttled_periods: current.nr_throttled,
+                    cpu_periods: current.nr_periods,
+                    throttled_usec: current.throttled_usec,
+                    network,
+                },
+            )
         }
         _ => unreachable!("container tabs route"),
     };
