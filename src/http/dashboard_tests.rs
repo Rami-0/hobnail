@@ -443,9 +443,10 @@ async fn scoped_board_edits_cannot_introduce_targets_or_reuse_foreign_ids() {
         })
     };
     let integration = item(json!({"kind":"integration","integration_id":integration["id"]}));
-    let on_board = item(
+    let mut on_board = item(
         json!({"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}),
     );
+    on_board["position"] = json!(1);
     let foreign_container =
         item(json!({"kind":"container","target":{"by":"compose","project":"shop","service":"db"}}));
     let doc = |items: Vec<Value>| json!({"version":0,"sections":[{"title":"Services","position":0,"items":items}]});
@@ -509,12 +510,13 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
     let owner = Client::owner(start(st.clone()).await).await;
     let board = owner.board("Service").await;
     let path = format!("/api/v1/boards/{board}");
-    owner.json("PUT", &path, json!({"version":0,"sections":[{
+    let mut document = json!({"version":0,"sections":[{
         "title":"Services","position":0,"items":[{
             "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
             "payload":{"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}
         }]
-    }]}), 200).await;
+    }]});
+    owner.json("PUT", &path, document.clone(), 200).await;
     let scopes = json!({"boards":[board],"integrations":[]});
     let viewer = owner.guest("scoped-reader", "viewer", scopes.clone()).await;
     let admin = owner.guest("scoped-editor", "admin", scopes).await;
@@ -554,32 +556,94 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
             "{route}"
         );
     }
-    for route in [
-        "/settings",
-        "/settings/general",
-        "/api/settings",
-        "/api/settings/config",
-        "/api/containers/web/env",
-        "/api/containers/web/health",
-        "/api/containers/web/top",
-    ] {
-        assert_eq!(
-            admin.call("GET", route, Value::Null).await.status,
-            403,
-            "{route}"
-        );
-    }
-    for (method, route) in [
-        ("POST", "/api/v1/boards".to_string()),
-        ("POST", "/api/v1/integrations".to_string()),
-        ("DELETE", path.clone()),
-    ] {
+    use crate::api::access::{Access, ROUTES};
+    for (method, route) in ROUTES
+        .iter()
+        .filter(|r| r.access == Access::Admin)
+        .map(|r| (r.method, r.pattern.replace("<id>", "outside")))
+        .chain(
+            WRITES
+                .iter()
+                .filter(|(_, path)| {
+                    path.starts_with("/api/settings/") || path.starts_with("/settings/")
+                })
+                .map(|(method, path)| (*method, path.to_string())),
+        )
+        .chain(
+            SETTINGS_READS
+                .iter()
+                .map(|suffix| ("GET", format!("/api/settings/{suffix}"))),
+        )
+        .chain(
+            crate::ui::routes::SETTINGS
+                .iter()
+                .map(|(_, slug, _)| ("GET", format!("/settings/{slug}"))),
+        )
+        .chain(
+            [
+                "/settings",
+                "/api/settings",
+                "/api/containers/web/env",
+                "/api/containers/web/health",
+                "/api/containers/web/top",
+            ]
+            .map(|p| ("GET", p.to_string())),
+        )
+        .chain([("DELETE", path.clone())])
+    {
         assert_eq!(
             admin.call(method, &route, json!({})).await.status,
             403,
-            "{route}"
+            "{method} {route}"
         );
     }
+
+    let suggestions_board = owner.board("Allow suggestions").await;
+    let users = owner.json("GET", "/api/v1/users", Value::Null, 200).await;
+    let user_id = |name: &str| {
+        users
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["name"] == name)
+            .unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    };
+    owner
+        .json(
+            "PUT",
+            &format!("/api/v1/users/{}/scopes", user_id("scoped-editor")),
+            json!({"scopes":{"boards":[board,suggestions_board]}}),
+            200,
+        )
+        .await;
+    let suggestions = admin
+        .json(
+            "GET",
+            &format!("/api/v1/boards/{suggestions_board}/suggestions"),
+            Value::Null,
+            200,
+        )
+        .await;
+    assert_eq!(suggestions.as_array().unwrap().len(), 1);
+    assert_eq!(suggestions[0]["payload"]["target"]["service"], "web");
+
+    let levels = viewer
+        .call("GET", "/api/logs/levels?c=web", Value::Null)
+        .await;
+    assert!(levels.body.contains("points"));
+    let download = viewer
+        .call("GET", "/api/logs/download?stack=shop", Value::Null)
+        .await;
+    assert_eq!(download.status, 200);
+    assert!(download.body.contains("web"));
+    assert!(!download.body.contains("# db:"));
+    let (mut logs, _) = Stream::open(owner.addr, "/api/logs/stream?c=web,db", &viewer.cookie).await;
+    assert!(logs.until(b"\n\n").await.starts_with("event: hello\n"));
+    assert_eq!(logs.next().await.1["c"], 0);
+    assert!(logs.until(b"\n\n").await.starts_with("event: done\n"));
+
     let (mut stream, _) = Stream::open(
         owner.addr,
         "/api/v1/stream?topics=containers,stats",
@@ -604,6 +668,24 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
     let (topic, list) = stream.next().await;
     assert_eq!(topic, "containers");
     assert_eq!(list["groups"], json!([]));
+    document["version"] = json!(2);
+    owner.json("PUT", &path, document, 200).await;
+    assert_eq!(
+        stream.next().await.1["groups"][0]["containers"][0]["name"],
+        "web"
+    );
+
+    owner
+        .json(
+            "PUT",
+            &format!("/api/v1/users/{}/scopes", user_id("scoped-reader")),
+            json!({"scopes":{"boards":[]}}),
+            200,
+        )
+        .await;
+    assert_eq!(stream.next().await.0, "config");
+    st.changed("groups");
+    assert_eq!(stream.next().await.1["containers"], json!({}));
 }
 
 #[tokio::test]
