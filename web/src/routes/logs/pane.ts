@@ -90,7 +90,6 @@ export class LogPane {
   private signature = "";
   private top = document.createElement("div");
   private content = document.createElement("div");
-  private bottom = document.createElement("div");
   private observer: ResizeObserver;
   private width = 0;
   private done = false;
@@ -112,9 +111,9 @@ export class LogPane {
     this.box = box; this.query = query; this.cap = cap; this.tail = tail;
     this.options = options; this.range = range; this.target = target; this.report = report; this.select = select;
     this.ring = new Ring(cap);
-    this.top.setAttribute("aria-hidden", "true"); this.bottom.setAttribute("aria-hidden", "true");
+    this.top.setAttribute("aria-hidden", "true");
     this.content.className = "log-window";
-    box.replaceChildren(this.top, this.content, this.bottom);
+    box.replaceChildren(this.top, this.content);
     box.addEventListener("scroll", this.scroll, { passive: true });
     box.addEventListener("wheel", this.wheel, { passive: true });
     box.addEventListener("keydown", this.key);
