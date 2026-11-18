@@ -314,6 +314,7 @@ export class LogPane {
       }
     }
     this.lastTop = this.box.scrollTop;
+    this.box.dataset.anchorDebug = JSON.stringify(this.anchor);
   }
   private fit(): void {
     const panes = this.box.closest(".log-panes");
