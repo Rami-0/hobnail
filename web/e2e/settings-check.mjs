@@ -141,7 +141,7 @@ try {
       await inp.click(`button[aria-label=${q("Edit " + name)}]`);
       await wait(present(editor), "bookmark edit opens");
       await fill(editor + ' input[name="description"]', "Edited in the browser");
-      await button(editor, "Save");
+      await inp.key("Enter", { modifiers: width===1440 ? 2 : 4 });
       await wait(`!${present(editor)}`, "bookmark edit saves");
       const marks = ok(await call("/api/settings/bookmarks", "GET", undefined, owner), "read bookmarks for ordering");
       ok(await call("/api/settings/bookmarks", "POST", { base_hash: marks.hash, action: "add", item: { name: `Order target ${label}`, url: "https://example.com/order" } }, owner), "seed reorder target");

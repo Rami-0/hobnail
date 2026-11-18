@@ -134,6 +134,25 @@ try {
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
       await wait('Number(localStorage.getItem("rh-seen")) > 0', "leaving Overview remembers the visit");
 
+      await load("/app/containers", '[data-testid="row"]');
+      await tab.ev('document.activeElement?.blur()');
+      await inp.key('j'); await wait(`!!document.querySelector('tr.kfocus a:focus')`, "j focuses the first actionable row");
+      const firstRow = await tab.ev(`document.querySelector('tr.kfocus').dataset.name`);
+      await inp.key('j'); await wait(`document.querySelector('tr.kfocus')?.dataset.name !== ${q(firstRow)}`, "j advances a row");
+      await inp.key('k'); await wait(`document.querySelector('tr.kfocus')?.dataset.name === ${q(firstRow)}`, "k returns to the previous row");
+      await inp.key('Enter'); await wait(`location.pathname===${q('/app/containers/')}+${q(firstRow)}`, "Enter opens the focused row");
+      await inp.key('l'); await wait(`location.pathname===${q('/app/containers/')}+${q(firstRow)}+'/logs'`, "l opens the current container logs");
+      await load("/app/containers/svc001", '[data-testid="ctr-tabs"] a');
+      await tab.ev(`document.querySelector('[data-testid="ctr-tabs"] a').focus()`);
+      for (const key of ['ArrowRight','ArrowLeft','End','Home']) {
+        await inp.key(key); await wait(`document.activeElement?.matches('[data-testid="ctr-tabs"] a')`, `detail tabs support ${key}`);
+      }
+      await inp.click('[data-testid="user"]');
+      await wait(`!!document.querySelector('[role="menu"]')`, "account menu opens");
+      for (const key of ['Home','End','ArrowUp','ArrowDown']) {
+        await inp.key(key); await wait(`!!document.activeElement?.closest('[role="menu"]')`, `menu supports ${key}`);
+      }
+      await inp.key('Escape');
       await load("/app/alerts", ".history-events li");
       await wait(`document.querySelector(${q('[aria-label="Firing now"]')})?.textContent.includes("svc004")`, "firing alert arrives through the live model", 15000);
       await tab.shot(path.join(out, `${label}-alerts.png`));
