@@ -57,6 +57,11 @@ try {
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       console.log(label, "picker");
       await load("/app/logs", '[data-testid="logs-picker-row"]'); await tab.shot(path.join(out, `${label}-list.png`));
+      for (const name of ['svc001','svc002','svc003','svc005']) await inp.click(`[data-testid="logs-picker-row"]:has(a[href$="/${name}/logs"]) [role="switch"]`);
+      await wait(`new URL(location.href).searchParams.get('sel')?.split(',').length===4`, "picker ticks stay in URL");
+      assert.ok(await tab.ev(`[...document.querySelectorAll('[role=switch]')].filter(b=>b.getAttribute('aria-checked')!=='true').every(b=>b.disabled || b.getAttribute('aria-disabled')==='true')`), "fifth tick is disabled");
+      await inp.click('.logs-picker-toolbar .btn'); await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "ticks open side by side");
+      await tab.ev('history.back()'); await wait('document.querySelectorAll("[data-testid=logs-picker] [role=switch][aria-checked=true]").length===4', "Back restores ticks");
       await inp.key("/"); await wait('document.activeElement === document.querySelector("[data-testid=filter]")', "slash focuses picker filter"); await inp.type("svc001");
       await wait('document.querySelectorAll("[data-testid=logs-picker-row]").length === 1', "picker filter");
       assert.ok((await tab.ev("location.search")).includes("q=svc001"));
@@ -90,6 +95,10 @@ try {
         const after = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), r=b.querySelector('[data-log-id="${anchor.id}"]'); return r ? r.getBoundingClientRect().top-b.getBoundingClientRect().top : null; })()`);
         assert.ok(after !== null && Math.abs(after-anchor.offset)<4, `${label} keeps reader line: ${after} vs ${anchor.offset}`);
       }
+      await tab.send('Emulation.setDeviceMetricsOverride',{width:width===390?410:1360,height:width===390?844:900,deviceScaleFactor:1,mobile:inp.touch}); await sleep(350);
+      const resizedOffset = await tab.ev(`(()=>{const b=document.querySelector('[data-testid=log-body]'),r=b.querySelector('[data-log-id="${anchor.id}"]');return r?r.getBoundingClientRect().top-b.getBoundingClientRect().top:null})()`);
+      assert.ok(resizedOffset!==null && Math.abs(resizedOffset-anchor.offset)<4, "resize preserves reader line");
+      await tab.send('Emulation.setDeviceMetricsOverride',{width,height:width===390?844:900,deviceScaleFactor:1,mobile:inp.touch}); await sleep(350);
       await tab.ev(`document.querySelector('[data-testid=log-latest]').click()`);
       await wait('!document.querySelector("[data-testid=log-latest]")', "jump resumes following");
 
@@ -155,7 +164,7 @@ try {
       console.log(label, "stack and panes");
       await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
-      await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await tab.shot(path.join(out, `${label}-four.png`));
+      await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await wait('[...document.querySelectorAll("[data-testid=log-body]")].every(b=>b.dataset.searchLines==="5000")', "all panes loaded", 25000); await tab.shot(path.join(out, `${label}-four.png`));
       await tab.ev('document.querySelector("[data-testid=log-pane] header>a[aria-label^=Close]")?.click()');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===3', "close pane in place");
       const leaveAt = Date.now(); await tab.ev('document.querySelector("nav.crumb a").click()'); await wait('!!document.querySelector("[data-testid=logs-picker]")', "route leave"); measurements.leaveAt = leaveAt;
