@@ -63,7 +63,10 @@ try {
       await tab.send("Page.navigate", { url: new URL(route, base).href });
       await wait(`location.pathname === ${q(route.split("?")[0])} && (${expression})`, route);
     };
-    const fill = async (selector, value) => { await inp.clear(selector); await inp.type(value); };
+    const fill = async (selector, value) => {
+      await inp.clear(selector);
+      await tab.send("Input.insertText", { text: value });
+    };
     const button = async (selector, caption) => {
       const marked = await tab.ev(`(() => {
         const el = Array.from(document.querySelectorAll(${q(selector + " button")})).find((button) => button.textContent.trim() === ${q(caption)});

@@ -8,3 +8,4 @@
 .settings-path{overflow-wrap:anywhere}
 .settings-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:699px){.settings-section .btn,.settings-form .btn{min-height:var(--ctl-h)}}
+@media (min-width:700px){.settings-page>.tabs{flex-wrap:wrap}}
