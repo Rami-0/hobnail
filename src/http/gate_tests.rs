@@ -2030,6 +2030,14 @@ async fn invite_roles_and_account_management() {
     assert_eq!(created.status, 201);
     let created: serde_json::Value = serde_json::from_str(&created.body).unwrap();
     let scope = created["id"].as_str().unwrap().to_owned();
+    st.db
+        .dashboard(|conn| {
+            conn.execute(
+            "INSERT INTO board_items (board_id,kind,config,layout) VALUES (?1,'container',?2,'{}')",
+            rusqlite::params![scope, r#"{"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}"#],
+        )
+        })
+        .unwrap();
     for role in ["viewer", "admin"] {
         let data =
             serde_json::json!({"role": role, "scopes": {"boards": [scope], "integrations": [] }});
@@ -2084,23 +2092,28 @@ async fn invite_roles_and_account_management() {
         assert_eq!(bootstrap["scoped"], true);
         let picker = req(addr, "GET", "/api/v1/logs/picker", &h, "").await;
         assert_eq!(picker.status, 200);
-        assert_eq!(
-            json_of(&picker, "scoped logs picker")["groups"],
-            serde_json::json!([])
-        );
-        for (path, status) in [
-            ("/api/logs/levels?c=web", 404),
-            ("/api/logs/download?c=web", 400),
-            ("/api/logs/stream?c=web", 400),
+        let picker = json_of(&picker, "scoped logs picker");
+        let names: Vec<_> = picker["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g["containers"].as_array().unwrap())
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["web"]);
+        for (path, expected) in [
+            ("/api/logs/levels?c=db", 404),
+            ("/api/logs/levels?c=web", 200),
+            ("/api/logs/download?c=db", 400),
+            ("/api/logs/stream?c=db", 400),
             ("/api/logs/status", 403),
         ] {
             assert_eq!(
                 req(addr, "GET", path, &h, "").await.status,
-                status,
+                expected,
                 "{path}"
             );
         }
-
         for resource in ["inspect", "metrics", "events"] {
             let path = format!("/api/v1/containers/no-grant/{resource}");
             assert_eq!(req(addr, "GET", &path, &h, "").await.status, 404, "{path}");
