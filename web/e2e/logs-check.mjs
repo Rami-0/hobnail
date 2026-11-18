@@ -233,7 +233,7 @@ try {
       results.push(measurements);
       assert.ok(measurements.fourBurstMaxTaskMs <= 100, `four-pane burst maximum ${measurements.fourBurstMaxTaskMs} ms exceeds 100 ms`);
       assert.ok(measurements.burstMaxTaskMs <= 100, `burst maximum ${measurements.burstMaxTaskMs} ms exceeds 100 ms`);
-    } catch (e) { failures.push(`${label}: ${e.stack}`); await tab.shot(path.join(out, `${label}-failure.png`)); }
+    } catch (e) { console.log(label, String(e), await tab.ev(`({width:innerWidth,scroll:scrollX,documentWidth:document.documentElement.scrollWidth,toolbar:document.querySelector('.log-toolbar')?.outerHTML,controls:[...document.querySelectorAll('.log-filter-controls,.log-filters')].map(e=>({class:e.className,display:getComputedStyle(e).display,rect:e.getBoundingClientRect().toJSON()}))})`).catch(()=>null)); failures.push(`${label}: ${e.stack}`); await tab.shot(path.join(out, `${label}-failure.png`)); }
     finally { if (!results.includes(measurements)) results.push(measurements); fs.writeFileSync(path.join(out, `${label}-recorder.json`), JSON.stringify(rec)); await tab.close(); }
   }
 } finally {
