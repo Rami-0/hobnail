@@ -241,10 +241,10 @@ pub(crate) fn change_password_for(
         .login_verifying
         .try_lock()
         .map_err(|_| "too many attempts; try again in 1 s")?;
-    let key = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    let key = session.account.id;
     let lock = || {
         state
-            .login_limiter
+            .password_limiter
             .lock()
             .unwrap_or_else(|e| e.into_inner())
     };
@@ -498,27 +498,58 @@ struct Slot {
     last_ms: u64,
 }
 
-/// Back-off after failed logins: 1 s, 2 s, 4 s ... capped at 60 s, per
-/// client IP. A global slot backs it up (many IPs cannot dodge the per-IP
-/// limit); it only starts after `GLOBAL_FREE` failures, so one stranger's
-/// bad guess does not lock the owner out, and it does not apply to clients
-/// that have signed in before (since start). A success clears the IP and the
-/// global slot; 15 minutes without failures forget them.
+/// Back-off after failed logins per client IP and across all clients.
 #[derive(Debug, Default)]
 pub struct RateLimiter {
     ips: HashMap<IpAddr, Slot>,
     global: Slot,
-    /// Clients that signed in successfully (since start), newest last. They
-    /// skip the global slot (not their own), so a stranger who keeps the
-    /// global back-off at 60 s cannot lock the owner out.
-    trusted: Vec<IpAddr>,
+}
+
+/// Password changes have independent back-off per account.
+#[derive(Debug, Default)]
+pub struct PasswordLimiter {
+    accounts: HashMap<i64, Slot>,
+}
+
+impl PasswordLimiter {
+    fn check(&mut self, account: i64, now_ms: u64) -> Result<(), u64> {
+        self.accounts
+            .retain(|_, slot| now_ms.saturating_sub(slot.last_ms) < FORGET_AFTER_MS);
+        check_backoff(
+            self.accounts.get(&account).map_or(0, |slot| slot.until_ms),
+            now_ms,
+        )
+    }
+
+    fn failure(&mut self, account: i64, now_ms: u64) {
+        self.accounts.entry(account).or_default().fail(now_ms, 0);
+    }
+
+    fn success(&mut self, account: i64) {
+        self.accounts.remove(&account);
+    }
+}
+
+fn check_backoff(until: u64, now_ms: u64) -> Result<(), u64> {
+    if now_ms < until {
+        Err((until - now_ms).div_ceil(1000))
+    } else {
+        Ok(())
+    }
+}
+
+impl Slot {
+    fn fail(&mut self, now_ms: u64, free: u32) {
+        self.fails = self.fails.saturating_add(1);
+        self.until_ms = now_ms + delay_ms(self.fails, free);
+        self.last_ms = now_ms;
+    }
 }
 
 const GLOBAL_FREE: u32 = 5;
 const FORGET_AFTER_MS: u64 = 15 * 60 * 1000;
 const MAX_TRACKED_IPS: usize = 256;
 const MAX_DELAY_MS: u64 = 60_000;
-const MAX_TRUSTED: usize = 16;
 
 /// Delay after `fails` failures, the first `free` of which cost nothing.
 fn delay_ms(fails: u32, free: u32) -> u64 {
@@ -532,17 +563,12 @@ impl RateLimiter {
     /// `Err(seconds to wait)` while this client must wait.
     pub fn check(&mut self, ip: IpAddr, now_ms: u64) -> Result<(), u64> {
         self.forget_old(now_ms);
-        let global = if self.trusted.contains(&ip) {
-            0
-        } else {
-            self.global.until_ms
-        };
-        let until = self.ips.get(&ip).map_or(0, |s| s.until_ms).max(global);
-        if now_ms < until {
-            Err((until - now_ms).div_ceil(1000))
-        } else {
-            Ok(())
-        }
+        let until = self
+            .ips
+            .get(&ip)
+            .map_or(0, |s| s.until_ms)
+            .max(self.global.until_ms);
+        check_backoff(until, now_ms)
     }
 
     pub fn failure(&mut self, ip: IpAddr, now_ms: u64) {
@@ -558,24 +584,12 @@ impl RateLimiter {
                 self.ips.remove(&old);
             }
         }
-        let s = self.ips.entry(ip).or_default();
-        s.fails += 1;
-        s.until_ms = now_ms + delay_ms(s.fails, 0);
-        s.last_ms = now_ms;
-        let g = &mut self.global;
-        g.fails += 1;
-        g.until_ms = now_ms + delay_ms(g.fails, GLOBAL_FREE);
-        g.last_ms = now_ms;
+        self.ips.entry(ip).or_default().fail(now_ms, 0);
+        self.global.fail(now_ms, GLOBAL_FREE);
     }
 
     pub fn success(&mut self, ip: IpAddr) {
         self.ips.remove(&ip);
-        self.global = Slot::default();
-        self.trusted.retain(|t| *t != ip);
-        if self.trusted.len() >= MAX_TRUSTED {
-            self.trusted.remove(0);
-        }
-        self.trusted.push(ip);
     }
 
     fn forget_old(&mut self, now_ms: u64) {
@@ -1066,6 +1080,7 @@ mod tests {
         l.success(ip);
         assert!(l.check(ip, t).is_ok());
         // 15 minutes without failures forget the counter.
+        t += FORGET_AFTER_MS;
         l.failure(ip, t);
         l.failure(ip, t + 1000);
         assert_eq!(l.check(ip, t + 1000), Err(2));
@@ -1091,26 +1106,28 @@ mod tests {
             l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 99)), t);
         }
         assert_eq!(l.check(fresh, t), Err(60), "capped at 60 s");
-        // A client that signed in before is not held by the global slot
-        // (only by its own), so the owner cannot be locked out this way.
         let owner = IpAddr::V4(Ipv4Addr::new(10, 3, 0, 1));
         l.success(owner);
-        for _ in 0..20 {
-            l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 99)), t);
-        }
         assert_eq!(l.check(fresh, t), Err(60));
-        assert!(l.check(owner, t).is_ok());
-        l.failure(owner, t);
-        assert_eq!(l.check(owner, t), Err(1), "its own back-off still applies");
+        assert_eq!(l.check(owner, t), Err(60));
         // Bounded memory under many clients.
         for n in 0..1000u32 {
             l.failure(IpAddr::V4(Ipv4Addr::from(0x0b00_0000 + n)), t);
         }
         assert!(l.ips.len() <= MAX_TRACKED_IPS);
-        for n in 0..100u32 {
-            l.success(IpAddr::V4(Ipv4Addr::from(0x0c00_0000 + n)));
-        }
-        assert_eq!(l.trusted.len(), MAX_TRUSTED);
+    }
+
+    #[test]
+    fn password_changes_back_off_independently_per_account() {
+        let mut passwords = PasswordLimiter::default();
+        let t = 1_000_000;
+        passwords.failure(1, t);
+        assert_eq!(passwords.check(1, t), Err(1));
+        assert_eq!(passwords.check(2, t), Ok(()));
+        passwords.success(2);
+        assert_eq!(passwords.check(1, t), Err(1));
+        passwords.success(1);
+        assert_eq!(passwords.check(1, t), Ok(()));
     }
 
     #[test]

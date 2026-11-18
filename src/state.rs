@@ -104,6 +104,7 @@ pub struct AppState {
     pub db: Arc<crate::db::Db>,
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
+    pub password_limiter: Mutex<crate::auth::PasswordLimiter>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
     pub login_verifying: Mutex<()>,
@@ -138,6 +139,7 @@ impl AppState {
             widgets: Mutex::new(HashMap::new()),
             db,
             alerts: Mutex::new(Default::default()),
+            password_limiter: Mutex::new(Default::default()),
             login_limiter: Mutex::new(Default::default()),
             login_verifying: Mutex::new(()),
             events,
