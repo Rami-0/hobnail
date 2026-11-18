@@ -150,3 +150,5 @@ tbody.none td{padding:0}
  .grp-t{height:44px}
  :is(.ctr-page,.cd-page) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
 }
+.ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+.port{height:max(24px,var(--hit));min-width:var(--hit);line-height:calc(max(24px,var(--hit)) - 2px);text-align:center}

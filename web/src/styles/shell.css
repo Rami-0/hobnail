@@ -194,3 +194,5 @@ main>.banner{max-width:1480px;margin:0 auto 16px}
  .tree-filter svg{top:15px}
  .ctr>a:first-child,.stack>summary{height:44px}
 }
+/* Compact text actions retain a keyboard and pointer target. */
+a.stack-name,.side-foot .keys-btn{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}

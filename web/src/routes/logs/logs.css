@@ -14,3 +14,4 @@
 ::highlight(rh-log-search){background:var(--warn);color:var(--bg)}
 
 .log-container-head>a{display:inline-flex;align-items:center;min-height:var(--ctl-h)}.logs-page{--log-chip-lightness:68%}:root[data-theme=light] .logs-page{--log-chip-lightness:28%}@media(prefers-color-scheme:light){:root[data-theme=auto] .logs-page{--log-chip-lightness:28%}}
+.logs-picker-row>a,.logs-picker-group>header a,.log-tabs a,.log-pane-tools a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
