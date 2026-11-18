@@ -88,6 +88,7 @@ function Integrations({ admin }: { admin: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [verdicts, setVerdicts] = useState<Record<string, IntegrationVerdict>>({});
+  const forgetVerdict = (id: string) => setVerdicts(({ [id]: _old, ...remaining }) => remaining);
   const load = useCallback(async () => { const result = await api.get<IntegrationView[]>("/api/v1/integrations"); if (result.kind === "ok") setItems(result.data); else setError(result.message); }, []);
   // load updates state only after the asynchronous server response.
   // eslint-disable-next-line react/set-state-in-effect
@@ -110,11 +111,12 @@ function Integrations({ admin }: { admin: boolean }) {
       {editing && <form id="integration-form" onSubmit={async (e) => {
         e.preventDefault(); if (busy) return; setFields({});
         if (changed && !secret) { setFields({ secret: "Enter the credential again for the new origin, or clear the saved credential first." }); return; }
+        const connectionChanged = editing === "new" || url !== editing.base_url || !!secret || enabled !== (editing.admin?.enabled ?? true);
         const data = new FormData(e.currentTarget); setBusy(true);
         const result = await api.request<IntegrationView>(editing === "new" ? "POST" : "PUT", `/api/v1/integrations${editing === "new" ? "" : `/${editing.id}`}`, { body: {
           name: String(data.get("name")), kind: "http", base_url: url, enabled, icon: String(data.get("icon")) || null, ...(secret ? { secret } : {}),
         } });
-        if (result.kind === "ok") { close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
+        if (result.kind === "ok") { if (connectionChanged) forgetVerdict(result.data.id); close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
       }}>
         <Field id="integration-name" label="Name" error={fields.name}><TextInput name="name" required maxLength={80} defaultValue={editing === "new" ? "" : editing.name} /></Field>
         <Field id="integration-url" label="Service URL" error={fields.base_url}><TextInput name="base_url" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} /></Field>
@@ -123,14 +125,14 @@ function Integrations({ admin }: { admin: boolean }) {
         {changed && <Note kind="warn">The origin changed. Enter the credential again for this destination.</Note>}
         {bound && editing !== "new" && <Button busy={busy} onClick={async () => {
           setBusy(true); const result = await api.request<IntegrationView>("DELETE", `/api/v1/integrations/${editing.id}/secret`);
-          if (result.kind === "ok") { setEditing(result.data); setSecret(""); await load(); } else setFields({ secret: result.message }); setBusy(false);
+          if (result.kind === "ok") { setEditing(result.data); setSecret(""); forgetVerdict(result.data.id); await load(); } else setFields({ secret: result.message }); setBusy(false);
         }}>Clear saved credential</Button>}
         <Switch checked={enabled} onChange={setEnabled} label="Enabled" />{fields.form && <Note kind="bad">{fields.form}</Note>}
       </form>}
     </Dialog>
     <Dialog open={!!deleting} title="Delete integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button className="danger" busy={busy} onClick={async () => {
       if (!deleting) return; setBusy(true); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);
-      if (result.kind === "ok") { setDeleting(null); await load(); } else setError(result.message); setBusy(false);
+      if (result.kind === "ok") { forgetVerdict(deleting.id); setDeleting(null); await load(); } else setError(result.message); setBusy(false);
     }}>Delete integration</Button></>}><p>Delete “{deleting?.name}” and its saved credential? Board items will show a missing target.</p></Dialog>
   </section>;
 }

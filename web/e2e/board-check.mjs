@@ -110,6 +110,11 @@ try {
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:2"); await inp.click('button[form="integration-form"][type="submit"]'); await wait('document.querySelector("#integration-secret-err")?.textContent.includes("again")', "origin change requires entering credential again");
   const denied = await api("PUT", `/integrations/${integrationId}`, { name: "M2 HTTP connection", kind: "http", base_url: "http://127.0.0.1:2", enabled: true }); check(denied.status === 400 && denied.data.error.field === "secret", "server enforces origin binding on secret field");
   await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays verdict class and message");
+  await inp.click('[data-testid="integration-row"] button'); await wait(visible("integration-form"));
+  await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:1/updated");
+  await inp.click('button[form="integration-form"][type="submit"]'); await wait(`!${visible("integration-form")}`, "same-origin integration update saves without reentering the credential");
+  check(await tab.ev(`!${visible("integration-verdict")}`), "changing integration configuration invalidates the old test verdict");
+  check((await api("GET", `/integrations/${integrationId}`)).data.has_secret, "same-origin update retains the saved credential");
   hiddenBoardId = (await api("POST", "/boards", { name: "Outside Viewer scope" })).data.id;
   const invite = await api("POST", "/invites", { role: "viewer", scopes: { boards: [boardId], integrations: [] } }); check(invite.status === 201, "create scoped Viewer invite");
   const accepted = await fetch(base + "/api/v1/invites/accept", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ token: invite.data.token, username: `viewer-${Date.now()}`, password: PW }) });
