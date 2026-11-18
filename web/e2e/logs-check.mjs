@@ -49,7 +49,7 @@ try {
     try {
       for (const d of ["Page", "Runtime", "Network", "Log"]) await tab.send(d + ".enable");
       await tab.send("Runtime.addBinding", { name: "__hbCsp" }); await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: CSP_LISTENER });
-      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `globalThis.logSources=[]; const OriginalEventSource=EventSource; globalThis.EventSource=class extends OriginalEventSource {constructor(...args){super(...args); if(String(args[0]).includes('/api/logs/stream?')) logSources.push(this);}};` });
+      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `globalThis.logSources=[]; const OriginalEventSource=EventSource; globalThis.EventSource=class extends OriginalEventSource {constructor(...args){super(...args); if(String(args[0]).includes('/api/logs/stream?')) {logSources.push(this);this.wireCount=0;this.addEventListener('l',e=>{this.wireCount+=JSON.parse(e.data).length;});}}};` });
       await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `localStorage.setItem('rh-theme',${q(theme)});` });
       await tab.send("Network.setCookie", { name: cookie.slice(0, split), value: cookie.slice(split + 1), url: base.origin, path: "/", httpOnly: true, sameSite: "Strict" });
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 844 : 900, deviceScaleFactor: 1, mobile: inp.touch });
@@ -64,9 +64,13 @@ try {
       await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("5,000 / 5,000")', "5000-line ring");
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       await sleep(1000);
+      measurements.burstObserveStartedAt=Date.now();
       await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(list => logTasks.push(...list.getEntries().map(e=>e.duration))); logObserver.observe({type:'longtask',buffered:false});`);
       await sleep(7000);
       measurements.burstMaxTaskMs = await tab.ev('Math.max(0,...logTasks)');
+      measurements.burstObserveEndedAt=Date.now();
+      measurements.wireLines = await tab.ev('Math.max(...logSources.map(s=>s.wireCount))');
+      assert.ok(measurements.wireLines>=6500, "initial 5000 plus the 1500-line burst arrived");
       await tab.ev('logObserver.disconnect()');
       measurements.mountedRows = await tab.ev('document.querySelectorAll("[data-log-id]").length');
       assert.ok(measurements.mountedRows < 150, "rows are windowed");
