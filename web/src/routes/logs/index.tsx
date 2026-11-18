@@ -118,8 +118,8 @@ export default function LogsPage() {
       const el = e.target as HTMLElement;
       const typing = el.matches("input,textarea,select") || el.isContentEditable;
       if (e.ctrlKey || e.metaKey || e.altKey || document.querySelector('[role="dialog"][data-open]')) return;
-      if (e.key === "/" && !typing) { e.preventDefault(); e.stopImmediatePropagation(); input.current?.focus(); }
-      if (e.key === "End" && !typing) { e.preventDefault(); window.dispatchEvent(new Event("rh:logs-latest")); }
+      if (e.key === "/" && !typing && input.current) { e.preventDefault(); e.stopImmediatePropagation(); input.current?.focus(); }
+      if (e.key === "End" && !typing && input.current) { e.preventDefault(); window.dispatchEvent(new Event("rh:logs-latest")); }
     };
     document.addEventListener("keydown", key, true); return () => document.removeEventListener("keydown", key, true);
   }, []);
