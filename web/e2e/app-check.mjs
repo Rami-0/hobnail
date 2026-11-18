@@ -247,6 +247,7 @@ async function runPass(size, scheme) {
     await click(`${onboarding} button[type="submit"]`);
     if (!(await step("onboarding signs in the owner", () => until(`!!document.querySelector('[data-testid="user"]')`, 10000)))) return summarise();
     await click('[data-testid="user"]');
+    await until(`!!document.querySelector('button[data-testid="signout"]')`, 3000);
     await click('button[data-testid="signout"]');
   }
   if (!(await step("signed-out navigation opens the login form", () => until(`location.pathname === "/app/login" && !!document.querySelector('form[data-testid="login"] input[name="username"]')`)))) {

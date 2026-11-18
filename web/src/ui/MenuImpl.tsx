@@ -20,7 +20,7 @@ export default function MenuImpl({ label, trigger, items, header, testId, trigge
             // Items are a fixed list for each menu.
             // eslint-disable-next-line react/no-array-index-key
             <SdkMenuItem key={i} value={String(i)} className={it.danger ? "menu-item danger" : "menu-item"}
-              data-testid={it.testId} onSelect={() => { it.onSelect(); }}>
+              render={<button type="button" aria-label={typeof it.label === "string" ? it.label : undefined} />} data-testid={it.testId} onSelect={() => { it.onSelect(); }}>
               {it.icon}<span>{it.label}</span>
             </SdkMenuItem>
           ))}
