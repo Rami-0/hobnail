@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createClient, errorInfo, retryAfterSeconds, type ApiResult } from "./client.ts";
+import { createClient, toResult, errorInfo, retryAfterSeconds, type ApiResult } from "./client.ts";
 
 interface Call {
   url: string;
@@ -166,4 +166,10 @@ test("errorInfo reads all three body shapes", () => {
   assert.deepEqual(errorInfo('{"error":"m","locked":true}', 403), { message: "m", locked: true });
   assert.deepEqual(errorInfo("plain\n", 403), { message: "plain" });
   assert.deepEqual(errorInfo("", 502), { message: "HTTP 502" });
+});
+
+test("board conflicts retain the current version", async () => {
+  const result = await toResult(new Response(JSON.stringify({ error: { code: "conflict", message: "board version changed" }, current_version: 7 }), { status: 409 }));
+  assert.equal(result.kind, "stale");
+  if (result.kind === "stale") assert.equal(result.currentVersion, 7);
 });

@@ -24,7 +24,7 @@ export type ApiResult<T> =
   | { kind: "sign_in"; status: 401; message: string; code?: string }
   | { kind: "forbidden"; status: 403; reason: Forbidden; message: string }
   /** 409: the config changed on disk since it was read. */
-  | { kind: "stale"; status: 409; message: string }
+  | { kind: "stale"; status: 409; message: string; currentVersion?: number }
   /** 422 (and 400 with a field): a value the server refused. */
   | { kind: "invalid"; status: number; message: string; field?: string; line?: number; col?: number }
   /** 429: wait this many whole seconds (at least 1). */
@@ -61,6 +61,7 @@ export const CSRF_HEADER = "X-RH-CSRF";
 
 /** What an error body says, whichever of the three shapes it has. */
 interface ErrorInfo {
+  currentVersion?: number;
   message: string;
   code?: string;
   field?: string;
@@ -91,6 +92,8 @@ export function errorInfo(text: string, status: number): ErrorInfo {
       // /api/v1 shape.
       const v1 = e as Partial<ApiErrorBody["error"]>;
       const info: ErrorInfo = { message: str(v1.message) ?? `HTTP ${status}` };
+      const currentVersion = num(j.current_version);
+      if (currentVersion !== undefined) info.currentVersion = currentVersion;
       const code = str(v1.code);
       const field = str(v1.field);
       if (code !== undefined) info.code = code;
@@ -161,7 +164,7 @@ export async function toResult<T>(r: Response): Promise<ApiResult<T>> {
     case 403:
       return { kind: "forbidden", status: 403, reason: forbiddenReason(info), message: info.message };
     case 409:
-      return { kind: "stale", status: 409, message: info.message };
+      return { kind: "stale", status: 409, message: info.message, ...(info.currentVersion === undefined ? {} : { currentVersion: info.currentVersion }) };
     case 429:
       return {
         kind: "rate_limited",
