@@ -143,7 +143,7 @@ export class LogPane {
   }
   private decode(data: string): LogLine[] {
     const lines = JSON.parse(data) as Array<Omit<LogLine, "c"> & { c: number }>;
-    return lines.map((line) => ({ ...line, c: this.names.get(line.c) ?? String(line.c) }));
+    return lines.map((line) => ({ c: this.names.get(line.c) ?? String(line.c), t: line.t, m: line.m, s: line.s, l: line.l, x: line.x }));
   }
   loadOlder(): void {
     if (this.older || !this.ring.rows.length || this.ring.rows.length >= this.cap) { this.message = "The ring is full; choose an earlier range to read older lines."; this.schedule(); return; }
