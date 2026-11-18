@@ -247,7 +247,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
     };
     side.addEventListener("click", onClick);
     return () => side.removeEventListener("click", onClick);
-  }, [sideRef]);
+  }, [full]);
 
   const toggle = () => {
     if (window.matchMedia(WIDE).matches) {
