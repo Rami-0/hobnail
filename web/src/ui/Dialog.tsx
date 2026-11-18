@@ -143,7 +143,7 @@ export function Dialog({
       setAsking(false);
       if (opener?.isConnected && !opener.closest("[inert]")) opener.focus({ preventScroll: true });
     };
-  }, [open, initialFocus, request, keepEditing]);
+  }, [open, initialFocus, request]);
 
   // The guard bar takes focus on its safe choice.
   useEffect(() => {
