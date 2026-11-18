@@ -6,6 +6,7 @@
 use hyper::{HeaderMap, Response, StatusCode};
 use serde::Serialize;
 
+use crate::db::accounts::Role;
 use crate::http::server::Body;
 use crate::state::AppState;
 
@@ -15,16 +16,19 @@ pub const API_VERSION: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Session {
-    /// The signed-in user (`"admin"`), or null.
-    pub user: Option<String>,
+    pub user: Option<SessionUser>,
     /// The `X-RH-CSRF` token for writes; null when not signed in.
     pub csrf: Option<String>,
-    /// False until `hobnail set-password` has run (everything is read-only).
-    pub password_set: bool,
-    /// `[logs] require_login`: logs need a session.
-    pub logs_require_login: bool,
+    pub owner_exists: bool,
     pub build: BuildInfoView,
     pub api: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SessionUser {
+    pub name: String,
+    pub role: Role,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -40,19 +44,20 @@ pub struct BuildInfoView {
 }
 
 pub fn session(state: &AppState, headers: &HeaderMap) -> Session {
-    let user = crate::auth::current_user(state, headers);
-    let csrf = crate::auth::csrf_token(state, headers);
-    // Both or neither (the session could end between the two reads).
-    let (user, csrf) = match (user, csrf) {
-        (Some(u), Some(c)) => (Some(u), Some(c)),
-        _ => (None, None),
-    };
+    let (user, csrf) = crate::auth::request_session(state, headers).map_or((None, None), |s| {
+        (
+            Some(SessionUser {
+                name: s.account.name.clone(),
+                role: s.account.role,
+            }),
+            Some(s.csrf()),
+        )
+    });
     let b = &state.build;
     Session {
         user,
         csrf,
-        password_set: crate::auth::password_is_set(state),
-        logs_require_login: state.config.current().logs.require_login,
+        owner_exists: state.db.owner_exists(),
         build: BuildInfoView {
             version: b.version.to_string(),
             sha: b.sha.to_string(),

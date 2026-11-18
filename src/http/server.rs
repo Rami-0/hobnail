@@ -174,11 +174,6 @@ pub struct Peer(pub SocketAddr);
 /// - `/api/settings/*`                      → `settings::route`
 /// - every other page (`/`, `/containers`…) → `ui::routes::route`
 ///
-/// **Write policy, enforced here and nowhere else:** `GET`/`HEAD` are open
-/// (viewing needs no login). Any other method must pass
-/// `auth::require_write` (valid session + `X-RH-CSRF` + same Origin) before
-/// it reaches a module. The only exception is `POST /api/login`, which has no
-/// session yet; `auth::route` checks its Origin itself.
 async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     let host = request_host(&req);
     let path = req.uri().path().to_string();
@@ -192,22 +187,62 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         );
     }
     let read = req.method() == Method::GET || req.method() == Method::HEAD;
-    if !read {
-        let is_login = path == "/api/login" && req.method() == Method::POST;
-        if !is_login {
-            if let Err(denied) = crate::auth::require_write(&state, req.headers()) {
-                return denied.response();
-            }
+    use crate::api::access::{self, Access, Lookup};
+    let v1 = path.starts_with("/api/v1/");
+    let lookup = v1.then(|| access::lookup(req.method(), &path));
+    let asset = read
+        && (path == "/app"
+            || path.starts_with("/app/")
+            || path.starts_with("/assets/")
+            || matches!(
+                path.as_str(),
+                "/manifest.webmanifest"
+                    | "/favicon.ico"
+                    | "/icon.svg"
+                    | "/icon-192.png"
+                    | "/icon-512.png"
+                    | "/apple-touch-icon.png"
+            ));
+    let page = read
+        && !(path.starts_with("/api/")
+            || path.starts_with("/static/")
+            || path.starts_with("/icons/")
+            || matches!(path.as_str(), "/custom.css" | "/alarm.json"));
+    let access = match &lookup {
+        Some(Lookup::Found(m)) => m.route.access,
+        // Unknown paths have no handler or data. Keep v1 404/405 for reads.
+        Some(_) if read => Access::Public,
+        _ if asset
+            || (read && path == "/healthz")
+            || (req.method() == Method::POST && path == "/api/login") =>
+        {
+            Access::Public
         }
+        _ if !read && path.starts_with("/api/settings/") => Access::Admin,
+        _ => Access::Viewer,
+    };
+    let session = match access::check(&state, req.headers(), access, !read) {
+        Ok(session) => session,
+        Err(denied) => return denied.response(v1, page),
+    };
+    if let Some(lookup) = lookup {
+        return crate::api::route(&state, req, lookup, session).await;
+    }
+    if !read {
         return match path.as_str() {
             "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
             p if p.starts_with("/api/settings/") => crate::settings::route(&state, req).await,
-            p if p.starts_with("/api/v1/") => crate::api::route(&state, req).await,
             _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
         };
     }
     match path.as_str() {
         "/healthz" => text(StatusCode::OK, "ok\n"),
+        "/login" => {
+            let mut response = full(StatusCode::SEE_OTHER, "");
+            set(&mut response, hyper::header::LOCATION, "/app/login");
+            set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
+            response
+        }
         "/api/stream" => sse(state, host),
         "/api/state" => json(&crate::render::state_json(&state)),
         "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
@@ -247,7 +282,6 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         p if p.starts_with("/api/settings/") => crate::settings::route(&state, req).await,
         // The React client (docs/plans/react-port.md): its JSON API, the
         // embedded build under /assets/ and the app document under /app.
-        p if p.starts_with("/api/v1/") => crate::api::route(&state, req).await,
         p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
             crate::http::assets::route(&req)
         }

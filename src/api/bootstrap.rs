@@ -1,9 +1,8 @@
-//! `GET /api/v1/bootstrap` (Public, `no-store`): what the shell needs before
-//! its first render (title, theme, which features are on, the refresh
-//! cadence). `config_error` is for a session only (null for a visitor).
+//! Signed-in application bootstrap data.
 
 use serde::Serialize;
 
+use crate::db::accounts::Role;
 use crate::state::AppState;
 
 /// How often the live loop samples container stats (`live::STATS_EVERY`).
@@ -12,6 +11,7 @@ pub const STATS_SECS: u64 = 5;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Bootstrap {
+    pub role: Role,
     /// `[page] title`, else the host name.
     pub title: String,
     pub hostname: String,
@@ -23,7 +23,6 @@ pub struct Bootstrap {
     /// Docker could not be read (the lists show the last known state).
     pub docker_error: Option<String>,
     /// The config file failed to load (the last good one is in use).
-    /// Session only: always null for a visitor.
     pub config_error: Option<String>,
     /// Alert incidents firing now.
     pub alerts_firing: u32,
@@ -53,7 +52,7 @@ pub struct Refresh {
     pub stats_secs: u64,
 }
 
-pub fn bootstrap(state: &AppState, signed: bool, now: i64) -> Bootstrap {
+pub fn bootstrap(state: &AppState, role: Role, now: i64) -> Bootstrap {
     let loaded = state.config.snapshot();
     let cfg = &loaded.config;
     let theme = match cfg.page.theme.as_str() {
@@ -62,6 +61,7 @@ pub fn bootstrap(state: &AppState, signed: bool, now: i64) -> Bootstrap {
     };
     let snap = state.snapshot();
     Bootstrap {
+        role,
         title: cfg
             .page
             .title
@@ -77,7 +77,7 @@ pub fn bootstrap(state: &AppState, signed: bool, now: i64) -> Bootstrap {
             system: cfg.system.enabled,
         },
         docker_error: super::containers::docker_error(cfg, &snap),
-        config_error: loaded.error.clone().filter(|_| signed),
+        config_error: loaded.error.clone(),
         alerts_firing: state.alerts.lock().unwrap().incidents.len() as u32,
         refresh: Refresh {
             system_secs: cfg.system.refresh.0.as_secs().max(1),
@@ -87,11 +87,7 @@ pub fn bootstrap(state: &AppState, signed: bool, now: i64) -> Bootstrap {
     }
 }
 
-pub fn get(
-    state: &AppState,
-    headers: &hyper::HeaderMap,
-) -> hyper::Response<crate::http::server::Body> {
-    let signed = crate::auth::current_user(state, headers).is_some();
+pub fn get(state: &AppState, role: Role) -> hyper::Response<crate::http::server::Body> {
     let now = crate::util::unix_now() as i64;
-    super::json(hyper::StatusCode::OK, &bootstrap(state, signed, now))
+    super::json(hyper::StatusCode::OK, &bootstrap(state, role, now))
 }

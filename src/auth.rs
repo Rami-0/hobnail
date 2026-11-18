@@ -414,6 +414,12 @@ pub(crate) struct Session {
     pub account: crate::db::accounts::Account,
 }
 
+impl Session {
+    pub fn csrf(&self) -> String {
+        csrf_for(&self.token)
+    }
+}
+
 pub(crate) fn sha256_hex(data: &[u8]) -> String {
     hex(digest::digest(&digest::SHA256, data).as_ref())
 }

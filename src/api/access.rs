@@ -1,34 +1,42 @@
-//! The `/api/v1` route table: every route declares who may call it, and the
-//! check runs before its handler (docs/plans/react-port.md 4.2, "Reads are
-//! declared, not open by default"). A path that is not in [`ROUTES`] is a
-//! 404; a known path with another method is a 405.
-//!
-//! Writes (any method but GET/HEAD) have already passed
-//! `auth::require_write` in `http::server::route` before they get here; a
-//! write row still declares its access (normally `Session`).
-//!
-//! Adding a route = adding a row (and a [`Handler`] variant). Pattern
-//! segments are literals or `<name>` captures. A capture is percent-decoded
-//! and must not be empty, `.`, `..`, or contain `/`, `\` or a control
-//! character (so `%2F` cannot smuggle a slash into a name).
+//! Route declarations and the shared authentication and role gate.
 
 use hyper::{HeaderMap, Method};
 
 use super::error::ApiError;
+use crate::auth::{self, Session, WriteDenied};
+use crate::db::accounts::Role;
 use crate::state::AppState;
+
+pub use crate::db::accounts::Account as Principal;
+
+impl Principal {
+    #[allow(dead_code)] // Used by board handlers in M2.
+    pub fn can_see_board(&self, id: &str) -> bool {
+        self.role == Role::Owner
+            || self
+                .scopes
+                .as_ref()
+                .is_none_or(|s| s.boards.iter().any(|b| b == id))
+    }
+
+    #[allow(dead_code)] // Used by integration handlers in M2.
+    pub fn can_see_integration(&self, id: &str) -> bool {
+        self.role == Role::Owner
+            || self
+                .scopes
+                .as_ref()
+                .is_none_or(|s| s.integrations.iter().any(|i| i == id))
+    }
+}
 
 /// Who may call a route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     /// Anyone (still behind the Host guard).
     Public,
-    /// A valid session cookie (`auth::current_user`).
-    #[cfg_attr(not(test), allow(dead_code))] // first used by phase 1 routes
-    Session,
-    /// Readable logs: `[logs] require_login = false`, or a session
-    /// (`logs::allowed`).
-    #[cfg_attr(not(test), allow(dead_code))] // first used by phase 3 (logs)
-    LogsGate,
+    Viewer,
+    Admin,
+    Owner,
 }
 
 /// Which handler answers a matched route (dispatched in `api::route`).
@@ -40,6 +48,22 @@ pub enum Handler {
     Container,
     Strips,
     Stream,
+    Onboard,
+    InviteAccept,
+    InviteValidate,
+    Invites,
+    InviteCreate,
+    InviteRevoke,
+    Users,
+    UserRole,
+    UserDisabled,
+    UserScopes,
+    UserSignOut,
+    UserDelete,
+    Password,
+    Sessions,
+    SessionRevoke,
+    SessionsRevoke,
 }
 
 #[derive(Debug)]
@@ -53,9 +77,6 @@ pub struct Route {
 }
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
-///
-/// The phase 1 reads are all `Public`, with the same visitor/session split
-/// as today's pages: session-only fields are left out for a visitor.
 pub const ROUTES: &[Route] = &[
     Route {
         method: "GET",
@@ -66,32 +87,128 @@ pub const ROUTES: &[Route] = &[
     Route {
         method: "GET",
         pattern: "/api/v1/bootstrap",
-        access: Access::Public,
+        access: Access::Viewer,
         handler: Handler::Bootstrap,
     },
     Route {
         method: "GET",
         pattern: "/api/v1/containers",
-        access: Access::Public,
+        access: Access::Viewer,
         handler: Handler::Containers,
     },
     Route {
         method: "GET",
         pattern: "/api/v1/containers/<name>",
-        access: Access::Public,
+        access: Access::Viewer,
         handler: Handler::Container,
     },
     Route {
         method: "GET",
         pattern: "/api/v1/strips",
-        access: Access::Public,
+        access: Access::Viewer,
         handler: Handler::Strips,
     },
     Route {
         method: "GET",
         pattern: "/api/v1/stream",
-        access: Access::Public,
+        access: Access::Viewer,
         handler: Handler::Stream,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/onboarding/owner",
+        access: Access::Public,
+        handler: Handler::Onboard,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/invites/accept",
+        access: Access::Public,
+        handler: Handler::InviteAccept,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/invites/validate",
+        access: Access::Public,
+        handler: Handler::InviteValidate,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/invites",
+        access: Access::Owner,
+        handler: Handler::Invites,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/invites",
+        access: Access::Owner,
+        handler: Handler::InviteCreate,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/invites/<id>",
+        access: Access::Owner,
+        handler: Handler::InviteRevoke,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/users",
+        access: Access::Owner,
+        handler: Handler::Users,
+    },
+    Route {
+        method: "PATCH",
+        pattern: "/api/v1/users/<id>/role",
+        access: Access::Owner,
+        handler: Handler::UserRole,
+    },
+    Route {
+        method: "PATCH",
+        pattern: "/api/v1/users/<id>/disabled",
+        access: Access::Owner,
+        handler: Handler::UserDisabled,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/users/<id>/scopes",
+        access: Access::Owner,
+        handler: Handler::UserScopes,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/users/<id>/sign-out",
+        access: Access::Owner,
+        handler: Handler::UserSignOut,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/users/<id>",
+        access: Access::Owner,
+        handler: Handler::UserDelete,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/account/password",
+        access: Access::Viewer,
+        handler: Handler::Password,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/account/sessions",
+        access: Access::Viewer,
+        handler: Handler::Sessions,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/account/sessions/<id>",
+        access: Access::Viewer,
+        handler: Handler::SessionRevoke,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/account/sessions",
+        access: Access::Viewer,
+        handler: Handler::SessionsRevoke,
     },
 ];
 
@@ -149,21 +266,58 @@ pub fn lookup(method: &Method, path: &str) -> Lookup {
     }
 }
 
-/// The access check, run before every handler. `Err` is the 401 to send.
-pub fn check(state: &AppState, headers: &HeaderMap, access: Access) -> Result<(), ApiError> {
-    match access {
-        Access::Public => Ok(()),
-        Access::Session => crate::auth::current_user(state, headers)
-            .map(|_| ())
-            .ok_or_else(ApiError::sign_in_required),
-        Access::LogsGate => {
-            if crate::logs::allowed(state, headers) {
-                Ok(())
-            } else {
-                Err(ApiError::logs_sign_in_required())
+pub(crate) enum Denied {
+    SignIn,
+    Role,
+    Write(WriteDenied),
+}
+
+impl Denied {
+    pub fn response(self, v1: bool, page: bool) -> hyper::Response<crate::http::server::Body> {
+        use crate::http::server::{full, set, text};
+        use hyper::StatusCode;
+        match self {
+            Self::Write(error) => error.response(),
+            Self::SignIn if v1 => ApiError::sign_in_required().response(),
+            Self::SignIn if page => {
+                let mut response = full(StatusCode::SEE_OTHER, "");
+                set(&mut response, hyper::header::LOCATION, "/app/login");
+                set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
+                response
             }
+            Self::SignIn => WriteDenied::NoSession.response(),
+            Self::Role if v1 => {
+                ApiError::new(StatusCode::FORBIDDEN, "forbidden", "insufficient role").response()
+            }
+            Self::Role => text(StatusCode::FORBIDDEN, "insufficient role\n"),
         }
     }
+}
+
+pub(crate) fn check(
+    state: &AppState,
+    headers: &HeaderMap,
+    access: Access,
+    write: bool,
+) -> Result<Option<Session>, Denied> {
+    let minimum = match access {
+        Access::Public => return Ok(None),
+        Access::Viewer => Role::Viewer,
+        Access::Admin => Role::Admin,
+        Access::Owner => Role::Owner,
+    };
+    let session = auth::request_session(state, headers).ok_or(if write {
+        Denied::Write(WriteDenied::NoSession)
+    } else {
+        Denied::SignIn
+    })?;
+    if write {
+        auth::check_write(&session, headers).map_err(Denied::Write)?;
+    }
+    if session.account.role < minimum {
+        return Err(Denied::Role);
+    }
+    Ok(Some(session))
 }
 
 fn match_path(pattern: &'static str, path: &str) -> Option<Vec<(&'static str, String)>> {
@@ -318,46 +472,27 @@ mod tests {
     }
 
     #[test]
-    fn check_each_access() {
-        let st = crate::ui::testutil::state_with(vec![], "");
-        let none = HeaderMap::new();
-        assert_eq!(check(&st, &none, Access::Public), Ok(()));
-        assert_eq!(
-            check(&st, &none, Access::Session),
-            Err(ApiError::sign_in_required())
-        );
-        // `[logs] require_login` defaults to true.
-        assert_eq!(
-            check(&st, &none, Access::LogsGate),
-            Err(ApiError::logs_sign_in_required())
-        );
-        let mut forged = HeaderMap::new();
-        forged.insert(
-            hyper::header::COOKIE,
-            format!("rh_session={}", "ab".repeat(32)).parse().unwrap(),
-        );
-        assert!(check(&st, &forged, Access::Session).is_err());
-        assert!(check(&st, &forged, Access::LogsGate).is_err());
-
-        // A valid session passes both.
-        let token = "cd".repeat(32);
-        let hash: String = ring::digest::digest(&ring::digest::SHA256, token.as_bytes())
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let now = crate::util::unix_now() as i64;
-        assert!(st.db.create_session(&hash, now, now + 3600));
-        let mut signed_in = HeaderMap::new();
-        signed_in.insert(
-            hyper::header::COOKIE,
-            format!("rh_session={token}").parse().unwrap(),
-        );
-        assert_eq!(check(&st, &signed_in, Access::Session), Ok(()));
-        assert_eq!(check(&st, &signed_in, Access::LogsGate), Ok(()));
-
-        let open = crate::ui::testutil::state_with(vec![], "[logs]\nrequire_login = false\n");
-        assert_eq!(check(&open, &none, Access::LogsGate), Ok(()));
-        assert!(check(&open, &none, Access::Session).is_err());
+    fn scope_checks_distinguish_empty_scopes_and_unrestricted_access() {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        db.recover_owner(None, "hash", 1).unwrap();
+        let mut account = db.accounts().unwrap().pop().unwrap();
+        use crate::db::accounts::Scopes;
+        account.scopes = Some(Scopes::default());
+        assert!(account.can_see_board("any"));
+        assert!(account.can_see_integration("any"));
+        account.role = Role::Admin;
+        assert!(!account.can_see_board("any"));
+        assert!(!account.can_see_integration("any"));
+        account.scopes = Some(Scopes {
+            boards: vec!["one".into()],
+            integrations: vec!["two".into()],
+        });
+        assert!(account.can_see_board("one"));
+        assert!(!account.can_see_board("two"));
+        assert!(account.can_see_integration("two"));
+        assert!(!account.can_see_integration("one"));
+        account.scopes = None;
+        assert!(account.can_see_board("any"));
+        assert!(account.can_see_integration("any"));
     }
 }

@@ -9,10 +9,12 @@ use hyper::header::{CACHE_CONTROL, CONTENT_TYPE};
 use hyper::{Request, Response, StatusCode};
 use serde::Serialize;
 
+use crate::auth::{CredentialAction, Session};
 use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
 pub mod access;
+mod accounts;
 pub mod bootstrap;
 pub mod containers;
 pub mod error;
@@ -30,19 +32,43 @@ use error::ApiError;
 /// Hash of the build inputs (set by the image build; `dev` otherwise).
 pub const CONTENT_HASH: &str = env!("RH_CONTENT_HASH");
 
-pub async fn route(state: &Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
-    let m = match access::lookup(req.method(), req.uri().path()) {
+pub(crate) async fn route(
+    state: &Arc<AppState>,
+    req: Request<Incoming>,
+    lookup: Lookup,
+    principal: Option<Session>,
+) -> Response<Body> {
+    let m = match lookup {
         Lookup::Found(m) => m,
         Lookup::NotFound => return ApiError::not_found().response(),
         Lookup::MethodNotAllowed(allow) => return ApiError::method_not_allowed_response(&allow),
     };
-    if let Err(e) = access::check(state, req.headers(), m.route.access) {
-        return e.response();
-    }
     let query = req.uri().query().unwrap_or("");
     match m.route.handler {
         Handler::Session => session::get(state, req.headers()),
-        Handler::Bootstrap => bootstrap::get(state, req.headers()),
+        Handler::Bootstrap => bootstrap::get(state, principal.expect("viewer gate").account.role),
+        Handler::Onboard => {
+            crate::auth::credential_route(state, req, CredentialAction::Onboard).await
+        }
+        Handler::InviteAccept => {
+            crate::auth::credential_route(state, req, CredentialAction::Accept).await
+        }
+        Handler::InviteValidate => accounts::validate_invite(state, query),
+        Handler::Invites
+        | Handler::InviteCreate
+        | Handler::InviteRevoke
+        | Handler::Users
+        | Handler::UserRole
+        | Handler::UserDisabled
+        | Handler::UserScopes
+        | Handler::UserSignOut
+        | Handler::UserDelete
+        | Handler::Password
+        | Handler::Sessions
+        | Handler::SessionRevoke
+        | Handler::SessionsRevoke => {
+            accounts::route(state, req, m, principal.expect("account gate")).await
+        }
         Handler::Containers => containers::list(state).await,
         Handler::Container => {
             let name = m.param("name").unwrap_or_default();
