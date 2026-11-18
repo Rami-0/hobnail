@@ -7,7 +7,7 @@ import { Button } from "../../ui/Button.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { Switch } from "../../ui/Switch.tsx";
-import { matcher, names, permalink, searchState, type Row } from "./model.ts";
+import { matcher, names, paneHref, permalink, searchState, type Row } from "./model.ts";
 import { copyLogText, LogPane, type PaneStatus, type ViewOptions } from "./pane.ts";
 import { ContainerContext } from "./ContainerContext.tsx";
 import "./logs.css";
@@ -166,9 +166,9 @@ export default function LogsPage() {
       setRangeError(""); setSearch({ since: f ? String(f) : null, until: t ? String(t) : null }, { replace: true });
     }}><Field id="logs-from" label="From" error={rangeErrorField === "from" ? rangeError : ""}><TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field id="logs-to" label="To" error={rangeErrorField === "to" ? rangeError : ""}><TextInput type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Button type="submit">Apply</Button></form>}
     <div className="log-panes" style={{ gridTemplateColumns: `repeat(${stack ? 1 : Math.max(1, panes.length)}, minmax(0, 1fr))` }}>
-      {stack && stackExists ? <Pane key={`stack:${stack}`} title={stack} stack query={`stack=${encodeURIComponent(stack)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} /> : panes.map((name) => <Pane key={name} title={name} query={`c=${encodeURIComponent(name)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} close={route.route.name === "logs" ? `/app/logs${panes.length > 1 ? `?c=${encodeURIComponent(panes.filter((n) => n !== name).join(","))}` : ""}` : undefined} />)}
+      {stack && stackExists ? <Pane key={`stack:${stack}`} title={stack} stack query={`stack=${encodeURIComponent(stack)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} /> : panes.map((name) => <Pane key={name} title={name} query={`c=${encodeURIComponent(name)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} close={route.route.name === "logs" ? paneHref(route.query, panes.filter((n) => n !== name), route.hash) : undefined} />)}
     </div>
     {route.route.name === "container_logs" && <LevelCounts name={route.route.ctr} range={route.search.get("range") || "6h"} />}
-    {route.route.name === "logs" && <a href={`/app/logs?sel=${encodeURIComponent(panes.join(","))}`}>Add a pane</a>}
+    {route.route.name === "logs" && <a href={paneHref(route.query, panes, route.hash, true)}>Add a pane</a>}
   </div>;
 }

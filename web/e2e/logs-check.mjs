@@ -227,8 +227,11 @@ try {
       const firstMatch = await tab.ev('Number(document.querySelector(".log-current").dataset.timestamp)');
       await inp.key("Enter"); await sleep(200);
       assert.ok(await tab.ev('Number(document.querySelector(".log-current").dataset.timestamp)') <= firstMatch, "older match steps chronologically across panes");
+      await tab.ev(`globalThis.retainedSources=logSources.filter(s=>s.readyState===1&&!s.url.includes('c=svc001'))`);
       await tab.ev('document.querySelector("[data-testid=log-pane] header>a[aria-label^=Close]")?.click()');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===3', "close pane in place");
+      assert.equal(await tab.ev('new URL(location.href).searchParams.get("search")'), "ERROR", "close retains shared search state");
+      assert.ok(await tab.ev('retainedSources.length===3&&retainedSources.every(s=>s.readyState===1)'), "remaining panes keep their streams");
       const leaveAt = Date.now(); await tab.ev('document.querySelector("nav.crumb a").click()'); await wait('!!document.querySelector("[data-testid=logs-picker]")', "route leave"); measurements.leaveAt = leaveAt;
       await sleep(2500);
       const status = await fetch(new URL("/api/logs/status", base), { headers }).then((r) => r.json()); assert.equal(status.viewer_streams, 0, "viewer stream closed after leave"); measurements.streamCountZeroAfterMs = Date.now() - leaveAt;

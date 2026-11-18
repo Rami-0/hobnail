@@ -2,6 +2,7 @@ import { useBootstrap, useContainers } from "../../live/index.ts";
 import { rowLink, viewerHost } from "../../format/index.ts";
 import { TabNav } from "../../ui/TabNav.tsx";
 import { ServiceIcon, StatusDot } from "../containers/parts.tsx";
+import { paneHref } from "./model.ts";
 import { tabs } from "../container/range.ts";
 
 export function ContainerContext({ name, query }: { name: string; query: string }) {
@@ -16,7 +17,7 @@ export function ContainerContext({ name, query }: { name: string; query: string 
       <div><h1>{row && <StatusDot dot={row.dot} />}{row?.title ?? name}</h1><p className="mono muted">{row?.title !== name && `${name} · `}{row?.image}{row && ` · ${row.label}`}</p></div>
       {open && <a className="btn" href={open} target="_blank" rel="noopener noreferrer">Open</a>}
       {admin && <a className="btn ghost" href={`${root}?edit=override`}>Edit</a>}
-      <a href={`/app/logs?sel=${encodeURIComponent(name)}`}>Side by side</a>
+      <a href={paneHref(query, [name], location.hash, true)}>Side by side</a>
     </header>
     {live.data?.docker_error && <p className="banner warn" role="alert">Docker is unreachable. Logs cannot be read right now. {live.data.docker_error}</p>}
     <TabNav label="Container sections" items={tabs(name, query).filter((tab) => tab.id !== "processes" || admin)} current="logs" testId="ctr-tabs" />

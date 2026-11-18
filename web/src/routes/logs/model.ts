@@ -130,3 +130,11 @@ export function streamParams(query: string, range: string, tail: number, cap: nu
   else if (seeking) params.set("since", String(Math.max(0, target / 1000 - 120)));
   return params;
 }
+
+export function paneHref(query: string, containers: string[], hash = "", picking = false): string {
+  const params = new URLSearchParams(query);
+  params.delete(picking ? "c" : "sel");
+  const key = picking ? "sel" : "c";
+  if (containers.length) params.set(key, containers.join(",")); else params.delete(key);
+  return "/app/logs" + (params.size ? `?${params}` : "") + hash;
+}

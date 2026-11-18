@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges, streamParams } from "./model.ts";
+import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges, streamParams, paneHref } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -79,4 +79,14 @@ test("ranges, seeks and reconnects read a full ring while the initial live tail 
   assert.equal(seek.get("tail"), "5000"); assert.equal(seek.get("since"), "180");
   assert.equal(streamParams("c=web", "", 500, 5000, null, 600000, 500000).get("tail"), "500");
   assert.equal(streamParams("c=web", "", 500, 5000, null, 0, 500000).get("since"), "0");
+});
+
+test("pane selection links retain search, levels, range and permalink state", () => {
+  const query = "?c=a,b&search=ERROR&case=1&re=1&range=1h&levels=ew&show=3";
+  const close = new URL(paneHref(query, ["b"], "#t=123"), "https://test.invalid");
+  assert.equal(close.searchParams.get("c"), "b"); assert.equal(close.hash, "#t=123");
+  for (const [key,value] of new URLSearchParams(query)) if (key!=="c") assert.equal(close.searchParams.get(key), value);
+  const pick = new URL(paneHref(query, ["a","b"], "#t=123", true), "https://test.invalid");
+  assert.equal(pick.searchParams.has("c"),false); assert.equal(pick.searchParams.get("sel"), "a,b");
+  assert.equal(pick.searchParams.get("range"), "1h"); assert.equal(pick.hash, "#t=123");
 });
