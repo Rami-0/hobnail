@@ -4,7 +4,7 @@
 //   first route (index.html + every JS/CSS it references directly,
 //     modulepreload links included)                 <= 180 KB gzip
 //   any other JS/CSS chunk                           <=  60 KB gzip
-//     charts vendor chunk ("recharts"/"charts-vendor") <= 110 KB gzip
+//     charts vendor chunk ("recharts"/"charts-vendor") <=  60 KB gzip
 //   whole dist: <= 1.3 MB raw (non-.gz files) and <= 400 KB gzip
 //   npm run size
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -15,7 +15,7 @@ const KB = 1000;
 const BUDGET = {
   firstRoute: 180 * KB,
   chunk: 60 * KB,
-  charts: 110 * KB,
+  charts: 60 * KB,
   distRaw: 1300 * KB,
   distGzip: 400 * KB,
 };

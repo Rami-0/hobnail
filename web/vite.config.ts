@@ -52,6 +52,12 @@ export default defineConfig(({ command }) => {
       assetsDir: "assets",
       emptyOutDir: true,
       sourcemap: false,
+      // Split the chart implementation itself; its former single lazy chunk
+      // exceeded M2b's 60 KB gzip cap. React and SDK imports keep their normal
+      // interaction boundaries instead of joining a global vendor bundle.
+      rolldownOptions: { output: { codeSplitting: { groups: [
+        { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 200_000 },
+      ] } } },
       // Inline nothing as data: URLs; every asset is a hashed file the
       // server caches for a year.
       assetsInlineLimit: 0,
