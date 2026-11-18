@@ -193,7 +193,8 @@ pub(super) fn configure(conn: &Connection, file: bool) -> rusqlite::Result<()> {
          PRAGMA journal_size_limit = 4194304;
          PRAGMA wal_autocheckpoint = 500;
          PRAGMA temp_store = MEMORY;
-         PRAGMA foreign_keys = ON;",
+         PRAGMA foreign_keys = ON;
+         PRAGMA recursive_triggers = ON;",
     )
 }
 
@@ -269,8 +270,63 @@ mod tests {
             "UPDATE users SET role = 'admin'",
             "UPDATE users SET disabled = 1",
             "DELETE FROM users",
+            "INSERT OR REPLACE INTO users (name, password_hash, role, created, updated)
+             VALUES ('alice', 'newhash', 'viewer', 2, 2)",
         ] {
             assert!(conn.execute(sql, []).is_err(), "{sql}");
         }
+    }
+
+    #[test]
+    fn boards_start_empty_and_integration_secrets_are_origin_bound() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        migrate(&mut conn).unwrap();
+        let new_board = || {
+            conn.query_row(
+                "INSERT INTO boards (name, created, updated) VALUES ('Blank', 1, 1)
+                 RETURNING id, version",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap()
+        };
+        let (board, version) = new_board();
+        assert_eq!(board.len(), 32);
+        assert_eq!(version, 0);
+        assert_ne!(board, new_board().0);
+        let items: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM board_items WHERE board_id = ?1",
+                [&board],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(items, 0);
+        let integration: String = conn
+            .query_row(
+                "INSERT INTO integrations (name, kind, origin, secret, secret_origin)
+             VALUES ('Example', 'example', 'https://example.test', 'secret', 'https://example.test')
+             RETURNING id",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(integration.len(), 32);
+        assert!(conn
+            .execute(
+                "UPDATE integrations SET origin = 'https://new.example.test' WHERE id = ?1",
+                [&integration],
+            )
+            .is_err());
+        assert_eq!(
+            conn.execute(
+                "UPDATE integrations SET origin = 'https://new.example.test', secret = NULL,
+             secret_origin = NULL WHERE id = ?1",
+                [&integration],
+            )
+            .unwrap(),
+            1
+        );
     }
 }
