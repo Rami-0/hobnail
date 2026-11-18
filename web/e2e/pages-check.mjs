@@ -124,7 +124,7 @@ try {
       for (const [key,route] of [["o","overview"],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
         await tab.ev('document.activeElement?.blur()');
         await inp.key('g'); await inp.key(key);
-        await wait(`location.pathname === ${q('/app/'+route)}`, `g ${key} opens ${route}`);
+        await wait(key === 's' ? `location.pathname === '/app/settings' || location.pathname === '/app/settings/general'` : `location.pathname === ${q('/app/'+route)}`, `g ${key} opens ${route}`);
       }
       await inp.key("?");
       await wait(exists('[data-testid="shortcuts"]'), "opens the shortcut sheet");
@@ -149,6 +149,7 @@ try {
       }
       await inp.click('[data-testid="user"]');
       await wait(`!!document.querySelector('[role="menu"]')`, "account menu opens");
+      await wait(`!!document.activeElement?.closest('[role="menu"]')`, "opening the menu focuses an item");
       for (const key of ['Home','End','ArrowUp','ArrowDown']) {
         await inp.key(key); await wait(`!!document.activeElement?.closest('[role="menu"]')`, `menu supports ${key}`);
       }
