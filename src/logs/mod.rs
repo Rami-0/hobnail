@@ -16,7 +16,7 @@
 //! context lines itself (`static/logs.js`).
 //!
 //! Log text is never written to the app's own log, the database or alert
-//! messages. Logs need a signed-in user by default (`[logs] require_login`,
+//! messages. Logs need a signed-in user (
 //! default true): container logs often contain secrets. Only containers the
 //! dashboard shows can be tailed (not ones hidden or excluded by the owner).
 
@@ -116,12 +116,6 @@ pub fn rule_summary(r: &RuleConfig) -> String {
         r.count.unwrap_or(1),
         crate::util::human_duration(r.window.map(|d| d.0.as_secs()).unwrap_or(300)),
     )
-}
-
-/// Whether this request may see logs.
-pub fn allowed(state: &AppState, headers: &hyper::HeaderMap) -> bool {
-    !state.config.current().logs.require_login
-        || crate::auth::current_user(state, headers).is_some()
 }
 
 /// The one rule for whose logs may be read: a valid name the owner has not
@@ -259,10 +253,8 @@ fn stream_query(q: &[(String, String)], default_tail: u32) -> client::Query {
 pub async fn route(
     state: &Arc<AppState>,
     req: &hyper::Request<hyper::body::Incoming>,
+    session_hash: &str,
 ) -> hyper::Response<Body> {
-    if !allowed(state, req.headers()) {
-        return text(StatusCode::UNAUTHORIZED, "sign in to view logs\n");
-    }
     let q = parse_query(req.uri().query().unwrap_or(""));
     let cfg = state.config.current();
     match req.uri().path() {
@@ -271,7 +263,12 @@ pub async fn route(
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
-            tail::sse(state, names, stream_query(&q, cfg.logs.tail()))
+            tail::sse(
+                state,
+                names,
+                stream_query(&q, cfg.logs.tail()),
+                session_hash.to_owned(),
+            )
         }
         "/api/logs/download" => {
             let names = targets(state, &q, 4);
@@ -286,7 +283,8 @@ pub async fn route(
                 .chars()
                 .filter(|c| c.is_ascii_digit() || *c == 'T')
                 .collect();
-            tail::download(state, names.clone(), rq, &format!("{base}-{stamp}.log"))
+            let filename = format!("{base}-{stamp}.log");
+            tail::download(state, names, rq, &filename, session_hash.to_owned())
         }
         "/api/logs/levels" => {
             let Some(name) = query_get(&q, "c").filter(|n| client::valid_name(n)) else {

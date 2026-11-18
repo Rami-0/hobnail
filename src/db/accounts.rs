@@ -314,6 +314,19 @@ impl Db {
         })
     }
 
+    pub fn session_is_valid(&self, hash: &str, now: i64) -> bool {
+        self.with(false, |i| {
+            i.conn.query_row(
+                "SELECT EXISTS (
+                SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
+                WHERE token_hash = ?1 AND expires > ?2 AND disabled = 0
+            )",
+                params![hash, now],
+                |row| row.get(0),
+            )
+        })
+    }
+
     pub fn account_session(&self, hash: &str, now: i64, expires: i64) -> Option<Account> {
         self.with(None, |i| {
             let query = format!(

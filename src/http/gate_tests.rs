@@ -1161,7 +1161,6 @@ async fn req_bounded(
 }
 
 /// What no visitor response may contain.
-const PROBE_SECRET: &str = "SECRET-PROBE-OUTPUT";
 const CONFIG_SECRET: &str = "unknown field";
 /// Every owner-hidden container's name starts with this.
 const HIDDEN_PREFIX: &str = "secret-";

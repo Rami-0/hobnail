@@ -254,6 +254,7 @@ fn current(state: &AppState) -> (ContainersView, u64) {
 async fn run(
     st: Arc<AppState>,
     topics: Topics,
+    session_hash: String,
     mut sub: broadcast::Receiver<Arc<str>>,
     tx: mpsc::Sender<Bytes>,
 ) {
@@ -308,13 +309,15 @@ async fn run(
             _ = ping.tick() => Bytes::from_static(b": ping\n\n"),
             _ = tx.closed() => break,
         };
-        if tx.send(msg).await.is_err() {
+        if !st.db.session_is_valid(&session_hash, crate::auth::now_s())
+            || tx.send(msg).await.is_err()
+        {
             break;
         }
     }
 }
 
-pub fn get(state: &Arc<AppState>, query: &str, head: bool) -> Response<Body> {
+pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String) -> Response<Body> {
     let mut r = if head {
         // Headers only: no subscription, no viewer.
         full(StatusCode::OK, Bytes::new())
@@ -322,7 +325,13 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool) -> Response<Body> {
         let (tx, rx) = mpsc::channel::<Bytes>(QUEUE);
         let sub = state.events.subscribe();
         let guard = state.viewer_guard();
-        tokio::spawn(run(state.clone(), Topics::parse(query), sub, tx));
+        tokio::spawn(run(
+            state.clone(),
+            Topics::parse(query),
+            session_hash,
+            sub,
+            tx,
+        ));
         Response::new(StreamBody { rx, _guard: guard }.boxed_unsync())
     };
     set(&mut r, CONTENT_TYPE, "text/event-stream");

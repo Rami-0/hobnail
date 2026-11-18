@@ -235,15 +235,20 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
         };
     }
-    match path.as_str() {
+    let mut response = match path.as_str() {
         "/healthz" => text(StatusCode::OK, "ok\n"),
+        "/favicon.ico" => crate::ui::pwa::route(&state, "/icon.svg").expect("favicon asset"),
         "/login" => {
             let mut response = full(StatusCode::SEE_OTHER, "");
             set(&mut response, hyper::header::LOCATION, "/app/login");
             set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
             response
         }
-        "/api/stream" => sse(state, host),
+        "/api/stream" => sse(
+            state,
+            host,
+            session.as_ref().expect("viewer gate").hash.clone(),
+        ),
         "/api/state" => json(&crate::render::state_json(&state)),
         "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
         "/static/app.css" => asset(req.uri().query(), APP_CSS, CSS, APP_CSS_V),
@@ -269,7 +274,9 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             crate::ui::icons::dashboard_icon(&state, &p[10..], letter).await
         }
         p if p.starts_with("/icons/") => crate::ui::icon_response(&state, &p[7..]),
-        p if p.starts_with("/api/logs/") => crate::logs::route(&state, &req).await,
+        p if p.starts_with("/api/logs/") => {
+            crate::logs::route(&state, &req, &session.as_ref().expect("viewer gate").hash).await
+        }
         p if p.starts_with("/api/containers/") => {
             crate::ui::pages::container::api(&state, &req).await
         }
@@ -286,7 +293,11 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             crate::http::assets::route(&req)
         }
         _ => crate::ui::routes::route(&state, &req, &host).await,
+    };
+    if session.is_some() {
+        set(&mut response, CACHE_CONTROL, "no-store");
     }
+    response
 }
 
 pub fn full(status: StatusCode, body: impl Into<Bytes>) -> Response<Body> {
@@ -381,7 +392,7 @@ pub fn sse_event(event: &str, data: &str) -> Bytes {
     Bytes::from(s)
 }
 
-fn sse(state: Arc<AppState>, host: String) -> Response<Body> {
+fn sse(state: Arc<AppState>, host: String, session_hash: String) -> Response<Body> {
     let (tx, rx) = mpsc::channel::<Bytes>(16);
     let mut sub = state.events.subscribe();
     let guard = state.viewer_guard();
@@ -395,6 +406,7 @@ fn sse(state: Arc<AppState>, host: String) -> Response<Body> {
         loop {
             tokio::select! {
                 m = sub.recv() => {
+                    if !st.db.session_is_valid(&session_hash, crate::auth::now_s()) { break; }
                     let id = match m {
                         Ok(id) => id,
                         Err(broadcast::error::RecvError::Lagged(_)) => Arc::from("reload"),
@@ -410,6 +422,7 @@ fn sse(state: Arc<AppState>, host: String) -> Response<Body> {
                     if tx.send(msg).await.is_err() { break; }
                 }
                 _ = ping.tick() => {
+                    if !st.db.session_is_valid(&session_hash, crate::auth::now_s()) { break; }
                     if tx.send(Bytes::from_static(b": ping\n\n")).await.is_err() { break; }
                 }
                 _ = tx.closed() => break,

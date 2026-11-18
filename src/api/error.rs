@@ -19,7 +19,7 @@ pub struct ApiError {
     #[cfg_attr(test, ts(skip))]
     pub status: StatusCode,
     /// Stable, machine-readable: `not_found`, `method_not_allowed`,
-    /// `sign_in_required`, `logs_sign_in_required`, `bad_request`,
+    /// `sign_in_required`, `bad_request`,
     /// `internal` (500: a handler task failed).
     pub code: &'static str,
     /// Plain words for a person.
@@ -67,14 +67,6 @@ impl ApiError {
         )
     }
 
-    pub fn logs_sign_in_required() -> Self {
-        Self::new(
-            StatusCode::UNAUTHORIZED,
-            "logs_sign_in_required",
-            "sign in to read logs",
-        )
-    }
-
     /// A malformed request; `field` names the offending field, if any.
     pub fn bad_request(message: impl Into<String>, field: Option<&str>) -> Self {
         Self {
@@ -115,11 +107,6 @@ mod tests {
             (ApiError::not_found(), 404, "not_found"),
             (ApiError::method_not_allowed(), 405, "method_not_allowed"),
             (ApiError::sign_in_required(), 401, "sign_in_required"),
-            (
-                ApiError::logs_sign_in_required(),
-                401,
-                "logs_sign_in_required",
-            ),
             (ApiError::bad_request("bad", None), 400, "bad_request"),
         ];
         for (e, status, code) in cases {

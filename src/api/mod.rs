@@ -75,7 +75,12 @@ pub(crate) async fn route(
             containers::get(state, req.headers(), name, query).await
         }
         Handler::Strips => strips::get(state).await,
-        Handler::Stream => stream::get(state, query, req.method() == hyper::Method::HEAD),
+        Handler::Stream => stream::get(
+            state,
+            query,
+            req.method() == hyper::Method::HEAD,
+            principal.expect("viewer gate").hash,
+        ),
     }
 }
 

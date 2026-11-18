@@ -850,7 +850,6 @@ fn logs_need_a_login_by_default() {
         assert_eq!(s, 401, "{p}");
         assert!(html.contains("set-password"), "explains how to unlock: {p}");
     }
-    assert!(!super::allowed(&st, &hyper::HeaderMap::new()));
 }
 
 #[test]

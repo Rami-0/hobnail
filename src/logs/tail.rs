@@ -187,9 +187,15 @@ fn meta_json(idx: usize, i: &Info) -> String {
 
 /// `GET /api/logs/stream`: SSE with events `meta`, `l` (array of lines),
 /// `err`, `end` (one container's stream ended) and `done` (all ended).
-pub fn sse(state: &Arc<AppState>, names: Vec<String>, q: Query) -> Response<Body> {
+pub fn sse(
+    state: &Arc<AppState>,
+    names: Vec<String>,
+    q: Query,
+    session_hash: String,
+) -> Response<Body> {
     let (tx, rx) = mpsc::channel::<Bytes>(BODY_QUEUE);
     let socket = state.env.docker_socket.clone();
+    let db = state.db.clone();
     tokio::spawn(async move {
         let (ltx, mut lrx) = mpsc::channel::<Msg>(LINE_QUEUE);
         for (i, n) in names.iter().enumerate() {
@@ -206,13 +212,17 @@ pub fn sse(state: &Arc<AppState>, names: Vec<String>, q: Query) -> Response<Body
             let first = tokio::select! {
                 m = lrx.recv() => m,
                 _ = ping.tick() => {
-                    if tx.send(Bytes::from_static(b": p\n\n")).await.is_err() {
+                    if !db.session_is_valid(&session_hash, crate::auth::now_s())
+                        || tx.send(Bytes::from_static(b": p\n\n")).await.is_err() {
                         return;
                     }
                     continue;
                 }
                 _ = tx.closed() => return,
             };
+            if !db.session_is_valid(&session_hash, crate::auth::now_s()) {
+                return;
+            }
             let Some(first) = first else {
                 let _ = tx.send(sse_event("done", "")).await;
                 return;
@@ -303,9 +313,11 @@ pub fn download(
     names: Vec<String>,
     q: Query,
     filename: &str,
+    session_hash: String,
 ) -> Response<Body> {
     let (tx, rx) = mpsc::channel::<Bytes>(BODY_QUEUE);
     let socket = state.env.docker_socket.clone();
+    let db = state.db.clone();
     let several = names.len() > 1;
     tokio::spawn(async move {
         for name in names {
@@ -315,6 +327,9 @@ pub fn download(
             tokio::spawn(reader(socket.clone(), 0, name.clone(), q, ltx));
             let mut chunk = String::new();
             while let Some(m) = lrx.recv().await {
+                if !db.session_is_valid(&session_hash, crate::auth::now_s()) {
+                    return;
+                }
                 match m {
                     Msg::Lines(_, ls) => {
                         for l in ls {

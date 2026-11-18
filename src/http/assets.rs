@@ -144,7 +144,12 @@ pub fn resolve(
     let mut headers = vec![(CONTENT_TYPE, a.ctype), (X_CONTENT_TYPE_OPTIONS, "nosniff")];
     if is_app {
         headers.push((CACHE_CONTROL, "no-cache"));
-        headers.push((REFERRER_POLICY, "same-origin"));
+        let referrer = if path.starts_with("/app/invite/") {
+            "no-referrer"
+        } else {
+            "same-origin"
+        };
+        headers.push((REFERRER_POLICY, referrer));
         headers.push((CONTENT_SECURITY_POLICY, CSP));
     } else {
         headers.push((CACHE_CONTROL, IMMUTABLE));
