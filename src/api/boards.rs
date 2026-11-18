@@ -13,7 +13,9 @@ use super::{
 };
 use crate::{db::accounts::Role, http::server::Body, model::Container, state::AppState};
 
-const MAX_DOCUMENT: usize = 512 * 1024;
+// A full document with the largest supported set of links must round-trip
+// after the server adds section and item IDs.
+const MAX_DOCUMENT: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
