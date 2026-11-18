@@ -46,6 +46,7 @@ try {
       if(!focus) problems.push('no visible keyboard focus ring');
       results.push({width,route,controls:controls.length,problems});
       failures.push(...problems.map(p=>`${width} ${route}: ${p}`));
+      fs.writeFileSync(path.join(process.env.OUT, "progress.json"), JSON.stringify(results,null,2));
       console.log(`${problems.length?'FAIL':'ok'} ${width} ${route}: ${controls.length} controls, ${problems.length} violations`);
     };
     try {
