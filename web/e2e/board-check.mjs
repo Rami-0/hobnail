@@ -53,9 +53,11 @@ try {
   await wait(`document.querySelector('[data-section="0"][data-item="0"] h3')?.textContent === "second"`, "Alt+Down moves an item");
   await inp.key("ArrowRight", { modifiers: 8 });
   await wait(`document.querySelector('[data-section="0"][data-item="1"] input[id$="desktop"]')?.value === "5"`, "Shift+Right resizes the moved item");
+  await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(".suggestions button")', "suggestions include discovered containers"); await inp.click('.suggestions button'); await wait(`!${visible("board-picker")}`);
   const before = boardPuts; await inp.click('[data-testid="board-save"]'); await wait(`!${visible("board-editor")}`, "Save exits edit mode"); check(boardPuts - before === 1, "Save sends exactly one board PUT");
-  await tab.send("Page.reload"); await wait('document.querySelectorAll("[data-testid=board-tile]").length === 2', "reload preserves saved items");
+  await tab.send("Page.reload"); await wait('document.querySelectorAll("[data-testid=board-tile]").length === 3', "reload preserves saved items");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`, "draft saved to server");
+  await inp.click('nav[data-testid="sidebar"] a[href="/app/containers"]'); await wait('!!document.querySelector("[role=dialog][data-open]")', "unsaved navigation asks before leaving"); await inp.click('[role="dialog"][data-open] .dlg-ft button'); await wait(visible("board-editor"), "Keep editing preserves local work");
   await tab.send("Page.reload"); await wait(visible("board-draft"), "reload offers server draft"); await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-editor"), "draft resumes");
   await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`);
   const secondSession = await login(); const remote = (await api("GET", `/boards/${boardId}`, undefined, secondSession)).data.document;

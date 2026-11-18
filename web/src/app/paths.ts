@@ -17,7 +17,7 @@ export type Route =
 
 /** The route's parameters by name (`{ name: "web-1" }` on /app/containers/web-1). */
 export function routeParams(r: Route): Record<string, string> {
-  return r.name === "container" ? { name: r.ctr } : {};
+  return r.name === "container" ? { name: r.ctr } : r.name === "board" ? { id: r.id } : {};
 }
 
 /** `/app/login` -> `/login`, `/app` and `/app/` -> `/`; null outside the base. */

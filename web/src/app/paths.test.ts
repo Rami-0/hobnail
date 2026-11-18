@@ -152,3 +152,11 @@ test("link interception: the browser keeps modifiers, other buttons, targets, do
   // A hash on another client page is a navigation.
   assert.equal(interceptedPath(click({ href: "http://h.example/app/login#pw" })), "/app/login#pw");
 });
+
+test("board and Settings routes stay inside the client", () => {
+  const id = "a".repeat(32);
+  assert.deepEqual(matchRoute(`/app/boards/${id}`), { name: "board", id });
+  assert.deepEqual(routeParams(matchRoute(`/app/boards/${id}`)), { id });
+  assert.deepEqual(matchRoute("/app/settings/integrations"), { name: "settings", tab: "integrations" });
+  assert.equal(matchRoute("/app/boards/not-an-id").name, "not_found");
+});

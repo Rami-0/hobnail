@@ -26,15 +26,16 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   const live = useContainers();
   const p = item.payload;
   const matched = resolved?.container;
-  const container = matched ? live.data?.groups.flatMap((g) => g.containers).find((c) => c.name === matched.name) ?? matched : null;
+  const container = matched ? live.data ? live.data.groups.flatMap((g) => g.containers).find((c) => c.name === matched.name) ?? null : matched : null;
+  const targetMissing = resolved?.missing || (p.kind === "container" && !!matched && !!live.data && !container);
   const integration = resolved?.integration;
   const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? p.widget_id : integration?.name ?? "Integration";
   const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : integration?.admin?.icon;
   const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : integration?.base_url;
-  return <div className="board-tile" data-testid="board-tile" data-missing={resolved?.missing || undefined}>
+  return <div className="board-tile" data-testid="board-tile" data-missing={targetMissing || undefined}>
     <div className="board-tile-head"><BoardIcon name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <h3>{href ? <a href={href}>{title}</a> : title}</h3></div>
-    {resolved?.missing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
+    {targetMissing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
       p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
       p.kind === "link" ? <p className="muted">Saved link · {p.url}</p> :
       p.kind === "integration" ? <><p className="muted">{integration?.base_url}</p><p>{integration?.admin?.enabled === false ? "Disabled" : "No connection test recorded"}</p></> :

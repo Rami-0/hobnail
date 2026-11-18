@@ -97,7 +97,7 @@ export function rebase(base: BoardDocument, mine: BoardDocument, current: BoardD
   return normalize({ version: current.version, sections });
 }
 export function iconSource(name: string | null | undefined, enabled: boolean): string | null {
-  return enabled && name && /^[a-z0-9][a-z0-9-]*$/.test(name) ? `/api/v1/icons/${encodeURIComponent(name)}` : null;
+  return enabled && name && /^[a-zA-Z0-9_-]{1,96}$/.test(name) ? `/api/v1/icons/${encodeURIComponent(name)}` : null;
 }
 export function avatar(title: string): string { return Array.from(title.trim())[0]?.toUpperCase() ?? "?"; }
 export function origin(url: string): string | null {
