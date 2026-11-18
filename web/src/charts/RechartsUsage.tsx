@@ -49,6 +49,7 @@ type Kind = "cpu" | "mem";
 type Layer = "avg" | "max" | "cmp";
 type Unit = "pct" | "bytes" | "rate" | "scalar" | "temp";
 const HISTORY: Record<string, [string, Unit]> = {
+  mem_pct: ["Memory of limit", "pct"], log_error: ["Log errors", "scalar"], log_warn: ["Log warnings", "scalar"],
   cpu: ["CPU", "pct"], load1: ["Load (1 min)", "scalar"], mem: ["Memory", "bytes"],
   swap: ["Swap", "bytes"], disk: ["Disk used", "pct"], temp: ["Temperature", "temp"],
   net_rx: ["Network in", "rate"], net_tx: ["Network out", "rate"],
