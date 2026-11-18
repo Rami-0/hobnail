@@ -24,7 +24,7 @@ export default function Alerts() {
       <section className="panel history-block" aria-label="Firing now">
         <h2>Firing now</h2>
         {data.firing.length ? <ul className="history-events">{data.firing.map((incident) => <li key={`${incident.rule}:${incident.subject}`} data-testid="row">
-          <strong>{incident.container && names.has(incident.subject) ? <a href={containerHref(incident.subject)}>{incident.subject}</a> : incident.subject}</strong>{" "}
+          <strong><a href={incident.href}>{incident.subject}</a></strong>{" "}
           {incident.state} · {incident.rule} · <RelativeTime at={incident.since} />
           {incident.container && names.has(incident.subject) && <> · <a href={logsHref(incident.subject, incident.since)}>Logs</a></>}
           {!incident.notified && <span className="muted"> · Notification pending or suppressed</span>}

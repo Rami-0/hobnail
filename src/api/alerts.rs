@@ -16,6 +16,7 @@ pub(super) struct AlertIncident {
     pub rule: String,
     pub subject: String,
     pub container: bool,
+    pub href: String,
     pub state: String,
     pub since: u64,
     pub notified: bool,
@@ -57,10 +58,23 @@ pub(super) fn firing(state: &AppState) -> Vec<AlertIncident> {
             {
                 return None;
             }
+            let href =
+                match crate::ui::alerts::subject_href(&config, &incident.rule, &incident.subject) {
+                    Some((href, false)) => format!(
+                        "/app{}",
+                        if href.starts_with("/#") {
+                            href.replacen("/#", "/overview#", 1)
+                        } else {
+                            href
+                        }
+                    ),
+                    _ => "/app/alerts".to_string(),
+                };
             Some(AlertIncident {
                 rule: incident.rule.clone(),
                 subject: incident.subject.clone(),
                 container,
+                href,
                 state: incident.state.clone(),
                 since: incident.since,
                 notified: incident.notified,

@@ -14,6 +14,8 @@ use crate::state::AppState;
 pub(super) struct OverviewAttention {
     name: String,
     title: String,
+    href: String,
+    container: bool,
     reason: String,
     severity: String,
     detail: String,
@@ -75,6 +77,8 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             Some(OverviewAttention {
                 name: row.name.clone(),
                 title: row.title.clone(),
+                href: format!("/app/containers/{}", crate::ui::fmt::url_encode(&row.name)),
+                container: true,
                 reason: if row.exit_code.is_some() {
                     "exit"
                 } else if row.restarts > 1 {
@@ -95,6 +99,59 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             })
         })
         .collect();
+    attention.extend(
+        firing
+            .iter()
+            .filter(|i| !i.container)
+            .map(|i| OverviewAttention {
+                name: i.subject.clone(),
+                title: i.subject.clone(),
+                href: i.href.clone(),
+                container: false,
+                reason: "alert".into(),
+                severity: "bad".into(),
+                detail: format!("{} · {}", i.state, i.rule),
+                since: Some(i.since as i64),
+                probe: None,
+            }),
+    );
+    if attention.len() < 8 {
+        let strips = crate::ui::view::strips(state, now);
+        for row in rows
+            .iter()
+            .filter(|row| row.state == "running" && row.attention.is_none())
+        {
+            if attention.iter().any(|entry| entry.name == row.name) {
+                continue;
+            }
+            let Some(strip) = strips.by_name.get(&row.name) else {
+                continue;
+            };
+            let Some(index) = (strip.cells.len().saturating_sub(4)..strip.cells.len())
+                .rev()
+                .find(|&i| strip.cells[i] == crate::db::strips::Cell::Bad)
+            else {
+                continue;
+            };
+            attention.push(OverviewAttention {
+                name: row.name.clone(),
+                title: row.title.clone(),
+                href: format!("/app/containers/{}", crate::ui::fmt::url_encode(&row.name)),
+                container: true,
+                reason: "recovered".into(),
+                severity: "warn".into(),
+                detail: format!(
+                    "Recovered after: {}",
+                    strip.why.get(&index).map_or("problem", String::as_str)
+                ),
+                since: None,
+                probe: None,
+            });
+            if attention.len() >= 8 {
+                break;
+            }
+        }
+    }
     attention.sort_by_key(|row| row.severity != "bad");
     attention.truncate(8);
     let mut remaining_probes = crate::ui::pages::overview::PROBES_MAX;

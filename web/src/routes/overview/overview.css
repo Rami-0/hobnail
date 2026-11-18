@@ -8,3 +8,4 @@
 .overview-map a:nth-child(odd) rect { fill: var(--raised); }
 .overview-map a:focus-visible rect { stroke: var(--accent); stroke-width: 3; }
 .overview-map text { fill: var(--text); font-size: 12px; }
+.overview-health-meter rect { fill: var(--ok); }

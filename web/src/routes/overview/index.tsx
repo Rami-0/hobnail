@@ -80,10 +80,12 @@ export default function Overview() {
         <a href="/app/containers?state=problem"><strong>{problems ?? "—"}</strong> problems</a>
         <a href="/app/alerts"><strong>{overview?.firing ?? "—"}</strong> alerts firing</a>
       </div>
-      {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={item.name} data-name={item.name}>
-        <span className={`dot ${item.severity}`} /> <a href={containerHref(item.name)}>{item.title}</a> · {item.detail}
+      {running !== undefined && stopped !== undefined && running + stopped > 0 && <Meter
+        value={running} max={running + stopped} label="Containers running" className="overview-health-meter" />}
+      {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={`${item.name}:${item.reason}:${item.detail}`} data-name={item.container ? item.name : undefined}>
+        <span className={`dot ${item.severity}`} /> <a href={item.href}>{item.title}</a> · {item.detail}
         {item.since !== null && <> · <RelativeTime at={item.since} /></>}
-        {" · "}<a href={logsHref(item.name, item.since)}>Logs</a>
+        {item.container && <>{" · "}<a href={logsHref(item.name, item.since)}>Logs</a></>}
         {item.probe && <small className="overview-probe">{item.probe}</small>}
       </li>)}</ul></>}
       <div className="overview-strips">{groups.map((g) => {
@@ -127,7 +129,7 @@ export default function Overview() {
     </section>}
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
       {admin && <a href="/app/settings/widgets?add=widget">Add widget</a>}
-      <div className="overview-widget-grid">{widgets?.map((w) => <article key={w.id} className="panel history-block">
+      <div className="overview-widget-grid">{widgets?.map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
         <h3>{w.link ? <a href={w.link}>{w.title}</a> : w.title}</h3><WidgetContent widget={w} />
       </article>)}</div>
     </section>}
