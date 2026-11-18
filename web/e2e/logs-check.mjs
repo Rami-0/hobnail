@@ -132,6 +132,7 @@ try {
       await inp.type("ERROR"); await wait('Number(document.querySelector("[data-testid=log-matches]")?.textContent.split("/")[1]) > 0', "plain search counter");
       measurements.search5000Ms = await tab.ev('performance.now()-searchStarted');
       measurements.searchMatchMs = await tab.ev('Number(document.querySelector("[data-testid=log-body]").dataset.searchMs)');
+      await wait('CSS.highlights.has("rh-log-search")', "visible search text is highlighted without replacing nodes");
       await inp.key("Enter"); await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
       await setQuery("ansi red"); await wait('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[1])>0', "case-insensitive matches");
