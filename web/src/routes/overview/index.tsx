@@ -82,18 +82,24 @@ export default function Overview() {
       </div>
       {running !== undefined && stopped !== undefined && running + stopped > 0 && <Meter
         value={running} max={running + stopped} label="Containers running" className="overview-health-meter" />}
+      <div className="overview-status">
+      <div>
       {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={`${item.name}:${item.reason}:${item.detail}`} data-name={item.container ? item.name : undefined}>
         <span className={`dot ${item.severity}`} /> <a href={item.href}>{item.title}</a> · {item.detail}
         {item.since !== null && <> · <RelativeTime at={item.since} /></>}
         {item.container && <>{" · "}<a href={logsHref(item.name, item.since)}>Logs</a></>}
         {item.probe && <small className="overview-probe">{item.probe}</small>}
       </li>)}</ul></>}
-      <div className="overview-strips">{groups.map((g) => {
+      </div>
+      <details className="overview-strips" open>
+        <summary>Stack health · last 24 hours</summary>
+{groups.map((g) => {
         const codes = strips?.stacks[g.name];
         return codes ? <a key={g.name} href={`/app/containers?stack=${encodeURIComponent(g.name)}`}>
           <span>{g.title}</span><HealthStrip codes={codes} step={strips?.step} label={g.title} />
         </a> : null;
-      })}</div>
+      })}</details>
+      </div>
     </section>
     {boot?.features.system && <section className="history-block">
       <h2><a href="/app/host">Host</a></h2>

@@ -3,3 +3,9 @@
 .host-facts summary, [data-testid=host] summary { cursor: pointer; font-weight: 600; }
 .host-table { overflow-x: auto; }
 .host-table td:nth-child(2) { min-width: 14ch; overflow-wrap: anywhere; }
+
+.host-facts .kv { display: grid; grid-template-columns: minmax(0,1fr) max-content; gap: .3rem .6rem; margin-block: .65rem 0; }
+.host-facts .kv-r { display: contents; }
+.host-facts dd { margin: 0; color: var(--text-2); }
+.host-table table { width: 100%; text-align: start; }
+.host-table :is(th,td) { text-align: start; padding: .3rem .5rem; }

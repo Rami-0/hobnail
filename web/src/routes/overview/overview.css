@@ -9,3 +9,9 @@
 .overview-map a:focus-visible rect { stroke: var(--accent); stroke-width: 3; }
 .overview-map text { fill: var(--text); font-size: 12px; }
 .overview-health-meter rect { fill: var(--ok); }
+
+.overview-status { display: grid; gap: 1rem; margin-top: .75rem; }
+.overview-strips summary { font-weight: 600; cursor: pointer; }
+@media (min-width: 1050px) {
+  .overview-status { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
