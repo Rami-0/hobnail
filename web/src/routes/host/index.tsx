@@ -23,6 +23,7 @@ function format(value: number | null, unit: string): string {
   if (unit === "bytes") return bytes(value);
   if (unit === "rate") return `${bytes(value)}/s`;
   if (unit === "temp") return `${value.toFixed(1)} °C`;
+  if (unit === "mbps") return `${value} Mbit/s`;
   if (unit === "rpm") return `${Math.round(value)} rpm`;
   if (unit === "per_sec") return `${value.toFixed(1)}/s`;
   return String(value);
@@ -73,6 +74,14 @@ export default function Host() {
           <td>{p.pid}</td><td>{p.command}</td><td>{p.container === null ? "Host" : <a href={containerHref(p.container)}>{p.container}</a>}</td>
           <td>{p.uid ?? "—"}</td><td>{pct(p.cpu_pct)}</td><td>{bytes(p.rss_bytes)}</td><td>{p.threads}</td>
         </tr>)}</tbody></table></div> : <p>No processes visible.</p>}
+      </details>}
+      {!!host.process_groups?.length && boot?.role !== "viewer" && <details className="panel history-block">
+        <summary>Process usage by container</summary>
+        {host.process_lifetime && <p className="muted">CPU averages since the processes started.</p>}
+        <ul className="history-events">{host.process_groups.map((group) => <li key={group.container ?? "host"}>
+          {group.container ? <a href={containerHref(group.container)}>{group.container}</a> : "Host"}
+          {" · "}{group.count} processes · {pct(group.cpu_pct)} CPU · {bytes(group.rss_bytes)}
+        </li>)}</ul>
       </details>}
       <History recording={boot?.features.history ?? false} />
     </> : !error && <p role="status">Loading host facts…</p>}

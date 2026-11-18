@@ -2369,6 +2369,7 @@ async fn viewer_cannot_read_administrative_details() {
     let (topic, live) = stream.next().await;
     assert_eq!(topic, "host");
     assert!(live["processes"].is_null());
+    assert!(live["process_groups"].is_null());
     let overview = req(addr, "GET", "/api/v1/overview?probes=1", &h, "").await;
     assert_eq!(
         json_of(&overview, "viewer overview")["attention"][0]["reason"],
@@ -2409,6 +2410,15 @@ async fn viewer_cannot_read_administrative_details() {
     );
     let (owner, _) = login(addr).await;
     let admin_headers = [("Cookie", owner.as_str())];
+    let initial = req(addr, "GET", "/api/v1/host", &admin_headers, "").await;
+    assert!(json_of(&initial, "owner initial host")["processes"].is_null());
+    let (mut admin_stream, _) = Stream::open(addr, "/api/v1/stream?topics=host", &owner).await;
+    assert_eq!(admin_stream.next().await.0, "hello");
+    let (topic, sample) = admin_stream.next().await;
+    assert_eq!(topic, "host");
+    assert!(sample["processes"].is_array());
+    assert!(sample["process_groups"].is_array());
+    drop(admin_stream);
     let inspect = req(
         addr,
         "GET",

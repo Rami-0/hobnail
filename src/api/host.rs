@@ -42,6 +42,15 @@ pub(super) struct HostProcess {
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct HostProcessGroup {
+    container: Option<String>,
+    cpu_pct: f64,
+    rss_bytes: u64,
+    count: usize,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(super) struct HostView {
     at: u64,
     hostname: String,
@@ -52,6 +61,8 @@ pub(super) struct HostView {
     load: [f64; 3],
     groups: Vec<HostGroup>,
     processes: Option<Vec<HostProcess>>,
+    process_groups: Option<Vec<HostProcessGroup>>,
+    process_lifetime: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -195,6 +206,21 @@ fn facts(host: &Host, admin: bool) -> Vec<HostGroup> {
                     val(&format!("{} received", n.name), "rate", n.rx_bps),
                     val(&format!("{} sent", n.name), "rate", n.tx_bps),
                     val(
+                        &format!("{} link speed", n.name),
+                        "mbps",
+                        n.speed_mbps.map(|s| s as f64),
+                    ),
+                    val(
+                        &format!("{} received total", n.name),
+                        "bytes",
+                        Some(n.cur.rx_bytes as f64),
+                    ),
+                    val(
+                        &format!("{} sent total", n.name),
+                        "bytes",
+                        Some(n.cur.tx_bytes as f64),
+                    ),
+                    val(
                         &format!("{} errors / drops", n.name),
                         "count",
                         Some(n.new_errs as f64),
@@ -234,32 +260,43 @@ pub(super) fn live(state: &AppState, admin: bool, subscribed: bool) -> HostView 
     let (host, processes) = crate::host::live_sample(state, admin && subscribed);
     let config = state.config.current();
     let snapshot = state.snapshot();
-    let processes = processes.filter(|_| admin).map(|report| {
+    let container = |id: Option<&String>| match id {
+        None => Some(None),
+        Some(id) => snapshot
+            .containers
+            .iter()
+            .find(|c| c.id.starts_with(id) || id.starts_with(&c.id))
+            .filter(|c| !crate::ui::view::is_excluded(&config, c))
+            .map(|c| Some(c.name.clone())),
+    };
+    let report = processes.filter(|_| admin);
+    let processes = report.as_ref().map(|report| {
         report
             .top
             .iter()
             .filter_map(|p| {
-                let container = match &p.cid {
-                    None => None,
-                    Some(cid) => {
-                        let c = snapshot
-                            .containers
-                            .iter()
-                            .find(|c| c.id.starts_with(cid) || cid.starts_with(&c.id))?;
-                        if crate::ui::view::is_excluded(&config, c) {
-                            return None;
-                        }
-                        Some(c.name.clone())
-                    }
-                };
                 Some(HostProcess {
                     pid: p.pid,
                     command: p.cmd.clone(),
-                    container,
+                    container: container(p.cid.as_ref())?,
                     uid: p.uid,
                     cpu_pct: p.cpu,
                     rss_bytes: p.rss,
                     threads: p.threads,
+                })
+            })
+            .collect()
+    });
+    let process_groups = report.as_ref().map(|report| {
+        report
+            .groups
+            .iter()
+            .filter_map(|(id, cpu, rss, count)| {
+                Some(HostProcessGroup {
+                    container: container(id.as_ref())?,
+                    cpu_pct: *cpu,
+                    rss_bytes: *rss,
+                    count: *count,
                 })
             })
             .collect()
@@ -274,6 +311,8 @@ pub(super) fn live(state: &AppState, admin: bool, subscribed: bool) -> HostView 
         load: host.load,
         groups: facts(&host, admin),
         processes,
+        process_groups,
+        process_lifetime: report.map(|r| r.lifetime),
     }
 }
 

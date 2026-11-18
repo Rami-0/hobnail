@@ -110,6 +110,7 @@ fn files() -> Vec<(String, String)> {
         render::<super::host::HostGroup>(),
         render::<super::host::HostValue>(),
         render::<super::host::HostProcess>(),
+        render::<super::host::HostProcessGroup>(),
         render::<super::host::HostHistory>(),
         render::<super::history::HistoryView>(),
         render::<super::history::HistoryMetric>(),
