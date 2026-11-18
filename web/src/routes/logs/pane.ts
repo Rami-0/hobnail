@@ -461,7 +461,7 @@ export class LogPane {
     }
     if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = chipName(row.c, new URLSearchParams(this.query).get("stack") ?? "", this.width < 700 ? 12 : 20); chip.title = row.c;
       const hash = [...new TextEncoder().encode(row.c)].reduce((h, b) => Math.imul(h ^ b, 16777619) >>> 0, 2166136261);
-      chip.style.color = `hsl(${hash % 360} 55% 62%)`; el.append(chip); }
+      chip.style.color = `hsl(${hash % 360} 55% var(--log-chip-lightness,68%))`; el.append(chip); }
     const text = document.createElement("span"); text.className = "log-text";
     const fold = row.fold;
     if (fold) {

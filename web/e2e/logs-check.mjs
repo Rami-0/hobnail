@@ -90,6 +90,7 @@ try {
       measurements.mountedRows = await tab.ev('document.querySelectorAll("[data-log-id]").length');
       assert.ok(measurements.mountedRows < 150, "rows are windowed");
       await wait(`(() => { const b=document.querySelector('[data-testid=log-body]'); return b.scrollHeight-b.scrollTop-b.clientHeight < 2; })()`, "follows newest after burst");
+      if(width===390) assert.ok(await tab.ev('document.querySelector("[data-testid=log-container-head] h1").getBoundingClientRect().height<40'), "phone container identity has room for its short title");
       await tab.shot(path.join(out, `${label}-single.png`));
       assert.equal(await tab.ev('!!document.querySelector("#hostile-log,#hostile-img") || !!globalThis.logPwned'), false, "hostile markup creates no elements");
       assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile log remains literal text");
