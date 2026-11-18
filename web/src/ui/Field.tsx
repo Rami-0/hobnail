@@ -75,3 +75,9 @@ export function TextInput({ className, mono, type = "text", value, defaultValue,
   );
 }
 
+
+export function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const field = useContext(Ctx);
+  return <textarea id={field?.id} aria-describedby={field?.describedBy} aria-invalid={field?.invalid || undefined}
+    className={`in ${className ?? ""}`} {...props} />;
+}
