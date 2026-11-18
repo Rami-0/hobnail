@@ -1,5 +1,5 @@
 import { api } from "../../api/session.ts";
-import { chipName, filterRows, matcher, matchRanges, nextMatch, Ring, type LogLine, type MatchPosition, type Row } from "./model.ts";
+import { chipName, filterRows, matcher, matchRanges, nextMatch, Ring, streamParams, type LogLine, type MatchPosition, type Row } from "./model.ts";
 
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
@@ -152,12 +152,9 @@ export class LogPane {
   }
   private connect(): void {
     if (this.closed || this.suspended || this.done) return;
-    const params = new URLSearchParams(this.query + this.range);
-    params.set("tail", String(this.tail));
-    const latest = Math.min(...this.last.values());
-    if (Number.isFinite(latest)) params.set("since", String(latest / 1000 + 0.000001));
-    else if (this.target && this.target <= Date.now() + 5000) params.set("since", String(Math.max(0, this.target / 1000 - 120)));
-    else if (this.target) this.message = "That moment is still to come: showing the live tail.";
+    const latest = Math.min(...this.last.values()), now = Date.now();
+    const params = streamParams(this.query, this.range, this.tail, this.cap, Number.isFinite(latest) ? latest : null, this.target, now);
+    if (this.target !== null && this.target > now + 5000) this.message = "That moment is still to come: showing the live tail.";
     this.state = "connecting"; this.schedule();
     const reconnectFloor = new Map(this.last);
     const reconnecting = reconnectFloor.size > 0;

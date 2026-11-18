@@ -121,3 +121,12 @@ export function matchRanges(text: string, query: string, regex: boolean, sensiti
     return [...text.matchAll(expression)].filter((m) => m[0].length > 0).slice(0, 1000).map((m) => [m.index, m.index + m[0].length]);
   } catch { return []; }
 }
+
+export function streamParams(query: string, range: string, tail: number, cap: number, latest: number | null, target: number | null, now: number): URLSearchParams {
+  const params = new URLSearchParams(query + range);
+  const seeking = target !== null && target <= now + 5000;
+  params.set("tail", String(latest !== null || range || seeking ? cap : tail));
+  if (latest !== null) params.set("since", String(latest / 1000 + 0.000001));
+  else if (seeking) params.set("since", String(Math.max(0, target / 1000 - 120)));
+  return params;
+}

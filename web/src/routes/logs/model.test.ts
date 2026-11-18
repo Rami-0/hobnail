@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges } from "./model.ts";
+import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges, streamParams } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -66,4 +66,17 @@ test("late stack batches retain the newest timestamps rather than the newest arr
   assert.deepEqual(ring.rows.map((r) => r.t), [3,4,5]);
   ring.append([{c:"slow",t:6,m:"new"}]);
   assert.deepEqual(ring.rows.map((r) => r.t), [4,5,6]);
+});
+
+test("ranges, seeks and reconnects read a full ring while the initial live tail stays small", () => {
+  const live = streamParams("c=web", "", 500, 5000, null, null, 500000);
+  assert.equal(live.get("tail"), "500"); assert.equal(live.has("since"), false);
+  const range = streamParams("stack=shop", "&since=1h", 500, 5000, null, null, 500000);
+  assert.equal(range.get("tail"), "5000"); assert.equal(range.get("since"), "1h");
+  const resume = streamParams("c=web", "", 500, 5000, 123000, null, 500000);
+  assert.equal(resume.get("tail"), "5000"); assert.equal(resume.get("since"), "123.000001");
+  const seek = streamParams("c=web", "", 500, 5000, null, 300000, 500000);
+  assert.equal(seek.get("tail"), "5000"); assert.equal(seek.get("since"), "180");
+  assert.equal(streamParams("c=web", "", 500, 5000, null, 600000, 500000).get("tail"), "500");
+  assert.equal(streamParams("c=web", "", 500, 5000, null, 0, 500000).get("since"), "0");
 });
