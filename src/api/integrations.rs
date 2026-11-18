@@ -253,18 +253,20 @@ fn target(
 }
 
 fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
-    let now = Instant::now();
     let mut attempts = state.integration_tests.lock().unwrap();
-    attempts.retain(|_, (started, _)| now.duration_since(*started) < Duration::from_secs(10));
-    let (_, count) = attempts.entry(account).or_insert((now, 0));
-    if *count >= 3 {
+    let now = Instant::now();
+    let recent = |time: &Instant| now.duration_since(*time) < Duration::from_secs(10);
+    attempts.retain(|_, times| times.back().is_some_and(recent));
+    let times = attempts.entry(account).or_default();
+    times.retain(recent);
+    if times.len() >= 3 {
         return Err(ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limited",
             "Wait ten seconds before testing another integration.",
         ));
     }
-    *count += 1;
+    times.push_back(now);
     Ok(())
 }
 

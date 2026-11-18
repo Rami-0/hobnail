@@ -1,7 +1,7 @@
 //! Process-wide state shared by the server, the refresh loop and background
 //! tasks. Locks are std (short critical sections, never held across .await).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -105,7 +105,7 @@ pub struct AppState {
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
     pub password_limiter: Mutex<crate::auth::PasswordLimiter>,
-    pub integration_tests: Mutex<HashMap<i64, (std::time::Instant, u8)>>,
+    pub integration_tests: Mutex<HashMap<i64, VecDeque<std::time::Instant>>>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
     pub login_verifying: Mutex<()>,
