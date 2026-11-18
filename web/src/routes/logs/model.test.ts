@@ -58,3 +58,12 @@ test("highlight ranges preserve literal punctuation and reject invalid or empty 
   assert.deepEqual(matchRanges("text", "[", true, false), []);
   assert.deepEqual(matchRanges("text", "^", true, false), []);
 });
+
+test("late stack batches retain the newest timestamps rather than the newest arrivals", () => {
+  const ring = new Ring(3);
+  ring.append([3,4,5].map((t) => ({c:"fast",t,m:String(t)})));
+  ring.append([1,2].map((t) => ({c:"slow",t,m:String(t)})));
+  assert.deepEqual(ring.rows.map((r) => r.t), [3,4,5]);
+  ring.append([{c:"slow",t:6,m:"new"}]);
+  assert.deepEqual(ring.rows.map((r) => r.t), [4,5,6]);
+});

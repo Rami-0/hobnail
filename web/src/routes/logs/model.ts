@@ -12,9 +12,11 @@ export class Ring {
       const segments = ansi(line.m), plain = segments.map((segment) => segment.text).join("");
       return { ...line, id: this.next++, plain, segments, fold: jsonFold(plain) };
     });
+    incoming.sort((a, b) => a.t - b.t || a.id - b.id);
     const room = Math.max(0, this.cap - this.rows.length);
-    this.rows = older ? [...(room ? incoming.slice(-room) : []), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
+    this.rows = older ? [...(room ? incoming.slice(-room) : []), ...this.rows] : [...this.rows, ...incoming];
     this.rows.sort((a, b) => a.t - b.t || a.id - b.id);
+    if (!older && this.rows.length > this.cap) this.rows = this.rows.slice(-this.cap);
   }
 }
 export interface Segment { text: string; classes: string; fg?: string; bg?: string }
