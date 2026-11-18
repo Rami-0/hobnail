@@ -17,6 +17,8 @@ export class LogPane {
   private hiddenTimer = 0;
   private delay = 2000;
   private closed = false;
+  private restoring = false;
+  private openedJson = new Set<number>();
   private suspended = false;
   private heights = new Map<number, number>();
   private visible: Row[] = [];
@@ -68,6 +70,9 @@ export class LogPane {
       this.schedule();
     });
     this.observer.observe(box); this.observer.observe(this.content);
+    if (box.closest(".logs-page")) this.observer.observe(box.closest(".logs-page") as Element);
+    window.addEventListener("resize", this.resize);
+    box.addEventListener("touchstart", this.touch, { passive: true });
     window.addEventListener("pagehide", this.pagehide);
     window.addEventListener("pageshow", this.pageshow);
     document.addEventListener("visibilitychange", this.visibility);
@@ -75,6 +80,7 @@ export class LogPane {
   }
   update(options: ViewOptions): void {
     const changed = options.wrap !== this.options.wrap || options.time !== this.options.time;
+    this.restoring = true;
     this.options = options;
     if (changed) { this.heights.clear(); this.signature = ""; }
     this.schedule();
@@ -90,6 +96,8 @@ export class LogPane {
   close(): void {
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
     this.observer.disconnect();
+    window.removeEventListener("resize", this.resize);
+    this.box.removeEventListener("touchstart", this.touch);
     this.box.removeEventListener("scroll", this.scroll); this.box.removeEventListener("wheel", this.wheel);
     this.box.removeEventListener("keydown", this.key); this.box.removeEventListener("click", this.click);
     window.removeEventListener("pagehide", this.pagehide); window.removeEventListener("pageshow", this.pageshow);
@@ -172,8 +180,11 @@ export class LogPane {
     this.following = false; this.anchor = { id, offset: 0 };
     this.box.scrollTop = this.offsets[i] ?? 0; this.lastTop = this.box.scrollTop;
   }
-  private wheel = (e: WheelEvent) => { if (e.deltaY < 0) { this.following = false; this.mark(); this.schedule(); } };
+  private resize = () => this.schedule();
+  private touch = () => { this.restoring = false; };
+  private wheel = (e: WheelEvent) => { this.restoring = false; if (e.deltaY < 0) { this.following = false; this.mark(); this.schedule(); } };
   private scroll = () => {
+    if (this.restoring) return;
     const top = this.box.scrollTop;
     if (top < this.lastTop - 0.1) this.following = false;
     else if (top > this.lastTop && this.box.scrollHeight - top - this.box.clientHeight <= 24) { this.following = true; this.unseen = 0; }
@@ -195,6 +206,7 @@ export class LogPane {
     }
   };
   private click = (e: MouseEvent) => {
+    if ((e.target as Element).closest("summary,a,button,pre")) return;
     const el = (e.target as Element).closest<HTMLElement>("[data-log-id]");
     const row = el && this.visible.find((r) => r.id === Number(el.dataset.logId));
     if (row) { this.selected = row; this.select(row, false); this.signature = ""; this.schedule(); }
@@ -235,7 +247,22 @@ export class LogPane {
     }
     this.lastTop = this.box.scrollTop;
   }
+  private fit(): void {
+    const panes = this.box.closest(".log-panes");
+    if (innerWidth < 700 && (panes?.children.length ?? 0) > 1) { this.box.style.height = "340px"; return; }
+    let below = 0;
+    for (let sibling = this.box.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
+      if (getComputedStyle(sibling).position !== "absolute") below += (sibling as HTMLElement).offsetHeight;
+    }
+    if (panes) for (let sibling = panes.nextElementSibling; sibling; sibling = sibling.nextElementSibling) below += (sibling as HTMLElement).offsetHeight + 8;
+    const bar = document.querySelector<HTMLElement>(".bbar");
+    const bottom = innerWidth < 700 ? bar?.offsetHeight ?? 56 : 0;
+    const height = Math.max(240, innerHeight - (this.box.getBoundingClientRect().top + scrollY) - below - bottom - 32);
+    this.box.style.height = `${Math.floor(height)}px`;
+  }
   private flush(): void {
+    this.restoring = true;
+    this.fit();
     if (!this.options.paused && this.pending.length) {
       const batch = this.pending; this.pending = [];
       if (!this.following) this.unseen += batch.length;
@@ -243,9 +270,13 @@ export class LogPane {
       for (const line of batch) this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
       const retained = new Set(this.ring.rows.map((r) => r.id));
       for (const id of this.heights.keys()) if (!retained.has(id)) this.heights.delete(id);
+      for (const id of this.openedJson) if (!retained.has(id)) this.openedJson.delete(id);
     }
     const search = matcher(this.options.search, this.options.regex, this.options.sensitive);
+    const searchStarted = performance.now();
     const filtered = filterRows(this.ring.rows, search.test, this.options.only, this.options.context, this.options.levels);
+    this.box.dataset.searchMs = (performance.now() - searchStarted).toFixed(3);
+    this.box.dataset.searchLines = String(this.ring.rows.length);
     const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
     this.visible = filtered.rows; this.hits = filtered.hits; this.counts = filtered.counts;
     let total = this.layout();
@@ -276,6 +307,7 @@ export class LogPane {
       this.bottom.style.height = `${Math.max(0, total - after)}px`;
       this.measure(); total = this.layout(); this.restore(total);
     }
+    requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
     this.report({ state: this.options.paused ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following,
       message: search.error ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
@@ -298,7 +330,14 @@ export class LogPane {
     const fold = jsonFold(row.plain);
     if (fold) {
       const details = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
-      summary.textContent = fold.summary; pre.textContent = fold.pretty; details.append(summary, pre); text.append(details);
+      summary.textContent = fold.summary; pre.textContent = fold.pretty;
+      details.open = this.openedJson.has(row.id);
+      details.addEventListener("toggle", () => {
+        if (!details.isConnected) return;
+        if (details.open) this.openedJson.add(row.id); else this.openedJson.delete(row.id);
+        this.measure(); this.schedule();
+      });
+      details.append(summary, pre); text.append(details);
     } else {
       for (const segment of ansi(row.m)) {
         const span = document.createElement("span"); span.className = segment.classes;
