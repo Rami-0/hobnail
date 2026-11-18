@@ -118,6 +118,10 @@ async function run(target, profile) {
     await tab.send("Performance.enable", { timeDomain: "timeTicks" });
     await tab.send("Network.setCacheDisabled", { cacheDisabled: true });
     await tab.send("Network.clearBrowserCache"); await tab.send("Network.clearBrowserCookies");
+    if (process.env.HB_COOKIE) {
+      const cookie = process.env.HB_COOKIE, split = cookie.indexOf("=");
+      await tab.send("Network.setCookie", { name: cookie.slice(0, split), value: cookie.slice(split + 1), url: new URL(base).origin, path: "/", httpOnly: true, sameSite: "Strict" });
+    }
     await tab.send("Emulation.setDeviceMetricsOverride", { width: p.w, height: p.h, deviceScaleFactor: 1, mobile: p.mobile });
     await tab.send("Emulation.setTouchEmulationEnabled", { enabled: p.mobile, maxTouchPoints: p.mobile ? 5 : 0 });
     await tab.send("Emulation.setCPUThrottlingRate", { rate: p.rate });
