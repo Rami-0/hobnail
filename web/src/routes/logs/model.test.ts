@@ -4,9 +4,9 @@ import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, se
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
-  assert.deepEqual(r.rows.map((r) => r.t), [2, 3, 4]);
+  assert.deepEqual(r.rows.map((row) => row.t), [2, 3, 4]);
   r.append([{ c: "a", t: 1, m: "old" }], true);
-  assert.deepEqual(r.rows.map((r) => r.t), [2, 3, 4]);
+  assert.deepEqual(r.rows.map((row) => row.t), [2, 3, 4]);
 });
 test("ANSI strips controls, preserves hostile text and emits SGR spans", () => {
   const s = ansi("\x1b[1;31m<script>bad</script>\x1b[0m\x1b]8;;javascript:bad\x07hello\x07");
@@ -28,7 +28,7 @@ test("plain, case and regex searches tolerate invalid patterns", () => {
 test("levels and matching context compose", () => {
   const r = new Ring(20); r.append(["before", "hit", "after", "no"].map((m, t) => ({ c: "a", t, m, l: t === 1 ? "e" : "i" })));
   const f = filterRows(r.rows, matcher("hit", false, false).test, true, 1, "i");
-  assert.deepEqual(f.rows.map((r) => r.plain), ["before", "after"]); assert.equal(f.counts.e, 1);
+  assert.deepEqual(f.rows.map((row) => row.plain), ["before", "after"]); assert.equal(f.counts.e, 1);
 });
 test("URL state, permalinks and reconnect cursor retain units and disable linked regex", () => {
   const q = new URLSearchParams("c=a,b&c=b,c&search=%5B&re=1&case=1");

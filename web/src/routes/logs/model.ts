@@ -1,25 +1,28 @@
+/* eslint-disable no-control-regex -- ANSI escape and terminal control stripping is intentional. */
 // Pure log contracts and transformations. Stream timestamps remain milliseconds.
 export interface LogLine { c: string; t: number; m: string; s?: number; l?: string; x?: number }
 export interface Row extends LogLine { id: number; plain: string }
 export class Ring {
   rows: Row[] = [];
   next = 0;
-  constructor(readonly cap: number) {}
+  readonly cap: number;
+  constructor(cap: number) { this.cap = cap; }
   append(lines: LogLine[], older = false): void {
     const incoming = lines.map((l) => ({ ...l, id: this.next++, plain: ansi(l.m).map((s) => s.text).join("") }));
-    this.rows = older ? [...incoming.slice(-Math.max(0, this.cap - this.rows.length)), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
+    this.rows = older ? [...incoming.slice(0, Math.max(0, this.cap - this.rows.length)), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
     this.rows.sort((a, b) => a.t - b.t || a.id - b.id);
   }
 }
 export interface Segment { text: string; classes: string; fg?: string; bg?: string }
 const palette = ["#121212", "#d65c5c", "#6bb576", "#c9ad58", "#729fe0", "#ba83d0", "#64b7bb", "#d0d0d0", "#777777", "#ff8585", "#93dc9b", "#f0d57f", "#9cc3ff", "#e3acfa", "#94e1e5", "#ffffff"];
+const cube = (k: number) => k ? 55 + k * 40 : 0;
 function color(n: number): string {
   n = Math.max(0, Math.min(255, n));
-  if (n < 16) return palette[n]!;
+  if (n < 16) return palette[n] ?? "#ffffff";
   if (n >= 232) { const v = 8 + (n - 232) * 10; return `rgb(${v},${v},${v})`; }
-  const v = (k: number) => k ? 55 + k * 40 : 0;
+
   n -= 16;
-  return `rgb(${v(Math.floor(n / 36))},${v(Math.floor(n / 6) % 6)},${v(n % 6)})`;
+  return `rgb(${cube(Math.floor(n / 36))},${cube(Math.floor(n / 6) % 6)},${cube(n % 6)})`;
 }
 export function ansi(message: string): Segment[] {
   const out: Segment[] = [];
@@ -36,7 +39,7 @@ export function ansi(message: string): Segment[] {
     if (m[2] !== "m") continue;
     const p = (m[1] || "0").split(/[;:]/).map(Number);
     for (let i = 0; i < p.length; i++) {
-      const n = p[i];
+      const n = p[i] ?? 0;
       if (n === 0) { fg = bg = undefined; flags.clear(); }
       else if (n === 1) flags.add("log-bold");
       else if (n === 2) flags.add("log-dim");
@@ -47,10 +50,10 @@ export function ansi(message: string): Segment[] {
       else if (n === 24) flags.delete("log-underline");
       else if (n === 39) fg = undefined;
       else if (n === 49) bg = undefined;
-      else if (n! >= 30 && n! <= 37) fg = color(n! - 30);
-      else if (n! >= 90 && n! <= 97) fg = color(n! - 82);
-      else if (n! >= 40 && n! <= 47) bg = color(n! - 40);
-      else if (n! >= 100 && n! <= 107) bg = color(n! - 92);
+      else if (n >= 30 && n <= 37) fg = color(n - 30);
+      else if (n >= 90 && n <= 97) fg = color(n - 82);
+      else if (n >= 40 && n <= 47) bg = color(n - 40);
+      else if (n >= 100 && n <= 107) bg = color(n - 92);
       else if (n === 38 || n === 48) {
         let c: string | undefined;
         if (p[i + 1] === 5) { c = color(p[i + 2] ?? 0); i += 2; }
