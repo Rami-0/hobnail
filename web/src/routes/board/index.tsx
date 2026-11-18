@@ -77,7 +77,12 @@ export default function BoardPage() {
   if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board">
     <header className="board-heading"><div><p className="muted">Board</p><div className="board-title"><ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} /><h1>{view.board.name}</h1></div></div>
-      {admin && <Button data-testid="board-edit" onClick={() => { setEditing(view.document); setChanged(false); }}>Edit board</Button>}</header>
+      {admin && <Button data-testid="board-edit" onClick={async () => {
+        const result = await api.get<BoardDraft | null>(`/api/v1/boards/${id}/draft`);
+        if (result.kind !== "ok") { setError(result.message); return; }
+        if (result.data) setDraft(result.data);
+        else { setEditing(view.document); setChanged(false); }
+      }}>Edit board</Button>}</header>
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="primary" onClick={() => { if (draft) setEditing(draft.document); setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {error && <Note kind="bad">{error}</Note>}
     {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty">

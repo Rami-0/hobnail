@@ -58,7 +58,10 @@ try {
   await tab.send("Page.reload"); await wait('document.querySelectorAll("[data-testid=board-tile]").length === 3', "reload preserves saved items");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`, "draft saved to server");
   await inp.click('nav[data-testid="sidebar"] a[href="/app/containers"]'); await wait('!!document.querySelector("[role=dialog][data-open]")', "unsaved navigation asks before leaving"); await inp.click('[role="dialog"][data-open] .dlg-ft button'); await wait(visible("board-editor"), "Keep editing preserves local work");
-  await tab.send("Page.reload"); await wait(visible("board-draft"), "reload offers server draft"); await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-editor"), "draft resumes");
+  await tab.send("Page.reload"); await wait(visible("board-draft"), "reload offers server draft");
+  await inp.key("Escape"); await wait(`!${visible("board-draft")}`, "dismiss draft prompt without discarding");
+  await inp.click('[data-testid="board-edit"]'); await wait(visible("board-draft"), "Edit offers the preserved draft again");
+  await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-editor"), "draft resumes");
   await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`);
   // Drafts are per user: another session of this same owner would clear
   // the owner's shared draft when it saves. Use a distinct Admin principal.
