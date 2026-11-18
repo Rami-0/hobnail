@@ -199,7 +199,8 @@ export class LogPane {
     if (event && LogPane.stepped.has(event)) return;
     if (event) LogPane.stepped.add(event);
     const hits = [...LogPane.panes].flatMap((pane) => pane.hits.map((row) => ({ pane: pane.query, id: row.id, t: row.t })));
-    const next = nextMatch(hits, LogPane.match, direction);
+    const current = LogPane.match ?? hits.filter((hit) => [...LogPane.panes].some((pane) => pane.query === hit.pane && pane.current === hit.id)).toSorted((a, b) => a.t - b.t).at(-1) ?? null;
+    const next = nextMatch(hits, current, direction);
     if (!next) return;
     LogPane.match = next;
     for (const pane of LogPane.panes) {
