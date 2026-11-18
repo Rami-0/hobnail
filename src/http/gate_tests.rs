@@ -8,6 +8,9 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::state::AppState;
 
+#[path = "dashboard_tests.rs"]
+mod dashboard_tests;
+
 const PW: &str = "correct horse battery";
 
 /// Every write route (method, path). Bodies are valid-ish JSON; what matters
