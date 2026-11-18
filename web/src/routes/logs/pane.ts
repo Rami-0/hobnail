@@ -39,6 +39,7 @@ export class LogPane {
   private width = 0;
   private done = false;
   private last = new Map<string, number>();
+  private names = new Map<number, string>();
   private pickedTarget = false;
   readonly box: HTMLElement;
   readonly query: string;
@@ -107,12 +108,13 @@ export class LogPane {
     const es = this.source = new EventSource(`/api/logs/stream?${params}`);
     es.addEventListener("hello", () => { this.state = "live"; this.delay = 2000; this.schedule(); });
     es.addEventListener("meta", (e) => {
-      const m = JSON.parse((e as MessageEvent<string>).data) as { running: boolean; status: string };
+      const m = JSON.parse((e as MessageEvent<string>).data) as { c: number; name: string; running: boolean; status: string };
+      this.names.set(m.c, m.name);
       if (!m.running) this.message = `This container is stopped. ${m.status}`;
       this.schedule();
     });
     es.addEventListener("l", (e) => {
-      const lines = JSON.parse((e as MessageEvent<string>).data) as LogLine[];
+      const lines = this.decode((e as MessageEvent<string>).data);
       for (const line of lines) {
         const previous = this.last.get(line.c);
         if (previous !== undefined && line.t <= previous && reconnecting) continue;
@@ -139,6 +141,10 @@ export class LogPane {
       this.delay = Math.min(30000, this.delay * 2);
     });
   }
+  private decode(data: string): LogLine[] {
+    const lines = JSON.parse(data) as Array<Omit<LogLine, "c"> & { c: number }>;
+    return lines.map((line) => ({ ...line, c: this.names.get(line.c) ?? String(line.c) }));
+  }
   loadOlder(): void {
     if (this.older || !this.ring.rows.length || this.ring.rows.length >= this.cap) { this.message = "The ring is full; choose an earlier range to read older lines."; this.schedule(); return; }
     const oldest = (this.ring.rows[0]?.t ?? 0);
@@ -148,7 +154,7 @@ export class LogPane {
     p.set("since", String(Math.max(0, oldest - span) / 1000)); p.set("until", String((oldest - 1) / 1000)); p.set("tail", String(Math.min(this.tail, this.cap - this.ring.rows.length)));
     const older: LogLine[] = [];
     const es = this.older = new EventSource(`/api/logs/stream?${p}`);
-    es.addEventListener("l", (e) => older.push(...JSON.parse((e as MessageEvent<string>).data) as LogLine[]));
+    es.addEventListener("l", (e) => older.push(...this.decode((e as MessageEvent<string>).data)));
     const finish = () => { es.close(); this.older = null; this.ring.append(older, true); if (!older.length) this.message = "No older lines in this window."; this.schedule(); };
     es.addEventListener("done", finish); es.addEventListener("error", finish);
   }
