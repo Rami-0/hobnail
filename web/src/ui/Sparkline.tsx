@@ -57,20 +57,21 @@ export interface HealthStripProps {
 const WORD: Record<string, string> = { u: "no data", f: "not running", o: "running", w: "restarted", b: "problem" };
 
 export function HealthStrip({ codes, label, step = 900, cells, className }: HealthStripProps) {
-  const n = Math.max(1, codes.length);
+  const buckets = codes.length ? codes : Array<number>(Math.max(1, Math.ceil(86400 / step))).fill(0);
+  const n = buckets.length;
   const ago = (i: number) => {
     const s = (n - i) * step;
     const h = Math.round(s / 360) / 10;
     return s <= 0 ? "now" : h >= 1 ? `${h} h ago` : `${Math.round(s / 60)} min ago`;
   };
-  const rects = cells ? codes.map((c, i) => [i, i, c] as [number, number, number]) : stripRuns(codes);
+  const rects = cells ? buckets.map((c, i) => [i, i, c] as [number, number, number]) : stripRuns(buckets);
   return (
     <svg
       className={["hstrip", className ?? ""].filter(Boolean).join(" ")}
       viewBox={`0 0 ${n} 8`}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`${label}: ${stripSummary(codes, step)}`}
+      aria-label={`${label}: ${stripSummary(buckets, step)}`}
     >
       {rects.map(([a, b, c]) => {
         const cls = stripClass(c);

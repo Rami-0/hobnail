@@ -663,7 +663,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
         {up === null ? <span className="muted">—</span> : <span className="num">{duration(up)}</span>}
       </td>
       <td className="c-hist" data-l="24 h">
-        {near && strip ? <HealthStrip codes={strip} label={r.title} step={stripStep} /> : null}
+        {near ? <HealthStrip codes={strip ?? []} label={r.title} step={stripStep} /> : null}
       </td>
       <LiveCell name={r.name} kind="cpu" running={running} near={near} visible={visible} cells={cells} />
       <LiveCell name={r.name} kind="mem" running={running} near={near} visible={visible} cells={cells} />
