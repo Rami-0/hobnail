@@ -35,7 +35,7 @@ function Pane({ title, query, picker, options, range, target, close, stack }: {
   useEffect(() => controller.current?.update(options), [options]);
   useEffect(() => {
     const latest = () => controller.current?.latest();
-    const step = (e: Event) => controller.current?.step((e as CustomEvent<number>).detail);
+    const step = (e: Event) => controller.current?.step((e as CustomEvent<number>).detail, e);
     window.addEventListener("rh:logs-latest", latest); window.addEventListener("rh:logs-step", step);
     return () => { window.removeEventListener("rh:logs-latest", latest); window.removeEventListener("rh:logs-step", step); };
   }, []);

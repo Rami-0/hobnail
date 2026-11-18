@@ -1,5 +1,5 @@
 import { api } from "../../api/session.ts";
-import { filterRows, matcher, Ring, type LogLine, type Row } from "./model.ts";
+import { chipName, filterRows, matcher, nextMatch, Ring, type LogLine, type MatchPosition, type Row } from "./model.ts";
 
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
@@ -12,6 +12,9 @@ export interface PaneStatus { state: string; count: number; matches: number; cur
 // This class owns only the ref's descendants. Text is always a text node.
 // One animation-frame flush and a visible window bound work independently of tail size.
 export class LogPane {
+  private static panes = new Set<LogPane>();
+  private static stepped = new WeakSet<Event>();
+  private static match: MatchPosition | null = null;
   readonly ring: Ring;
   private source: EventSource | null = null;
   private older: EventSource | null = null;
@@ -85,6 +88,7 @@ export class LogPane {
     window.addEventListener("pagehide", this.pagehide);
     window.addEventListener("pageshow", this.pageshow);
     document.addEventListener("visibilitychange", this.visibility);
+    LogPane.panes.add(this);
     this.connect();
   }
   update(options: ViewOptions): void {
@@ -104,6 +108,8 @@ export class LogPane {
   };
   private disconnect(): void { this.source?.close(); this.older?.close(); clearTimeout(this.retry); this.source = this.older = null; }
   close(): void {
+    LogPane.panes.delete(this);
+    if (!LogPane.panes.size) LogPane.match = null;
     window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
     this.observer.disconnect();
@@ -189,12 +195,18 @@ export class LogPane {
     es.addEventListener("done", finish); es.addEventListener("error", finish);
   }
   latest(): void { this.following = true; this.unseen = 0; this.anchor = null; this.schedule(); }
-  step(direction: number): void {
-    if (!this.hits.length) return;
-    const i = this.hits.findIndex((r) => r.id === this.current);
-    const row = this.hits[(i + direction + this.hits.length) % this.hits.length];
-    if (!row) return;
-    this.current = row.id; this.seek(row.id); this.signature = ""; this.schedule();
+  step(direction: number, event?: Event): void {
+    if (event && LogPane.stepped.has(event)) return;
+    if (event) LogPane.stepped.add(event);
+    const hits = [...LogPane.panes].flatMap((pane) => pane.hits.map((row) => ({ pane: pane.query, id: row.id, t: row.t })));
+    const next = nextMatch(hits, LogPane.match, direction);
+    if (!next) return;
+    LogPane.match = next;
+    for (const pane of LogPane.panes) {
+      pane.current = pane.query === next.pane ? next.id : null;
+      if (pane.current !== null) pane.seek(pane.current);
+      pane.signature = ""; pane.schedule();
+    }
   }
   private seek(id: number): void {
     const i = this.visible.findIndex((r) => r.id === id);
@@ -349,7 +361,7 @@ export class LogPane {
 
     let total = this.layout();
     if (this.searchKey !== changedSearch) {
-      this.searchKey = changedSearch;
+      this.searchKey = changedSearch; LogPane.match = null;
       const newest = this.hits.at(-1);
       this.current = newest?.id ?? null;
       if (newest && this.options.search) this.seek(newest.id);
@@ -399,7 +411,7 @@ export class LogPane {
       time.textContent = (date.toDateString() === new Date().toDateString() ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
       el.append(time);
     }
-    if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = row.c; chip.title = row.c;
+    if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = chipName(row.c, new URLSearchParams(this.query).get("stack") ?? "", this.width < 700 ? 12 : 20); chip.title = row.c;
       const hash = [...new TextEncoder().encode(row.c)].reduce((h, b) => Math.imul(h ^ b, 16777619) >>> 0, 2166136261);
       chip.style.color = `hsl(${hash % 360} 55% 62%)`; el.append(chip); }
     const text = document.createElement("span"); text.className = "log-text";

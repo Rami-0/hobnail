@@ -98,3 +98,15 @@ export function permalink(hash: string): number | null { const m = /^#t=(\d+(?:\
 export function cursor(rows: LogLine[]): number | null { return rows.length ? Math.max(...rows.map((r) => r.t)) / 1000 + 0.000001 : null; }
 export function searchState(q: URLSearchParams) { return { search: q.get("search") || "", sensitive: q.get("case") === "1", regexFromLink: q.get("re") === "1" }; }
 export function retryDelay(attempt: number): number { return Math.min(30000, 2000 * 2 ** attempt); }
+
+export interface MatchPosition { pane: string; id: number; t: number }
+export function nextMatch(hits: MatchPosition[], current: MatchPosition | null, direction: number): MatchPosition | null {
+  const sorted = hits.toSorted((a, b) => a.t - b.t || a.pane.localeCompare(b.pane) || a.id - b.id);
+  if (!sorted.length) return null;
+  const i = sorted.findIndex((h) => h.pane === current?.pane && h.id === current.id);
+  return sorted[i < 0 ? (direction < 0 ? sorted.length - 1 : 0) : (i + direction + sorted.length) % sorted.length] ?? null;
+}
+export function chipName(name: string, stack: string, limit: number): string {
+  if (stack && name.startsWith(stack) && /^[-_]/.test(name.slice(stack.length))) name = name.slice(stack.length + 1);
+  return name.length <= limit ? name : name.slice(0, Math.ceil(limit / 2) - 1) + "…" + name.slice(-Math.floor(limit / 2));
+}

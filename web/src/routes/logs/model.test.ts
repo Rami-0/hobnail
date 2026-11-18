@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay } from "./model.ts";
+import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -37,4 +37,17 @@ test("URL state, permalinks and reconnect cursor retain units and disable linked
   assert.equal(permalink("#t=123.5"), 123.5); assert.equal(permalink("#t=Infinity"), null);
   assert.equal(cursor([{ c: "a", m: "", t: 123000 }]), 123.000001);
   assert.equal(cursor([]), null); assert.equal(retryDelay(6), 30000);
+});
+
+test("match stepping merges panes chronologically and wraps across panes", () => {
+  const a = { pane: "a", id: 1, t: 1 }, b = { pane: "b", id: 1, t: 2 }, c = { pane: "a", id: 2, t: 3 };
+  assert.deepEqual(nextMatch([c, a, b], null, -1), c);
+  assert.deepEqual(nextMatch([c, a, b], c, -1), b);
+  assert.deepEqual(nextMatch([c, a, b], c, 1), a);
+  assert.equal(nextMatch([], a, 1), null);
+});
+test("stack chips remove the project prefix and retain both identifying ends", () => {
+  assert.equal(chipName("shop_web_1", "shop", 12), "web_1");
+  assert.equal(chipName("shop-very-long-service-2", "shop", 12), "very-…vice-2");
+  assert.equal(chipName("shopping_web", "shop", 20), "shopping_web");
 });
