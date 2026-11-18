@@ -256,6 +256,11 @@ visible row window. Controls remain React components from `src/ui/`.
 | `[data-log-id][data-timestamp][data-level]` | One mounted log row; timestamp in milliseconds |
 | `[data-testid="log-older"]`, `[data-testid="log-latest"]` | Older window and jump-to-latest actions |
 | `[data-testid="log-matches"]` | Current match / total in this pane |
+| `#logs-from`, `#logs-to` | Custom-range fields and field-local validation |
+| `.log-current`, `.log-selected` | Current search/permalink result and line-action selection |
+| `.log-actions` | Copy/link actions and keyboard focus return |
+| `.log-level-count`, `.log-name`, `.log-history-start` | Retained level totals, stack chips and loaded-history boundaries |
+| `a[download][href^="/api/logs/download"]` | Native authenticated text download link |
 
 `[data-testid="log-body"]` also exposes `data-search-ms` (matching/filtering
 work in the latest frame, measured with `performance.now()`) and
