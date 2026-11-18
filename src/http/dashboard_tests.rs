@@ -725,7 +725,7 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
     );
     assert_eq!(
         header(&r.head, "cache-control").as_deref(),
-        Some("no-store")
+        Some("private, max-age=86400")
     );
     assert!(crate::http::assets::CSP.contains("img-src 'self' data:"));
 }

@@ -83,10 +83,7 @@ pub(crate) async fn route(
             if !state.config.current().icons.remote || validate_icon(Some(name)).is_err() {
                 return ApiError::not_found().response();
             }
-            let mut response =
-                crate::ui::icons::dashboard_icon(state, &format!("{name}.svg"), None).await;
-            set(&mut response, CACHE_CONTROL, "no-store");
-            response
+            crate::ui::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
         }
         Handler::Onboard => {
             crate::auth::credential_route(state, req, CredentialAction::Onboard).await

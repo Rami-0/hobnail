@@ -252,10 +252,17 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             }
         }
     }
+    let dashboard_icon = matches!(&lookup, Some(Lookup::Found(m))
+        if m.route.handler == access::Handler::DashboardIcon);
     let mut response = dispatch(&state, req, &path, host, read, lookup, session.as_ref()).await;
     if let Some(session) = session {
         crate::auth::refresh_cookie(&state, &session, &mut response);
-        set(&mut response, CACHE_CONTROL, "no-store");
+        if dashboard_icon && response.status().is_success() {
+            set(&mut response, CACHE_CONTROL, "private, max-age=86400");
+            set(&mut response, hyper::header::VARY, "Cookie");
+        } else {
+            set(&mut response, CACHE_CONTROL, "no-store");
+        }
     }
     response
 }

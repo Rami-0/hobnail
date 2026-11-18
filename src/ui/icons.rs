@@ -151,7 +151,22 @@ fn cached_path(data_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 
 /// Recently failed fetches, so a missing icon is not re-fetched per request.
 static MISSES: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+const MAX_MISSES: usize = 512;
 const MISS_TTL: Duration = Duration::from_secs(3600);
+
+fn cache_miss(misses: &mut HashMap<String, Instant>, name: &str) {
+    misses.retain(|_, time| time.elapsed() < MISS_TTL);
+    if misses.len() >= MAX_MISSES && !misses.contains_key(name) {
+        if let Some(oldest) = misses
+            .iter()
+            .min_by_key(|(_, time)| *time)
+            .map(|(name, _)| name.clone())
+        {
+            misses.remove(&oldest);
+        }
+    }
+    misses.insert(name.to_string(), Instant::now());
+}
 
 /// `GET /icons/di/<name>.svg?l=X`
 pub async fn dashboard_icon(state: &AppState, file: &str, letter: Option<char>) -> Response<Body> {
@@ -190,11 +205,10 @@ pub async fn dashboard_icon(state: &AppState, file: &str, letter: Option<char>) 
             Ok(r) => crate::info!("icon not found", name = name, status = r.status),
             Err(e) => crate::warn!("icon fetch failed", name = name, error = e),
         }
-        MISSES
-            .lock()
-            .unwrap()
-            .get_or_insert_with(HashMap::new)
-            .insert(name.to_string(), Instant::now());
+        cache_miss(
+            MISSES.lock().unwrap().get_or_insert_with(HashMap::new),
+            name,
+        );
     }
     let l = letter.filter(|c| c.is_ascii_alphanumeric()).unwrap_or('?');
     svg_response(avatar_svg(name, l).into_bytes(), "no-cache")
@@ -232,6 +246,17 @@ fn svg_response(body: Vec<u8>, cache: &str) -> Response<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn miss_cache_expires_entries_and_limits_size() {
+        let mut misses = HashMap::from([("expired".into(), Instant::now() - MISS_TTL)]);
+        for i in 0..MAX_MISSES + 1 {
+            cache_miss(&mut misses, &i.to_string());
+        }
+        assert_eq!(misses.len(), MAX_MISSES);
+        assert!(!misses.contains_key("expired"));
+        assert!(misses.contains_key(&MAX_MISSES.to_string()));
+    }
 
     #[test]
     fn auto_icons() {
