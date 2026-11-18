@@ -38,7 +38,7 @@ mod tests;
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::{Method, Request, Response};
 use std::sync::Arc;
 
 use crate::http::server::Body;
