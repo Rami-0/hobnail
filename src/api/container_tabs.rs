@@ -33,6 +33,8 @@ pub(super) struct ContainerInspect {
     read_only: bool,
     network_mode: String,
     networks: Vec<String>,
+    network_addresses: Vec<(String, String, String, String, String)>,
+    health_schedule: Option<[i64; 4]>,
     user: String,
     work_dir: String,
     command: Option<Vec<String>>,
@@ -153,6 +155,27 @@ fn run(
                     privileged: i.host_config.privileged,
                     read_only: i.host_config.readonly_rootfs,
                     network_mode: i.host_config.network_mode,
+                    network_addresses: i
+                        .network_settings
+                        .networks
+                        .as_ref()
+                        .into_iter()
+                        .flatten()
+                        .map(|(name, endpoint)| {
+                            (
+                                name.clone(),
+                                endpoint.ip_address.clone(),
+                                endpoint.ipv6_address.clone(),
+                                endpoint.gateway.clone(),
+                                endpoint.mac_address.clone(),
+                            )
+                        })
+                        .collect(),
+                    health_schedule: i
+                        .config
+                        .healthcheck
+                        .as_ref()
+                        .map(|h| [h.interval, h.timeout, h.retries, h.start_period]),
                     networks: i
                         .network_settings
                         .networks

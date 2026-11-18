@@ -105,6 +105,17 @@ function Inspect({ root, admin }: { root: string; admin: boolean }) {
         ["Health test", data.health_test?.join(" ") || "—"],
       ] as const : []),
     ]} />
+    <h3>Network addresses</h3>
+    {data.network_addresses.length ? data.network_addresses.map(([network, ipv4, ipv6, gateway, mac]) => <section key={network}>
+      <h4>{network}</h4><Pairs rows={[["IPv4", ipv4 || "—"], ["IPv6", ipv6 || "—"], ["Gateway", gateway || "—"], ["MAC", mac || "—"]]} />
+    </section>) : <p>No attached networks.</p>}
+    <h3>Health-check schedule</h3>
+    {data.health_schedule ? <Pairs rows={[
+      ["Interval", data.health_schedule[0] > 0 ? duration(data.health_schedule[0] / 1e9) : "Docker default (30s)"],
+      ["Timeout", data.health_schedule[1] > 0 ? duration(data.health_schedule[1] / 1e9) : "Docker default (30s)"],
+      ["Retries", data.health_schedule[2] > 0 ? data.health_schedule[2] : 3],
+      ["Start period", duration(data.health_schedule[3] / 1e9)],
+    ]} /> : <p>No health check configured.</p>}
     <h3>Mounts</h3>
     {data.mounts.length ? <ul>{data.mounts.map((m) => <li key={m.destination}>
       {m.source && <>{m.source} → </>}{m.destination} · {m.kind} · {m.writable ? "read/write" : "read-only"}
