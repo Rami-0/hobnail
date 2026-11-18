@@ -70,7 +70,7 @@ export type Control = {
 };
 
 export function displayValue(field: Control, value: unknown): string {
-  if (value == null) return "";
+  if (value === null || value === undefined) return "";
   if (field.format === "list" && Array.isArray(value)) return value.join(", ");
   if (field.format === "map" && typeof value === "object") return Object.entries(value).map(([key, entry]) => `${key}=${entry}`).join("\n");
   if (field.format === "json" || typeof value === "object") return JSON.stringify(value, null, 2);
