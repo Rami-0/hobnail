@@ -11,7 +11,7 @@ import { useBootstrap, useContainers, useNow, useStatsMap, useStrips, useSystem 
 import { useRead } from "../../live/read.ts";
 import { bytes, duration, pct } from "../../format/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
-import { HealthStrip, Meter } from "../../ui/Sparkline.tsx";
+import { ChartPlaceholder, HealthStrip, Meter } from "../../ui/Sparkline.tsx";
 import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import { treemap } from "./treemap.ts";
 import "../history/history.css";
@@ -60,6 +60,7 @@ export default function Overview() {
     };
   }, [allowed, now]);
   if (boot?.scoped) return <p className="page">Overview is unavailable with board-scoped access.</p>;
+  if (!overview || !containers) return <p className="page" role={error ? "alert" : "status"}>{error ?? "Loading Overview…"}</p>;
   const bookmarkGroups = new Map<string, BookmarkView[]>();
   for (const bookmark of bookmarks ?? []) {
     const group = bookmark.group || "Bookmarks";
@@ -117,7 +118,7 @@ export default function Overview() {
         <span>CPU {pct(system.cpu_pct)}</span><span>Memory {bytes(system.mem_used)} / {bytes(system.mem_total)}</span>
         <span>Load {system.load[0].toFixed(2)}</span><span>Uptime {duration(system.uptime_secs)}</span>
       </div>}
-      {!!overview?.hour.length && <Suspense fallback={null}><Charts
+      {!!overview?.hour.length && <Suspense fallback={<ChartPlaceholder count={4} />}><Charts
         series={{ from: overview.now - 3600, to: overview.now, range: "1h", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: overview.markers }}
         metrics={overview.hour} recording={boot.features.history}
         onZoom={(from, to) => navigate(`/app/history?from=${from}&to=${to}`)}

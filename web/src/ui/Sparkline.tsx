@@ -111,3 +111,14 @@ export function Meter({ value, max, label, className }: MeterProps) {
     </svg>
   );
 }
+
+/** Reserve the whole chart grid while data and the plotting module arrive. */
+export function ChartPlaceholder({ count }: { count: number }) {
+  return <div className="charts two" aria-label="Loading charts" aria-busy="true">
+    {Array.from({ length: count }, (_, index) => (
+      // Placeholder positions are fixed until the complete grid replaces them.
+      // eslint-disable-next-line react/no-array-index-key
+      <div key={index} className="chart ch-wait" />
+    ))}
+  </div>;
+}

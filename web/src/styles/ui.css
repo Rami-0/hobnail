@@ -260,3 +260,5 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 /* Reserve chart grid layout before its lazy implementation arrives. */
 .charts.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-3)}
 @media (max-width:900px){.charts.two{grid-template-columns:minmax(0,1fr)}}
+
+.ch-wait{min-height:calc(206px + var(--hit));background:var(--surface)}

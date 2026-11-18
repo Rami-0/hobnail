@@ -6,6 +6,7 @@ import { containerHref, logsHref } from "../../app/paths.ts";
 import { navigate, useRoute } from "../../app/router.ts";
 import { useBootstrap, useContainers } from "../../live/index.ts";
 import { Button } from "../../ui/Button.tsx";
+import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { historyWindow, RANGES, windowSteps } from "./window.ts";
 import "./history.css";
@@ -40,8 +41,8 @@ export default function History() {
       {zoomed && <Button onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button>}
     </div>
     {error && <p role="alert">{error}</p>}
-    {!data ? !error && <p role="status">Loading history…</p> : <>
-      <Suspense fallback={<p role="status">Loading charts…</p>}>
+    {!data ? !error && <ChartPlaceholder count={8} /> : <>
+      <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
         <Charts
           series={{ from: data.from, to: data.to, range, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
           metrics={data.metrics}
