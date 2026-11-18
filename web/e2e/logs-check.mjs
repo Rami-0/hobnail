@@ -60,6 +60,14 @@ try {
       assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile log remains literal text");
       await tab.ev(`{const b=document.querySelector('[data-testid=log-body]'); b.scrollTop-=100;}`);
       await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll up stops following");
+      if (width === 390) await inp.click('.log-filters');
+      const anchor = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), br=b.getBoundingClientRect(); const r=[...b.querySelectorAll('[data-log-id]')].find(r=>r.getBoundingClientRect().bottom > br.top+1); return {id:r.dataset.logId, offset:r.getBoundingClientRect().top-br.top}; })()`);
+      for (const label of ['Wrap','Time','Wrap','Time']) {
+        await tab.ev(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${q(label)}).click()`);
+        await sleep(200);
+        const after = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), r=b.querySelector('[data-log-id="${anchor.id}"]'); return r ? r.getBoundingClientRect().top-b.getBoundingClientRect().top : null; })()`);
+        assert.ok(after !== null && Math.abs(after-anchor.offset)<4, `${label} keeps reader line: ${after} vs ${anchor.offset}`);
+      }
       await tab.ev(`document.querySelector('[data-testid=log-latest]').click()`);
       await wait('!document.querySelector("[data-testid=log-latest]")', "jump resumes following");
 
@@ -86,6 +94,8 @@ try {
       measurements.search5000Ms = await tab.ev('performance.now()-searchStarted');
       await inp.key("Enter"); await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
+      await tab.ev(`document.querySelector('[data-testid=log-body] details summary')?.click()`);
+      assert.ok(await tab.ev(`!!document.querySelector('[data-testid=log-body] details[open] pre')`), "JSON folds and opens");
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
       const dl = await fetch(new URL(download, base), { headers }); assert.equal(dl.status, 200); assert.ok(dl.headers.get("content-disposition").includes("attachment")); assert.ok((await dl.text()).includes("<script"));
       await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await tab.shot(path.join(out, `${label}-stack.png`));
