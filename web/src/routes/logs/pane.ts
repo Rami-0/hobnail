@@ -272,7 +272,7 @@ export class LogPane {
     }
     this.report({ state: this.options.paused ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following,
-      message: search.error ?? this.message, counts: this.counts });
+      message: search.error ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
   }
   private searchKey = "";
   private row(row: Row): HTMLElement {
@@ -285,7 +285,9 @@ export class LogPane {
       time.textContent = (date.toDateString() === new Date().toDateString() ? "" : date.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " ") + date.toLocaleTimeString(undefined, { hour12: false });
       el.append(time);
     }
-    if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = row.c; chip.title = row.c; el.append(chip); }
+    if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = row.c; chip.title = row.c;
+      const hash = [...new TextEncoder().encode(row.c)].reduce((h, b) => Math.imul(h ^ b, 16777619) >>> 0, 2166136261);
+      chip.style.color = `hsl(${hash % 360} 55% 62%)`; el.append(chip); }
     const text = document.createElement("span"); text.className = "log-text";
     const fold = jsonFold(row.plain);
     if (fold) {

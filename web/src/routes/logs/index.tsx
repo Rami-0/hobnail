@@ -77,6 +77,21 @@ function Picker({ data }: { data: LogsPicker }) {
     </section>)}
   </div>;
 }
+function LevelCounts({ name, range }: { name: string; range: string }) {
+  const [open, setOpen] = useState(false), [counts, setCounts] = useState<number[] | null>(null), [error, setError] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    const ac = new AbortController();
+    void api.get<{ points: Array<[number, number[]]> }>(`/api/logs/levels?c=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`, { signal: ac.signal }).then((r) => {
+      if (ac.signal.aborted) return;
+      if (r.kind === "ok") setCounts(r.data.points.reduce((sum, p) => sum.map((n, i) => n + (p[1][i] ?? 0)), [0, 0, 0, 0, 0])); else setError(r.message);
+    });
+    return () => ac.abort();
+  }, [open, name, range]);
+  return <details className="log-level-history" onToggle={(e) => setOpen(e.currentTarget.open)}><summary>Errors and warnings, last {range}</summary>
+    {error ? <p role="alert">{error}</p> : <p>{counts ? `${counts[0]} errors · ${counts[1]} warnings` : "Loading counts…"}</p>}
+  </details>;
+}
 export default function LogsPage() {
   const route = useRoute();
   const [picker, setPicker] = useState<LogsPicker | null>(null), [error, setError] = useState("");
@@ -135,6 +150,7 @@ export default function LogsPage() {
     <div className="log-panes" style={{ gridTemplateColumns: `repeat(${stack ? 1 : Math.max(1, panes.length)}, minmax(0, 1fr))` }}>
       {stack && stackExists ? <Pane key={`stack:${stack}`} title={stack} stack query={`stack=${encodeURIComponent(stack)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} /> : panes.map((name) => <Pane key={name} title={name} query={`c=${encodeURIComponent(name)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} close={route.route.name === "logs" ? `/app/logs${panes.length > 1 ? `?c=${encodeURIComponent(panes.filter((n) => n !== name).join(","))}` : ""}` : undefined} />)}
     </div>
+    {route.route.name === "container_logs" && <LevelCounts name={route.route.ctr} range={route.search.get("range") || "6h"} />}
     {route.route.name === "logs" && <a href={`/app/logs?sel=${encodeURIComponent(panes.join(","))}`}>Add a pane</a>}
   </div>;
 }
