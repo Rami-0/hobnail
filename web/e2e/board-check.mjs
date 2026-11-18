@@ -60,9 +60,15 @@ try {
   await inp.click('nav[data-testid="sidebar"] a[href="/app/containers"]'); await wait('!!document.querySelector("[role=dialog][data-open]")', "unsaved navigation asks before leaving"); await inp.click('[role="dialog"][data-open] .dlg-ft button'); await wait(visible("board-editor"), "Keep editing preserves local work");
   await tab.send("Page.reload"); await wait(visible("board-draft"), "reload offers server draft"); await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-editor"), "draft resumes");
   await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`);
-  const secondSession = await login(); const remote = (await api("GET", `/boards/${boardId}`, undefined, secondSession)).data.document;
+  // Drafts are per user: another session of this same owner would clear
+  // the owner's shared draft when it saves. Use a distinct Admin principal.
+  const adminInvite = await api("POST", "/invites", { role: "admin" });
+  check(adminInvite.status === 201, "create a separate Admin editing session");
+  const adminAccepted = await fetch(base + "/api/v1/invites/accept", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ token: adminInvite.data.token, username: `editor-${Date.now()}`, password: PW }) });
+  const secondSession = { cookie: adminAccepted.headers.get("set-cookie").split(";")[0], csrf: (await adminAccepted.json()).csrf };
+  const remote = (await api("GET", `/boards/${boardId}`, undefined, secondSession)).data.document;
   remote.sections.push({ title: "Other session", position: remote.sections.length, items: [] }); check((await api("PUT", `/boards/${boardId}`, remote, secondSession)).status === 200, "second session saves a board version");
-  await inp.click('[data-testid="board-save"]'); await wait(visible("board-conflict"), "a stale save exposes conflict choices");
+  await inp.click('[data-testid="board-save"]'); await wait(`${visible("board-conflict")} && document.querySelector('[data-testid="board-save"]').disabled`, "a real 409 exposes conflict choices and disables Save");
   await tab.send("Page.reload"); await wait(visible("board-draft"), "stale draft survives a reload after conflict");
   await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-conflict"), "recovered stale draft requires explicit rebase");
   await inp.click('[data-testid="board-rebase"]'); await wait(`!document.querySelector('[data-testid="board-save"]').disabled`, "explicit rebase enables Save");
