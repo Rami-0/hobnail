@@ -196,14 +196,17 @@ export class LogPane {
   private mark(): void {
     if (this.following) { this.anchor = null; return; }
     const edge = this.box.getBoundingClientRect().top;
+    let clipped: HTMLElement | null = null;
     for (const child of this.content.children) {
       const element = child as HTMLElement;
       const bounds = element.getBoundingClientRect();
-      if (bounds.bottom > edge + 0.5) {
+      if (bounds.top >= edge - 0.5 && bounds.top < edge + this.box.clientHeight) {
         this.anchor = { id: Number(element.dataset.logId), offset: edge - bounds.top };
         return;
       }
+      if (bounds.bottom > edge && !clipped) clipped = element;
     }
+    if (clipped) { this.anchor = { id: Number(clipped.dataset.logId), offset: edge - clipped.getBoundingClientRect().top }; return; }
     let i = this.indexAt(this.box.scrollTop);
     i = Math.min(i, this.visible.length - 1);
     const row = this.visible[i];
@@ -256,6 +259,12 @@ export class LogPane {
     else if (this.anchor) {
       const index = this.visible.findIndex((r) => r.id === this.anchor?.id);
       if (index >= 0) this.box.scrollTop = (this.offsets[index] ?? 0) + this.anchor.offset;
+      else if (this.visible.length) {
+        const removed = this.ring.rows.find((row) => row.id === this.anchor?.id);
+        const next = this.visible.find((row) => row.t >= (removed?.t ?? 0)) ?? this.visible[0];
+        const at = this.visible.findIndex((row) => row.id === next?.id);
+        if (next && at >= 0) { this.anchor = { id: next.id, offset: this.anchor.offset }; this.box.scrollTop = (this.offsets[at] ?? 0) + this.anchor.offset; }
+      }
     }
     this.lastTop = this.box.scrollTop;
   }
