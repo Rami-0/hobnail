@@ -376,12 +376,19 @@ pub(super) async fn route(
                 if c.execute("DELETE FROM integrations WHERE id=?1", [id])? == 0 {
                     return Err(ApiError::not_found());
                 }
+                crate::db::accounts::revoke_target_invites(
+                    c,
+                    "$.integrations",
+                    id,
+                    crate::auth::now_s(),
+                )?;
                 c.execute(
                     "DELETE FROM access_grants WHERE kind='integration' AND target_id=?1",
                     [id],
                 )?;
                 Ok(())
             })?;
+            state.changed("reload");
             return Ok(super::no_content());
         }
         Handler::IntegrationTest => {

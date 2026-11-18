@@ -750,6 +750,7 @@ pub(super) async fn route(
             let version = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c, id)?;
                 c.execute("DELETE FROM boards WHERE id=?1", [id])?;
+                crate::db::accounts::revoke_target_invites(c, "$.boards", id, now)?;
                 c.execute(
                     "DELETE FROM access_grants WHERE kind='board' AND target_id=?1",
                     [id],

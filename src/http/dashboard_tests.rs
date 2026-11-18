@@ -731,6 +731,81 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
 }
 
 #[tokio::test]
+async fn deleting_targets_revokes_pending_invites_and_refreshes_boards() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Service").await;
+    let integration = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({
+                "name":"Service","kind":"http","enabled":true,"base_url":"https://example.test"
+            }),
+            201,
+        )
+        .await;
+    let id = integration["id"].as_str().unwrap();
+    let path = format!("/api/v1/boards/{board}");
+    owner
+        .json(
+            "PUT",
+            &path,
+            json!({"version":0,"sections":[{
+                "title":"Services","position":0,"items":[{
+                    "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+                    "payload":{"kind":"integration","integration_id":id}
+                }]
+            }]}),
+            200,
+        )
+        .await;
+    let invites = "/api/v1/invites";
+    owner
+        .json(
+            "POST",
+            invites,
+            json!({"role":"viewer","scopes":{"boards":[board]}}),
+            201,
+        )
+        .await;
+    owner
+        .json(
+            "POST",
+            invites,
+            json!({"role":"viewer","scopes":{"integrations":[id]}}),
+            201,
+        )
+        .await;
+    owner
+        .json("POST", invites, json!({"role":"viewer","scopes":{}}), 201)
+        .await;
+    let (mut stream, _) =
+        Stream::open(owner.addr, "/api/v1/stream?topics=boards", &owner.cookie).await;
+    assert_eq!(stream.next().await.0, "hello");
+    assert_eq!(
+        owner
+            .call("DELETE", &format!("/api/v1/integrations/{id}"), Value::Null)
+            .await
+            .status,
+        204
+    );
+    assert_eq!(stream.next().await.0, "config");
+    assert_eq!(
+        owner.json("GET", &path, Value::Null, 200).await["resolved"][0]["missing"],
+        true
+    );
+    assert_eq!(owner.call("DELETE", &path, Value::Null).await.status, 204);
+    let invites = owner.json("GET", invites, Value::Null, 200).await;
+    for invite in invites.as_array().unwrap() {
+        let scopes = &invite["scopes"];
+        let affected = scopes["boards"] == json!([board]) || scopes["integrations"] == json!([id]);
+        assert_eq!(invite["revoked_at"].is_number(), affected, "{invite}");
+    }
+}
+
+#[tokio::test]
 async fn disabled_integration_cannot_send_its_credential() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

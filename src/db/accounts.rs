@@ -199,6 +199,22 @@ pub(crate) fn read_accounts(conn: &Connection) -> rusqlite::Result<Vec<Account>>
     rows.collect()
 }
 
+/// Revoke outstanding invitations whose promised access can no longer be granted.
+pub(crate) fn revoke_target_invites(
+    conn: &Connection,
+    scope: &str,
+    id: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE invites SET revoked_at=?3
+         WHERE used_at IS NULL AND revoked_at IS NULL AND expires>?3
+         AND EXISTS (SELECT 1 FROM json_each(invites.scopes, ?1) WHERE value=?2)",
+        params![scope, id, now],
+    )?;
+    Ok(())
+}
+
 fn valid_targets(conn: &Connection, scopes: Option<&Scopes>) -> rusqlite::Result<bool> {
     let Some(scopes) = scopes else {
         return Ok(true);
