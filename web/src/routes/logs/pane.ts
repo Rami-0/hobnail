@@ -305,8 +305,9 @@ export class LogPane {
   private flush(): void {
     this.restoring = true;
     this.fit();
+    let accepted = 0;
     if (!this.options.paused && this.pending.length) {
-      const batch = this.pending.splice(0, 256);
+      const batch = this.pending.splice(0, 256); accepted = batch.length;
       if (!this.following) this.unseen += batch.length;
       this.ring.append(batch);
       for (const line of batch) {
@@ -318,8 +319,8 @@ export class LogPane {
       for (const id of this.heights.keys()) if (!retained.has(id)) this.heights.delete(id);
       for (const id of this.openedJson) if (!retained.has(id)) this.openedJson.delete(id);
     }
-    if (!this.options.paused && !this.pending.length && this.pendingOlder.length) {
-      this.ring.append(this.pendingOlder.splice(-256), true);
+    if (!this.options.paused && !this.pending.length && this.pendingOlder.length && accepted < 256) {
+      this.ring.append(this.pendingOlder.splice(-(256 - accepted)), true);
     }
     const search = matcher(this.options.search, this.options.regex, this.options.sensitive);
     const searchStarted = performance.now();
