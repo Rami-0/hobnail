@@ -53,6 +53,17 @@ const LIVE_MS = Number(process.env.LIVE_MS || 45000);
 const TRACE = process.env.TRACE !== "0";
 const LOAD_BUDGET = 200, LIVE_BUDGET = 50, LIVE_WINDOW = 1000, SETTLE = 2000;
 const enc = encodeURIComponent(NAME);
+let sessionCookie = process.env.HB_COOKIE;
+if (!sessionCookie && process.env.HB_PASSWORD) {
+  const origin = new URL(base).origin;
+  const session = await fetch(`${base}/api/v1/session`).then((r) => r.json());
+  const response = await fetch(base + (session.owner_exists ? "/api/login" : "/api/v1/onboarding/owner"), {
+    method: "POST", headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "admin", password: process.env.HB_PASSWORD }),
+  });
+  if (!response.ok) throw new Error(`Performance sign-in failed: ${response.status}`);
+  sessionCookie = response.headers.get("set-cookie")?.split(";")[0];
+}
 
 const T = {
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
@@ -118,8 +129,8 @@ async function run(target, profile) {
     await tab.send("Performance.enable", { timeDomain: "timeTicks" });
     await tab.send("Network.setCacheDisabled", { cacheDisabled: true });
     await tab.send("Network.clearBrowserCache"); await tab.send("Network.clearBrowserCookies");
-    if (process.env.HB_COOKIE) {
-      const cookie = process.env.HB_COOKIE, split = cookie.indexOf("=");
+    if (sessionCookie) {
+      const cookie = sessionCookie, split = cookie.indexOf("=");
       await tab.send("Network.setCookie", { name: cookie.slice(0, split), value: cookie.slice(split + 1), url: new URL(base).origin, path: "/", httpOnly: true, sameSite: "Strict" });
     }
     await tab.send("Emulation.setDeviceMetricsOverride", { width: p.w, height: p.h, deviceScaleFactor: 1, mobile: p.mobile });
