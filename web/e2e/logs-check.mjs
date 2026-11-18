@@ -23,7 +23,7 @@ const picker = await fetch(new URL("/api/v1/logs/picker", base), { headers }).th
 const group = picker.groups.find((g) => g.project && g.containers.some((c) => c.name === "svc001")); assert.ok(group);
 const browser = await launch(); const results = []; const failures = [];
 try {
-  for (const width of [1440, 390]) for (const theme of ["dark", "light"]) {
+  for (const width of (process.env.WIDTHS || "1440 390").split(/\s+/).map((v) => parseInt(v))) for (const theme of (process.env.SCHEMES || "dark light").split(/\s+/)) {
     const tab = await browser.tab(); const inp = input(tab), rec = recorder(tab, base.origin); inp.touch = width === 390;
     const label = `${width}-${theme}`; const measurements = { label };
     const wait = async (expr, message, ms = 12000) => assert.ok(await tab.until(expr, ms), message);
@@ -49,6 +49,7 @@ try {
       await inp.key("Enter"); await wait('!!document.querySelector("[data-testid=log-body] [data-log-id]")', "Enter opens first match");
       await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("5,000 / 5,000")', "5000-line ring");
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      await sleep(1000);
       await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(list => logTasks.push(...list.getEntries().map(e=>e.duration))); logObserver.observe({type:'longtask',buffered:false});`);
       await sleep(7000);
       measurements.burstMaxTaskMs = await tab.ev('Math.max(0,...logTasks)');
