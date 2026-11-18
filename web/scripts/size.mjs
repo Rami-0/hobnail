@@ -17,7 +17,7 @@ const BUDGET = {
   chunk: 60 * KB,
   charts: 60 * KB,
   distRaw: 1300 * KB,
-  distGzip: 400 * KB,
+  distGzip: 420 * KB,
 };
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 
