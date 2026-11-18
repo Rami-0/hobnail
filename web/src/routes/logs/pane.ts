@@ -121,7 +121,8 @@ export class LogPane {
     else if (this.target && this.target <= Date.now() + 5000) params.set("since", String(Math.max(0, this.target / 1000 - 120)));
     else if (this.target) this.message = "That moment is still to come: showing the live tail.";
     this.state = "connecting"; this.schedule();
-    const reconnecting = this.last.size > 0;
+    const reconnectFloor = new Map(this.last);
+    const reconnecting = reconnectFloor.size > 0;
     const es = this.source = new EventSource(`/api/logs/stream?${params}`);
     es.addEventListener("hello", () => { this.state = "live"; this.delay = 2000; this.schedule(); });
     es.addEventListener("meta", (e) => {
@@ -133,9 +134,10 @@ export class LogPane {
     es.addEventListener("l", (e) => {
       const lines = this.decode((e as MessageEvent<string>).data);
       for (const line of lines) {
-        const previous = this.last.get(line.c);
+        const previous = reconnectFloor.get(line.c);
         if (previous !== undefined && line.t <= previous && reconnecting) continue;
         this.pending.push(line);
+        this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
       }
       // Paused input stays bounded too. The cursor advances only when flushed.
       if (this.pending.length > this.cap) this.pending.splice(0, this.pending.length - this.cap);
