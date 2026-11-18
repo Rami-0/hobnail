@@ -68,10 +68,8 @@
 .in[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
 .in:disabled,.in[readonly]{background:var(--surface-2);color:var(--text-2);border-style:dashed;cursor:not-allowed}
 textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:vertical}
-select.in{padding-right:30px;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--text-2) 50%),linear-gradient(135deg,var(--text-2) 50%,transparent 50%);background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px;background-repeat:no-repeat}
 .sel{display:inline-flex;align-items:center;gap:var(--s-2);min-width:0}
 .sel-l{font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
-.sel select.in{width:auto}
 .cb{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:var(--fs-sm);color:var(--text);cursor:pointer}
 .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4) var(--s-5)}
 @media (max-width:699px){.grid-2{grid-template-columns:minmax(0,1fr)}}
