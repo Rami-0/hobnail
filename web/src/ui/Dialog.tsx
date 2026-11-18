@@ -102,12 +102,7 @@ export function Dialog({
     (first ?? el).focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (live.current.asking) keepEditing();
-        else request("escape");
-      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         const form = el.querySelector("form");
         if (form) {
           e.preventDefault();
