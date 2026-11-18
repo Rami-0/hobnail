@@ -70,17 +70,17 @@
 .ctbl th.c-num .sort-b{justify-content:flex-end}
 .ctbl .row:hover td,.ctbl .row.kfocus td{background:var(--surface-2)}
 .ctbl .row td:first-child{padding-left:14px}
-.c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+.c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
 .c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
 .c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
 .c-name .nm-t{white-space:nowrap}
 .c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
 .c-name .pill{margin-left:8px}
-.c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+.c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-stack a{color:var(--text-2)}
 .ctbl.grouped .c-stack{display:none}
-.c-image{width:18%;max-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-image{width:18%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-image .img{font-size:var(--fs-xs)}
 .c-state{width:1%;white-space:nowrap}
 .c-up{width:80px}
