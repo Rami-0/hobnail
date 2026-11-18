@@ -554,7 +554,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
   return (
     <tbody className={closed ? "grp closed" : "grp"}>
       <tr className="grp-h" data-testid="group" data-stack={g.name}>
-        <th colSpan={10} scope="rowgroup">
+        <th colSpan={9} scope="rowgroup">
           <button
             type="button"
             className="grp-t"
