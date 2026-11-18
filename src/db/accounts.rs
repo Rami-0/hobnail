@@ -340,7 +340,7 @@ impl Db {
             i.conn.query_row(
                 "SELECT EXISTS (
                 SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
-                WHERE token_hash = ?1 AND expires > ?2 AND created > ?3 AND disabled = 0
+                WHERE token_hash = ?1 AND expires > ?2 AND sessions.created > ?3 AND disabled = 0
             )",
                 params![hash, now, now - SESSION_MAX_AGE_SECS],
                 |row| row.get(0),
