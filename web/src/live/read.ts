@@ -18,7 +18,7 @@ export function useRead<T>(path: string | null, topic?: ReadTopic) {
     };
     load();
     const config = onConfigChange(load);
-    const live = topic ? watchReadTopic(topic, load) : null;
+    const live = topic && path ? watchReadTopic(topic, load) : null;
     return () => { lifetime.abort(); config(); live?.(); };
   }, [path, topic]);
   return result;

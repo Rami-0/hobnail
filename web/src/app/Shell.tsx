@@ -32,6 +32,7 @@ import { Brand, Sidebar } from "./Sidebar.tsx";
 import { applyDefaultTheme } from "./theme.ts";
 import { ThemeButton } from "./ThemeButton.tsx";
 import { useTabTitle } from "./title.ts";
+import { useAlertCount } from "./useAlertCount.ts";
 import { Vitals } from "./Vitals.tsx";
 
 const WIDE = "(min-width:1101px)";
@@ -60,7 +61,7 @@ const GO_HREF: Record<GoPage, () => string> = {
   host: () => "/host",
   logs: () => "/logs",
   history: () => "/app/history",
-  alerts: () => "/alerts",
+  alerts: () => "/app/alerts",
   settings: () => "/app/settings/boards",
 };
 
@@ -138,7 +139,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   }, [full, settled]);
 
   // ---- tab title and favicon ----
-  const problems = hidden ?? Math.max(problemCount(ctrs.data), b?.alerts_firing ?? 0);
+  const firing = useAlertCount();
+  const problems = hidden ?? Math.max(problemCount(ctrs.data), firing);
   useTabTitle(title, b?.title ?? null, problems);
 
   // ---- the owner's default theme, for a browser that has not chosen ----
@@ -431,12 +433,12 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             Logs<span className="sr"> (current interface)</span>
           </span>
         </a>
-        <a className="bb-i" href="/alerts">
+        <a className="bb-i" href="/app/alerts" aria-current={r === "alerts" ? "page" : undefined}>
           <BellIcon aria-hidden="true" />
           <span>
-            Alerts<span className="sr"> (current interface)</span>
+            Alerts
           </span>
-          {(b?.alerts_firing ?? 0) > 0 && <b className="bb-n">{b?.alerts_firing}</b>}
+          {firing > 0 && <b className="bb-n">{firing}</b>}
         </a>
         </>}
         <button

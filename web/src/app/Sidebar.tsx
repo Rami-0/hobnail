@@ -10,6 +10,7 @@
 // as the old UI); the stack of the open container stays open. The filter
 // text is kept while moving between pages until cleared (rh-tree-q); Enter
 // opens the first match, Down moves into the list.
+import { useAlertCount } from "./useAlertCount.ts";
 import {
   ArrowUpRightIcon,
   BellIcon,
@@ -373,7 +374,7 @@ export function Sidebar({
   const b = useBootstrap();
   const s = useSession();
   const active = r.name === "container" ? r.ctr : null;
-  const firing = b?.alerts_firing ?? 0;
+  const firing = useAlertCount();
   const build = s.session?.build;
   const railLabel = wide ? (rail ? "Expand sidebar" : "Collapse sidebar") : open ? "Close sidebar" : "Open sidebar";
   return (
@@ -420,9 +421,9 @@ export function Sidebar({
         <NavLink href="/logs" label="Logs" old icon={<ScrollTextIcon aria-hidden="true" />} />
         <NavLink href="/app/history" label="History" current={r.name === "history"} icon={<HistoryIcon aria-hidden="true" />} />
         <NavLink
-          href="/alerts"
+          href="/app/alerts"
           label="Alerts"
-          old
+          current={r.name === "alerts"}
           icon={<BellIcon aria-hidden="true" />}
           extra={
             firing > 0 ? (

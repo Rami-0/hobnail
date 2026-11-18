@@ -465,6 +465,7 @@ fn stream_topics() {
             system: true,
             boards: false,
             widget: false,
+            alerts: false,
         }
     );
     assert_eq!(
@@ -475,6 +476,7 @@ fn stream_topics() {
             system: false,
             boards: false,
             widget: false,
+            alerts: false,
         }
     );
     assert_eq!(
@@ -485,6 +487,7 @@ fn stream_topics() {
             system: true,
             boards: false,
             widget: false,
+            alerts: false,
         }
     );
 }

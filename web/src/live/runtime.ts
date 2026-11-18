@@ -64,7 +64,7 @@ export function watchBoards(cb: (event: { id: string; version: number }) => void
   return () => { boardListeners.delete(cb); off(); };
 }
 
-export type ReadTopic = "widget";
+export type ReadTopic = "widget" | "alerts";
 const reads = new Map<ReadTopic, Set<(data: unknown) => void>>();
 export function watchReadTopic(topic: ReadTopic, cb: (data: unknown) => void): () => void {
   const listeners = reads.get(topic) ?? new Set();
@@ -205,9 +205,12 @@ function refetchAll(): void {
 
 function onMessage(m: StreamMessage): void {
   switch (m.type) {
-    case "widget":
-      scheduler.queue(() => { for (const cb of reads.get(m.type) ?? []) cb(m.data); });
+    case "alerts":
+    case "widget": {
+      const listeners = reads.get(m.type);
+      scheduler.queue(() => { for (const cb of listeners ?? []) cb(m.data); });
       return;
+    }
     case "boards":
       void fetchBootstrap();
       if (stripsWanted > 0) void fetchStrips();

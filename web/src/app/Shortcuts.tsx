@@ -39,7 +39,7 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["g", "h"]}>Host{OLD}</Row>
         <Row k={["g", "l"]}>Logs{OLD}</Row>
         <Row k={["g", "y"]}>History</Row>
-        <Row k={["g", "a"]}>Alerts{OLD}</Row>
+        <Row k={["g", "a"]}>Alerts</Row>
         </>}
         {(!scoped || boot.role === "admin") && <Row k={["g", "s"]}>Settings</Row>}
         <Row k={[mod, "K"]}>Search and commands</Row>

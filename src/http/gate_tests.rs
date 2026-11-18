@@ -1205,6 +1205,10 @@ headers = { Authorization = "widget-secret" }
 name = "Example"
 url = "https://example.com"
 
+[channels.hook]
+type = "webhook"
+url = "https://example.com/channel-secret"
+
 [[alerts]]
 name = "shop-down"
 type = "container"
@@ -2090,7 +2094,12 @@ async fn invite_roles_and_account_management() {
             req(addr, "GET", "/api/v1/bookmarks", &h, "").await.status,
             403
         );
-        for path in ["/api/v1/widgets", "/api/v1/stream?topics=widget"] {
+        for path in [
+            "/api/v1/widgets",
+            "/api/v1/stream?topics=widget",
+            "/api/v1/alerts",
+            "/api/v1/stream?topics=alerts",
+        ] {
             assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
         }
         let r = req(
@@ -2312,6 +2321,12 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let alerts = req(addr, "GET", "/api/v1/alerts", &h, "").await;
+    assert_eq!(
+        json_of(&alerts, "viewer alerts")["rules"][0]["name"],
+        "shop-down"
+    );
+    assert!(!alerts.body.contains("channel-secret"));
     let widgets = req(addr, "GET", "/api/v1/widgets", &h, "").await;
     assert_eq!(json_of(&widgets, "viewer widgets")[0]["id"], "probe-widget");
     assert!(!widgets.body.contains("widget-secret"));

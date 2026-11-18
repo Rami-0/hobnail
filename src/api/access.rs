@@ -155,13 +155,13 @@ pub(crate) fn check_scope(
             }
             if matches!(
                 m.route.handler,
-                Handler::History | Handler::Bookmarks | Handler::Widgets
+                Handler::History | Handler::Bookmarks | Handler::Widgets | Handler::Alerts
             ) {
                 return Err(Denied::Role);
             }
             if m.route.handler == Handler::Stream && {
                 let topics = super::stream::Topics::requested(query);
-                topics.system || topics.widget
+                topics.system || topics.widget || topics.alerts
             } {
                 return Err(Denied::Role);
             }
@@ -225,6 +225,7 @@ pub enum Handler {
     History,
     Bookmarks,
     Widgets,
+    Alerts,
     Strips,
     Stream,
     Onboard,
@@ -430,6 +431,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/widgets",
         access: Access::Viewer,
         handler: Handler::Widgets,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/alerts",
+        access: Access::Viewer,
+        handler: Handler::Alerts,
     },
     Route {
         method: "GET",

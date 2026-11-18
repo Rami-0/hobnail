@@ -545,6 +545,26 @@ pub fn detail(
     })
 }
 
+/// Historical subjects can outlive the current Docker snapshot.
+pub(super) fn excluded_subject(
+    config: &crate::config::Config,
+    snapshot: &Snapshot,
+    name: &str,
+) -> bool {
+    if let Some(hide) = config.containers.get(name).and_then(|entry| entry.hide) {
+        return hide;
+    }
+    config
+        .docker
+        .exclude
+        .iter()
+        .any(|pattern| crate::util::glob_match(pattern, name))
+        || snapshot
+            .containers
+            .iter()
+            .any(|c| c.name == name && view::is_excluded(config, c))
+}
+
 pub(super) fn event_row(e: &Event) -> EventRow {
     EventRow {
         id: e.id,

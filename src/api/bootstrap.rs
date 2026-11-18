@@ -116,7 +116,7 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
         alerts_firing: if user.is_scoped() {
             0
         } else {
-            state.alerts.lock().unwrap().incidents.len() as u32
+            super::alerts::firing(state).len() as u32
         },
         refresh: Refresh {
             system_secs: cfg.system.refresh.0.as_secs().max(1),
