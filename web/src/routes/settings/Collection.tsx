@@ -23,9 +23,11 @@ type Props = Snapshot & {
   reorder?: boolean;
   row?: (entry: Entry) => ReactNode;
   extra?: (entry: Entry) => ReactNode;
+  validate?: (item: Values) => Record<string, string>;
+  afterSave?: { label: string; run: (item: Values) => Promise<void> };
   renderDetails?: (item: Values) => ReactNode;
   preview?: (item: Values, entry?: Entry) => Promise<string>;
-  body?: (changes: Values, input: Values) => Values;
+  body?: (changes: Values, input: Values, original?: Values) => Values;
   create?: (input: Values) => Values;
   renameKey?: string;
   renameRules?: (id: Entry["id"]) => string[];
@@ -147,6 +149,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
   }, [dirty]);
   function check() {
     const result = collectFields(fields, input);
+    Object.assign(result.errors, props.validate?.(result.values));
     setErrors(result.errors);
     setFailure(undefined);
     if (Object.keys(result.errors).length) {
@@ -155,14 +158,18 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
     }
     return result.values;
   }
-  async function save() {
+  async function save(andRun = false) {
     if (busy || base.entry?.locked) return;
     const values = check();
     if (!values) return;
     const changed = changedFields(base.values, input);
     const patch = Object.fromEntries(Object.keys(changed).map((key) => [key, values[key]]));
-    const item = base.entry ? props.body?.(patch, values) ?? patch : props.create?.(values) ?? values;
-    if (base.entry && !dirty) { close(); return; }
+    const item = base.entry ? props.body?.(patch, values, base.entry.item) ?? patch : props.create?.(values) ?? values;
+    if (base.entry && !dirty) {
+      close();
+      if (andRun) await props.afterSave?.run(values);
+      return;
+    }
     const renamed = props.renameKey && patch[props.renameKey];
     if (base.entry && renamed && props.renameRules?.(base.entry.id).length && !rename) {
       setRename(true);
@@ -176,6 +183,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
       close();
       saved(result.data);
       const latest = await refresh();
+      if (andRun) await props.afterSave?.run(values);
       focus(renamed && typeof renamed === "string" ? renamed : base.entry?.id ?? latest?.entries.at(-1)?.id);
     } else {
       setFailure(result);
@@ -216,6 +224,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
           setBusy(false);
         }
       }}>Fetch now</Button>}
+      {props.afterSave && <Button busy={busy} onClick={() => { void save(true); }}>{props.afterSave.label}</Button>}
       <Button type="submit" variant="primary" form={formId} busy={busy} disabled={base.entry?.locked}>{rename ? "Rename and update rules" : "Save"}</Button>
     </>}>
     <form id={formId} className="settings-form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>

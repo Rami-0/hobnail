@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../../api/session.ts";
 import { Button } from "../../ui/Button.tsx";
+import { toast } from "../../ui/toast.ts";
 import { Note } from "../../ui/Note.tsx";
 import { Collection, type Entry } from "./Collection.tsx";
 import type { Values } from "./forms.ts";
@@ -11,6 +12,7 @@ type Data = { hash: string; channels: Channel[]; rules: Entry[] };
 const envName = (value: string) => /^[A-Z_][A-Z0-9_]*$/.test(value) ? undefined : "Enter an environment variable name.";
 const named = (value: string) => /^[\w-]{1,64}$/.test(value) ? undefined : "Use 1–64 letters, digits, hyphens or underscores.";
 const sourceKeys = ["url_env", "url_file", "url", "webhook_url_env", "webhook_url_file", "token_env", "token_file"];
+const bound = (item: Values) => item.bound === true;
 const activeSource = (item: Values) => {
   if (item.type === "slack") return item.source === "file" ? "webhook_url_file" : "webhook_url_env";
   if (item.type === "telegram") return item.source === "file" ? "token_file" : "token_env";
@@ -18,12 +20,12 @@ const activeSource = (item: Values) => {
 };
 const channelFields: Control[] = [
   { key: "name", label: "Name", required: true, validate: named },
-  { key: "type", label: "Type", default: "webhook", options: ["webhook", "slack", "telegram"] },
-  { key: "source", label: "Secret source", default: "env", options: ["env", "file", "plain"],
+  { key: "type", label: "Type", default: "webhook", options: ["webhook", "slack", "telegram"], locked: bound },
+  { key: "source", label: "Secret source", default: "env", options: ["env", "file", "plain"], locked: bound,
     validate: (value) => ["env", "file", "plain"].includes(value) ? undefined : "Select a secret source." },
   ...sourceKeys.map((key): Control => ({
     key, label: key.endsWith("_env") ? "Environment variable name" : key.endsWith("_file") ? "Secret file path" : "Plain URL",
-    show: (input) => activeSource(input) === key, required: key !== "url",
+    show: (input) => activeSource(input) === key, required: key !== "url", locked: bound,
     format: key === "url" ? "url" : undefined, validate: key.endsWith("_env") ? envName : undefined,
     hint: key === "url" ? "Stored as plain text. Use a variable or file for credentials. Leave blank to keep an existing URL." : undefined,
   })),
@@ -31,12 +33,16 @@ const channelFields: Control[] = [
   { key: "timeout", format: "duration", label: "Timeout", placeholder: "10s" },
 ];
 
-function channelBody(patch: Values, input: Values) {
+function channelBody(patch: Values, input: Values, original?: Values) {
   const { source, ...changes } = patch;
   const key = activeSource(input);
   if (source !== undefined || changes.type !== undefined) {
     for (const candidate of sourceKeys) if (candidate !== key) changes[candidate] = null;
     if (input[key]) changes[key] = input[key];
+  }
+  if (original && input.type !== original.type) {
+    for (const obsolete of ["chat_id_env", "api_base", "headers", "headers_env", "body"]) changes[obsolete] = null;
+    if (input.type !== "telegram") changes.chat_id = null;
   }
   if (changes.url === null && key === "url") delete changes.url;
   return { name: input.name, type: input.type, ...changes };
@@ -91,7 +97,9 @@ function channels(data: Data): Entry[] {
   return data.channels.map((entry) => {
     const { url, headers: _headers, body: _body, api_base: _apiBase, ...safe } = entry.item;
     const source = sourceKeys.some((key) => key.endsWith("_file") && safe[key]) ? "file" : url ? "plain" : "env";
-    return { ...entry, original: { ...entry.item, name: entry.id }, item: { ...safe, name: entry.id, source } };
+    const boundDestination = entry.item.type === "telegram" && !!_apiBase
+      || entry.item.type === "webhook" && entry.secrets.some(({ field }) => field.startsWith("headers_"));
+    return { ...entry, original: { ...entry.item, name: entry.id }, item: { ...safe, name: entry.id, source, bound: boundDestination } };
   });
 }
 
@@ -102,10 +110,25 @@ function rules(data: Data): Entry[] {
 function ChannelDetails({ channel }: { channel: Channel }) {
   return <>
     <p>{String(channel.item.type)}</p>
+    {bound(channel.item) && <p>Secret references and their destination are set on the host.</p>}
     {channel.secrets.map((secret) => <p key={secret.field}><code>{secret.name ?? secret.path}</code> · {secret.set || secret.exists ? "Available" : "Missing"}</p>)}
     {channel.warnings.map((warning) => <p key={warning}>{warning}</p>)}
   </>;
 }
+
+async function testDelivery(name: string) {
+  const result = await api.post<{ ok: boolean; error?: string }>(endpoint("channels/test"), { name });
+  if (result.kind !== "ok") return { ok: false, message: result.message };
+  return { ok: result.data.ok, message: result.data.error ?? "Test sent." };
+}
+
+const saveAndTest = {
+  label: "Save and send test",
+  async run(item: Values) {
+    const result = await testDelivery(String(item.name));
+    toast(result.message, { kind: result.ok ? "ok" : "bad" });
+  },
+};
 
 function SendTest({ name }: { name: string }) {
   const [busy, setBusy] = useState(false);
@@ -113,8 +136,7 @@ function SendTest({ name }: { name: string }) {
   return <div><Button busy={busy} onClick={async () => {
     if (busy) return;
     setBusy(true);
-    const result = await api.post<{ ok: boolean; error?: string }>(endpoint("channels/test"), { name });
-    setFeedback(result.kind === "ok" ? { ok: result.data.ok, message: result.data.error ?? "Test sent." } : { ok: false, message: result.message });
+    setFeedback(await testDelivery(name));
     setBusy(false);
   }}>Send test</Button>{feedback && <Note kind={feedback.ok ? "ok" : "bad"}>{feedback.message}</Note>}</div>;
 }
@@ -129,19 +151,40 @@ export default function Notifications({ editorOnly }: { editorOnly?: boolean }) 
     <FailureNote failure={failure} retry={() => { void load(); }} />
     {data && <>
       <Collection kind="channel" title="Notification channels" path="channels" fields={channelFields} hash={data.hash}
-        entries={channels(data)} editorOnly={editorOnly} renameKey="name" body={channelBody} create={newChannel}
+        entries={channels(data)} editorOnly={editorOnly} renameKey="name" body={channelBody} create={newChannel} afterSave={saveAndTest}
         renameRules={(id) => data.rules.filter((rule) => Array.isArray(rule.item.channels) && rule.item.channels.includes(id)).map((rule) => String(rule.id))}
         row={channelDetails}
         extra={sendTest} refresh={refresh(channels)} />
       <Collection kind="rule" title="Alert rules" path="alerts" fields={ruleFields} hash={data.hash} entries={rules(data)}
-        editorOnly={editorOnly} reorder body={ruleBody} create={newRule} row={ruleRow} refresh={refresh(rules)} />
+        editorOnly={editorOnly} reorder body={ruleBody} create={newRule} validate={validateRule} renameKey="name" row={ruleRow} refresh={refresh(rules)} />
     </>}
   </>;
 }
 
 function channelDetails(entry: Entry) { return <ChannelDetails channel={entry as Channel} />; }
 function sendTest(entry: Entry) { return <SendTest name={String(entry.id)} />; }
-function ruleBody(changes: Values, input: Values) { return { name: input.name, type: input.type, ...changes }; }
+function comparisonValue(value: unknown) {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value) as unknown; } catch { return value; }
+}
+function ruleBody(changes: Values, input: Values, original?: Values) {
+  const result: Values = { name: input.name, type: input.type, ...changes };
+  if (original) for (const field of ruleFields) {
+    if (field.show && !field.show(input) && original[field.key] !== undefined) result[field.key] = null;
+  }
+  for (const key of ["equals", "not_equals"]) if (key in result) result[key] = comparisonValue(result[key]);
+  return result;
+}
+function validateRule(input: Values): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const count = (keys: string[]) => keys.filter((key) => input[key] !== null && input[key] !== undefined).length;
+  if (input.type === "host" && count(["above", "below"]) !== 1) errors.above = "Set exactly one of Above and Below.";
+  if (input.type === "widget" && count(["above", "below", "equals", "not_equals"]) !== 1) {
+    errors.above = "Set exactly one of Above, Below, Equals and Does not equal.";
+  }
+  if (input.type === "log_match" && !input.containers && !input.stack) errors.containers = "Set Containers, Compose stack, or both.";
+  return errors;
+}
 function newRule(input: Values) {
-  return Object.fromEntries(ruleFields.filter((field) => !field.show || field.show(input)).map((field) => [field.key, input[field.key]]));
+  return ruleBody(Object.fromEntries(ruleFields.filter((field) => !field.show || field.show(input)).map((field) => [field.key, input[field.key]])), input);
 }
