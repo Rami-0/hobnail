@@ -13,6 +13,7 @@
 
 #![allow(dead_code)] // parts of the API are only used by the UI/settings work
 
+pub(crate) mod accounts;
 pub mod api;
 pub mod ctrx;
 mod hostx;
@@ -887,67 +888,11 @@ impl Db {
 
     // ---- sessions and small settings (used by auth) ----
 
-    /// `token_hash` is the hex SHA-256 of the cookie value. Also drops expired
-    /// sessions and keeps at most `MAX_SESSIONS`.
-    pub fn create_session(&self, token_hash: &str, now: i64, expires: i64) -> bool {
-        self.with(false, |i| {
-            let tx = i.conn.transaction()?;
-            tx.execute(
-                "INSERT OR REPLACE INTO sessions (token_hash, created, expires) VALUES (?1, ?2, ?3)",
-                params![token_hash, now, expires],
-            )?;
-            tx.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
-            tx.execute(
-                "DELETE FROM sessions WHERE token_hash IN
-                 (SELECT token_hash FROM sessions ORDER BY created DESC, expires DESC
-                  LIMIT -1 OFFSET ?1)",
-                [MAX_SESSIONS],
-            )?;
-            tx.commit()?;
-            Ok(true)
-        })
-    }
-
-    /// True if the session exists and has not expired; if so, slides its expiry to
-    /// `new_expires`.
-    ///
-    /// The write only happens when it moves the expiry by at least a minute,
-    /// so the sliding window costs at most one write a minute per session.
-    pub fn touch_session(&self, token_hash: &str, now: i64, new_expires: i64) -> bool {
-        self.with(false, |i| {
-            let cur: Option<i64> = i
-                .conn
-                .prepare("SELECT expires FROM sessions WHERE token_hash = ?1")?
-                .query_row([token_hash], |r| r.get(0))
-                .optional()?;
-            let Some(cur) = cur.filter(|&e| e > now) else {
-                return Ok(false);
-            };
-            if new_expires >= cur + SLIDE_MIN_SECS {
-                i.conn
-                    .prepare("UPDATE sessions SET expires = ?1 WHERE token_hash = ?2")?
-                    .execute(params![new_expires, token_hash])?;
-            }
-            Ok(true)
-        })
-    }
-
     pub fn delete_session(&self, token_hash: &str) {
         self.with((), |i| {
             i.conn
                 .prepare("DELETE FROM sessions WHERE token_hash = ?1")?
                 .execute([token_hash])?;
-            Ok(())
-        });
-    }
-
-    /// Sign out everywhere except `keep` (a token hash), or everywhere if `None`.
-    pub fn delete_sessions_except(&self, keep: Option<&str>) {
-        self.with((), |i| {
-            i.conn.execute(
-                "DELETE FROM sessions WHERE token_hash != ?1",
-                [keep.unwrap_or("")],
-            )?;
             Ok(())
         });
     }
@@ -972,18 +917,6 @@ impl Db {
     pub fn kv_set(&self, key: &str, value: &str) -> bool {
         self.with(false, |i| {
             Inner::kv_set(&i.conn, key, value)?;
-            Ok(true)
-        })
-    }
-
-    /// Store a new password hash under `key` and delete every session, in
-    /// one transaction.
-    pub fn replace_password(&self, key: &str, hash: &str) -> bool {
-        self.with(false, |i| {
-            let tx = i.conn.transaction()?;
-            Inner::kv_set(&tx, key, hash)?;
-            tx.execute("DELETE FROM sessions", [])?;
-            tx.commit()?;
             Ok(true)
         })
     }
