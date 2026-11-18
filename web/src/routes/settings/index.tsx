@@ -19,6 +19,7 @@ import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
 
 const Users = lazy(() => import("./Users.tsx"));
+const General = lazy(() => import("./General.tsx"));
 const Bookmarks = lazy(() => import("./Bookmarks.tsx"));
 
 export default function SettingsPage() {
@@ -41,6 +42,7 @@ export default function SettingsPage() {
     {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
     {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
     {allowed && tab === "users" && <Suspense fallback={<p role="status">Loading users…</p>}><Users /></Suspense>}
+    {allowed && tab === "general" && <Suspense fallback={<p role="status">Loading general settings…</p>}><General /></Suspense>}
     {allowed && tab === "bookmarks" && <Suspense fallback={<p role="status">Loading bookmarks…</p>}><Bookmarks /></Suspense>}
   </div>;
 }
