@@ -208,6 +208,14 @@ fn save(
         )?;
         id.to_string()
     } else {
+        let count: u32 =
+            conn.query_row("SELECT count(*) FROM integrations", [], |row| row.get(0))?;
+        if count >= 128 {
+            return Err(ApiError::bad_request(
+                "at most 128 integrations are supported",
+                None,
+            ));
+        }
         conn.query_row(
             "INSERT INTO integrations (name,kind,origin,config,secret,secret_origin)
              VALUES (?1,?2,?3,?4,?5,?6) RETURNING id",

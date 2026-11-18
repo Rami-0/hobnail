@@ -731,6 +731,35 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
 }
 
 #[tokio::test]
+async fn board_and_integration_creates_enforce_capacity() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    st.db.dashboard(|c| -> rusqlite::Result<()> {
+        for _ in 0..63 {
+            c.execute("INSERT INTO boards (name,created,updated) VALUES ('Board',0,0)", [])?;
+        }
+        for _ in 0..127 {
+            c.execute("INSERT INTO integrations (name,kind,origin,config) VALUES ('Service','http','https://example.test','{}')", [])?;
+        }
+        Ok(())
+    }).unwrap();
+    let owner = Client::owner(start(st).await).await;
+    for (path, body, limit) in [
+        ("/api/v1/boards", json!({"name":"Board"}), 64),
+        (
+            "/api/v1/integrations",
+            json!({"name":"Service","kind":"http","base_url":"https://example.test","enabled":true}),
+            128,
+        ),
+    ] {
+        owner.json("POST", path, body.clone(), 201).await;
+        let response = owner.call("POST", path, body).await;
+        assert_api_error(&response, 400, "bad_request", path);
+        assert!(response.body.contains(&format!("at most {limit}")));
+    }
+}
+
+#[tokio::test]
 async fn deleting_targets_revokes_pending_invites_and_refreshes_boards() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

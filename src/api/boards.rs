@@ -684,6 +684,10 @@ pub(super) async fn route(
             super::validate_label(&name, "name")?;
             super::validate_icon(icon.as_deref())?;
             let board = db.dashboard(|c| -> Result<_, ApiError> {
+                let count: u32 = c.query_row("SELECT count(*) FROM boards", [], |row| row.get(0))?;
+                if count >= 64 {
+                    return Err(ApiError::bad_request("at most 64 boards are supported", None));
+                }
                 let id: String = c.query_row("INSERT INTO boards (name,icon,position,created,updated)
                     VALUES (?1,?2,(SELECT min(coalesce(max(position)+1,0),4294967295) FROM boards),?3,?3) RETURNING id",
                     params![name,icon,now], |r| r.get(0))?;
