@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { avatar, clampSpans, dirty, iconSource, needsSecret, rebase, reduceDocument } from "./document.ts";
+import { avatar, clampSpans, dirty, iconSource, needsSecret, rebase, recoveryBase, reduceDocument } from "./document.ts";
 import type { BoardDocument } from "../api/gen/BoardDocument.ts";
 const base: BoardDocument = { version: 3, sections: [{ id: "s", title: "Services", position: 0, items: [{ id: "i", position: 0, spans: { mobile: 4, tablet: 4, desktop: 4, rows: 1 }, payload: { kind: "link", title: "Site", url: "https://example.com" } }] }] };
 test("add entries without IDs, preserve server IDs, never mutate the input", () => {
@@ -47,4 +47,17 @@ test("rebase preserves remote item moves when local layout is unchanged", () => 
   const remote = reduceDocument(original, { type: "move", section: 0, item: 0, toSection: 1, to: 0 }); remote.version++;
   const merged = rebase(original, original, remote);
   assert.equal(merged.sections[0]?.items.length, 0); assert.equal(merged.sections[1]?.items[0]?.id, "i");
+});
+
+test("stale recovered drafts preserve server additions and strip deleted item IDs", () => {
+  const mine = reduceDocument(base, { type: "rename", section: 0, title: "Recovered" });
+  const current = structuredClone(base); current.version = 5;
+  const section = current.sections[0];
+  if (section) section.items = [{ position: 0, id: "remote-item", spans: { mobile: 4, tablet: 4, desktop: 4, rows: 1 }, payload: { kind: "link", title: "Remote link", url: "https://example.org" } }];
+  current.sections.push({ id: "new-remote", title: "New remote section", position: 1, items: [] });
+  const merged = rebase(recoveryBase(mine, current), mine, current);
+  assert.equal(merged.sections[0]?.title, "Recovered");
+  assert.equal(merged.sections[0]?.items[0]?.id, undefined);
+  assert.equal(merged.sections[0]?.items[1]?.id, "remote-item");
+  assert.equal(merged.sections[1]?.id, "new-remote");
 });

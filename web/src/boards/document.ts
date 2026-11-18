@@ -72,7 +72,11 @@ export function rebase(base: BoardDocument, mine: BoardDocument, current: BoardD
       const latest = currentSection?.items.find((i) => i.id === item.id);
       const originalSection = old ? base.sections.find((s) => s.items.some((i) => i.id === old.id)) : undefined;
       const moved = !!old && (originalSection?.id !== local.id || old.position !== item.position);
-      if (!old) { items.push(item); continue; }
+      if (!old) {
+        if (item.id && !latest) { const { id: _id, ...newItem } = item; items.push(newItem); }
+        else items.push(item);
+        continue;
+      }
       const payloadChanged = JSON.stringify(old.payload) !== JSON.stringify(item.payload);
       const spansChanged = JSON.stringify(old.spans) !== JSON.stringify(item.spans);
       if (!latest) {
@@ -104,3 +108,12 @@ export function origin(url: string): string | null {
   try { const u = new URL(url); return /^https?:$/.test(u.protocol) && !u.username && !u.password && !u.search && !u.hash ? u.origin : null; } catch { return null; }
 }
 export function needsSecret(savedOrigin: string | null | undefined, url: string): boolean { return !!savedOrigin && origin(url) !== savedOrigin; }
+
+/** A recovered stale draft has no historical base document in the API.
+ * Exclude unseen server entries from its synthetic base so recovery preserves
+ * additions rather than mistaking them for local deletions. */
+export function recoveryBase(draft: BoardDocument, current: BoardDocument): BoardDocument {
+  const sectionIds = new Set(draft.sections.map((s) => s.id).filter(Boolean));
+  const itemIds = new Set(draft.sections.flatMap((s) => s.items).map((i) => i.id).filter(Boolean));
+  return { version: draft.version, sections: current.sections.filter((s) => sectionIds.has(s.id)).map((s) => ({ id: s.id, title: s.title, position: s.position, items: s.items.filter((i) => itemIds.has(i.id)) })) };
+}

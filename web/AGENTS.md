@@ -215,3 +215,8 @@ data to OUT. Saved link metadata never counts as health evidence. Widgets
 currently show their configured identity and an explicit unavailable-data
 message: the existing backend widget renderer returns HTML, not a structured
 React data contract, and injecting that HTML is prohibited.
+
+When resuming a stale draft, the API supplies its document but no historical
+base document. Recovery therefore preserves server additions and asks the
+user to review the merge; old removals may need to be applied again. Ordinary
+same-session conflicts use the original document for a three-way rebase.

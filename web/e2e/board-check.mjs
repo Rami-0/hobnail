@@ -63,6 +63,8 @@ try {
   const secondSession = await login(); const remote = (await api("GET", `/boards/${boardId}`, undefined, secondSession)).data.document;
   remote.sections.push({ title: "Other session", position: remote.sections.length, items: [] }); check((await api("PUT", `/boards/${boardId}`, remote, secondSession)).status === 200, "second session saves a board version");
   await inp.click('[data-testid="board-save"]'); await wait(visible("board-conflict"), "a stale save exposes conflict choices");
+  await tab.send("Page.reload"); await wait(visible("board-draft"), "stale draft survives a reload after conflict");
+  await inp.click('[data-testid="draft-resume"]'); await wait(visible("board-conflict"), "recovered stale draft requires explicit rebase");
   await inp.click('[data-testid="board-rebase"]'); await wait(`!document.querySelector('[data-testid="board-save"]').disabled`, "explicit rebase enables Save");
   await inp.click('[data-testid="board-save"]'); await wait(`!${visible("board-editor")}`, "rebased board saves");
   check((await api("GET", `/boards/${boardId}`)).data.document.sections.some((section) => section.title === "Other session"), "rebase preserves the other session's addition");

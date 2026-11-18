@@ -4,7 +4,7 @@ import type { BoardView } from "../../api/gen/BoardView.ts";
 import type { BoardSuggestion } from "../../api/gen/BoardSuggestion.ts";
 import type { GridSpans } from "../../api/gen/GridSpans.ts";
 import { api } from "../../api/session.ts";
-import { dirty, rebase, reduceDocument, type Action } from "../../boards/document.ts";
+import { dirty, rebase, recoveryBase, reduceDocument, type Action } from "../../boards/document.ts";
 import { navigate } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -18,7 +18,7 @@ const breakpoint = (): keyof GridSpans => window.innerWidth < 700 ? "mobile" : w
 export default function Editor({ view, initial, changed, onSave, onCancel, onRebase }: {
   view: BoardView; initial: BoardDocument; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: () => void;
 }) {
-  const [base, setBase] = useState(view.document);
+  const [base, setBase] = useState(() => initial.version === view.document.version ? view.document : recoveryBase(initial, view.document));
   const [doc, setDoc] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,11 +64,11 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
       if (leaving.current || !modified || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey) return;
       const anchor = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>("a[href]") : null;
       if (!anchor || anchor.target === "_blank" || anchor.href === href) return;
-      e.preventDefault(); e.stopPropagation(); setPendingHref(anchor.href);
+      e.preventDefault(); e.stopPropagation(); if (operation.current) { setAnnouncement("Wait for the current operation to finish."); return; } setPendingHref(anchor.href);
     };
     const navigation = (e: Event) => {
       if (leaving.current || !modified) return;
-      e.preventDefault(); setPendingHref((e as CustomEvent<string>).detail);
+      e.preventDefault(); if (operation.current) { setAnnouncement("Wait for the current operation to finish."); return; } setPendingHref((e as CustomEvent<string>).detail);
     };
     const unload = (e: BeforeUnloadEvent) => { if (modified && !leaving.current) { e.preventDefault(); e.returnValue = ""; } };
     document.addEventListener("click", click, true); window.addEventListener("beforeunload", unload); window.addEventListener("rh:navigate", navigation);
@@ -124,6 +124,7 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     <header className="board-heading"><div><h1>Edit {view.board.name}</h1><p className="muted" role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p></div><div className="settings-actions"><Button busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button><Button variant="primary" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></div></header>
     <p className="muted">Drag Move onto an item or section; drag Resize to change size. On a focused item: Alt + arrows moves; Shift + arrows resizes at this screen width.</p>
     {(changed || conflict) && <Note kind="warn" testId="board-conflict">Another session saved this board. Your changes are kept here.
+      {initial.version !== view.document.version && <p>A recovered draft keeps server additions. Review it before saving; you may need to apply removals again.</p>}
       <Button data-testid="board-rebase" disabled={busy} onClick={async () => { if (operation.current) return; operation.current = true; setBusy(true); await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }
         const next = rebase(base, doc, result.data.document); setBase(result.data.document); setDoc(next); setConflict(false); onRebase(); setError(""); setAnnouncement("Changes rebased. Review them and choose Save."); operation.current = false; setBusy(false);
       }}>Reload and keep my changes</Button><Button onClick={() => { void cancel(); }}>Discard mine</Button>
