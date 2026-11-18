@@ -56,7 +56,7 @@ export function applyStoredRail(): void {
 }
 
 const GO_HREF: Record<GoPage, () => string> = {
-  overview: () => "/",
+  overview: () => "/app/overview",
   containers: () => appHref("/containers"),
   host: () => "/host",
   logs: () => "/logs",

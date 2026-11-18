@@ -10,6 +10,7 @@ export type Route =
   | { name: "invite"; token: string }
   | { name: "containers" }
   | { name: "history" }
+  | { name: "overview" }
   | { name: "alerts" }
   | { name: "board"; id: string }
   | { name: "settings"; tab: "boards" | "integrations" }
@@ -47,6 +48,8 @@ export function matchRoute(pathname: string): Route {
       return { name: "login" };
     case "/alerts":
       return { name: "alerts" };
+    case "/overview":
+      return { name: "overview" };
     case "/history":
       return { name: "history" };
     case "/containers":

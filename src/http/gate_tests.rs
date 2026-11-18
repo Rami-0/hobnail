@@ -2098,6 +2098,7 @@ async fn invite_roles_and_account_management() {
             "/api/v1/widgets",
             "/api/v1/stream?topics=widget",
             "/api/v1/alerts",
+            "/api/v1/overview",
             "/api/v1/stream?topics=alerts",
         ] {
             assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
@@ -2321,6 +2322,13 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let overview = req(addr, "GET", "/api/v1/overview?probes=1", &h, "").await;
+    assert_eq!(
+        json_of(&overview, "viewer overview")["attention"][0]["reason"],
+        "unhealthy"
+    );
+    assert!(!overview.body.contains("SECRET-PROBE-OUTPUT"));
+    assert!(!overview.body.contains(HIDDEN_PREFIX));
     let alerts = req(addr, "GET", "/api/v1/alerts", &h, "").await;
     assert_eq!(
         json_of(&alerts, "viewer alerts")["rules"][0]["name"],
@@ -2353,6 +2361,15 @@ async fn viewer_cannot_read_administrative_details() {
         "to"
     );
     let (owner, _) = login(addr).await;
+    let owner_overview = req(
+        addr,
+        "GET",
+        "/api/v1/overview?probes=1",
+        &[("Cookie", &owner)],
+        "",
+    )
+    .await;
+    assert!(owner_overview.body.contains("SECRET-PROBE-OUTPUT"));
     let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
     assert_eq!(owner_history.status, 200);
     assert!(owner_history.body.contains("auth.login_failed"));

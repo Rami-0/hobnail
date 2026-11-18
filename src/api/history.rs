@@ -20,11 +20,11 @@ type Points = Vec<(i64, f64)>;
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(super) struct HistoryMetric {
-    key: String,
-    step: i64,
-    points: Points,
-    max: Option<Points>,
-    yesterday: Option<Points>,
+    pub(super) key: String,
+    pub(super) step: i64,
+    pub(super) points: Points,
+    pub(super) max: Option<Points>,
+    pub(super) yesterday: Option<Points>,
 }
 
 #[derive(Serialize)]

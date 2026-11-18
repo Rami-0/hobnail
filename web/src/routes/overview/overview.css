@@ -1,0 +1,10 @@
+.overview-counts { display: flex; gap: 1rem; flex-wrap: wrap; padding-block: .5rem; }
+.overview-counts strong { font-size: 1.45rem; }
+.overview-probe { display: block; color: var(--text-2); }
+.overview-strips a { display: grid; grid-template-columns: minmax(5rem, 25%) minmax(0, 1fr); align-items: center; gap: 1rem; padding-block: .35rem; }
+.overview-consumers, .overview-widget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); gap: 1rem; }
+.overview-map { width: 100%; }
+.overview-map rect { fill: var(--surface-2); stroke: var(--border); }
+.overview-map a:nth-child(odd) rect { fill: var(--raised); }
+.overview-map a:focus-visible rect { stroke: var(--accent); stroke-width: 3; }
+.overview-map text { fill: var(--text); font-size: 12px; }

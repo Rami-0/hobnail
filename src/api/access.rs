@@ -155,7 +155,11 @@ pub(crate) fn check_scope(
             }
             if matches!(
                 m.route.handler,
-                Handler::History | Handler::Bookmarks | Handler::Widgets | Handler::Alerts
+                Handler::History
+                    | Handler::Bookmarks
+                    | Handler::Widgets
+                    | Handler::Alerts
+                    | Handler::Overview
             ) {
                 return Err(Denied::Role);
             }
@@ -226,6 +230,7 @@ pub enum Handler {
     Bookmarks,
     Widgets,
     Alerts,
+    Overview,
     Strips,
     Stream,
     Onboard,
@@ -437,6 +442,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/alerts",
         access: Access::Viewer,
         handler: Handler::Alerts,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/overview",
+        access: Access::Viewer,
+        handler: Handler::Overview,
     },
     Route {
         method: "GET",
