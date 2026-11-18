@@ -45,7 +45,7 @@ pub struct IntegrationSecretInput {
     secret: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationView {
     pub id: String,
@@ -58,7 +58,7 @@ pub struct IntegrationView {
     admin: Option<IntegrationDetails>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationDetails {
     icon: Option<String>,

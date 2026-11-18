@@ -462,7 +462,8 @@ fn stream_topics() {
         Topics {
             containers: false,
             stats: false,
-            system: true
+            system: true,
+            boards: false,
         }
     );
     assert_eq!(
@@ -470,7 +471,8 @@ fn stream_topics() {
         Topics {
             containers: true,
             stats: true,
-            system: false
+            system: false,
+            boards: false,
         }
     );
     assert_eq!(
@@ -478,7 +480,8 @@ fn stream_topics() {
         Topics {
             containers: false,
             stats: true,
-            system: true
+            system: true,
+            boards: false,
         }
     );
 }

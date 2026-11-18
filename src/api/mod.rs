@@ -12,6 +12,7 @@ use crate::state::AppState;
 
 pub mod access;
 mod accounts;
+mod boards;
 pub mod bootstrap;
 pub mod containers;
 pub mod error;
@@ -52,6 +53,20 @@ pub(crate) async fn route(
         | Handler::IntegrationClearSecret
         | Handler::IntegrationTest => {
             integrations::route(state, req, m, &principal.expect("integration gate").account)
+                .await
+                .unwrap_or_else(ApiError::response)
+        }
+        Handler::Boards
+        | Handler::BoardCreate
+        | Handler::Board
+        | Handler::BoardSave
+        | Handler::BoardUpdate
+        | Handler::BoardDelete
+        | Handler::BoardSuggestions
+        | Handler::BoardDraft
+        | Handler::BoardDraftSave
+        | Handler::BoardDraftDelete => {
+            boards::route(state, req, m, &principal.expect("board gate").account)
                 .await
                 .unwrap_or_else(ApiError::response)
         }
@@ -176,4 +191,11 @@ fn validate_icon(icon: Option<&str>) -> Result<(), ApiError> {
         ));
     }
     Ok(())
+}
+
+fn valid_id(id: &str) -> bool {
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }

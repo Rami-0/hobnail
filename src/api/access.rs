@@ -10,7 +10,6 @@ use crate::state::AppState;
 pub use crate::db::accounts::Account as Principal;
 
 impl Principal {
-    #[allow(dead_code)] // Used by board handlers in M2.
     pub fn can_see_board(&self, id: &str) -> bool {
         self.role == Role::Owner
             || self
@@ -19,7 +18,6 @@ impl Principal {
                 .is_none_or(|s| s.boards.iter().any(|b| b == id))
     }
 
-    #[allow(dead_code)] // Used by integration handlers in M2.
     pub fn can_see_integration(&self, id: &str) -> bool {
         self.role == Role::Owner
             || self
@@ -50,6 +48,16 @@ pub enum Handler {
     IntegrationSetSecret,
     IntegrationClearSecret,
     IntegrationTest,
+    Boards,
+    BoardCreate,
+    Board,
+    BoardSave,
+    BoardUpdate,
+    BoardDelete,
+    BoardSuggestions,
+    BoardDraft,
+    BoardDraftSave,
+    BoardDraftDelete,
     Session,
     Bootstrap,
     Containers,
@@ -86,6 +94,66 @@ pub struct Route {
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
 pub const ROUTES: &[Route] = &[
+    Route {
+        method: "GET",
+        pattern: "/api/v1/boards",
+        access: Access::Viewer,
+        handler: Handler::Boards,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/boards",
+        access: Access::Admin,
+        handler: Handler::BoardCreate,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/boards/<id>",
+        access: Access::Viewer,
+        handler: Handler::Board,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/boards/<id>",
+        access: Access::Admin,
+        handler: Handler::BoardSave,
+    },
+    Route {
+        method: "PATCH",
+        pattern: "/api/v1/boards/<id>",
+        access: Access::Admin,
+        handler: Handler::BoardUpdate,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/boards/<id>",
+        access: Access::Admin,
+        handler: Handler::BoardDelete,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/boards/<id>/suggestions",
+        access: Access::Viewer,
+        handler: Handler::BoardSuggestions,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/boards/<id>/draft",
+        access: Access::Admin,
+        handler: Handler::BoardDraft,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/boards/<id>/draft",
+        access: Access::Admin,
+        handler: Handler::BoardDraftSave,
+    },
+    Route {
+        method: "DELETE",
+        pattern: "/api/v1/boards/<id>/draft",
+        access: Access::Admin,
+        handler: Handler::BoardDraftDelete,
+    },
     Route {
         method: "GET",
         pattern: "/api/v1/integrations",

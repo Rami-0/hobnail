@@ -169,6 +169,12 @@ CREATE TABLE drafts (
   PRIMARY KEY (user_id, key)
 ) WITHOUT ROWID;
 ",
+    "
+ALTER TABLE boards ADD COLUMN icon TEXT;
+ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE boards ADD COLUMN sections TEXT NOT NULL DEFAULT '[]'
+  CHECK (json_valid(sections) AND json_type(sections) = 'array');
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.

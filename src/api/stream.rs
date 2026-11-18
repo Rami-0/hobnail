@@ -12,7 +12,8 @@
 //! - `resync {}` when this client fell behind (refetch everything).
 //!
 //! Unknown topics are ignored; none (or only unknown ones) means all three.
-//! `config` and `resync` go to everyone. Nothing here depends on a session:
+//! `boards` sends board IDs and versions only to accounts with board access.
+//! `config` and `resync` go to everyone:
 //! the stream never carries session-only data. The connection counts as a
 //! viewer (the live loop samples only while someone watches) for as long as
 //! its body is alive; a `: ping` comment every 25 s keeps proxies open.
@@ -102,6 +103,7 @@ pub struct Topics {
     pub containers: bool,
     pub stats: bool,
     pub system: bool,
+    pub boards: bool,
 }
 
 impl Topics {
@@ -109,6 +111,7 @@ impl Topics {
         containers: true,
         stats: true,
         system: true,
+        boards: true,
     };
 
     pub fn parse(query: &str) -> Topics {
@@ -117,6 +120,7 @@ impl Topics {
             containers: false,
             stats: false,
             system: false,
+            boards: false,
         };
         for v in q.iter().filter(|(k, _)| k == "topics").map(|(_, v)| v) {
             for name in v.split(',').map(str::trim) {
@@ -124,11 +128,12 @@ impl Topics {
                     "containers" => t.containers = true,
                     "stats" => t.stats = true,
                     "system" => t.system = true,
+                    "boards" => t.boards = true,
                     _ => {}
                 }
             }
         }
-        if t.containers || t.stats || t.system {
+        if t.containers || t.stats || t.system || t.boards {
             t
         } else {
             Topics::ALL
@@ -297,6 +302,13 @@ async fn run(
                             sig = Some(current(&st).1);
                         }
                         event("config", &serde_json::json!({}))
+                    }
+                    raw if topics.boards && raw.starts_with("board:") => {
+                        let Some((id, version)) = raw[6..].split_once(':') else { continue };
+                        let Ok(version) = version.parse() else { continue };
+                        let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
+                        if !account.can_see_board(id) { continue; }
+                        event("boards", &super::boards::BoardEvent { id: id.into(), version })
                     }
                     _ => continue,
                 },
