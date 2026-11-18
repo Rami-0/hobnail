@@ -269,7 +269,7 @@ function logs(c, q, res) {
     logConnections.push(connection); saveLogReport();
     let k = 5000;
     const burst = setTimeout(() => {
-      if (c.name === "svc001") res.write(Array.from({ length: 1500 }, (_, i) => logLine(c, Date.now() / 1000 + i / 10000, k++)).join(""));
+      if (c.name === "svc001") { connection.burstAt = Date.now(); saveLogReport(); res.write(Array.from({ length: 1500 }, (_, i) => logLine(c, Date.now() / 1000 + i / 10000, k++)).join("")); }
     }, 6000);
     const t = setInterval(() => res.write(logLine(c, Math.floor(Date.now() / 1000), k++)), 2000);
     res.on("close", () => { clearInterval(t); clearTimeout(burst); connection.closed = Date.now(); saveLogReport(); });
