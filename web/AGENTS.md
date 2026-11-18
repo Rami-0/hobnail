@@ -272,3 +272,18 @@ when starting fake-instance and `E2E_ENV=LOG_FIXTURES LOG_FIXTURES=1` for its
 real missing-container and read-error cases. The reconnect test dispatches an
 EventSource error to the captured real source, then checks the subsequent real
 request's cursor and backoff; it does not change the SSE protocol.
+
+## React Settings and accounts
+
+| Selector | Meaning |
+|---|---|
+| `[data-testid="settings-tabs"]`, `[data-testid="settings-locked"]` | Available Settings tabs and access refusal |
+| `[data-testid="settings-edit"]` | URL-named collection editor |
+| `[data-testid="settings-<kind>-list"]` | Collection and row controls |
+| `[data-testid="settings-containers"]` | Filterable overrides list and bulk bar |
+| `[data-testid="account-page"]`, `[data-testid="account-password"]`, `[data-testid="account-sessions"]` | Account, password form and other sessions |
+| `[data-testid="settings-users"]`, `[data-testid="user-row"]` | Owner management and its account rows |
+| `[data-testid="invite-create"]`, `[data-testid="invite-row"]`, `[data-testid="invite-link"]` | Invitation creation, status rows and one-time copy field |
+
+Run `web/e2e/settings-check.mjs` through `scripts/e2e.sh` on a throwaway port
+3395–3399. It writes dark and light desktop and phone screenshots to OUT.
