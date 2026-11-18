@@ -6,3 +6,5 @@
 .log-toolbar .btn[aria-pressed=true]{border-color:var(--accent-fg);color:var(--accent-fg);background:var(--surface-2)}.log-levels .btn[aria-pressed=false]{border-style:dashed;text-decoration:line-through}
 
 .log-levels .btn{gap:4px}.log-level-count{display:inline-block;min-width:5ch;text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+
+.log-container-context{margin-block:16px}.log-container-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.log-container-head>div{flex:1;min-width:0}.log-container-head h1{font-size:20px;display:flex;align-items:center;gap:8px;overflow-wrap:anywhere;margin:0}.log-container-head p{font-size:12px;overflow-wrap:anywhere}.log-level-history{margin-top:16px}.log-level-history figure{margin:12px 0}.log-level-history figcaption{font-size:12px;color:var(--text-2)}

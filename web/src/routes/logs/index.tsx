@@ -9,6 +9,7 @@ import { Select } from "../../ui/Select.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { matcher, names, permalink, searchState, type Row } from "./model.ts";
 import { copyLogText, LogPane, type PaneStatus, type ViewOptions } from "./pane.ts";
+import { ContainerContext } from "./ContainerContext.tsx";
 import "./logs.css";
 
 const savePref = (key: string, value: boolean) => { try { localStorage.setItem(`rh-logs-${key}`, value ? "1" : "0"); } catch { /* private browser */ } };
@@ -80,18 +81,25 @@ function Picker({ data }: { data: LogsPicker }) {
   </div>;
 }
 function LevelCounts({ name, range }: { name: string; range: string }) {
-  const [open, setOpen] = useState(false), [counts, setCounts] = useState<number[] | null>(null), [error, setError] = useState("");
+  const [open, setOpen] = useState(false), [points, setPoints] = useState<Array<[number, number[]]> | null>(null), [error, setError] = useState("");
   useEffect(() => {
     if (!open) return;
     const ac = new AbortController();
     void api.get<{ points: Array<[number, number[]]> }>(`/api/logs/levels?c=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`, { signal: ac.signal }).then((r) => {
       if (ac.signal.aborted) return;
-      if (r.kind === "ok") setCounts(r.data.points.reduce((sum, p) => sum.map((n, i) => n + (p[1][i] ?? 0)), [0, 0, 0, 0, 0])); else setError(r.message);
+      if (r.kind === "ok") setPoints(r.data.points); else setError(r.message);
     });
     return () => ac.abort();
   }, [open, name, range]);
+  const counts = points?.reduce((sum, p) => sum.map((n, i) => n + (p[1][i] ?? 0)), [0, 0, 0, 0, 0]);
+  const maximum = Math.max(1, ...(points ?? []).map((p) => (p[1][0] ?? 0) + (p[1][1] ?? 0)));
   return <details className="log-level-history" onToggle={(e) => setOpen(e.currentTarget.open)}><summary>Errors and warnings, last {range}</summary>
-    {error ? <p role="alert">{error}</p> : <p>{counts ? `${counts[0]} errors · ${counts[1]} warnings` : "Loading counts…"}</p>}
+    {error ? <p role="alert">{error}</p> : points?.length ? <figure aria-label={`${counts?.[0]} error and ${counts?.[1]} warning lines`}>
+      <svg viewBox={`0 0 ${points.length} 40`} preserveAspectRatio="none" width="100%" height="40" aria-hidden="true">{points.map(([t, c], i) => {
+        const e = (c[0] ?? 0) / maximum * 40, w = (c[1] ?? 0) / maximum * 40;
+        return <g key={t}><rect x={i} y={40-e} width="0.8" height={e} fill="var(--bad)"><title>{new Date(t*1000).toLocaleString()}: {c[0]} errors, {c[1]} warnings</title></rect><rect x={i} y={40-e-w} width="0.8" height={w} fill="var(--warn)" /></g>;
+      })}</svg><figcaption>{counts?.[0]} errors · {counts?.[1]} warnings</figcaption>
+    </figure> : <p>{points ? <>No log lines counted in this range yet. Counts are recorded for containers watched by a log alert. <a href="/app/alerts">Add a log alert</a></> : "Loading counts…"}</p>}
   </details>;
 }
 export default function LogsPage() {
@@ -136,7 +144,7 @@ export default function LogsPage() {
   if (!range) download.set("tail", String(picker.ring));
   const filters = [..."ewido"].filter((l) => !levels.includes(l)).length + Number(show !== "all") + Number(!!range);
   return <div className="page logs-page" data-testid="logs-viewer"><nav className="crumb"><a href="/app/logs">Logs</a><span> / {stack ?? (panes.length === 1 ? panes[0] : "Side by side")}</span></nav>
-    {route.route.name === "container_logs" && <nav className="log-tabs"><a href={`/app/containers/${encodeURIComponent(route.route.ctr)}${route.query}`}>Container overview</a><span aria-current="page">Logs</span><a href={`/app/logs?sel=${encodeURIComponent(route.route.ctr)}`}>Side by side</a></nav>}
+    {route.route.name === "container_logs" && <ContainerContext name={route.route.ctr} query={route.query} />}
     {(missing.length > 0 || (stack !== null && !stackExists)) && <p className="banner warn" role="alert">Not found: {missing.join(", ") || stack}</p>}
     <div className="log-toolbar"><div className="log-search"><TextInput ref={input} type="search" data-testid="filter" aria-label="Search logs" aria-invalid={!!matcher(search, regex, sensitive).error} title={matcher(search, regex, sensitive).error ?? undefined} placeholder="Search logs" value={search} onChange={(e) => setSearch({ search: e.target.value }, { replace: true })} onKeyDown={(e) => {
       if (e.key === "Enter") { e.preventDefault(); window.dispatchEvent(new CustomEvent("rh:logs-step", { detail: e.shiftKey ? 1 : -1 })); }
