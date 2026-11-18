@@ -399,6 +399,20 @@ async function containerPage(size) {
     return { ok, got: await loc() };
   });
   await shot("drag-zoomed");
+  await step("pen pointer drag writes the zoom bounds", async () => {
+    await go(`/app/containers/${enc}?range=6h`, chartsReady, 10000);
+    await sleep(400);
+    const b = await plot();
+    if (!b) return { ok: false, got: "no chart svg" };
+    await ev(`(() => {
+      const target = document.querySelector('[data-testid="chart-cpu"] .ch-canvas');
+      const options = { bubbles: true, pointerType: 'pen', pointerId: 91, isPrimary: true, button: 0, clientY: ${b.y} };
+      target.dispatchEvent(new PointerEvent('pointerdown', { ...options, buttons: 1, clientX: ${b.x1} }));
+      window.dispatchEvent(new PointerEvent('pointermove', { ...options, buttons: 1, clientX: ${b.x2} }));
+      window.dispatchEvent(new PointerEvent('pointerup', { ...options, buttons: 0, clientX: ${b.x2} }));
+    })()`);
+    return { ok: await until(`new URLSearchParams(location.search).has('from') && new URLSearchParams(location.search).has('to')`, 4000), got: await loc() };
+  });
 }
 
 // ---- the Edit dialog, signed in ----
