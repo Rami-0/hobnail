@@ -72,6 +72,7 @@ try {
       assert.ok((await tab.ev("location.search")).includes("q=svc001"));
       await inp.key("Enter"); await wait('!!document.querySelector("[data-testid=log-body] [data-log-id]")', "Enter opens first match");
       await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("5,000 / 5,000")', "5000-line ring");
+      await wait(`[...document.querySelectorAll('.log-level-count')].reduce((n,e)=>n+Number(e.textContent),0)===5000`, "closed panes release their counts");
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       await sleep(1000);
       if(process.env.TRACE_LOGS==='1') { await tab.send('Profiler.enable'); await tab.send('Profiler.start'); await tab.send('Tracing.start',{transferMode:'ReturnAsStream',traceConfig:{includedCategories:['devtools.timeline','disabled-by-default-devtools.timeline','toplevel','blink.user_timing','__metadata']}}); }
@@ -183,6 +184,7 @@ try {
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes");
       await wait('[...document.querySelectorAll("[data-testid=log-body]")].every(b=>b.dataset.searchLines==="5000")', "all panes loaded", 25000);
+      await wait(`[...document.querySelectorAll('.log-level-count')].reduce((n,e)=>n+Number(e.textContent),0)===20000`, "four-pane level counts equal retained lines");
       await tab.ev(`globalThis.fourOld=logSources.filter(s=>s.readyState===1 && s.url.includes('c=svc001')).at(-1);fourOld.dispatchEvent(new Event('error'))`);
       await wait(`logSources.some(s=>s!==fourOld&&s.readyState===1&&s.url.includes('c=svc001'))`, "four-pane cursor reconnect", 10000);
       measurements.fourBurstObserveStartedAt=Date.now();
