@@ -1,3 +1,5 @@
+import { eventLabel } from "../container/events.ts";
+import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { OverviewView } from "../../api/gen/OverviewView.ts";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
@@ -16,7 +18,6 @@ import "./overview.css";
 
 const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const SEEN = "rh-seen";
-const logs = (name: string, at?: number) => `/app/logs/${encodeURIComponent(name)}${at ? `#t=${at}` : ""}`;
 
 export default function Overview() {
   const boot = useBootstrap();
@@ -73,7 +74,7 @@ export default function Overview() {
       {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={item.name} data-name={item.name}>
         <span className={`dot ${item.severity}`} /> <a href={containerHref(item.name)}>{item.title}</a> · {item.detail}
         {item.since !== null && <> · <RelativeTime at={item.since} /></>}
-        {" · "}<a href={logs(item.name, item.since ?? undefined)}>Logs</a>
+        {" · "}<a href={logsHref(item.name, item.since)}>Logs</a>
         {item.probe && <small className="overview-probe">{item.probe}</small>}
       </li>)}</ul></>}
       <div className="overview-strips">{groups.map((g) => {
@@ -124,8 +125,8 @@ export default function Overview() {
     <section className="panel history-block"><h2>Recent events</h2><a href="/app/history#events">Timeline</a>
       {!overview?.events.length && <p>No recent events.</p>}
       <ul className="history-events">{overview?.events.map((e) => <li key={e.id}>
-        <RelativeTime at={e.at} /> · {e.kind} · {names.has(e.subject) ? <>
-          <a href={containerHref(e.subject)}>{e.subject}</a> · <a href={logs(e.subject, e.at)}>Logs</a>
+        <RelativeTime at={e.at} /> · {eventLabel(e.kind)} · {names.has(e.subject) ? <>
+          <a href={containerHref(e.subject)}>{e.subject}</a> · <a href={logsHref(e.subject, e.at)}>Logs</a>
         </> : e.subject}
       </li>)}</ul>
     </section>

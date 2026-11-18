@@ -224,9 +224,9 @@ pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background
 .hstrip .u{fill:var(--line);opacity:.45}
 .hstrip rect{transition:opacity var(--dur-2)}
 .hstrip rect:hover{opacity:1}
-.meter{height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden}
-.meter span{display:block;height:100%;background:var(--s,var(--accent));border-radius:2px}
-.meter.warn span{background:var(--warn)}.meter.bad span{background:var(--bad)}
+.meter{display:block;width:100%;height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden}
+.meter rect{fill:var(--s,var(--accent))}
+.meter.warn rect{fill:var(--warn)}.meter.bad rect{fill:var(--bad)}
 
 /* ---- keyboard row focus (j/k) ---- */
 .kfocus>td,.kfocus{background:color-mix(in srgb,var(--accent) 10%,transparent)!important}

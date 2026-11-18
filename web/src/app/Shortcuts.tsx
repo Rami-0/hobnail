@@ -23,8 +23,6 @@ function Row({ k, children }: { k: string[]; children: ReactNode }) {
   );
 }
 
-const OLD = <span className="muted"> (current interface)</span>;
-
 export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => void }) {
   const boot = useBootstrap();
   const scoped = boot?.scoped;
@@ -37,11 +35,11 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["g", "c"]}>Containers</Row>
         {!scoped && <>
         <Row k={["g", "h"]}>Host</Row>
-        <Row k={["g", "l"]}>Logs{OLD}</Row>
+        <Row k={["g", "l"]}>Logs</Row>
         <Row k={["g", "y"]}>History</Row>
         <Row k={["g", "a"]}>Alerts</Row>
         </>}
-        {(!scoped || boot.role === "admin") && <Row k={["g", "s"]}>Settings</Row>}
+        {(boot?.role !== "viewer") && <Row k={["g", "s"]}>Settings</Row>}
         <Row k={[mod, "K"]}>Search and commands</Row>
         <Row k={["↑ / ↓"]}>Move through palette results</Row>
         <Row k={["Home / End"]}>First or last palette result</Row>
@@ -50,13 +48,17 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["j"]}>Next row that opens something</Row>
         <Row k={["k"]}>Previous row</Row>
         <Row k={["↵"]}>Open the row</Row>
-        {!scoped && <Row k={["l"]}>Logs of the focused or open container{OLD}</Row>}
+        {!scoped && <Row k={["l"]}>Logs of the focused or open container</Row>}
         <Row k={["/"]}>
           {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands"}
         </Row>
         <Row k={["Alt", "↑ / ↓"]}>Board edit: move an item within its section</Row>
         <Row k={["Alt", "← / →"]}>Board edit: move an item between sections</Row>
         <Row k={["Shift", "arrows"]}>Board edit: resize width or rows on a focused Move or Resize control</Row>
+        <Row k={["↓ / ↵"]}>Move to or open the first sidebar filter result</Row>
+        <Row k={["↑ / ↓"]}>Move through the tree or an open menu</Row>
+        <Row k={["← / →", "Home / End"]}>Move between detail tabs</Row>
+        <Row k={["Home / End"]}>First or last menu item</Row>
         <Row k={[mod, "↵"]}>Save, in a dialog</Row>
         <Row k={["?"]}>This list</Row>
         <Row k={["Esc"]}>Close</Row>

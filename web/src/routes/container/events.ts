@@ -32,6 +32,6 @@ export function levelClass(level: string): "" | "warn" | "bad" {
 
 /** The old History timeline around an event, its row highlighted (chart.rs markers_from_events). */
 export function historyHref(id: number, at: number, level: string): string {
-  const all = level === "info" ? "&events=all" : "";
+  const all = level === "info" ? "&level=all" : "";
   return `/app/history?from=${at - 1800}&to=${at + 1800}${all}&before=${id + 1}#ev-${id}`;
 }

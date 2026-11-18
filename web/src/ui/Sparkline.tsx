@@ -96,7 +96,8 @@ export function Meter({ value, max, label, className }: MeterProps) {
   const pct = max > 0 && Number.isFinite(value) ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   const lv = pct >= 90 ? "bad" : pct >= 80 ? "warn" : "";
   return (
-    <div
+    <svg
+      viewBox="0 0 100 4" preserveAspectRatio="none"
       className={["meter", lv, className ?? ""].filter(Boolean).join(" ")}
       role="meter"
       aria-label={label}
@@ -105,7 +106,7 @@ export function Meter({ value, max, label, className }: MeterProps) {
       aria-valuenow={value}
       aria-valuetext={`${Math.round(pct)}%`}
     >
-      <span style={{ width: `${pct}%` }} />
-    </div>
+      <rect width={pct} height="4" />
+    </svg>
   );
 }

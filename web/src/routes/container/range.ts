@@ -95,8 +95,4 @@ export function historyNote(firstPoint: number | null, range: string, now: numbe
   return { have, fit: fit !== null && SECS[fit] < secs ? fit : null };
 }
 
-/** Log viewer at a moment: `#t=` in milliseconds (LG-11). */
-export function logsAt(name: string, at: number | null): string {
-  const base = `/app/containers/${encodeURIComponent(name)}/logs`;
-  return at === null ? base : `${base}#t=${Math.max(0, at) * 1000}`;
-}
+export { logsHref as logsAt } from "../../app/paths.ts";

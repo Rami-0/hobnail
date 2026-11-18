@@ -48,12 +48,4 @@ export function StatusDot({ dot }: { dot: string }) {
   );
 }
 
-/** Path of a container's page in this client. */
-export function containerHref(name: string): string {
-  return `/app/containers/${encodeURIComponent(name)}`;
-}
-
-/** The old UI's log viewer (a full page load: not in this client yet). */
-export function logsHref(name: string): string {
-  return `/containers/${encodeURIComponent(name)}/logs`;
-}
+export { containerHref, logsHref } from "../../app/paths.ts";

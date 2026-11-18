@@ -1,7 +1,8 @@
+import { eventLabel } from "../container/events.ts";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
 import { api } from "../../api/session.ts";
-import { containerHref } from "../../app/paths.ts";
+import { containerHref, logsHref } from "../../app/paths.ts";
 import { navigate, useRoute } from "../../app/router.ts";
 import { useBootstrap, useContainers } from "../../live/index.ts";
 import { Button } from "../../ui/Button.tsx";
@@ -69,18 +70,18 @@ export default function History() {
             {" "}<span aria-label="Starts per day, newest first">{days.join(" · ")}</span>
           </li>)}</ul>}
       </section>
-      <section className="panel history-block" aria-label="Incident timeline">
+      <section className="panel history-block" id="events" aria-label="Incident timeline">
         <h2>Incident timeline</h2>
         <div className="toolbar history-controls">
           {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
         </div>
         {data.events.length === 0 && !extra && <p>No matching events in this window.</p>}
-        <ul className="history-events">
+        <ul className="history-events rows">
           {[...(extra ? [extra] : []), ...data.events].map((event) => <li key={event.id} id={`ev-${event.id}`} data-selected={event.id === selected || undefined}>
-            <RelativeTime at={event.at} /> <strong>{event.kind}</strong>{" "}
+            <RelativeTime at={event.at} /> <strong>{eventLabel(event.kind)}</strong>{" "}
             {names.has(event.subject) ? <>
               <a href={containerHref(event.subject)}>{event.subject}</a>{" "}
-              <a href={`/app/logs/${encodeURIComponent(event.subject)}#t=${event.at}`}>Logs</a>
+              <a href={logsHref(event.subject, event.at)}>Logs</a>
             </> : event.subject}
             {event.message && <div className="muted">{event.message}</div>}
           </li>)}

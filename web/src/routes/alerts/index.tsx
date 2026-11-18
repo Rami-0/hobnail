@@ -1,3 +1,5 @@
+import { eventLabel } from "../container/events.ts";
+import { logsHref } from "../../app/paths.ts";
 import type { AlertsView } from "../../api/gen/AlertsView.ts";
 import { containerHref, useRoute } from "../../app/router.ts";
 import { useBootstrap, useContainers, useNow } from "../../live/index.ts";
@@ -6,7 +8,6 @@ import { Button } from "../../ui/Button.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import "../history/history.css";
 
-const logLink = (name: string, at: number) => `/app/logs/${encodeURIComponent(name)}#t=${at}`;
 
 export default function Alerts() {
   const boot = useBootstrap();
@@ -25,7 +26,7 @@ export default function Alerts() {
         {data.firing.length ? <ul className="history-events">{data.firing.map((incident) => <li key={`${incident.rule}:${incident.subject}`} data-testid="row">
           <strong>{incident.container && names.has(incident.subject) ? <a href={containerHref(incident.subject)}>{incident.subject}</a> : incident.subject}</strong>{" "}
           {incident.state} · {incident.rule} · <RelativeTime at={incident.since} />
-          {incident.container && names.has(incident.subject) && <> · <a href={logLink(incident.subject, incident.since)}>Logs</a></>}
+          {incident.container && names.has(incident.subject) && <> · <a href={logsHref(incident.subject, incident.since)}>Logs</a></>}
           {!incident.notified && <span className="muted"> · Notification pending or suppressed</span>}
         </li>)}</ul> : <p>{boot?.docker_error ? "Container rules cannot run while Docker is unreachable." : "No alerts firing."}</p>}
       </section>
@@ -54,10 +55,10 @@ export default function Alerts() {
         </div>
         {!data.log.length && <p>No alert events found.</p>}
         <ul className="history-events">{data.log.map((event) => <li key={event.id}>
-          <RelativeTime at={event.at} /> · <strong>{event.kind}</strong>{" "}
+          <RelativeTime at={event.at} /> · <strong>{eventLabel(event.kind)}</strong>{" "}
           {names.has(event.subject) ? <>
             <a href={containerHref(event.subject)}>{event.subject}</a>{" · "}
-            <a href={logLink(event.subject, event.at)}>Logs</a>
+            <a href={logsHref(event.subject, event.at)}>Logs</a>
           </> : event.subject}
           {event.message && <div className="muted">{event.message}</div>}
         </li>)}</ul>

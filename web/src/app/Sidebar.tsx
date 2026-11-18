@@ -12,7 +12,6 @@
 // opens the first match, Down moves into the list.
 import { useAlertCount } from "./useAlertCount.ts";
 import {
-  ArrowUpRightIcon,
   BellIcon,
   BoxIcon,
   CircleAlertIcon,
@@ -37,11 +36,10 @@ import { CHEVRON_RIGHT_ICON, LOGS_ICON } from "./glyphs.tsx";
 import { LiveIndicator } from "./Live.tsx";
 import { local, readFolded, readTreeQuery, session, writeFolded, writeTreeQuery } from "./prefs.ts";
 import { appHref, containerHref, type Route } from "./router.ts";
+import { logsHref } from "./paths.ts";
 import { filterTree, treeOf, treeTotals, type TreeCtr, type TreeStack } from "./tree.ts";
 
-/** The old UI's logs pages (not in this client yet). */
-const logsUrl = (name: string) => `/containers/${encodeURIComponent(name)}/logs`;
-const stackLogsUrl = (name: string) => `/stacks/${encodeURIComponent(name)}/logs`;
+const stackLogsUrl = (name: string) => `/app/stacks/${encodeURIComponent(name)}/logs`;
 
 export function Brand({ site }: { site: string | null }) {
   return (
@@ -60,30 +58,26 @@ function NavLink({
   label,
   icon,
   current,
-  old,
   extra,
 }: {
   href: string;
   label: string;
   icon: ReactNode;
   current?: boolean;
-  old?: boolean;
   extra?: ReactNode;
 }) {
   return (
     <a
-      className={old ? "nav-item old" : "nav-item"}
+      className="nav-item"
       href={href}
-      data-rtip={old ? `${label} (current interface)` : label}
+      data-rtip={label}
       aria-current={current ? "page" : undefined}
     >
       {icon}
       <span className="nav-label">
         {label}
-        {old && <span className="sr"> (current interface)</span>}
       </span>
       {extra}
-      {old && <ArrowUpRightIcon className="nav-old" aria-hidden="true" />}
     </a>
   );
 }
@@ -195,7 +189,7 @@ const StackItem = memo(function StackItem({
               <span className="nm">{c.title}</span>
               {!c.running && <span className="sr"> ({c.label})</span>}
             </a>
-            {!scoped && <a className="ia logs" href={logsUrl(c.name)} title="Logs (current interface)" aria-label={`Logs of ${c.title}`}>
+            {!scoped && <a className="ia logs" href={logsHref(c.name)} title="Logs" aria-label={`Logs of ${c.title}`}>
               {LOGS_ICON}
             </a>}
           </li>
@@ -402,7 +396,7 @@ export function Sidebar({
         </button>
       </div>
       <nav className="nav" aria-label="Main" data-testid="sidebar">
-        <NavLink href={appHref("/")} label="Home" icon={<HouseIcon aria-hidden="true" />} current={r.name === "home"} />
+        <NavLink href={appHref("/")} label="Home" icon={<HouseIcon aria-hidden="true" />} current={r.name === "home" || (r.name === "overview" && !b?.default_board)} />
         <NavLink
           href={appHref("/containers")}
           label="Containers"
@@ -411,14 +405,11 @@ export function Sidebar({
         />
         {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
           icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
-        {b && (!b.scoped || b.role === "admin") && <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        {b && b.role !== "viewer" && <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
         {b && !b.scoped && <>
-        <div className="nav-sep label" aria-hidden="true">
-          Current interface
-        </div>
         <NavLink href="/app/overview" label="Overview" current={r.name === "overview"} icon={<LayoutGridIcon aria-hidden="true" />} />
         <NavLink href="/app/host" label="Host" current={r.name === "host"} icon={<ServerIcon aria-hidden="true" />} />
-        <NavLink href="/logs" label="Logs" old icon={<ScrollTextIcon aria-hidden="true" />} />
+        <NavLink href="/app/logs" label="Logs" icon={<ScrollTextIcon aria-hidden="true" />} />
         <NavLink href="/app/history" label="History" current={r.name === "history"} icon={<HistoryIcon aria-hidden="true" />} />
         <NavLink
           href="/app/alerts"

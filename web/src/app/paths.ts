@@ -82,6 +82,12 @@ export function containerHref(name: string): string {
   return `${BASE}/containers/${encodeURIComponent(name)}`;
 }
 
+/** Routes reserved for the Logs milestone. Timeline fragments are milliseconds. */
+export function logsHref(name: string, at: number | null = null): string {
+  const root = `${containerHref(name)}/logs`;
+  return at === null ? root : `${root}#t=${Math.max(0, at) * 1000}`;
+}
+
 /** Search parameters as a patch: a value sets the key, null or "" removes it, other keys stay. */
 export type SearchPatch = Record<string, string | null>;
 

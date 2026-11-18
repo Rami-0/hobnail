@@ -2,7 +2,7 @@
 // URL, the current one `aria-current="page"`. On a phone the row scrolls
 // and keeps the current tab in view (OV-36). Links are plain anchors: the
 // router takes over /app links, any other URL is a full page load.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 export interface TabItem {
   id: string;
@@ -21,6 +21,17 @@ export interface TabNavProps {
   testId?: string;
 }
 
+const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const links = [...(event.currentTarget.closest("nav")?.querySelectorAll<HTMLAnchorElement>("a.tab") ?? [])];
+    const current = links.findIndex((link) => link === event.currentTarget);
+    if (current < 0) return;
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? links.length - 1 : (current + offset + links.length) % links.length;
+    event.preventDefault();
+    links[next]?.focus();
+  };
+
 export function TabNav({ label, items, current, testId }: TabNavProps) {
   const ref = useRef<HTMLElement>(null);
   const ids = items.map((t) => t.id).join("\n");
@@ -36,7 +47,7 @@ export function TabNav({ label, items, current, testId }: TabNavProps) {
   return (
     <nav ref={ref} className="tabs" aria-label={label} data-testid={testId}>
       {items.map((t) => (
-        <a key={t.id} className="tab" href={t.href} aria-current={t.id === current ? "page" : undefined}>
+        <a key={t.id} className="tab" href={t.href} onKeyDown={move} aria-current={t.id === current ? "page" : undefined}>
           {t.label}
           {t.extra}
         </a>

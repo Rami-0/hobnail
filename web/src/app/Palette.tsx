@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { signOut } from "./Account.tsx";
-import { containerHref } from "./paths.ts";
+import { containerHref, logsHref } from "./paths.ts";
 import { navigate } from "./router.ts";
 import { paletteIndex, rankPalette, type PaletteItem, type PaletteKind } from "./palette.ts";
 import { chooseTheme } from "./ThemeButton.tsx";
@@ -56,7 +56,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
   const base: PaletteItem[] = [
     page("Containers", "containers"),
     ...(!scoped ? PAGES.map(([name, path]) => page(name ?? "", path ?? "")) : []),
-    ...(!scoped || boot?.role === "admin" ? [page("Settings", "settings/boards")] : []),
+    ...(boot && boot.role !== "viewer" ? [page("Settings", "settings/boards")] : []),
     ...(edit ? SETTINGS.map(([name, path]) => page(name ?? "", `settings/${path}`, "Settings")) : []),
     ...bookmarks,
     ...boot?.boards.map((b) => page(b.name, `boards/${b.id}`, "Board")) ?? [],
@@ -68,7 +68,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
       const href = containerHref(row.name);
       const url = rowLink(row, window.location.hostname);
       const children: PaletteItem[] = [];
-      if (!scoped) children.push({ kind: "Logs", name: `Logs: ${row.title}`, href: `/app/logs/${encodeURIComponent(row.name)}` });
+      if (!scoped) children.push({ kind: "Logs", name: `Logs: ${row.title}`, href: logsHref(row.name) });
       if (url) children.push({ kind: "Open", name: "Open service ↗", href: url, detail: row.title });
       if (edit) children.push({ kind: "Action", name: `Edit ${row.title}`, href: `${href}?edit=override` });
       return { kind: "Container", name: row.title, detail: row.stack, keywords: row.name, href, children };

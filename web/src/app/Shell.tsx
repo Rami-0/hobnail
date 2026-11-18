@@ -21,7 +21,7 @@ import { Button } from "../ui/Button.tsx";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
-import { interceptedPath } from "./paths.ts";
+import { interceptedPath, logsHref } from "./paths.ts";
 import { local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
@@ -59,7 +59,7 @@ const GO_HREF: Record<GoPage, () => string> = {
   overview: () => "/app/overview",
   containers: () => appHref("/containers"),
   host: () => "/app/host",
-  logs: () => "/logs",
+  logs: () => "/app/logs",
   history: () => "/app/history",
   alerts: () => "/app/alerts",
   settings: () => "/app/settings/boards",
@@ -103,7 +103,7 @@ function logsTarget(current: string | null): string | null {
     }
   }
   name ??= current;
-  return name ? `/containers/${encodeURIComponent(name)}/logs` : null;
+  return name ? logsHref(name) : null;
 }
 
 export function Shell({ title, children }: { title: string; children: ReactNode }) {
@@ -288,6 +288,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       if (!act) return;
       switch (act.kind) {
         case "go":
+          if (act.page === "settings" && b?.role === "viewer") return;
           if (b?.scoped && act.page !== "containers" && !(act.page === "settings" && b.role === "admin")) return;
           e.preventDefault();
           navigate(GO_HREF[act.page]());
@@ -321,7 +322,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           const u = logsTarget(current);
           if (u) {
             e.preventDefault();
-            window.location.href = u;
+            navigate(u);
           }
         }
       }
@@ -418,7 +419,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         </div>
       </div>
       <nav className="bbar" aria-label="Quick navigation" inert={overPage}>
-        <a className="bb-i" href={appHref("/")} aria-current={r === "home" ? "page" : undefined}>
+        <a className="bb-i" href={appHref("/")} aria-current={(r === "home" || (r === "overview" && !b?.default_board)) ? "page" : undefined}>
           <HouseIcon aria-hidden="true" />
           <span>Home</span>
         </a>
@@ -427,10 +428,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>Containers</span>
         </a>
         {b && !b.scoped && <>
-        <a className="bb-i" href="/logs">
+        <a className="bb-i" href="/app/logs">
           <ScrollTextIcon aria-hidden="true" />
           <span>
-            Logs<span className="sr"> (current interface)</span>
+            Logs
           </span>
         </a>
         <a className="bb-i" href="/app/alerts" aria-current={r === "alerts" ? "page" : undefined}>
