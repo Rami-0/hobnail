@@ -77,13 +77,14 @@ try {
       await tab.ev(`globalThis.searchStarted=performance.now()`);
       await inp.type("ERROR"); await wait('Number(document.querySelector("[data-testid=log-matches]")?.textContent.split("/")[1]) > 0', "plain search counter");
       measurements.search5000Ms = await tab.ev('performance.now()-searchStarted');
+      measurements.searchMatchMs = await tab.ev('Number(document.querySelector("[data-testid=log-body]").dataset.searchMs)');
       await inp.key("Enter"); await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
       await tab.ev(`document.querySelector('[data-testid=log-body] details summary')?.click()`);
       assert.ok(await tab.ev(`!!document.querySelector('[data-testid=log-body] details[open] pre')`), "JSON folds and opens");
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
       const dl = await fetch(new URL(download, base), { headers }); assert.equal(dl.status, 200); assert.ok(dl.headers.get("content-disposition").includes("attachment")); assert.ok((await dl.text()).includes("<script"));
-      await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await tab.shot(path.join(out, `${label}-stack.png`));
+      await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await tab.shot(path.join(out, `${label}-four.png`));
       await tab.ev('document.querySelector("[data-testid=log-pane] header>a")?.click()');
@@ -97,7 +98,7 @@ try {
       results.push(measurements);
       assert.ok(measurements.burstMaxTaskMs <= 100, `burst maximum ${measurements.burstMaxTaskMs} ms exceeds 100 ms`);
     } catch (e) { failures.push(`${label}: ${e.stack}`); await tab.shot(path.join(out, `${label}-failure.png`)); }
-    finally { fs.writeFileSync(path.join(out, `${label}-recorder.json`), JSON.stringify(rec)); await tab.close(); }
+    finally { if (!results.includes(measurements)) results.push(measurements); fs.writeFileSync(path.join(out, `${label}-recorder.json`), JSON.stringify(rec)); await tab.close(); }
   }
 } finally {
   const current = await fetch(new URL("/api/settings/config", base), { headers }).then((r) => r.json());
