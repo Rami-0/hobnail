@@ -133,6 +133,7 @@ pub enum AccountError {
     Missing,
     Protected,
     Invalid,
+    InvalidScopes,
     Storage,
 }
 
@@ -190,6 +191,36 @@ fn owner_id(conn: &Connection) -> rusqlite::Result<Option<i64>> {
         r.get(0)
     })
     .optional()
+}
+
+pub(crate) fn read_accounts(conn: &Connection) -> rusqlite::Result<Vec<Account>> {
+    let mut stmt = conn.prepare(&format!("SELECT {ACCOUNT} FROM users ORDER BY name"))?;
+    let rows = stmt.query_map([], |r| Account::read(conn, r))?;
+    rows.collect()
+}
+
+fn valid_targets(conn: &Connection, scopes: Option<&Scopes>) -> rusqlite::Result<bool> {
+    let Some(scopes) = scopes else {
+        return Ok(true);
+    };
+    for (sql, ids) in [
+        (
+            "SELECT EXISTS (SELECT 1 FROM boards WHERE id=?1)",
+            &scopes.boards,
+        ),
+        (
+            "SELECT EXISTS (SELECT 1 FROM integrations WHERE id=?1)",
+            &scopes.integrations,
+        ),
+    ] {
+        let mut stmt = conn.prepare(sql)?;
+        for id in ids {
+            if !stmt.query_row([id], |r| r.get::<_, bool>(0))? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 fn set_scopes(
@@ -436,11 +467,7 @@ impl Db {
 
     pub fn accounts(&self) -> Result<Vec<Account>> {
         self.with(Err(AccountError::Storage), |i| {
-            let mut stmt = i
-                .conn
-                .prepare(&format!("SELECT {ACCOUNT} FROM users ORDER BY name"))?;
-            let rows = stmt.query_map([], |r| Account::read(&i.conn, r))?;
-            Ok(Ok(rows.collect::<rusqlite::Result<_>>()?))
+            Ok(Ok(read_accounts(&i.conn)?))
         })
     }
 
@@ -475,7 +502,12 @@ impl Db {
                         params![user, disabled, now],
                     )?;
                 }
-                AccountChange::Scopes(scopes) => set_scopes(&tx, user, scopes.as_ref(), now)?,
+                AccountChange::Scopes(scopes) => {
+                    if !valid_targets(&tx, scopes.as_ref())? {
+                        return Ok(Err(AccountError::InvalidScopes));
+                    }
+                    set_scopes(&tx, user, scopes.as_ref(), now)?;
+                }
                 AccountChange::SignOut => {
                     tx.execute("DELETE FROM sessions WHERE user_id = ?1", [user])?;
                 }
@@ -497,11 +529,17 @@ impl Db {
         expires: i64,
     ) -> Result<Invite> {
         self.with(Err(AccountError::Storage), |i| {
+            let tx = i
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            if !valid_targets(&tx, scopes)? {
+                return Ok(Err(AccountError::InvalidScopes));
+            }
             let scopes = scopes
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
-            let invite = i.conn.query_row(
+            let invite = tx.query_row(
                 &format!(
                     "INSERT INTO invites (token_hash, role, scopes, created, expires)
                  VALUES (?1, ?2, ?3, ?4, ?5) RETURNING {INVITE}"
@@ -509,6 +547,7 @@ impl Db {
                 params![hash, role.as_str(), scopes, now, expires],
                 Invite::read,
             )?;
+            tx.commit()?;
             Ok(Ok(invite))
         })
     }
@@ -524,7 +563,12 @@ impl Db {
     }
 
     pub fn validate_invite(&self, hash: &str, now: i64) -> Option<Invite> {
-        self.with(None, |i| active_invite(&i.conn, hash, now))
+        self.with(None, |i| {
+            let Some(invite) = active_invite(&i.conn, hash, now)? else {
+                return Ok(None);
+            };
+            Ok(valid_targets(&i.conn, invite.scopes.as_ref())?.then_some(invite))
+        })
     }
 
     pub fn revoke_invite(&self, id: &str, now: i64) -> Result<()> {
@@ -560,6 +604,9 @@ impl Db {
             )?;
             if exists {
                 return Ok(Err(AccountError::Conflict));
+            }
+            if !valid_targets(&tx, invite.scopes.as_ref())? {
+                return Ok(Err(AccountError::Invalid));
             }
             let user = insert_user(&tx, name, password_hash, invite.role, now)?;
             set_scopes(&tx, user, invite.scopes.as_ref(), now)?;

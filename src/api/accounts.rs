@@ -8,7 +8,9 @@ use serde_json::json;
 use super::access::{Handler, Matched};
 use super::error::ApiError;
 use crate::auth::{self, now_s, sha256_hex, Session};
-use crate::db::accounts::{AccountChange, AccountError, Invite, Role, Scopes};
+use crate::db::accounts::{
+    read_accounts, Account, AccountChange, AccountError, Invite, Role, Scopes,
+};
 use crate::http::server::Body;
 use crate::state::AppState;
 
@@ -63,6 +65,67 @@ pub struct InviteValidation {
     pub expires: Option<i64>,
 }
 
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ManagedUser {
+    #[serde(flatten)]
+    #[cfg_attr(test, ts(flatten))]
+    account: Account,
+    scope_targets: Option<ScopeTargets>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ScopeTargets {
+    boards: Vec<ScopeTarget>,
+    integrations: Vec<ScopeTarget>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct ScopeTarget {
+    id: String,
+    name: String,
+}
+
+fn managed_users(conn: &rusqlite::Connection) -> Result<Vec<ManagedUser>, ApiError> {
+    let mut boards = conn.prepare(
+        "SELECT b.id,b.name FROM access_grants g JOIN boards b ON b.id=g.target_id
+         WHERE g.kind='board' AND g.user_id=?1 ORDER BY b.name,b.id",
+    )?;
+    let mut integrations = conn.prepare(
+        "SELECT i.id,i.name FROM access_grants g JOIN integrations i ON i.id=g.target_id
+         WHERE g.kind='integration' AND g.user_id=?1 ORDER BY i.name,i.id",
+    )?;
+    let read = |row: &rusqlite::Row<'_>| {
+        Ok(ScopeTarget {
+            id: row.get(0)?,
+            name: row.get(1)?,
+        })
+    };
+    read_accounts(conn)?
+        .into_iter()
+        .map(|account| {
+            let scope_targets = if account.scopes.is_some() {
+                Some(ScopeTargets {
+                    boards: boards
+                        .query_map([account.id], read)?
+                        .collect::<rusqlite::Result<_>>()?,
+                    integrations: integrations
+                        .query_map([account.id], read)?
+                        .collect::<rusqlite::Result<_>>()?,
+                })
+            } else {
+                None
+            };
+            Ok(ManagedUser {
+                account,
+                scope_targets,
+            })
+        })
+        .collect()
+}
+
 pub fn validate_invite(state: &AppState, query: &str) -> Response<Body> {
     let invite = crate::db::api::parse_query(query)
         .and_then(|pairs| {
@@ -98,6 +161,9 @@ impl From<AccountError> for ApiError {
                 "protected_owner",
                 "owner account is protected",
             ),
+            AccountError::InvalidScopes => {
+                Self::bad_request("select existing board and integration IDs", Some("scopes"))
+            }
             AccountError::Invalid => Self::bad_request("invalid account operation", None),
             AccountError::Storage => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -115,11 +181,7 @@ async fn body<T: DeserializeOwned>(req: Request<Incoming>) -> Result<T, ApiError
 fn validate_scopes(scopes: Option<&Scopes>) -> Result<(), ApiError> {
     if let Some(scopes) = scopes {
         for id in scopes.boards.iter().chain(&scopes.integrations) {
-            if id.len() != 32
-                || !id
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            {
+            if !super::valid_id(id) {
                 return Err(ApiError::bad_request(
                     "scope IDs must be generated board or integration IDs",
                     Some("scopes"),
@@ -176,7 +238,12 @@ async fn handle(
             ));
         }
         Handler::InviteRevoke => db.revoke_invite(id, now)?,
-        Handler::Users => return Ok(super::json(StatusCode::OK, &db.accounts()?)),
+        Handler::Users => {
+            return Ok(super::json(
+                StatusCode::OK,
+                &db.dashboard(|c| managed_users(c))?,
+            ))
+        }
         Handler::Password => {
             let PasswordRequest { current, new } = body(req).await?;
             auth::check_password_policy(&new).map_err(|e| ApiError::bad_request(e, Some("new")))?;

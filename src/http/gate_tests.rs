@@ -2005,8 +2005,18 @@ async fn invite_roles_and_account_management() {
         ("X-RH-CSRF", owner.1.as_str()),
     ];
 
+    let created = req(
+        addr,
+        "POST",
+        "/api/v1/boards",
+        &owner_headers,
+        r#"{"name":"Scoped board"}"#,
+    )
+    .await;
+    assert_eq!(created.status, 201);
+    let created: serde_json::Value = serde_json::from_str(&created.body).unwrap();
+    let scope = created["id"].as_str().unwrap().to_owned();
     for role in ["viewer", "admin"] {
-        let scope = "a".repeat(32);
         let data =
             serde_json::json!({"role": role, "scopes": {"boards": [scope], "integrations": [] }});
         let r = req(
