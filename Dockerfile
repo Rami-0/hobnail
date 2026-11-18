@@ -19,8 +19,10 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 COPY static ./static
-# The Rust type-drift test compares the generated TypeScript against these.
+# The Rust drift tests compare the generated TypeScript and the formatting
+# fixtures against these.
 COPY web/src/api/gen ./web/src/api/gen
+COPY web/src/format/fixtures.json ./web/src/format/fixtures.json
 COPY --from=web /web/dist ./web/dist
 ARG RH_GIT_SHA=dev
 ARG RH_BUILD_TIME=unknown
@@ -34,7 +36,7 @@ ENV RH_GIT_SHA=${RH_GIT_SHA} RH_BUILD_TIME=${RH_BUILD_TIME} CARGO_TARGET_DIR=/ta
 # sharing=locked keeps two builds from interleaving between build and cp.
 RUN --mount=type=cache,id=rh-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=rh-target,target=/target,sharing=locked \
-    export RH_CONTENT_HASH="$(find src static web/dist web/src/api/gen build.rs Cargo.toml Cargo.lock -type f \
+    export RH_CONTENT_HASH="$(find src static web/dist web/src/api/gen web/src/format/fixtures.json build.rs Cargo.toml Cargo.lock -type f \
         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; sha256sum < "$f"; done \
         | sha256sum | cut -c1-64)" \
  && echo "content hash $RH_CONTENT_HASH" \

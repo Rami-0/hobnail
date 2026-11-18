@@ -6,7 +6,7 @@
 // button keeps focus while its action runs; clicks are ignored meanwhile.
 // Touch target: the height is `--ctl-h`, which tokens.css raises to 44 px
 // on touch screens and narrow windows.
-import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 
@@ -16,6 +16,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   busy?: boolean;
   /** An icon before the label (hidden while busy, the spinner takes its place). */
   icon?: ReactNode;
+  /** React 19 passes `ref` as a prop. */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Button({

@@ -346,3 +346,19 @@ the same image on copies of the same databases; ms):
 >
 > The cold-start target means the binary: the container figure is runc and
 > Docker networking before `main()` runs, which the app cannot change.
+
+## React port, phases 0 and 1 (2026-11-18)
+
+Full results, method and raw samples: [plans/react-port-phase-0-1.md](plans/react-port-phase-0-1.md)
+and [plans/react-port-raw/](plans/react-port-raw/). Not deployed; throwaway
+containers on 127.0.0.1, warm cache, the test instance's config, fresh database.
+
+| Metric | main `680a339` | React port phase 1 |
+|---|---|---|
+| Release binary | 6,633,904 B | 7,780,784 B |
+| Image (`docker images`) | 11.6 MB | 13.3 MB (both UIs ship) |
+| `memory.current` max at 1 / 10 / 25 clients | 6.01 / 6.55 / 7.51 MiB | 3.41 / 3.90 / 4.55 MiB (JSON API); differences are page-cache attribution, RssAnon equal |
+| `memory.peak`, whole run | 8.84 MiB | 6.29 MiB |
+| Client first route | 227.5 KB uncompressed | 105.5 KB gzip |
+| 150-row table, phone 4×: longest load task | 1,791 to 1,838 ms | 151 to 169 ms (trace), 169 to 220 ms (long-task observer) |
+| 150-row table, phone 4×: live update | 159 to 204 ms | 27 to 32 ms |

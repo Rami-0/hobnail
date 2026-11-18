@@ -33,11 +33,48 @@ When it is installed (with the lead, once a version is old enough):
 - read `web/AGENTS.md` (UI SDK reading instructions) before writing a new
   wrapper.
 
-## Phase 0 contents
+## Contents (Phase 1)
 
-- `Button.tsx`: variants `primary`, `secondary` (default), `ghost`; `busy`
-  (spinner, `aria-busy` + `aria-disabled`, keeps focus); `--ctl-h` height,
-  44 px on touch screens.
-- `index.ts`: the only import path for the app.
+Hand-written on platform elements (UI SDK is not installed), with the props
+below; pages use exactly these. Styles: `src/styles/ui.css`. Each row names
+the UI SDK entry that replaces the hand-written part once a version passes
+the release-age rule; the props stay, so callers do not change. Entries are
+the SDK's documented per-component imports (`@ui-sdk/react/<component>`);
+check the installed `docs/llms.txt` for the exact names before switching.
 
-Nothing else yet. Add a primitive here when a page needs it, not before.
+| Wrapper | Props | Built on | Replaced by (when installable) |
+|---|---|---|---|
+| `Button` | `variant` (`primary`/`secondary`/`ghost`), `busy`, `icon`, `ref`, button props | `<button>` | `@ui-sdk/react/button` |
+| `Dialog` | `open`, `title`, `description?`, `onClose(reason: "escape"\|"cancel"\|"backdrop"\|"done")`, `guard?()`, `footer?`, `children`, `initialFocus?`, `testId?`, `wide?`, `className?` | `<dialog>` + `showModal()` | `@ui-sdk/react/dialog` (the guard bar and Back handling stay ours) |
+| `Field` | `label`, `hint?`, `error?`, `children` (the control), `id`, `wide?` | `<label>` + context | `@ui-sdk/react/field` |
+| `TextInput` | input props, `mono?`, `ref` (id / describedby / invalid from the Field) | `<input>` | `@ui-sdk/react/input` |
+| `Select` | `label`, `value`, `onChange(value)`, `options: {value,label}[]`, `hideLabel?`, select props | native `<select>` | `@ui-sdk/react/select` (keep native on touch) |
+| `Switch` | `checked`, `onChange(checked)`, `label`, `busy?`, input props | `<input type=checkbox role=switch>` | `@ui-sdk/react/switch` |
+| `Note` | `kind` (`ok`/`warn`/`bad`/`info`), `children`, `action?`, `testId?`, `id?` | `<div role=status\|alert>` | stays (no SDK equivalent needed) |
+| `Banner` | `kind`, `children`, `action?`, `testId?` | `<div role=status\|alert>` | stays |
+| `EmptyState` | `icon`, `title`, `children?`, `tone?` (`good`/`bad`), `actions?`, `compact?`, `testId?` | markup | stays |
+| `toast(text, {kind?, action?, ms?, sticky?})`, `<Toaster/>` | three at most; "bad" stays until closed; queued while a dialog is open | `toast.ts` store + `<output>` region | `@ui-sdk/react/toast` (keep the dialog queue) |
+| `Menu` | `label`, `trigger`, `items: {label, onSelect, icon?, testId?, danger?}[]`, `header?`, `testId?`, `triggerClassName?`, `align?` | `<button aria-haspopup=menu>` + list | `@ui-sdk/react/menu` |
+| `TabNav` | `label`, `items: {id, label, href, extra?}[]`, `current`, `testId?` | links, `aria-current="page"` | stays (URL tabs are links, not role=tab) |
+| `Sparkline` | `values: (number\|null)[]`, `max?`, `label` ("" hides it), `width?`, `height?`, `color?` (a token name), `className?` | plain SVG (`svg.ts`) | stays (no Recharts here) |
+| `HealthStrip` | `codes: number[]`, `label`, `step?` (s per cell, 900), `cells?`, `className?` | plain SVG (`svg.ts`) | stays |
+| `Meter` | `value`, `max`, `label`, `className?` | `<div role=meter>` | stays |
+
+Behaviour notes:
+
+- **Dialog.** Focus moves to `initialFocus`, else the body's first control,
+  and returns to the opener on close. Esc, Close, a backdrop click and Back
+  ask `guard()` first; with unsaved input the footer becomes "Discard your
+  changes? Keep editing / Discard". The dialog adds no history entry: a
+  page whose URL is the dialog (`?edit=…`) has one already. On Back with
+  input it restores its URL and asks; without, `onClose("cancel")` runs
+  after the URL changed (remove `edit` with `replace`, never go back
+  again). Ctrl/⌘ Enter submits the first `<form>` inside; footer buttons
+  submit it with `form="<id>"`. Toasts wait while any dialog is open
+  (`layers.ts`).
+- **CSP.** No inline style attributes in markup, no injected `<style>`:
+  React's `style` prop (CSSOM) is used only for computed values (a meter's
+  width, a sparkline's `--s` colour).
+- **Touch.** 44 px targets and 16 px input text come from the tokens
+  (`--ctl-h`, `--ia`, `--hit`, `--fs-input` in tokens.css).
+- Pure logic is in `svg.ts` and `toast.ts`, unit-tested by `*.test.ts`.

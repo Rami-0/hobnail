@@ -1,151 +1,432 @@
-// The application shell: skip link, sidebar, top bar (title, theme, account)
-// and the main landmark. Phase 0: the sidebar lists the pages the client
-// will have; none exists yet, so they are shown as plain text, not links.
-import {
-  BellIcon,
-  BoxIcon,
-  HistoryIcon,
-  HouseIcon,
-  LayoutGridIcon,
-  LogInIcon,
-  LogOutIcon,
-  ScrollTextIcon,
-  ServerIcon,
-  SlidersHorizontalIcon,
-  UserIcon,
-} from "lucide-react";
-import { useCallback, useState, type ReactNode } from "react";
+// The application shell (src/ui/shell.rs layout; static/app.js sidebar,
+// keyboard map, live pill, tab badge): skip link, sidebar, top bar (title,
+// vitals, theme, account), the page-wide banners, the phone bottom bar, the
+// shortcuts sheet and the toasts.
+//
+// Sidebar by width, as the old UI: over 1100 px it is in the page and its
+// toggle collapses it to a rail (remembered, rh-side); from 700 to 1100 px
+// it is a rail the toggle opens over the page; under 700 px it is a drawer
+// that only the bottom bar's "More" opens. Open over the page, everything
+// behind is inert, Esc and Back close it (Forward opens it again), focus
+// goes into it and back to the opener; a closed drawer is out of the tab
+// order. `<html data-side="rail">` and `<html class="side-open">` drive the
+// CSS, as before.
+import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon } from "lucide-react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { api, refreshSession, useSession } from "../api/session.ts";
-import { Button } from "../ui/index.ts";
-import { appHref, useRoute } from "./router.ts";
+import { useSession } from "../api/session.ts";
+import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
+import { Banner, Button, Toaster } from "../ui/index.ts";
+import { Account } from "./Account.tsx";
+import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
+import { StalePill } from "./Live.tsx";
+import { interceptedPath } from "./paths.ts";
+import { local, readRail, settingsHref, writeRail } from "./prefs.ts";
+import { appHref, navigate, useRoute } from "./router.ts";
+import { pageFilter, Shortcuts } from "./Shortcuts.tsx";
+import { Brand, Sidebar } from "./Sidebar.tsx";
+import { applyDefaultTheme } from "./theme.ts";
 import { ThemeButton } from "./ThemeButton.tsx";
+import { useTabTitle } from "./title.ts";
+import { Vitals } from "./Vitals.tsx";
 
-/** The pages of the server-rendered UI, in its order (src/ui/shell.rs NAV). */
-const FUTURE: { label: string; icon: ReactNode }[] = [
-  { label: "Overview", icon: <LayoutGridIcon aria-hidden="true" /> },
-  { label: "Containers", icon: <BoxIcon aria-hidden="true" /> },
-  { label: "Host", icon: <ServerIcon aria-hidden="true" /> },
-  { label: "Logs", icon: <ScrollTextIcon aria-hidden="true" /> },
-  { label: "History", icon: <HistoryIcon aria-hidden="true" /> },
-  { label: "Alerts", icon: <BellIcon aria-hidden="true" /> },
-  { label: "Settings", icon: <SlidersHorizontalIcon aria-hidden="true" /> },
-];
+const WIDE = "(min-width:1101px)";
+const PHONE = "(max-width:699px)";
 
-function Brand() {
-  return (
-    <a className="brand" href={appHref("/")}>
-      <img src="/icon.svg" alt="" width="24" height="24" />
-      <span>Hobnail</span>
-    </a>
-  );
+function useMedia(q: string): boolean {
+  const [on, set] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const f = () => set(m.matches);
+    f();
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, [q]);
+  return on;
 }
 
-function Account({ announce }: { announce: (text: string) => void }) {
-  const s = useSession();
-  const loc = useRoute();
-  const [busy, setBusy] = useState(false);
-  if (s.status === "loading") return <div className="acct" />;
-  const user = s.session?.user ?? null;
-  if (!user) {
-    if (loc.route.name === "login") return <div className="acct" />;
-    // From the home page the link is plain /app/login (next defaults to /app).
-    const here = loc.pathname + loc.search + loc.hash;
-    const href = loc.route.name === "home" && !loc.search && !loc.hash
-      ? appHref("/login")
-      : `${appHref("/login")}?next=${encodeURIComponent(here)}`;
-    return (
-      <div className="acct">
-        <a className="btn sm ghost acct-in" data-testid="signin" href={href}>
-          <LogInIcon aria-hidden="true" />
-          <span>Sign in</span>
-        </a>
-      </div>
-    );
+/** Before the first render: the remembered rail (src/ui/shell.rs BOOT_JS). */
+export function applyStoredRail(): void {
+  if (readRail(local())) document.documentElement.dataset.side = "rail";
+}
+
+const GO_HREF: Record<GoPage, () => string> = {
+  overview: () => "/",
+  containers: () => appHref("/containers"),
+  host: () => "/host",
+  logs: () => "/logs",
+  history: () => "/history",
+  alerts: () => "/alerts",
+  settings: () => settingsHref(local()),
+};
+
+const visible = (el: Element) => el instanceof HTMLElement && el.offsetParent !== null && !el.closest("[hidden]");
+
+/** Rows j/k move through: the page's rows that open something (NAV-60). */
+function rows(): HTMLElement[] {
+  const marked = Array.from(document.querySelectorAll<HTMLElement>('main [data-testid="row"]'));
+  const list = marked.length ? marked : Array.from(document.querySelectorAll<HTMLElement>("main tbody tr, main ul.rows > li"));
+  return list.filter((r) => visible(r) && r.querySelector("a[href]"));
+}
+
+function moveKeyRow(dir: 1 | -1): void {
+  const list = rows();
+  if (!list.length) return;
+  let i = list.findIndex((r) => r.classList.contains("kfocus"));
+  if (i < 0) i = list.findIndex((r) => r.contains(document.activeElement));
+  for (const r of list) r.classList.remove("kfocus");
+  const r = list[moveRow(i, dir, list.length)];
+  if (!r) return;
+  r.classList.add("kfocus");
+  r.querySelector<HTMLElement>("a[href]")?.focus({ preventScroll: true });
+  r.scrollIntoView({ block: "nearest" });
+}
+
+/** The old UI's logs page of the focused row's or the open container. */
+function logsTarget(current: string | null): string | null {
+  const a = document.activeElement;
+  const row = document.querySelector<HTMLElement>(".kfocus[data-name]") ?? (a instanceof Element ? a.closest<HTMLElement>("[data-name]") : null);
+  let name = row?.dataset.name ?? null;
+  if (!name && a instanceof HTMLAnchorElement) {
+    const m = /^\/app\/containers\/([^/?#]+)$/.exec(new URL(a.href).pathname);
+    if (m?.[1]) {
+      try {
+        name = decodeURIComponent(m[1]);
+      } catch {
+        name = null;
+      }
+    }
   }
-  const signOut = async () => {
-    setBusy(true);
-    const r = await api.post("/api/logout");
-    await refreshSession();
-    setBusy(false);
-    // 401: the session had already ended; the refresh shows that.
-    if (r.kind !== "ok" && r.kind !== "sign_in") announce(`Sign-out failed: ${r.message}`);
-    else announce("Signed out.");
-  };
-  return (
-    <div className="acct">
-      <span className="acct-user" data-testid="user" title={`Signed in as ${user}`}>
-        <UserIcon aria-hidden="true" />
-        {user}
-      </span>
-      <Button
-        variant="ghost"
-        className="sm"
-        data-testid="signout"
-        busy={busy}
-        icon={<LogOutIcon aria-hidden="true" />}
-        onClick={() => void signOut()}
-      >
-        Sign out
-      </Button>
-    </div>
-  );
+  name ??= current;
+  return name ? `/containers/${encodeURIComponent(name)}/logs` : null;
 }
 
 export function Shell({ title, children }: { title: string; children: ReactNode }) {
   const loc = useRoute();
-  const [said, setSaid] = useState("");
-  // A polite live region stands in for the toast the old UI shows (no toast
-  // primitive yet). Same text twice still re-announces: clear, then set.
-  const announce = useCallback((text: string) => {
-    setSaid("");
-    window.setTimeout(() => setSaid(text), 50);
+  const session = useSession();
+  const b = useBootstrap();
+  const ctrs = useContainers();
+  const hidden = useHiddenProblems();
+  const newBuild = useNewBuild();
+  const wide = useMedia(WIDE);
+  const phone = useMedia(PHONE);
+  const [rail, setRail] = useState(() => document.documentElement.dataset.side === "rail");
+  const [open, setOpenState] = useState(false);
+  const [keys, setKeys] = useState(false);
+  const sideRef = useRef<HTMLElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const drawer = useRef({ pushed: false, popping: false, from: null as HTMLElement | null });
+  // The sidebar is drawn in a second step (a transition), after the top bar
+  // and the page: two smaller tasks instead of one long one on a slow phone.
+  const full = useDeferredValue(true, false);
+  const settled = session.status !== "loading";
+  // #root[data-ready="1"]: drawn, sidebar included, with a known session.
+  useEffect(() => {
+    if (full && settled) document.getElementById("root")?.setAttribute("data-ready", "1");
+  }, [full, settled]);
+
+  // ---- tab title and favicon ----
+  const problems = hidden ?? Math.max(problemCount(ctrs.data), b?.alerts_firing ?? 0);
+  useTabTitle(title, b?.title ?? null, problems);
+
+  // ---- the owner's default theme, for a browser that has not chosen ----
+  const themeDefault = b?.theme_default;
+  useEffect(() => {
+    if (themeDefault) applyDefaultTheme(themeDefault);
+  }, [themeDefault]);
+
+  // ---- sidebar state on <html> ----
+  useEffect(() => {
+    const root = document.documentElement;
+    if (rail) root.dataset.side = "rail";
+    else delete root.dataset.side;
+  }, [rail]);
+  useEffect(() => {
+    document.documentElement.classList.toggle("side-open", open);
+  }, [open]);
+
+  const openRef = useRef(false);
+  const setOpen = useCallback((on: boolean, opts: { from?: HTMLElement | null; entry?: boolean; viaBack?: boolean } = {}) => {
+    if (openRef.current === on) return;
+    openRef.current = on;
+    setOpenState(on);
+    const d = drawer.current;
+    if (on) {
+      d.from = opts.from ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      if (opts.entry) d.pushed = true;
+      else {
+        try {
+          window.history.pushState({ rhDrawer: 1 }, "");
+          d.pushed = true;
+        } catch {
+          d.pushed = false;
+        }
+      }
+      window.setTimeout(() => sideRef.current?.querySelector<HTMLElement>(".nav-item")?.focus(), 0);
+      return;
+    }
+    if (opts.viaBack) d.pushed = false;
+    else if (d.pushed) {
+      d.pushed = false;
+      d.popping = true;
+      try {
+        window.history.back();
+      } catch {
+        d.popping = false;
+      }
+    }
+    const from = d.from;
+    window.setTimeout(() => {
+      if (from?.isConnected && !window.matchMedia(WIDE).matches) from.focus({ preventScroll: true });
+    }, 0);
   }, []);
+
+  // Back closes the drawer; Forward onto its entry opens it again.
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const d = drawer.current;
+      if (d.popping) {
+        d.popping = false;
+        return;
+      }
+      if (document.documentElement.classList.contains("side-open")) setOpen(false, { viaBack: true });
+      else if ((e.state as { rhDrawer?: number } | null)?.rhDrawer && !window.matchMedia(WIDE).matches) setOpen(true, { entry: true });
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [setOpen]);
+
+  // Wide again: nothing is over the page.
+  useEffect(() => {
+    if (wide) setOpen(false);
+  }, [wide, setOpen]);
+
+  // Leaving through a link in the open drawer replaces its history entry,
+  // so Back from the next page comes straight back here (static/app.js).
+  useEffect(() => {
+    const side = sideRef.current;
+    if (!side) return;
+    const onClick = (e: globalThis.MouseEvent) => {
+      const d = drawer.current;
+      if (!d.pushed || !(e.target instanceof Element)) return;
+      const a = e.target.closest("a[href]");
+      if (!(a instanceof HTMLAnchorElement) || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || a.target) return;
+      e.preventDefault();
+      d.pushed = false;
+      openRef.current = false;
+      setOpenState(false);
+      const path = interceptedPath({
+        button: 0,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        defaultPrevented: false,
+        target: "",
+        hasDownload: a.hasAttribute("download"),
+        href: a.href,
+        origin: window.location.origin,
+        current: window.location.pathname + window.location.search,
+      });
+      if (path) navigate(path, { replace: true });
+      else window.location.replace(a.href);
+    };
+    side.addEventListener("click", onClick);
+    return () => side.removeEventListener("click", onClick);
+  }, [sideRef]);
+
+  const toggle = () => {
+    if (window.matchMedia(WIDE).matches) {
+      const next = !rail;
+      writeRail(local(), next);
+      setRail(next);
+    } else setOpen(!open);
+  };
+
+  const stacks = () => {
+    if (window.matchMedia(WIDE).matches) {
+      if (rail) {
+        writeRail(local(), false);
+        setRail(false);
+      }
+    } else setOpen(true);
+    window.setTimeout(() => filterRef.current?.focus(), 0);
+  };
+
+  // ---- the keyboard map ----
+  const keyState = useRef<KeyState>({ gAt: 0 });
+  const current = loc.route.name === "container" ? loc.route.ctr : null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "Escape" && document.documentElement.classList.contains("side-open")) {
+        setOpen(false);
+        return;
+      }
+      const a = document.activeElement;
+      const typing =
+        a instanceof HTMLElement && isTyping(a.tagName, a instanceof HTMLInputElement ? a.type : "", a.isContentEditable);
+      const blocked = !!document.querySelector("dialog[open]") || document.documentElement.classList.contains("side-open");
+      const r = keyAction(e, keyState.current, Date.now(), typing, blocked);
+      keyState.current = r.state;
+      const act = r.action;
+      if (!act) return;
+      switch (act.kind) {
+        case "go":
+          e.preventDefault();
+          navigate(GO_HREF[act.page]());
+          return;
+        case "help":
+          e.preventDefault();
+          setKeys(true);
+          return;
+        case "slash": {
+          const f = pageFilter();
+          if (f) {
+            e.preventDefault();
+            f.focus();
+            f.select();
+          }
+          return;
+        }
+        case "row":
+          e.preventDefault();
+          moveKeyRow(act.dir);
+          return;
+        case "logs": {
+          const u = logsTarget(current);
+          if (u) {
+            e.preventDefault();
+            window.location.href = u;
+          }
+        }
+      }
+    };
+    const onFocus = (e: FocusEvent) => {
+      for (const r of document.querySelectorAll(".kfocus")) if (e.target instanceof Node && !r.contains(e.target)) r.classList.remove("kfocus");
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
+  }, [current, setOpen]);
+
+  // ---- banners ----
+  const dockerError = b?.features.docker ? (ctrs.data?.docker_error ?? b.docker_error) : null;
+  const anyCtr = !!ctrs.data?.groups.some((g) => g.containers.length > 0);
+  const overPage = open && !wide;
+  const r = loc.route.name;
+
   return (
     <>
       <a className="skip" href="#main">
         Skip to content
       </a>
       <div className="app">
-        <aside className="side" aria-label="Sidebar">
-          <div className="side-head">
-            <Brand />
-          </div>
-          <nav className="nav" aria-label="Pages">
-            <a className="nav-item" href={appHref("/")} aria-current={loc.route.name === "home" ? "page" : undefined}>
-              <HouseIcon aria-hidden="true" />
-              <span>Home</span>
-            </a>
-          </nav>
-          <div className="nav-note" id="nav-soon-note">
-            Not in the new client yet; use <a href="/">the current interface</a>:
-          </div>
-          <ul className="nav" aria-describedby="nav-soon-note">
-            {FUTURE.map((n) => (
-              <li key={n.label} className="nav-item soon">
-                {n.icon}
-                <span>{n.label}</span>
-              </li>
-            ))}
-          </ul>
-        </aside>
-        <div className="col">
+        {full ? (
+          <Sidebar
+            route={loc.route}
+            site={b?.title ?? null}
+            open={open}
+            phone={phone}
+            wide={wide}
+            rail={rail}
+            onToggle={toggle}
+            onClose={() => setOpen(false)}
+            onStacks={stacks}
+            onKeys={() => setKeys(true)}
+            sideRef={sideRef}
+            filterRef={filterRef}
+          />
+        ) : (
+          <aside id="side" className="side" aria-label="Sidebar" ref={sideRef} />
+        )}
+        <div className="scrim" onClick={() => setOpen(false)} aria-hidden="true" />
+        <div className="col" inert={overPage}>
           <header className="top">
             <span className="top-brand">
-              <Brand />
+              <Brand site={null} />
             </span>
             <div className="top-title">{title}</div>
-            <ThemeButton announce={announce} />
-            <Account announce={announce} />
+            <Vitals />
+            <ThemeButton />
+            <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
+              <RefreshCwIcon aria-hidden="true" />
+            </button>
+            <Account />
           </header>
           <main id="main" tabIndex={-1}>
+            {newBuild && (
+              <Banner
+                kind="info"
+                testId="new-build"
+                action={
+                  <Button className="sm" onClick={() => window.location.reload()}>
+                    Reload
+                  </Button>
+                }
+              >
+                <strong>A new version is available</strong> — reload to use it.
+              </Banner>
+            )}
+            {session.session?.user && b?.config_error && (
+              <Banner kind="bad" testId="config-banner">
+                <strong>Config error. Still using the last good config.</strong> <code className="wrap">{b.config_error}</code>
+              </Banner>
+            )}
+            {dockerError && (
+              <Banner kind="bad" testId="docker-banner">
+                <strong>Hobnail cannot reach Docker.</strong> Is the Docker socket mounted and readable?
+                {anyCtr && " Containers show their last known state."}
+                <details className="dk-raw">
+                  <summary>Details</summary>
+                  <code className="wrap">{dockerError}</code>
+                </details>
+              </Banner>
+            )}
             {children}
           </main>
         </div>
       </div>
-      <output className="sr" aria-live="polite">
-        {said}
-      </output>
+      <nav className="bbar" aria-label="Quick navigation" inert={overPage}>
+        <a className="bb-i" href={appHref("/")} aria-current={r === "home" ? "page" : undefined}>
+          <HouseIcon aria-hidden="true" />
+          <span>Home</span>
+        </a>
+        <a className="bb-i" href={appHref("/containers")} aria-current={r === "containers" || r === "container" ? "page" : undefined}>
+          <BoxIcon aria-hidden="true" />
+          <span>Containers</span>
+        </a>
+        <a className="bb-i" href="/logs">
+          <ScrollTextIcon aria-hidden="true" />
+          <span>
+            Logs<span className="sr"> (current interface)</span>
+          </span>
+        </a>
+        <a className="bb-i" href="/alerts">
+          <BellIcon aria-hidden="true" />
+          <span>
+            Alerts<span className="sr"> (current interface)</span>
+          </span>
+          {(b?.alerts_firing ?? 0) > 0 && <b className="bb-n">{b?.alerts_firing}</b>}
+        </a>
+        <button
+          type="button"
+          className="bb-i"
+          data-testid="drawer-open"
+          aria-controls="side"
+          aria-expanded={open}
+          onClick={(e) => setOpen(true, { from: e.currentTarget })}
+        >
+          <EllipsisIcon aria-hidden="true" />
+          <span>More</span>
+        </button>
+      </nav>
+      <Shortcuts open={keys} onClose={() => setKeys(false)} />
+      <StalePill />
+      <Toaster />
     </>
   );
 }

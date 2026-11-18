@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { appHref, interceptedPath, matchRoute, safeNext, stripBase, type LinkClick } from "./paths.ts";
+import {
+  appHref,
+  containerHref,
+  interceptedPath,
+  matchRoute,
+  nextSearch,
+  routeParams,
+  safeNext,
+  stripBase,
+  type LinkClick,
+} from "./paths.ts";
 
 test("basename: only /app and below belong to the client", () => {
   assert.equal(stripBase("/app"), "/");
@@ -22,6 +32,37 @@ test("route matching", () => {
   assert.deepEqual(matchRoute("/app/login/"), { name: "login" });
   assert.deepEqual(matchRoute("/app/nope"), { name: "not_found", path: "/app/nope" });
   assert.deepEqual(matchRoute("/applogin"), { name: "not_found", path: "/applogin" });
+});
+
+test("containers and one container", () => {
+  assert.deepEqual(matchRoute("/app/containers"), { name: "containers" });
+  assert.deepEqual(matchRoute("/app/containers/"), { name: "containers" });
+  assert.deepEqual(matchRoute("/app/containers/web-1"), { name: "container", ctr: "web-1" });
+  assert.deepEqual(matchRoute("/app/containers/web-1/"), { name: "container", ctr: "web-1" });
+  assert.deepEqual(matchRoute("/app/containers/my%20app"), { name: "container", ctr: "my app" });
+  assert.deepEqual(routeParams({ name: "container", ctr: "web" }), { name: "web" });
+  assert.deepEqual(routeParams({ name: "containers" }), {});
+  for (const bad of [
+    "/app/containers/web/logs",
+    "/app/containers/a%2Fb",
+    "/app/containers/%zz",
+    "/app/containers/%00x",
+    "/app/containersx",
+  ]) {
+    assert.equal(matchRoute(bad).name, "not_found", bad);
+  }
+  assert.equal(containerHref("my app"), "/app/containers/my%20app");
+  assert.deepEqual(matchRoute(containerHref("a b#c?")), { name: "container", ctr: "a b#c?" });
+});
+
+test("search: a record patches (null and empty remove), URLSearchParams replaces", () => {
+  assert.equal(nextSearch("?q=web&sort=cpu", { q: "db" }), "?q=db&sort=cpu");
+  assert.equal(nextSearch("?q=web&sort=cpu", { q: null }), "?sort=cpu");
+  assert.equal(nextSearch("?q=web", { q: "" }), "");
+  assert.equal(nextSearch("", { edit: "override" }), "?edit=override");
+  assert.equal(nextSearch("?q=web&sort=cpu", new URLSearchParams("range=1h")), "?range=1h");
+  assert.equal(nextSearch("?a=1", new URLSearchParams()), "");
+  assert.equal(nextSearch("?x=1", { q: "a b&c" }), "?x=1&q=a+b%26c");
 });
 
 test("next: same-origin /app paths pass unchanged", () => {

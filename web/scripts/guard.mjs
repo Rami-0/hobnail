@@ -4,11 +4,14 @@
 //   outerHTML / insertAdjacentHTML), eval(, new Function(, document.write;
 // - a UI primitive library imported outside src/ui/ (the wrapper folder;
 //   only src/main.tsx may import @ui-sdk/core/web.css);
-// - recharts imported outside src/charts/.
+// - recharts imported outside src/charts/;
+// - src/charts/ reached other than by a lazy `import("…/charts/…")` from
+//   src/routes/container/ (the charts chunk is never on the first route;
+//   `import type` is fine, it is erased).
 // Comments are not exempt: rewording a comment is cheaper than an
 // allow-list that hides a real use.
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
 const src = join(root, "src");
@@ -42,6 +45,11 @@ const UI_LIBS = [
 ];
 
 const IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g;
+// Static imports and re-exports (not `import type` / `export type`), and dynamic ones.
+const STATIC = /^\s*(?:import|export)\s+(?!type\b)(?:[^;]*?\bfrom\s*)?["']([^"']+)["']/gm;
+const DYNAMIC = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+const chartsDir = join(src, "charts");
+const inCharts = (file, spec) => spec.startsWith(".") && (resolve(dirname(file), spec) + sep).startsWith(chartsDir + sep);
 
 function* files(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -73,6 +81,18 @@ for (const file of files(src)) {
     }
     if ((spec === "recharts" || spec.startsWith("recharts/")) && !rel.startsWith("src/charts/")) {
       problems.push(`${rel}:${line}: import "recharts" only from src/charts/`);
+    }
+  }
+  if (!rel.startsWith("src/charts/")) {
+    for (const m of text.matchAll(STATIC)) {
+      if (!inCharts(file, m[1])) continue;
+      const line = text.slice(0, m.index).split("\n").length;
+      problems.push(`${rel}:${line}: "${m[1]}" is the charts chunk: load it with a lazy import() from src/routes/container/`);
+    }
+    for (const m of text.matchAll(DYNAMIC)) {
+      if (!inCharts(file, m[1]) || rel.startsWith("src/routes/container/")) continue;
+      const line = text.slice(0, m.index).split("\n").length;
+      problems.push(`${rel}:${line}: the charts chunk is loaded only from src/routes/container/`);
     }
   }
 }

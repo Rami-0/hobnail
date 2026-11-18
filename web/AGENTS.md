@@ -14,15 +14,16 @@ the JSON API. Same origin, no Node in production.
 | Path | What |
 |---|---|
 | `index.html` | the document; no inline script or style |
-| `src/main.tsx` | entry: styles, stored theme, session, React root |
-| `src/app/` | shell, router (`paths.ts` pure, `router.ts` History API), theme |
-| `src/routes/` | one component per page |
+| `src/main.tsx` | entry: styles, stored theme and rail, session, React root |
+| `src/app/` | shell (`Shell.tsx`, `Sidebar.tsx`, vitals, account, shortcuts sheet), router (`paths.ts` pure, `router.ts` History API: `useRoute()` with `path`, `params`, `search`, `setSearch`), theme, keyboard map (`keys.ts`), remembered shell state (`prefs.ts`, the old UI's storage keys) |
+| `src/live/` | the live layer: one `EventSource` per tab (`stream.ts`, pure), stores and frame scheduler (`store.ts`), reducers (`reducer.ts`), the app's wiring (`runtime.ts`) and hooks (`hooks.ts`; import from `live/index.ts`) |
+| `src/routes/` | one component per page; `containers/` and `container/` are lazy chunks (default exports) |
 | `src/api/client.ts` | the only fetch wrapper: typed `ApiResult`, CSRF, retry |
 | `src/api/session.ts` | `GET /api/v1/session` store, `useSession()`, the `api` client |
 | `src/api/gen/` | TypeScript types generated from Rust by ts-rs; never edit by hand (`RH_UPDATE_TYPES=1 scripts/cargo.sh test` rewrites them) |
 | `src/ui/` | the wrapper folder for interactive primitives (see below) |
-| `src/charts/` | the only place that may import `recharts` (when charts arrive) |
-| `src/styles/` | `global.css` (imported once by main.tsx), `tokens.css` (tokens and themes) |
+| `src/charts/` | the only place that may import `recharts`; reached only by a lazy `import()` from `src/routes/container/` |
+| `src/styles/` | `global.css` (imported once by main.tsx) imports `tokens.css` (tokens and themes), `ui.css` (the primitives of `src/ui/`) and `shell.css` (sidebar, top bar, bottom bar) |
 | `scripts/guard.mjs` | source guard run by `npm run check` |
 
 ## Rules
@@ -57,6 +58,33 @@ the JSON API. Same origin, no Node in production.
   `package-lock.json` is committed. No new dependency without the lead, and
   no exception to the age rule: if it blocks an install, stop and ask.
   Check the locked set with `scripts/web.sh node scripts/ages.mjs`.
+
+## Live data (src/live)
+
+- One stream per tab: `GET /api/v1/stream?topics=…`, the topics being what
+  the mounted hooks asked for (`useContainers` → `containers,stats`,
+  `useSystem`/vitals → `system`). Closed on `pagehide` and after 10 s
+  hidden, opened again on return (everything refetched after a minute
+  away); a stream the browser closed is retried after 5 s, doubling to a
+  minute. `useLiveStatus()`: `connecting` | `live` | `reconnecting` |
+  `stopped` (paused, or no topic, or no EventSource).
+- Stream messages are applied in one animation frame (at most one render
+  per frame) and held while the user touches or scrolls.
+- `config` and `resync` refetch bootstrap, containers and strips and call
+  `onConfigChange` listeners: a page refetches its own data; nothing
+  reloads. `hello` with another sha/content than the page's build shows
+  the "new version" banner.
+- Hooks: `useBootstrap`, `useContainers` (`{data, error}`), `useSystem`,
+  `useVitalsRings`, `useStrips`, `useLiveStatus`, `useLiveInfo`,
+  `useNewBuild`, `useNow` (server-corrected seconds, every 30 s),
+  `onConfigChange(cb)`.
+
+## Shell state kept with the old UI
+
+Same keys and formats as `static/app.js`, so both UIs agree: `rh-theme`
+(raw), `rh-side` (`rail`/`open`, raw), `rh-tree` (JSON `{stack: true}` for
+folded stacks), `rh-tree-q` (sessionStorage, the sidebar filter), and
+`rh-set-tab` is read for the Settings link.
 
 ## Commands (from the repository root; Node runs in a container)
 
@@ -93,10 +121,22 @@ CSP; check CSP against the built client served by Rust.
 | `form[data-testid="login"]` with `input[name="password"]` and `button[type="submit"]` | the login page |
 | `[data-testid="login-error"]` | a failed sign-in (wrong password, rate limit countdown, …) |
 | `[data-testid="user"]` (contains the user name, `admin`) | signed in |
-| `button[data-testid="signout"]` | signed in; posts `/api/logout`, refreshes the session, stays on the page |
+| `button[data-testid="user"]` | signed in: the account menu button (contains the user name); opens the menu |
+| `button[data-testid="signout"]` | signed in, inside the account menu (open it first); posts `/api/logout`, refreshes the session, stays on the page |
+| `nav[data-testid="sidebar"]` | the sidebar's page list |
+| `[data-testid="tree-stack"][data-stack="<name>"]`, inside it `[data-testid="tree-count"]` | a stack of the sidebar tree and its running/total count |
+| `[data-testid="live-status"][data-state="live\|reconnecting\|stopped\|connecting"]` | the live indicator (sidebar foot) |
+| `[data-testid="live-stopped"]` | the "Live updates stopped at HH:MM" pill (after 4 s reconnecting) |
+| `[data-testid="vitals"]` | the top bar's vitals chips (hidden under 700 px, absent with `[system]` off) |
+| `button[data-testid="drawer-open"]` | phone bottom bar "More": opens the drawer |
+| `[data-testid="shortcuts"]` | the shortcuts sheet (`?`) |
+| `[data-testid="new-build"]` | the "new version" banner |
+| `[data-testid="docker-banner"]`, `[data-testid="config-banner"]` | Docker unreachable; config error (signed in only) |
 
 Also present: `[data-testid="theme"]` (theme button), `[data-testid="no-password"]`
-(login page, no password set).
+(login page, no password set). The `[data-testid="user"]` element became the
+account menu's button in Phase 1, so the sign-out check opens it before
+clicking `signout`.
 
 ## UI SDK reading instructions (decision §1, rules 1–8)
 

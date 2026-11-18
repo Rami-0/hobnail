@@ -472,6 +472,24 @@ fn state_text(c: &Container) -> String {
     }
 }
 
+/// The configured link of a container (override `url`, else a web-URL
+/// `hobnail.url` label), with `{id}` and `{name}` filled and `{host}` kept
+/// for the viewer to fill in; `None` when nothing is configured (the link is
+/// then chosen from the published ports). The JSON API's `link`.
+pub fn link_template(cfg: &Config, c: &Container) -> Option<String> {
+    let id12: String = c.id.chars().take(12).collect();
+    cfg.containers
+        .get(&c.name)
+        .and_then(|o| o.url.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            label(c, LABEL_URL)
+                .filter(|u| is_web_url(u))
+                .map(str::to_string)
+        })
+        .map(|u| u.replace("{id}", &id12).replace("{name}", &c.name))
+}
+
 /// Fill a link template: `{host}`, `{id}` (12 chars), `{name}`.
 fn fill(tpl: &str, host: &str, id12: &str, name: &str) -> String {
     tpl.replace("{host}", &url_host_part(host))

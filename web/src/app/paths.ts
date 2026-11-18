@@ -4,7 +4,18 @@
 /** Every client route lives under this path; the server sends index.html for it. */
 export const BASE = "/app";
 
-export type Route = { name: "home" } | { name: "login" } | { name: "not_found"; path: string };
+export type Route =
+  | { name: "home" }
+  | { name: "login" }
+  | { name: "containers" }
+  /** One container's page; `ctr` is the decoded container name. */
+  | { name: "container"; ctr: string }
+  | { name: "not_found"; path: string };
+
+/** The route's parameters by name (`{ name: "web-1" }` on /app/containers/web-1). */
+export function routeParams(r: Route): Record<string, string> {
+  return r.name === "container" ? { name: r.ctr } : {};
+}
 
 /** `/app/login` -> `/login`, `/app` and `/app/` -> `/`; null outside the base. */
 export function stripBase(pathname: string): string | null {
@@ -29,9 +40,47 @@ export function matchRoute(pathname: string): Route {
       return { name: "home" };
     case "/login":
       return { name: "login" };
-    default:
-      return { name: "not_found", path: pathname };
+    case "/containers":
+      return { name: "containers" };
   }
+  const m = /^\/containers\/([^/]+)$/.exec(clean);
+  if (m?.[1]) {
+    let ctr: string;
+    try {
+      ctr = decodeURIComponent(m[1]);
+    } catch {
+      return { name: "not_found", path: pathname };
+    }
+    // eslint-disable-next-line no-control-regex
+    if (ctr !== "" && !ctr.includes("/") && !/[\u0000-\u001f\u007f]/.test(ctr)) return { name: "container", ctr };
+  }
+  return { name: "not_found", path: pathname };
+}
+
+/** The client path of a container's page (`/app/containers/<name>`). */
+export function containerHref(name: string): string {
+  return `${BASE}/containers/${encodeURIComponent(name)}`;
+}
+
+/** Search parameters as a patch: a value sets the key, null or "" removes it, other keys stay. */
+export type SearchPatch = Record<string, string | null>;
+
+/**
+ * The query string (`?a=1`, or "" for none) after applying `next` to
+ * `current`: a URLSearchParams replaces the whole query, a record patches it.
+ */
+export function nextSearch(current: string, next: URLSearchParams | SearchPatch): string {
+  let p: URLSearchParams;
+  if (next instanceof URLSearchParams) p = new URLSearchParams(next);
+  else {
+    p = new URLSearchParams(current);
+    for (const [k, v] of Object.entries(next)) {
+      if (v === null || v === "") p.delete(k);
+      else p.set(k, v);
+    }
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
 }
 
 /** Longest `next` the server accepts (auth.rs MAX_NEXT). */

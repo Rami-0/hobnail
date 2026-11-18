@@ -83,7 +83,7 @@ now_us() { local t=${EPOCHREALTIME/./}; echo $((10#$t)); }
 # ---- the load client and the report (python3 in TOOLS_IMAGE) ----
 cat > "$TMP/bin/client.py" <<'PY'
 # One process, N clients: each has a stream thread and a poller thread.
-import http.client, json, os, re, socket, sys, threading, time
+import gzip, http.client, json, os, re, socket, sys, threading, time
 host, port, profile, n, dur, outdir = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), float(sys.argv[5]), sys.argv[6]
 HDR = {"Accept-Encoding": "gzip", "User-Agent": "hobnail-bench"}
 
@@ -92,6 +92,8 @@ def get(path, timeout=10):
     try:
         c.request("GET", path, headers=HDR)
         r = c.getresponse(); body = r.read()
+        # Embedded assets come gzip-encoded when asked; read them as the page.
+        if r.getheader("Content-Encoding") == "gzip": body = gzip.decompress(body)
         return r.status, body
     finally:
         c.close()

@@ -1,6 +1,7 @@
-// Entry module. Order matters: styles, then the stored theme on <html>
-// (before the first render, see app/theme.ts for the first-paint limit),
-// then the session request, then React.
+// Entry module. Order matters: styles, then the stored theme and sidebar
+// rail on <html> (before the first render, see app/theme.ts for the
+// first-paint limit), then the session request, then React. The live
+// stream starts with the first component that asks for live data.
 //
 // When UI SDK is installed, its stylesheet is imported here, once:
 //   import "@ui-sdk/core/web.css";
@@ -12,9 +13,11 @@ import { createRoot } from "react-dom/client";
 import { refreshSession } from "./api/session.ts";
 import { App } from "./app/App.tsx";
 import { interceptLinks } from "./app/router.ts";
+import { applyStoredRail } from "./app/Shell.tsx";
 import { applyStoredTheme } from "./app/theme.ts";
 
 applyStoredTheme();
+applyStoredRail();
 void refreshSession();
 interceptLinks();
 

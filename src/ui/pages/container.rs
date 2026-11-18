@@ -88,7 +88,7 @@ const EVENT_KINDS: &[(&str, &str, &str)] = &[
 /// Health-check outputs shown (Docker keeps five).
 const HEALTH_LOGS: usize = 5;
 /// Health-check output is cut to this many characters.
-const HEALTH_OUTPUT_MAX: usize = 600;
+pub(crate) const HEALTH_OUTPUT_MAX: usize = 600;
 
 pub fn page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
     let snap = ctx.state.snapshot();
@@ -840,7 +840,7 @@ fn health_panel(ctx: &Ctx, i: &Inspect) -> Markup {
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
+pub(crate) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
@@ -1504,7 +1504,7 @@ fn labels_panel(c: &Container) -> Markup {
 }
 
 /// Labels Docker Compose and image builds add on their own.
-fn is_bookkeeping_label(k: &str) -> bool {
+pub(crate) fn is_bookkeeping_label(k: &str) -> bool {
     [
         "com.docker.compose.",
         "org.opencontainers.image.",

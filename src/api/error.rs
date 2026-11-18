@@ -19,7 +19,8 @@ pub struct ApiError {
     #[cfg_attr(test, ts(skip))]
     pub status: StatusCode,
     /// Stable, machine-readable: `not_found`, `method_not_allowed`,
-    /// `sign_in_required`, `logs_sign_in_required`, `bad_request`.
+    /// `sign_in_required`, `logs_sign_in_required`, `bad_request`,
+    /// `internal` (500: a handler task failed).
     pub code: &'static str,
     /// Plain words for a person.
     pub message: String,
@@ -75,7 +76,6 @@ impl ApiError {
     }
 
     /// A malformed request; `field` names the offending field, if any.
-    #[cfg_attr(not(test), allow(dead_code))] // first used by phase 1 writes
     pub fn bad_request(message: impl Into<String>, field: Option<&str>) -> Self {
         Self {
             field: field.map(str::to_string),

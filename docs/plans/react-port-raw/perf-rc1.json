@@ -1,0 +1,876 @@
+{
+  "base": "http://127.0.0.1:3441",
+  "name": "svc002",
+  "at": "2026-11-18T01:41:11.918Z",
+  "results": [
+    {
+      "target": "app",
+      "profile": "phone",
+      "url": "http://127.0.0.1:3441/app/containers",
+      "ok": true,
+      "notes": [
+        "no visible sortable header th[data-sort=\"name\"]"
+      ],
+      "wall_ready_ms": 1498,
+      "ready_ms": 1328.7,
+      "rows_at_ready": 10,
+      "rows_end": 51,
+      "end_url": "/app/containers?q=svc1",
+      "fcp_ms": 920,
+      "lcp_ms": 920,
+      "lcp_el": null,
+      "cls": 0.0158,
+      "dom_elements": 3342,
+      "nodes_metric": 9170,
+      "metrics_load": {
+        "TaskDuration": 2225.3,
+        "ScriptDuration": 1081.8,
+        "LayoutDuration": 210.9,
+        "RecalcStyleDuration": 154.6,
+        "JSHeapUsedSize": 6856660
+      },
+      "metrics_end": {
+        "TaskDuration": 3062.3,
+        "JSHeapUsedSize": 6887408
+      },
+      "longtask_observer": {
+        "load": [
+          169,
+          67,
+          50
+        ],
+        "live": [
+          [],
+          [],
+          []
+        ],
+        "interaction": [
+          65
+        ]
+      },
+      "trace": {
+        "tasks": 1546,
+        "load": {
+          "max_ms": 150.7,
+          "over50": 1,
+          "over200": 0,
+          "busy_ms": 1106.5,
+          "top": [
+            150.7,
+            43.1,
+            31.2,
+            21.5,
+            19.8
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 32.2,
+            "busy_ms": 41.4,
+            "tasks": 17
+          },
+          {
+            "max_ms": 26.5,
+            "busy_ms": 34.3,
+            "tasks": 15
+          },
+          {
+            "max_ms": 23.4,
+            "busy_ms": 39.8,
+            "tasks": 15
+          }
+        ],
+        "interaction": {
+          "max_ms": 65.3,
+          "over50": 2
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 96,
+      "interactions": [
+        {
+          "name": "keydown",
+          "dur": 96,
+          "delay": 0.3,
+          "proc": 2.1
+        },
+        {
+          "name": "click",
+          "dur": 72,
+          "delay": 44.3,
+          "proc": 2.4
+        },
+        {
+          "name": "keydown",
+          "dur": 64,
+          "delay": 0.8,
+          "proc": 4.8
+        },
+        {
+          "name": "keydown",
+          "dur": 56,
+          "delay": 1.1,
+          "proc": 1.3
+        },
+        {
+          "name": "keydown",
+          "dur": 48,
+          "delay": 2.8,
+          "proc": 1.9
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "app",
+      "profile": "desktop",
+      "url": "http://127.0.0.1:3441/app/containers",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 575,
+      "ready_ms": 439.7,
+      "rows_at_ready": 10,
+      "rows_end": 51,
+      "end_url": "/app/containers?q=svc1",
+      "fcp_ms": 340,
+      "lcp_ms": 340,
+      "lcp_el": null,
+      "cls": 0.1337,
+      "dom_elements": 3513,
+      "nodes_metric": 9587,
+      "metrics_load": {
+        "TaskDuration": 919.3,
+        "ScriptDuration": 327.1,
+        "LayoutDuration": 128.9,
+        "RecalcStyleDuration": 82,
+        "JSHeapUsedSize": 6316660
+      },
+      "metrics_end": {
+        "TaskDuration": 2323.7,
+        "JSHeapUsedSize": 8642820
+      },
+      "longtask_observer": {
+        "load": [
+          62
+        ],
+        "live": [
+          [],
+          [],
+          []
+        ],
+        "interaction": [
+          82,
+          54,
+          67
+        ]
+      },
+      "trace": {
+        "tasks": 1496,
+        "load": {
+          "max_ms": 57.8,
+          "over50": 1,
+          "over200": 0,
+          "busy_ms": 545,
+          "top": [
+            57.8,
+            43.2,
+            41.1,
+            37.2,
+            34.4
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 30.9,
+            "busy_ms": 69.8,
+            "tasks": 31
+          },
+          {
+            "max_ms": 29.7,
+            "busy_ms": 55.2,
+            "tasks": 31
+          },
+          {
+            "max_ms": 40.5,
+            "busy_ms": 64.3,
+            "tasks": 28
+          }
+        ],
+        "interaction": {
+          "max_ms": 82.7,
+          "over50": 4
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 152,
+      "interactions": [
+        {
+          "name": "keydown",
+          "dur": 152,
+          "delay": 1,
+          "proc": 1.6
+        },
+        {
+          "name": "pointerdown",
+          "dur": 104,
+          "delay": 3.1,
+          "proc": 0.2
+        },
+        {
+          "name": "keydown",
+          "dur": 96,
+          "delay": 1.6,
+          "proc": 1.4
+        },
+        {
+          "name": "pointerup",
+          "dur": 96,
+          "delay": 7.6,
+          "proc": 0.2
+        },
+        {
+          "name": "keydown",
+          "dur": 64,
+          "delay": 0.8,
+          "proc": 1.9
+        },
+        {
+          "name": "keydown",
+          "dur": 48,
+          "delay": 0.9,
+          "proc": 0.7
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "chart",
+      "profile": "phone",
+      "url": "http://127.0.0.1:3441/app/containers/svc002",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 2376,
+      "ready_ms": 2355.9,
+      "rows_at_ready": 2,
+      "rows_end": 2,
+      "end_url": "/app/containers/svc002",
+      "fcp_ms": 1036,
+      "lcp_ms": 1332,
+      "lcp_el": "p.mono",
+      "cls": 0.0002,
+      "dom_elements": 1831,
+      "nodes_metric": 2579,
+      "metrics_load": {
+        "TaskDuration": 2428.8,
+        "ScriptDuration": 1439.6,
+        "LayoutDuration": 229.1,
+        "RecalcStyleDuration": 132.9,
+        "JSHeapUsedSize": 8115980
+      },
+      "metrics_end": {
+        "TaskDuration": 3849.2,
+        "JSHeapUsedSize": 10247924
+      },
+      "longtask_observer": {
+        "load": [
+          167,
+          64,
+          66,
+          73,
+          99,
+          70,
+          112,
+          369,
+          187
+        ],
+        "live": [
+          [],
+          [],
+          []
+        ],
+        "interaction": [
+          67,
+          74,
+          52
+        ]
+      },
+      "trace": {
+        "tasks": 2494,
+        "load": {
+          "max_ms": 369.3,
+          "over50": 3,
+          "over200": 1,
+          "busy_ms": 1137.6,
+          "top": [
+            369.3,
+            188,
+            112.4,
+            24.2,
+            15.3
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 10.7,
+            "busy_ms": 57.3,
+            "tasks": 73
+          },
+          {
+            "max_ms": 10.3,
+            "busy_ms": 72,
+            "tasks": 73
+          },
+          {
+            "max_ms": 9.2,
+            "busy_ms": 58.4,
+            "tasks": 73
+          }
+        ],
+        "interaction": {
+          "max_ms": 74.8,
+          "over50": 3
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 152,
+      "interactions": [
+        {
+          "name": "pointerup",
+          "dur": 152,
+          "delay": 14.9,
+          "proc": 1.9
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "chart",
+      "profile": "desktop",
+      "url": "http://127.0.0.1:3441/app/containers/svc002",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 909,
+      "ready_ms": 843.3,
+      "rows_at_ready": 2,
+      "rows_end": 2,
+      "end_url": "/app/containers/svc002",
+      "fcp_ms": 272,
+      "lcp_ms": 400,
+      "lcp_el": "p.mono",
+      "cls": 0.0027,
+      "dom_elements": 1831,
+      "nodes_metric": 2574,
+      "metrics_load": {
+        "TaskDuration": 702.4,
+        "ScriptDuration": 400.7,
+        "LayoutDuration": 65.6,
+        "RecalcStyleDuration": 44.6,
+        "JSHeapUsedSize": 8891296
+      },
+      "metrics_end": {
+        "TaskDuration": 1290.7,
+        "JSHeapUsedSize": 9673656
+      },
+      "longtask_observer": {
+        "load": [
+          123
+        ],
+        "live": [
+          [],
+          [],
+          []
+        ],
+        "interaction": []
+      },
+      "trace": {
+        "tasks": 1194,
+        "load": {
+          "max_ms": 123.2,
+          "over50": 1,
+          "over200": 0,
+          "busy_ms": 363.7,
+          "top": [
+            123.2,
+            45.7,
+            42.6,
+            23.9,
+            15.8
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 9.8,
+            "busy_ms": 14.7,
+            "tasks": 16
+          },
+          {
+            "max_ms": 12.3,
+            "busy_ms": 38.2,
+            "tasks": 28
+          },
+          {
+            "max_ms": 4.5,
+            "busy_ms": 13.1,
+            "tasks": 17
+          }
+        ],
+        "interaction": {
+          "max_ms": 25.3,
+          "over50": 0
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 16,
+      "interactions": [
+        {
+          "name": "pointerdown",
+          "dur": 16,
+          "delay": 11.8,
+          "proc": 0.6
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "old",
+      "profile": "phone",
+      "url": "http://127.0.0.1:3441/containers",
+      "ok": true,
+      "notes": [
+        "no visible sortable header th[data-sort=\"name\"] a"
+      ],
+      "wall_ready_ms": 2409,
+      "ready_ms": 240.5,
+      "rows_at_ready": 7,
+      "rows_end": 150,
+      "end_url": "/containers?q=svc1",
+      "fcp_ms": 2440,
+      "lcp_ms": 2440,
+      "lcp_el": null,
+      "cls": 0,
+      "dom_elements": 8195,
+      "nodes_metric": 22914,
+      "metrics_load": {
+        "TaskDuration": 4311.7,
+        "ScriptDuration": 356.9,
+        "LayoutDuration": 762.8,
+        "RecalcStyleDuration": 1328.8,
+        "JSHeapUsedSize": 1701084
+      },
+      "metrics_end": {
+        "TaskDuration": 13020.9,
+        "JSHeapUsedSize": 1953304
+      },
+      "longtask_observer": {
+        "load": [
+          1837
+        ],
+        "live": [
+          [],
+          [
+            152
+          ],
+          []
+        ],
+        "interaction": [
+          92,
+          921,
+          663,
+          202,
+          624,
+          246,
+          382,
+          119,
+          202
+        ]
+      },
+      "trace": {
+        "tasks": 1682,
+        "load": {
+          "max_ms": 1838.4,
+          "over50": 6,
+          "over200": 5,
+          "busy_ms": 4338.4,
+          "top": [
+            1838.4,
+            758.5,
+            316,
+            254,
+            209.2
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 34.5,
+            "busy_ms": 845.1,
+            "tasks": 80
+          },
+          {
+            "max_ms": 159.4,
+            "busy_ms": 923.9,
+            "tasks": 86
+          },
+          {
+            "max_ms": 23.7,
+            "busy_ms": 878.5,
+            "tasks": 79
+          }
+        ],
+        "interaction": {
+          "max_ms": 922.4,
+          "over50": 10
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 936,
+      "interactions": [
+        {
+          "name": "keydown",
+          "dur": 936,
+          "delay": 52.6,
+          "proc": 0.8
+        },
+        {
+          "name": "keydown",
+          "dur": 928,
+          "delay": 3.1,
+          "proc": 4.1
+        },
+        {
+          "name": "keydown",
+          "dur": 896,
+          "delay": 16,
+          "proc": 0.5
+        },
+        {
+          "name": "keydown",
+          "dur": 616,
+          "delay": 97.2,
+          "proc": 1
+        },
+        {
+          "name": "click",
+          "dur": 232,
+          "delay": 203,
+          "proc": 4.2
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "old",
+      "profile": "desktop",
+      "url": "http://127.0.0.1:3441/containers",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 826,
+      "ready_ms": 102.3,
+      "rows_at_ready": 11,
+      "rows_end": 150,
+      "end_url": "/containers?q=svc1",
+      "fcp_ms": 904,
+      "lcp_ms": 904,
+      "lcp_el": null,
+      "cls": 0,
+      "dom_elements": 8195,
+      "nodes_metric": 27823,
+      "metrics_load": {
+        "TaskDuration": 2115.6,
+        "ScriptDuration": 106.9,
+        "LayoutDuration": 260.3,
+        "RecalcStyleDuration": 259.1,
+        "JSHeapUsedSize": 1462428
+      },
+      "metrics_end": {
+        "TaskDuration": 9312.2,
+        "JSHeapUsedSize": 1413584
+      },
+      "longtask_observer": {
+        "load": [
+          535
+        ],
+        "live": [
+          [],
+          [],
+          []
+        ],
+        "interaction": [
+          179,
+          163,
+          139,
+          67,
+          93,
+          73,
+          83
+        ]
+      },
+      "trace": {
+        "tasks": 2909,
+        "load": {
+          "max_ms": 535,
+          "over50": 2,
+          "over200": 1,
+          "busy_ms": 2125,
+          "top": [
+            535,
+            152.4,
+            48.7,
+            34,
+            33.7
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 24.3,
+            "busy_ms": 659.8,
+            "tasks": 198
+          },
+          {
+            "max_ms": 49.3,
+            "busy_ms": 695.8,
+            "tasks": 208
+          },
+          {
+            "max_ms": 21.2,
+            "busy_ms": 633.7,
+            "tasks": 197
+          }
+        ],
+        "interaction": {
+          "max_ms": 179.6,
+          "over50": 10
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 312,
+      "interactions": [
+        {
+          "name": "keydown",
+          "dur": 312,
+          "delay": 0.4,
+          "proc": 0.8
+        },
+        {
+          "name": "keydown",
+          "dur": 280,
+          "delay": 3.3,
+          "proc": 0.3
+        },
+        {
+          "name": "keydown",
+          "dur": 264,
+          "delay": 13.1,
+          "proc": 0.2
+        },
+        {
+          "name": "pointerup",
+          "dur": 208,
+          "delay": 19.2,
+          "proc": 0.2
+        },
+        {
+          "name": "keydown",
+          "dur": 160,
+          "delay": 1.6,
+          "proc": 0.2
+        },
+        {
+          "name": "pointerdown",
+          "dur": 152,
+          "delay": 6.2,
+          "proc": 0.1
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "old-ctr",
+      "profile": "phone",
+      "url": "http://127.0.0.1:3441/containers/svc002",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 868,
+      "ready_ms": 400.6,
+      "rows_at_ready": 2,
+      "rows_end": 2,
+      "end_url": "/containers/svc002",
+      "fcp_ms": 896,
+      "lcp_ms": 896,
+      "lcp_el": "p.mono",
+      "cls": 0.0304,
+      "dom_elements": 1858,
+      "nodes_metric": 17387,
+      "metrics_load": {
+        "TaskDuration": 1557.9,
+        "ScriptDuration": 366.5,
+        "LayoutDuration": 162.9,
+        "RecalcStyleDuration": 317.5,
+        "JSHeapUsedSize": 1707152
+      },
+      "metrics_end": {
+        "TaskDuration": 4032.6,
+        "JSHeapUsedSize": 1481564
+      },
+      "longtask_observer": {
+        "load": [
+          218,
+          345,
+          223
+        ],
+        "live": [
+          [],
+          [
+            170
+          ],
+          []
+        ],
+        "interaction": []
+      },
+      "trace": {
+        "tasks": 1427,
+        "load": {
+          "max_ms": 346.6,
+          "over50": 5,
+          "over200": 3,
+          "busy_ms": 1593.8,
+          "top": [
+            346.6,
+            231.7,
+            218.6,
+            106.4,
+            50
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 6.7,
+            "busy_ms": 237.8,
+            "tasks": 80
+          },
+          {
+            "max_ms": 177.4,
+            "busy_ms": 376.8,
+            "tasks": 93
+          },
+          {
+            "max_ms": 7.3,
+            "busy_ms": 241.2,
+            "tasks": 76
+          }
+        ],
+        "interaction": {
+          "max_ms": 38.1,
+          "over50": 0
+        }
+      },
+      "live_updates": 3,
+      "inp_ms": 40,
+      "interactions": [
+        {
+          "name": "pointerup",
+          "dur": 40,
+          "delay": 14.1,
+          "proc": 0.9
+        }
+      ],
+      "violations": []
+    },
+    {
+      "target": "old-ctr",
+      "profile": "desktop",
+      "url": "http://127.0.0.1:3441/containers/svc002",
+      "ok": true,
+      "notes": [],
+      "wall_ready_ms": 291,
+      "ready_ms": 151.1,
+      "rows_at_ready": 2,
+      "rows_end": 2,
+      "end_url": "/containers/svc002",
+      "fcp_ms": 360,
+      "lcp_ms": 360,
+      "lcp_el": "p.mono",
+      "cls": 0.0089,
+      "dom_elements": 1858,
+      "nodes_metric": 6516,
+      "metrics_load": {
+        "TaskDuration": 945.3,
+        "ScriptDuration": 55.9,
+        "LayoutDuration": 50.4,
+        "RecalcStyleDuration": 76.4,
+        "JSHeapUsedSize": 781640
+      },
+      "metrics_end": {
+        "TaskDuration": 5807.2,
+        "JSHeapUsedSize": 1013656
+      },
+      "longtask_observer": {
+        "load": [
+          77,
+          75
+        ],
+        "live": [
+          [
+            59
+          ],
+          [],
+          [],
+          []
+        ],
+        "interaction": []
+      },
+      "trace": {
+        "tasks": 3145,
+        "load": {
+          "max_ms": 77.7,
+          "over50": 3,
+          "over200": 0,
+          "busy_ms": 956.6,
+          "top": [
+            77.7,
+            75,
+            51.2,
+            18.8,
+            15.8
+          ]
+        },
+        "live": [
+          {
+            "max_ms": 61.3,
+            "busy_ms": 646.5,
+            "tasks": 206
+          },
+          {
+            "max_ms": 19.3,
+            "busy_ms": 374,
+            "tasks": 197
+          },
+          {
+            "max_ms": 38.2,
+            "busy_ms": 423.1,
+            "tasks": 210
+          },
+          {
+            "max_ms": 13.3,
+            "busy_ms": 154.1,
+            "tasks": 90
+          }
+        ],
+        "interaction": {
+          "max_ms": 26.5,
+          "over50": 0
+        }
+      },
+      "live_updates": 4,
+      "inp_ms": 32,
+      "interactions": [
+        {
+          "name": "pointerup",
+          "dur": 32,
+          "delay": 4.5,
+          "proc": 0.2
+        }
+      ],
+      "violations": []
+    }
+  ]
+}

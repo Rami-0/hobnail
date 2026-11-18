@@ -1090,7 +1090,8 @@ async fn api_v1_access_table_walked_as_a_visitor() {
         for cookie in [None, Some(forged.as_str())] {
             let h: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
             for m in ["GET", "HEAD"] {
-                let resp = req(addr, m, &path, &h, "").await;
+                // Bounded: the event stream answers and stays open.
+                let resp = req_bounded(addr, m, &path, &h).await;
                 match r.access {
                     Access::Public => assert_ne!(resp.status, 401, "{m} {what}"),
                     Access::Session | Access::LogsGate if m == "HEAD" => {
@@ -1105,4 +1106,723 @@ async fn api_v1_access_table_walked_as_a_visitor() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// /api/v1 phase 1 reads (docs/plans/react-port.md 5, phase 1): bootstrap,
+// containers, one container, strips, the stream. All Public; what a visitor
+// must never get: probe output and checks, `auth.*` events, the config
+// error, and any container the owner hid (override, label, `[docker]
+// exclude`).
+
+/// Like `req`, but gives up reading after a second (the event stream never
+/// ends); what arrived until then is the response.
+async fn req_bounded(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> Resp {
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    let mut r = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nContent-Length: 0\r\n"
+    );
+    for (k, v) in headers {
+        r.push_str(&format!("{k}: {v}\r\n"));
+    }
+    r.push_str("\r\n");
+    s.write_all(r.as_bytes()).await.unwrap();
+    let mut out = Vec::new();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
+    let mut buf = [0u8; 8192];
+    loop {
+        match tokio::time::timeout_at(deadline, s.read(&mut buf)).await {
+            Ok(Ok(0)) | Ok(Err(_)) | Err(_) => break,
+            Ok(Ok(n)) => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    let text = String::from_utf8_lossy(&out).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .unwrap_or(0);
+    Resp {
+        status,
+        head: head.to_string(),
+        body: body.to_string(),
+    }
+}
+
+/// What no visitor response may contain.
+const PROBE_SECRET: &str = "SECRET-PROBE-OUTPUT";
+const CONFIG_SECRET: &str = "unknown field";
+/// Every owner-hidden container's name starts with this.
+const HIDDEN_PREFIX: &str = "secret-";
+
+const PRIVACY_TOML: &str = r#"
+[docker]
+exclude = ["secret-exc*"]
+
+[containers.secret-ovr]
+hide = true
+
+[containers.web]
+url = "http://{host}:9000/{name}"
+
+[[alerts]]
+name = "shop-down"
+type = "container"
+containers = ["web", "db"]
+on = ["unhealthy", "stopped"]
+"#;
+
+/// A fake Docker socket answering `GET /containers/<id>/json` for `web`
+/// with a failing health check whose output is a secret.
+async fn fake_docker_inspect(tag: &str) -> String {
+    use tokio::net::UnixListener;
+    let path = std::env::temp_dir().join(format!("rh-api-{tag}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let l = UnixListener::bind(&path).unwrap();
+    let web_id = crate::ui::testutil::ctr("web", None, "running").id;
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut s, _)) = l.accept().await else {
+                return;
+            };
+            let web_id = web_id.clone();
+            tokio::spawn(async move {
+                let mut req = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => req.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&req).to_string();
+                let path = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                let (status, body) = if path == format!("/containers/{web_id}/json") {
+                    let body = serde_json::json!({
+                        "Id": web_id, "Name": "/web",
+                        "Config": {"Cmd": ["--token=SECRET-CMD"], "Env": ["PASSWORD=hunter2"]},
+                        "State": {
+                            "Status": "running", "Running": true,
+                            "StartedAt": "2026-11-14T21:00:00Z",
+                            "Health": {"Status": "unhealthy", "FailingStreak": 3, "Log": [
+                                {"Start": "2026-11-14T21:01:00Z", "End": "2026-11-14T21:01:01Z",
+                                 "ExitCode": 1, "Output": "SECRET-PROBE-OUTPUT token=abc\nsecond line"},
+                                {"Start": "2026-11-14T21:01:30Z", "End": "2026-11-14T21:01:31Z",
+                                 "ExitCode": 1, "Output": "SECRET-PROBE-OUTPUT again"}
+                            ]}
+                        }
+                    });
+                    ("200 OK", body.to_string())
+                } else {
+                    (
+                        "404 Not Found",
+                        r#"{"message":"No such container"}"#.to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    path.to_string_lossy().into_owned()
+}
+
+/// The privacy fixture: `web` (unhealthy, link override), `db` (exited 1),
+/// `a.b-c_d` (a name that needs encoding care) and three hidden ones, with
+/// history and events for all of them (so a filter that fails shows).
+async fn privacy_state(tag: &str) -> Arc<AppState> {
+    use crate::ui::testutil::ctr;
+    let socket = fake_docker_inspect(tag).await;
+    let mut web = ctr("web", Some("shop"), "running");
+    web.health = Some("unhealthy".into());
+    web.status = "Up 3 hours (unhealthy)".into();
+    web.created = 1_700_000_000;
+    let mut lbl = ctr("secret-lbl", Some("shop"), "running");
+    lbl.labels.insert("hobnail.hide".into(), "true".into());
+    let containers = vec![
+        web,
+        ctr("db", Some("shop"), "exited"),
+        ctr("a.b-c_d", None, "running"),
+        lbl,
+        ctr("secret-ovr", Some("shop"), "running"),
+        ctr("secret-exc", Some("vault"), "running"),
+    ];
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "rh-api-{tag}-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.toml"), PRIVACY_TOML).unwrap();
+    let st = AppState::new(crate::state::Env {
+        listen: vec![],
+        data_dir: dir.clone(),
+        config_path: dir.join("config.toml"),
+        docker_socket: socket,
+        host_proc: "/nonexistent".into(),
+        host_sys: "/nonexistent".into(),
+        hostname: "testhost".into(),
+        allowed_hosts: vec![],
+    });
+    assert!(
+        st.config.snapshot().error.is_none(),
+        "{:?}",
+        st.config.snapshot().error
+    );
+    let now = crate::util::unix_now() as i64;
+    st.containers.send_replace(Arc::new(crate::model::Snapshot {
+        containers: containers.clone(),
+        fetched_at: now as u64,
+        error: None,
+    }));
+    assert!(st.db.is_enabled());
+    let s = crate::model::ContainerStats {
+        cpu_percent: 12.5,
+        mem_bytes: 64 << 20,
+    };
+    for c in &containers {
+        for k in 0..20 {
+            st.db
+                .record_containers(now - 3000 + k * 15, &[(c.name.as_str(), &s)]);
+        }
+        st.db
+            .record_event(now - 100, "container.start", "info", &c.name, "started");
+        // Login history under a container's name: never for a visitor.
+        st.db.record_event(
+            now - 50,
+            "auth.login_failed",
+            "warn",
+            &c.name,
+            "from 192.0.2.7",
+        );
+    }
+    crate::auth::set_password_for_tests(&st.db, PW);
+    st
+}
+
+fn json_of(r: &Resp, what: &str) -> serde_json::Value {
+    assert_eq!(r.status, 200, "{what}: {}\n{}", r.head, r.body);
+    assert_json_no_store(r, what);
+    serde_json::from_str(&r.body).unwrap_or_else(|e| panic!("{what}: {e}: {}", r.body))
+}
+
+fn assert_visitor_clean(body: &str, what: &str) {
+    assert!(
+        !body.contains(HIDDEN_PREFIX),
+        "{what} shows a hidden container: {body}"
+    );
+    assert!(
+        !body.contains(PROBE_SECRET),
+        "{what} shows probe output: {body}"
+    );
+    assert!(
+        !body.contains("SECRET-CMD"),
+        "{what} shows a command line: {body}"
+    );
+    assert!(
+        !body.contains("hunter2"),
+        "{what} shows an env value: {body}"
+    );
+    assert!(
+        !body.contains("auth."),
+        "{what} shows login history: {body}"
+    );
+    assert!(
+        !body.contains("192.0.2.7"),
+        "{what} shows a client IP: {body}"
+    );
+    assert!(
+        !body.contains(CONFIG_SECRET),
+        "{what} shows the config error: {body}"
+    );
+}
+
+/// Break the config file (the last good one stays in use, with an error).
+fn break_config(st: &AppState) {
+    std::fs::write(
+        st.config.path(),
+        format!("{PRIVACY_TOML}\n[page]\nbogus_key = 1\n"),
+    )
+    .unwrap();
+    st.config.reload();
+    let e = st.config.snapshot().error.expect("config error");
+    assert!(e.contains(CONFIG_SECRET), "{e}");
+}
+
+/// A visitor gets every phase 1 read without probe output, checks,
+/// `auth.*` events, the config error or any hidden container; the detail of
+/// a hidden container is a 404 like an unknown name.
+#[tokio::test]
+async fn api_v1_reads_keep_visitor_privacy() {
+    let st = privacy_state("privacy").await;
+    break_config(&st);
+    let addr = start(st.clone()).await;
+    let forged = format!("rh_session={}", "ab".repeat(32));
+    for cookie in [None, Some(forged.as_str())] {
+        let h: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
+        let r = req(addr, "GET", "/api/v1/bootstrap", &h, "").await;
+        let v = json_of(&r, "bootstrap");
+        assert_eq!(v["config_error"], serde_json::Value::Null, "{v}");
+        assert_visitor_clean(&r.body, "bootstrap");
+
+        let r = req(addr, "GET", "/api/v1/containers", &h, "").await;
+        let v = json_of(&r, "containers");
+        assert_visitor_clean(&r.body, "containers");
+        let names: Vec<&str> = v["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g["containers"].as_array().unwrap())
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["db", "web", "a.b-c_d"], "{v}");
+        let groups: Vec<&str> = v["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["name"].as_str().unwrap())
+            .collect();
+        // "vault" only holds an excluded container: no group at all.
+        assert_eq!(groups, ["shop", "Standalone"], "{v}");
+
+        let r = req(addr, "GET", "/api/v1/containers/web", &h, "").await;
+        let v = json_of(&r, "detail web");
+        assert_visitor_clean(&r.body, "detail web");
+        let why = &v["why"];
+        assert_eq!(why["probe"], serde_json::Value::Null, "{v}");
+        assert_eq!(why["checks"], serde_json::json!([]), "{v}");
+        assert!(
+            why["title"]
+                .as_str()
+                .unwrap()
+                .starts_with("Health check failing"),
+            "{v}"
+        );
+        assert!(
+            v["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["kind"] == "container.start"),
+            "{v}"
+        );
+        assert!(
+            !v["series"]["markers"].as_array().unwrap().is_empty(),
+            "{v}"
+        );
+
+        for hidden in ["secret-ovr", "secret-lbl", "secret-exc", "nope"] {
+            let r = req(addr, "GET", &format!("/api/v1/containers/{hidden}"), &h, "").await;
+            assert_api_error(&r, 404, "not_found", hidden);
+            assert!(!r.body.contains(HIDDEN_PREFIX), "{}", r.body);
+        }
+
+        let r = req(addr, "GET", "/api/v1/strips", &h, "").await;
+        let v = json_of(&r, "strips");
+        assert_visitor_clean(&r.body, "strips");
+        let keys: Vec<&String> = v["containers"].as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["a.b-c_d", "db", "web"], "{v}");
+        let stacks: Vec<&String> = v["stacks"].as_object().unwrap().keys().collect();
+        assert_eq!(stacks, ["Standalone", "shop"], "{v}");
+        assert_eq!(v["buckets"], 96, "{v}");
+        assert_eq!(v["containers"]["web"].as_array().unwrap().len(), 96);
+    }
+}
+
+/// Signed in: the same reads add the probe's first line, Docker's last
+/// checks and the config error; login history shows in the timeline.
+#[tokio::test]
+async fn api_v1_reads_with_a_session_add_probe_checks_and_config_error() {
+    let st = privacy_state("signed").await;
+    break_config(&st);
+    let addr = start(st.clone()).await;
+    let (cookie, _) = login(addr).await;
+    let h = [("Cookie", cookie.as_str())];
+    let r = req(addr, "GET", "/api/v1/bootstrap", &h, "").await;
+    let v = json_of(&r, "bootstrap");
+    assert!(
+        v["config_error"]
+            .as_str()
+            .is_some_and(|e| e.contains(CONFIG_SECRET)),
+        "{v}"
+    );
+    let r = req(addr, "GET", "/api/v1/containers/web", &h, "").await;
+    let v = json_of(&r, "detail web");
+    let why = &v["why"];
+    assert_eq!(
+        why["probe"], "SECRET-PROBE-OUTPUT again",
+        "newest failing probe, first line: {v}"
+    );
+    let checks = why["checks"].as_array().unwrap();
+    assert_eq!(checks.len(), 2, "{v}");
+    assert_eq!(checks[0]["output"], "SECRET-PROBE-OUTPUT again");
+    assert_eq!(
+        checks[1]["output"],
+        "SECRET-PROBE-OUTPUT token=abc\nsecond line"
+    );
+    assert_eq!(checks[0]["exit_code"], 1);
+    assert_eq!(checks[0]["at"], 1_794_690_090, "{v}");
+    assert_eq!(why["title"], "Health check failing, 3 in a row", "{v}");
+    // The exact start from the inspect.
+    assert_eq!(v["row"]["started_at"], 1_794_690_000, "{v}");
+    assert!(
+        v["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "auth.login_failed"),
+        "{v}"
+    );
+    // Hidden stays hidden with a session too (as today's lists).
+    let r = req(addr, "GET", "/api/v1/containers/secret-ovr", &h, "").await;
+    assert_api_error(&r, 404, "not_found", "hidden, signed in");
+    let r = req(addr, "GET", "/api/v1/containers", &h, "").await;
+    assert!(!r.body.contains(HIDDEN_PREFIX), "{}", r.body);
+}
+
+/// The chart window: `to` past now is clamped to now, `from` before 30 days
+/// to 30 days; `from >= to`, half a window, a bad number or range are a 400
+/// naming the field; names are percent-decoded, a bad encoding is a 404.
+#[tokio::test]
+async fn api_v1_container_window_and_names() {
+    let st = privacy_state("window").await;
+    let addr = start(st.clone()).await;
+    let now = crate::util::unix_now() as i64;
+    let get = |q: String| async move {
+        req(addr, "GET", &format!("/api/v1/containers/web{q}"), &[], "").await
+    };
+
+    let v = json_of(&get(String::new()).await, "default");
+    let s = &v["series"];
+    assert_eq!(s["range"], "6h", "{s}");
+    assert_eq!(
+        s["to"].as_i64().unwrap() - s["from"].as_i64().unwrap(),
+        6 * 3600
+    );
+    assert!(s["cpu_max"].is_null() && s["mem_max"].is_null(), "{s}");
+    assert_eq!(s["step"], 60, "{s}");
+    let n = s["cpu"].as_array().unwrap().len();
+    assert!(
+        (5..=6).contains(&n),
+        "20 samples of 15 s in 60 s buckets: {s}"
+    );
+    assert_eq!(s["cpu"][0][1], 12.5, "{s}");
+
+    let v = json_of(&get("?range=7d".into()).await, "7d");
+    assert_eq!(v["series"]["range"], "7d");
+    assert!(v["series"]["cpu_max"].is_array(), "band from 24 h up");
+
+    // to > now: clamped.
+    let v = json_of(
+        &get(format!("?from={}&to={}", now - 3600, now + 7200)).await,
+        "future",
+    );
+    let s = &v["series"];
+    assert!(
+        s["to"].as_i64().unwrap() <= crate::util::unix_now() as i64,
+        "{s}"
+    );
+    assert!(s["to"].as_i64().unwrap() >= now, "{s}");
+    // One hour once clamped: the 1 h preset serves it.
+    assert_eq!(s["range"], "1h", "{s}");
+    assert_eq!(
+        s["to"].as_i64().unwrap() - s["from"].as_i64().unwrap(),
+        3600,
+        "{s}"
+    );
+    // More than 30 days: from clamped to 30 days back.
+    let v = json_of(
+        &get(format!("?from={}&to={now}", now - 90 * 86_400)).await,
+        "90d",
+    );
+    let s = &v["series"];
+    assert_eq!(s["range"], "30d", "{s}");
+    assert!(s["from"].as_i64().unwrap() >= now - 30 * 86_400, "{s}");
+    assert!(
+        s["cpu"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p[0].as_i64().unwrap() >= s["from"].as_i64().unwrap()),
+        "points before from are dropped: {s}"
+    );
+    // A zoomed hour reads at the 1 h preset; points < from dropped.
+    let v = json_of(
+        &get(format!("?from={}&to={}", now - 2000, now - 1000)).await,
+        "zoom",
+    );
+    let s = &v["series"];
+    assert_eq!(s["range"], "1h", "{s}");
+    assert_eq!(s["from"], now - 2000, "{s}");
+    assert!(
+        s["cpu"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p[0].as_i64().unwrap() >= now - 2000),
+        "{s}"
+    );
+
+    for (q, field) in [
+        (format!("?from={now}&to={now}"), "from"),
+        (format!("?from={}&to={}", now, now - 10), "from"),
+        (format!("?from={}&to={}", now + 100, now + 200), "from"),
+        (
+            format!("?from={}&to={}", now - 60 * 86_400, now - 40 * 86_400),
+            "from",
+        ),
+        (format!("?from={now}"), "to"),
+        (format!("?to={now}"), "from"),
+        ("?from=abc&to=1".to_string(), "from"),
+        ("?from=1&to=1.5".to_string(), "to"),
+        ("?range=2h".to_string(), "range"),
+    ] {
+        let r = get(q.clone()).await;
+        assert_api_error(&r, 400, "bad_request", &q);
+        let v: serde_json::Value = serde_json::from_str(&r.body).unwrap();
+        assert_eq!(v["error"]["field"], field, "{q}: {v}");
+    }
+    // Unknown name (with a bad window too): 404 first.
+    let r = req(addr, "GET", "/api/v1/containers/nope?range=2h", &[], "").await;
+    assert_api_error(&r, 404, "not_found", "unknown");
+
+    // Percent-encoded names.
+    for p in ["a.b-c_d", "a%2Eb%2Dc_d", "%61.b-c_d"] {
+        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &[], "").await;
+        let v = json_of(&r, p);
+        assert_eq!(v["row"]["name"], "a.b-c_d", "{p}");
+    }
+    for p in ["a%2Fb", "%2e%2e", "%zz", "web%00", "secret%2Dovr"] {
+        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &[], "").await;
+        assert_api_error(&r, 404, "not_found", p);
+    }
+}
+
+/// An open `/api/v1/stream` connection (HTTP/1.0: the body is the raw
+/// event stream, no chunk framing).
+struct Stream {
+    s: TcpStream,
+    buf: Vec<u8>,
+}
+
+impl Stream {
+    async fn open(addr: std::net::SocketAddr, path: &str) -> (Stream, String) {
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        s.write_all(format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut st = Stream { s, buf: Vec::new() };
+        let head = st.until(b"\r\n\r\n").await;
+        (st, head)
+    }
+
+    /// Bytes up to and including `sep` (5 s at most).
+    async fn until(&mut self, sep: &[u8]) -> String {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(i) = self.buf.windows(sep.len()).position(|w| w == sep) {
+                let out: Vec<u8> = self.buf.drain(..i + sep.len()).collect();
+                return String::from_utf8_lossy(&out).into_owned();
+            }
+            let mut b = [0u8; 8192];
+            match tokio::time::timeout_at(deadline, self.s.read(&mut b)).await {
+                Ok(Ok(n)) if n > 0 => self.buf.extend_from_slice(&b[..n]),
+                other => panic!(
+                    "stream ended or timed out: {other:?}; have {:?}",
+                    String::from_utf8_lossy(&self.buf)
+                ),
+            }
+        }
+    }
+
+    /// The next event (comments skipped): (name, JSON data).
+    async fn next(&mut self) -> (String, serde_json::Value) {
+        loop {
+            let block = self.until(b"\n\n").await;
+            let mut name = None;
+            let mut data = String::new();
+            for line in block.lines() {
+                if let Some(n) = line.strip_prefix("event: ") {
+                    name = Some(n.to_string());
+                } else if let Some(d) = line.strip_prefix("data: ") {
+                    assert!(data.is_empty(), "one data line per event: {block}");
+                    data.push_str(d);
+                }
+            }
+            if let Some(n) = name {
+                let v = serde_json::from_str(&data).unwrap_or_else(|e| panic!("{n}: {e}: {data}"));
+                return (n, v);
+            }
+        }
+    }
+
+    /// True when nothing arrives within `ms` (no event pending).
+    async fn quiet(&mut self, ms: u64) -> bool {
+        if !self.buf.is_empty() {
+            return false;
+        }
+        let mut b = [0u8; 1024];
+        match tokio::time::timeout(std::time::Duration::from_millis(ms), self.s.read(&mut b)).await
+        {
+            Err(_) => true,
+            Ok(Ok(n)) => {
+                self.buf.extend_from_slice(&b[..n]);
+                false
+            }
+            Ok(Err(_)) => false,
+        }
+    }
+}
+
+async fn viewers_reach(st: &AppState, n: usize, poke: bool) -> bool {
+    for _ in 0..100 {
+        if st.viewers() == n {
+            return true;
+        }
+        if poke {
+            // Only a write notices a closed socket.
+            st.changed("reload");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    st.viewers() == n
+}
+
+/// The stream: `hello` first; a publish that changes the list is a
+/// `containers` event (no hidden container in it); a stats refresh that
+/// changes nothing else is a `stats` event only; a config reload is
+/// `config`; falling behind is `resync`; the viewer count follows the
+/// connection.
+#[tokio::test]
+async fn api_v1_stream_events_and_viewer_count() {
+    let st = privacy_state("stream").await;
+    let addr = start(st.clone()).await;
+    assert_eq!(st.viewers(), 0);
+    let (mut s, head) =
+        Stream::open(addr, "/api/v1/stream?topics=containers,stats,system,bogus").await;
+    assert!(
+        head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200"),
+        "{head}"
+    );
+    assert_eq!(
+        header(&head, "content-type").as_deref(),
+        Some("text/event-stream")
+    );
+    assert_eq!(header(&head, "cache-control").as_deref(), Some("no-store"));
+    let (name, v) = s.next().await;
+    assert_eq!(name, "hello");
+    assert_eq!(v["sha"], st.build.sha);
+    assert_eq!(v["content"], crate::api::CONTENT_HASH);
+    assert_eq!(v["api"], 1);
+    assert!(
+        viewers_reach(&st, 1, false).await,
+        "connected viewer counted"
+    );
+
+    // A stats refresh with nothing else changed: `stats` only.
+    crate::live::refresh_container_stats(&st);
+    let (name, v) = s.next().await;
+    assert_eq!(name, "stats", "{v}");
+    let keys: Vec<&String> = v["containers"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["a.b-c_d", "db", "web"], "visible only: {v}");
+    assert!(
+        s.quiet(300).await,
+        "no containers event after a stats refresh"
+    );
+
+    // A container comes: `containers` with the whole view.
+    let mut snap = (*st.snapshot()).clone();
+    snap.containers
+        .push(crate::ui::testutil::ctr("new-one", Some("shop"), "running"));
+    st.publish_containers(snap.clone());
+    let (name, v) = s.next().await;
+    assert_eq!(name, "containers", "{v}");
+    let text = v.to_string();
+    assert!(text.contains("\"new-one\""), "{text}");
+    assert!(!text.contains(HIDDEN_PREFIX), "{text}");
+    assert!(v["groups"].is_array() && v["now"].is_i64(), "{v}");
+    // The same list again: only numbers.
+    st.publish_containers(snap);
+    let (name, _) = s.next().await;
+    assert_eq!(name, "stats");
+
+    // System: a host sample.
+    crate::live::refresh_system(&st);
+    let (name, v) = s.next().await;
+    assert_eq!(name, "system", "{v}");
+    assert!(v["load"].is_array() && v["disks"].is_array(), "{v}");
+
+    // Ignored ids.
+    st.changed("w-x");
+    st.changed("alerts");
+    assert!(s.quiet(300).await, "w-* and alerts are not sent");
+
+    // Config reload.
+    st.changed("reload");
+    let (name, v) = s.next().await;
+    assert_eq!(name, "config");
+    assert_eq!(v, serde_json::json!({}));
+
+    // Falling behind (more than the 64 the broadcast holds, with no await
+    // in between): `resync`.
+    for _ in 0..200 {
+        st.changed("w-x");
+    }
+    let (name, v) = s.next().await;
+    assert_eq!(name, "resync");
+    assert_eq!(v, serde_json::json!({}));
+
+    // Disconnect: the viewer goes away (within the next writes).
+    drop(s);
+    assert!(
+        viewers_reach(&st, 0, true).await,
+        "viewers: {}",
+        st.viewers()
+    );
+}
+
+/// Topics: only what was asked for (`system` alone gets no list events);
+/// HEAD answers the headers without counting a viewer; a visitor's stream
+/// never carries a hidden container.
+#[tokio::test]
+async fn api_v1_stream_topics_and_head() {
+    let st = privacy_state("topics").await;
+    let addr = start(st.clone()).await;
+    let r = req(addr, "HEAD", "/api/v1/stream", &[], "").await;
+    assert_eq!(r.status, 200, "{}", r.head);
+    assert_eq!(
+        header(&r.head, "content-type").as_deref(),
+        Some("text/event-stream")
+    );
+    assert_eq!(st.viewers(), 0);
+
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=system").await;
+    assert_eq!(s.next().await.0, "hello");
+    crate::live::refresh_container_stats(&st);
+    let mut snap = (*st.snapshot()).clone();
+    snap.containers
+        .push(crate::ui::testutil::ctr("other", None, "running"));
+    st.publish_containers(snap);
+    assert!(s.quiet(300).await, "no list events without the topics");
+    crate::live::refresh_system(&st);
+    assert_eq!(s.next().await.0, "system");
+    drop(s);
+
+    // Only `containers`: a stats refresh sends nothing.
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=containers").await;
+    assert_eq!(s.next().await.0, "hello");
+    crate::live::refresh_container_stats(&st);
+    assert!(s.quiet(300).await, "stats not asked for");
+    drop(s);
+    assert!(viewers_reach(&st, 0, true).await);
 }

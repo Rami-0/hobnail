@@ -1,0 +1,159 @@
+/* The containers table and the pieces the container page shares (icon, dot,
+   pill, segmented control, ports). Ported from static/cards.css,
+   static/components.css and static/app.css; scoped to the two pages so the
+   shell's own styles are not touched. Phones (<= 640 px) get stacked rows
+   that skip layout and paint while off screen (content-visibility). */
+:is(.ctr-page,.cd-page) .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--off)}
+:is(.ctr-page,.cd-page) .dot.ok{background:var(--ok)}
+:is(.ctr-page,.cd-page) .dot.warn{background:var(--warn)}
+:is(.ctr-page,.cd-page) .dot.bad{background:var(--bad)}
+:is(.ctr-page,.cd-page) .dot.off{background:none;box-shadow:inset 0 0 0 1.5px var(--off)}
+:is(.ctr-page,.cd-page) .pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-xs);font-weight:500;color:var(--text-2);white-space:nowrap}
+:is(.ctr-page,.cd-page) .pill.ok{color:var(--ok-fg);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+:is(.ctr-page,.cd-page) .pill.warn{color:var(--warn-fg);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
+:is(.ctr-page,.cd-page) .pill.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 55%,transparent)}
+:is(.ctr-page,.cd-page) .icon{width:20px;height:20px;border-radius:5px;flex:none;object-fit:contain}
+:is(.ctr-page,.cd-page) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
+:is(.ctr-page,.cd-page) .ia{position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--ia);height:var(--ia);flex:none;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-3);cursor:pointer}
+:is(.ctr-page,.cd-page) .ia:hover{color:var(--text);background:var(--tint-2);text-decoration:none}
+:is(.ctr-page,.cd-page) .ia svg{width:16px;height:16px}
+:is(.ctr-page,.cd-page) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
+:is(.ctr-page,.cd-page) .ra .btn.sm{gap:6px}
+:is(.ctr-page,.cd-page) .btn.icon{padding:0;width:var(--ctl-h)}
+:is(.ctr-page,.cd-page) fieldset.seg{margin:0;min-inline-size:0}
+:is(.ctr-page,.cd-page) .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
+:is(.ctr-page,.cd-page) .seg>:is(a,button){display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:.8929rem;font-weight:500;white-space:nowrap;cursor:pointer;text-decoration:none}
+:is(.ctr-page,.cd-page) .seg>:is(a,button):hover{color:var(--text)}
+:is(.ctr-page,.cd-page) .seg>:is([aria-current],[aria-pressed=true]){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
+:is(.ctr-page,.cd-page) .seg svg{width:14px;height:14px}
+:is(.ctr-page,.cd-page) .seg .n{font:.7857rem var(--mono);color:var(--text-3)}
+:is(.ctr-page,.cd-page) .st-l{font-size:calc(12.5rem/14);color:var(--text-2)}
+:is(.ctr-page,.cd-page) .st-l.warn{color:var(--warn-fg)}
+:is(.ctr-page,.cd-page) .st-l.bad{color:var(--bad-fg);font-weight:600}
+:is(.ctr-page,.cd-page) .st-l.off{color:var(--text-3)}
+:is(.ctr-page,.cd-page) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
+:is(.ctr-page,.cd-page) .mono.img{color:var(--text-2)}
+:is(.ctr-page,.cd-page) .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+:is(.ctr-page,.cd-page) .tbl th{height:32px;padding:0 10px;text-align:left;font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
+:is(.ctr-page,.cd-page) .tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+:is(.ctr-page,.cd-page) .tbl tbody tr:last-child td{border-bottom-color:transparent}
+.port{display:inline-block;height:20px;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/18px var(--mono);color:var(--accent-fg);white-space:nowrap}
+.port:hover{border-color:var(--accent);text-decoration:none}
+.port.local{color:var(--text-3);border-style:dashed}
+.port.local small,.port.plain small{font-size:calc(10rem/14);font-family:var(--font)}
+.port.plain{color:var(--text-2)}
+.port.more{color:var(--text-3)}
+
+/* ---- toolbar ---- */
+.ctr-page{display:grid;gap:var(--s-3)}
+.ctr-page search.bar{display:flex}
+.ctr-page .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ctr-page .search-in{position:relative;flex:1 1 240px;max-width:360px}
+.ctr-page .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
+.ctr-page .search-in input{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-input)}
+.ctr-page .search-in input:focus{border-color:var(--accent)}
+.ctr-page .bar select{height:var(--ctl-h);padding:0 8px;max-width:220px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font-size:var(--fs-input)}
+.ctr-page .sortctl{display:none;gap:4px;align-items:center}
+.ctbl-loading{padding:var(--s-4)}
+
+/* ---- table ---- */
+.ctr-page .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;contain:paint}
+.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
+.ctbl caption b{color:var(--text);font-weight:600}
+.ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
+.ctbl .sort-b{display:flex;width:100%;min-height:32px;align-items:center;gap:3px;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
+.ctbl .sort-b:hover{color:var(--text)}
+.ctbl .sort-i{width:12px;height:12px}
+.ctbl .sort-i.off{opacity:0}
+.ctbl .sort-b:hover .sort-i.off{opacity:.6}
+.ctbl th[aria-sort=ascending],.ctbl th[aria-sort=descending]{color:var(--text)}
+.ctbl th.c-num{text-align:right}
+.ctbl th.c-num .sort-b{justify-content:flex-end}
+.ctbl .row:hover td,.ctbl .row.kfocus td{background:var(--surface-2)}
+.ctbl .row td:first-child{padding-left:14px}
+.c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+.c-name>.dot{margin-right:9px;vertical-align:1px}
+.c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
+.c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
+.c-name .nm-t{white-space:nowrap}
+.c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
+.c-name .pill{margin-left:8px}
+.c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+.c-stack a{color:var(--text-2)}
+.ctbl.grouped .c-stack{display:none}
+.c-image{width:18%;max-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-image .img{font-size:var(--fs-xs)}
+.c-state{width:1%;white-space:nowrap}
+.c-up{width:80px}
+.c-num{width:124px;text-align:right;white-space:nowrap}
+.c-num .num{font:calc(12.5rem/14) var(--mono);display:inline-block;min-width:62px}
+/* A live number changes in a box of its own size: the table is not laid out again (size containment). */
+.ctbl .c-num .num{width:62px;height:1.45em;line-height:1.45em;vertical-align:middle;contain:strict;text-align:right;white-space:nowrap}
+.ctbl .c-num .cell-spark{contain:strict}
+.c-num .cell-spark{display:inline-block;width:40px;height:14px;margin-left:8px;vertical-align:-2px}
+.c-up .num{min-width:0}
+.c-ports{width:1%;white-space:nowrap}
+.c-act{width:112px;text-align:right;white-space:nowrap}
+.ctbl .c-hist{width:132px}
+.c-hist .hstrip{width:120px;height:12px}
+.row.stopped .nm{color:var(--text-2)}
+.row.stopped .c-image .img{color:var(--text-3)}
+.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
+tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
+.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 6px;border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:calc(12.5rem/14);font-weight:600;text-align:left;contain:inline-size}
+.grp-t:hover{background:var(--tint)}
+.grp-t .chev{width:14px;height:14px;color:var(--text-3);transition:transform var(--dur-2)}
+.grp.closed .grp-t .chev{transform:rotate(-90deg)}
+.grp-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp-t>svg,.grp-t .cnt{flex:none}
+.grp-t .cnt{font:500 var(--fs-micro) var(--mono);color:var(--text-3)}
+.grp-strip{flex:0 1 200px;margin-left:auto;min-width:40px}
+.grp-strip .hstrip{height:8px}
+tbody.none td{padding:0}
+/* rows still to come (index.tsx Waiting): their height, so nothing moves when they arrive */
+.ctbl tr.row-wait td{height:calc(var(--n) * var(--row));padding:0;border:0}
+.hstrip{display:block;width:100%;height:10px;border-radius:2px;overflow:hidden;shape-rendering:crispEdges}
+.hstrip .o{fill:var(--ok);opacity:.78}
+.hstrip .w{fill:var(--warn)}
+.hstrip .b{fill:var(--bad)}
+.hstrip .f{fill:var(--border);opacity:.55}
+.hstrip .u{fill:var(--line);opacity:.45}
+@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
+@media (max-width:900px){.c-num .cell-spark{display:none}.c-num{width:80px}.ctbl .c-ports,.ctbl .c-hist{display:none}}
+
+/* ---- phones: stacked rows, a sort control in the toolbar ---- */
+@media (max-width:640px){
+ .ctr-page .seg{overflow-x:auto;max-width:100%}
+ .ctr-page .search-in{max-width:none;flex-basis:100%}
+ .ctr-page .sortctl{display:flex}
+ .ctbl,.ctbl tbody{display:block}
+ .ctbl thead{display:none}
+ .ctbl caption{display:block}
+ .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--line);content-visibility:auto;contain-intrinsic-size:auto 130px}
+ .ctbl tr.row td{display:block;height:auto;padding:0;border:0;width:auto;max-width:none;background:none!important}
+ .ctbl tr.row td.c-name{flex:1 1 60%;min-width:0;padding:0!important}
+ .ctbl tr.row td.c-act{order:2}
+ .ctbl tr.row td:is(.c-stack,.c-state,.c-num,.c-ports){order:3;font-size:var(--fs-xs)}
+ .ctbl.grouped tr.row td.c-stack{display:none}
+ .ctbl tr.row td.c-ports{display:block;flex-basis:100%}
+ .ctbl tr.row td.c-ports:empty{display:none}
+ .ctbl tr.row td.c-image{display:none}
+ .ctbl tr.row td.c-num{text-align:left}
+ .ctbl tr.row td.c-num::before{content:attr(data-l) " ";color:var(--text-3);font-size:var(--fs-micro)}
+ .c-num .num{min-width:0}
+ .ctbl .c-num .num{width:auto;height:auto;contain:none;text-align:left}
+ .ctbl tr.row td.c-num{contain:layout paint}
+ .ctbl tr.row td.c-hist{display:block;order:4;flex-basis:100%;width:auto}
+ .ctbl tr.row td.c-hist:empty{display:none}
+ .c-hist .hstrip{width:100%;height:5px;opacity:.85}
+ .ctbl tr.grp-h{display:block}
+ .ctbl tr.grp-h th{display:block;height:auto}
+ .ctbl tbody.none tr,.ctbl tbody.none td{display:block}
+ .ctbl tr.row-wait,.ctbl tr.row-wait td{display:block}
+ .ctbl tr.row-wait td{height:calc(var(--n) * 130px)}
+}
+@media (pointer:coarse),(max-width:640px){
+ .port{height:44px;min-width:44px;line-height:42px;text-align:center;margin-block:2px}
+ .grp-t{height:44px}
+ :is(.ctr-page,.cd-page) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
+}

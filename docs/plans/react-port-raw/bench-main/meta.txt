@@ -1,0 +1,10 @@
+image=hobnail-p0-main:680a339
+image_id=sha256:db421e3bd503c55aa1eb8028ae5f6c2041960d1fd46beeda12bad5d10e571e95
+profile=html
+label=warm cache
+config=seed-config.toml (9555f080f7d3)
+date=2026-11-18T01:45:33Z
+host=4 CPUs, 7.2 GiB, kernel 7.0.0-38-generic, Docker 29.5.2
+phases=startup 10s/100ms idle 90s/500ms load 60s/500ms x (1 10 25) after 60s/500ms
+healthcheck=1
+healthz_ms=440

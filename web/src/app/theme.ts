@@ -12,8 +12,9 @@
 // OS theme before the module runs; with a stored theme that differs from the
 // OS one (ember, contrast, or dark/light against the OS), that first frame
 // shows the OS background colour. There is no content in it to restyle.
-// The server-rendered UI also honours `[page] theme` from config.toml as the
-// default; the client does not know it yet (it is not in /api/v1/session).
+// The owner's default (`[page] theme`) comes with /api/v1/bootstrap and is
+// applied then for a browser that has not chosen (applyDefaultTheme); until
+// it arrives such a browser shows auto.
 
 export const THEMES = ["auto", "dark", "light", "ember", "contrast"] as const;
 export type Theme = (typeof THEMES)[number];
@@ -91,9 +92,25 @@ function browserStorage(): ThemeStorage | null {
  * (`<meta name="theme-color">`, phone status bar, installed-app title bar)
  * at the theme's page background, as static/app.js does.
  */
+const themeListeners = new Set<() => void>();
+
+/** Re-render on a theme change (the theme button). */
+export function subscribeTheme(fn: () => void): () => void {
+  themeListeners.add(fn);
+  return () => {
+    themeListeners.delete(fn);
+  };
+}
+
+/** The theme on the page now. */
+export function currentTheme(): Theme {
+  return themeOf(document.documentElement.dataset.theme);
+}
+
 export function applyTheme(t: Theme): void {
   const root = document.documentElement;
   root.dataset.theme = t;
+  for (const l of themeListeners) l();
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (meta) meta.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#1D1210";
 }
@@ -109,4 +126,16 @@ export function applyStoredTheme(): Theme {
 export function setTheme(t: Theme): void {
   applyTheme(t);
   writeTheme(browserStorage(), t);
+}
+
+/**
+ * The owner's default (`[page] theme`, from /api/v1/bootstrap) for a browser
+ * that has not chosen one; a stored choice wins (theme per browser over
+ * the config default). True when it changed the page.
+ */
+export function applyDefaultTheme(t: Theme): boolean {
+  if (readTheme(browserStorage())) return false;
+  if (themeOf(document.documentElement.dataset.theme) === t) return false;
+  applyTheme(t);
+  return true;
 }

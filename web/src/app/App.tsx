@@ -1,29 +1,91 @@
-// Route -> page, inside the shell. Marks #root[data-ready="1"] once the first
-// render with a known session is committed (the browser checks wait for it).
-import { useEffect } from "react";
+// Route -> page, inside the shell (which marks #root[data-ready="1"] once
+// it is drawn with a known session; the browser checks wait for it).
+// The Containers and container pages are lazy chunks (their default
+// exports); the charts under the container page are a further lazy chunk.
+import { lazy, Suspense, useDeferredValue } from "react";
 
 import { useSession } from "../api/session.ts";
-import { Button } from "../ui/index.ts";
 import { Home } from "../routes/Home.tsx";
 import { Login } from "../routes/Login.tsx";
 import { NotFound } from "../routes/NotFound.tsx";
-import { useRoute } from "./router.ts";
+import { Banner, Button } from "../ui/index.ts";
+import { useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
-const TITLES = { home: "Home", login: "Sign in", not_found: "Not found" } as const;
+const loadContainers = () => import("../routes/containers/index.tsx");
+const loadContainer = () => import("../routes/container/index.tsx");
+// The page this document opened on is fetched at once (its script and
+// stylesheet arrive and apply in frames of their own, before the first render).
+const opened = window.location.pathname.replace(/\/+$/, "");
+const earlyList = opened === "/app/containers" ? loadContainers() : null;
+const earlyOne = /^\/app\/containers\/[^/]+$/.test(opened) ? loadContainer() : null;
+const ContainersPage = lazy(() => earlyList ?? loadContainers());
+const ContainerPage = lazy(() => earlyOne ?? loadContainer());
+
+function titleOf(r: Route): string {
+  switch (r.name) {
+    case "home":
+      return "Home";
+    case "login":
+      return "Sign in";
+    case "containers":
+      return "Containers";
+    case "container":
+      return r.ctr;
+    default:
+      return "Not found";
+  }
+}
+
+/** Font weights the pages use (each is a font lookup the first time it is laid out). */
+const WARM = [400, 500, 600, 700];
+
+function Loading() {
+  return (
+    <div className="page" aria-busy="true">
+      <div className="sk-rows">
+        <output className="sr">Loading…</output>
+        <span className="sk" />
+        <span className="sk" />
+        <span className="sk" />
+        {/* The fonts the shell and the table use, laid out in this cheap
+            first frame, so their first use does not land in a later, larger one. */}
+        <span className="sr" aria-hidden="true">
+          {WARM.map((w) => (
+            <span key={w} style={{ fontWeight: w }}>
+              Aa0 <code>Aa0</code>
+            </span>
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   const { route } = useRoute();
   const s = useSession();
-  const settled = s.status !== "loading";
+  // The first render is a placeholder; the shell and the page follow in a
+  // transition, which React renders in slices (a plain first render is one
+  // long task on a slow phone).
+  const ready = useDeferredValue(true, false);
 
-  useEffect(() => {
-    document.title = `${TITLES[route.name]} · Hobnail`;
-  }, [route.name]);
 
-  useEffect(() => {
-    if (settled) document.getElementById("root")?.setAttribute("data-ready", "1");
-  }, [settled]);
+  // The placeholder has the shell's frame (sidebar column, top bar), so
+  // nothing moves when the shell arrives.
+  if (!ready) {
+    return (
+      <div className="app">
+        <aside className="side" aria-hidden="true" />
+        <div className="col">
+          <header className="top" />
+          <main id="main">
+            <Loading />
+          </main>
+        </div>
+      </div>
+    );
+  }
 
   let page;
   switch (route.name) {
@@ -33,24 +95,33 @@ export function App() {
     case "login":
       page = <Login />;
       break;
+    case "containers":
+      page = <ContainersPage />;
+      break;
+    case "container":
+      // A new container is a new page: its state starts afresh.
+      page = <ContainerPage key={route.ctr} />;
+      break;
     default:
       page = <NotFound path={route.path} />;
   }
   return (
-    <Shell title={TITLES[route.name]}>
+    <Shell title={titleOf(route)}>
       {s.status === "error" && !s.session ? (
         <div className="page narrow">
-          <div className="banner bad" role="alert">
-            <div>
-              Could not read the session: {s.message}.{" "}
+          <Banner
+            kind="bad"
+            action={
               <Button className="sm" onClick={() => window.location.reload()}>
                 Reload
               </Button>
-            </div>
-          </div>
+            }
+          >
+            Could not read the session: {s.message}.
+          </Banner>
         </div>
       ) : null}
-      {page}
+      <Suspense fallback={<Loading />}>{page}</Suspense>
     </Shell>
   );
 }

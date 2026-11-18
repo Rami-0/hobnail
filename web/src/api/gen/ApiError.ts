@@ -6,7 +6,8 @@
 export type ApiError = {
 /**
  * Stable, machine-readable: `not_found`, `method_not_allowed`,
- * `sign_in_required`, `logs_sign_in_required`, `bad_request`.
+ * `sign_in_required`, `logs_sign_in_required`, `bad_request`,
+ * `internal` (500: a handler task failed).
  */
 code: string,
 /**

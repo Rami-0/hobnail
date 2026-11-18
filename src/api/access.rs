@@ -35,6 +35,11 @@ pub enum Access {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handler {
     Session,
+    Bootstrap,
+    Containers,
+    Container,
+    Strips,
+    Stream,
 }
 
 #[derive(Debug)]
@@ -48,12 +53,47 @@ pub struct Route {
 }
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
-pub const ROUTES: &[Route] = &[Route {
-    method: "GET",
-    pattern: "/api/v1/session",
-    access: Access::Public,
-    handler: Handler::Session,
-}];
+///
+/// The phase 1 reads are all `Public`, with the same visitor/session split
+/// as today's pages: session-only fields are left out for a visitor.
+pub const ROUTES: &[Route] = &[
+    Route {
+        method: "GET",
+        pattern: "/api/v1/session",
+        access: Access::Public,
+        handler: Handler::Session,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/bootstrap",
+        access: Access::Public,
+        handler: Handler::Bootstrap,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/containers",
+        access: Access::Public,
+        handler: Handler::Containers,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/containers/<name>",
+        access: Access::Public,
+        handler: Handler::Container,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/strips",
+        access: Access::Public,
+        handler: Handler::Strips,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/stream",
+        access: Access::Public,
+        handler: Handler::Stream,
+    },
+];
 
 /// A route that matched, with its decoded captures in pattern order.
 #[derive(Debug)]
@@ -64,7 +104,6 @@ pub struct Matched {
 
 impl Matched {
     /// The decoded value of capture `<name>`.
-    #[cfg_attr(not(test), allow(dead_code))] // first used by phase 1 routes
     pub fn param(&self, name: &str) -> Option<&str> {
         self.params
             .iter()

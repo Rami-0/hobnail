@@ -262,8 +262,8 @@ async function runPass(size, scheme) {
   // 4. the right password
   await click(pwSel); await typeText(PW);
   await key("Enter");
-  const signedIn = `(() => { const u = document.querySelector('[data-testid="user"]'); return !!u && /admin/.test(u.textContent) && !!document.querySelector('button[data-testid="signout"]'); })()`;
-  if (!(await step('signed in: [data-testid="user"] shows admin and button[data-testid="signout"] is there', () => until(signedIn, 10000)))) {
+  const signedIn = `(() => { const u = document.querySelector('[data-testid="user"]'); return !!u && /admin/.test(u.textContent); })()`;
+  if (!(await step('signed in: [data-testid="user"] shows admin', () => until(signedIn, 10000)))) {
     const err = await ev(`document.querySelector('[data-testid="login-error"]')?.textContent ?? null`).catch(() => null);
     if (err) console.log(`       login error shown: ${err}`);
     await shot(name + "-signin-failed"); return summarise();
@@ -275,7 +275,11 @@ async function runPass(size, scheme) {
   await shot(name + "-4-signed-in");
 
   // 5. sign out
-  await step('signing out brings a[data-testid="signin"] back', async () => { await click('button[data-testid="signout"]'); return until(`!!document.querySelector('a[data-testid="signin"]') && !document.querySelector('[data-testid="user"]')`); });
+  await step('signing out brings a[data-testid="signin"] back', async () => {
+    // Phase 1: sign out sits in the account menu that [data-testid="user"] opens.
+    if (!(await until(`!!document.querySelector('button[data-testid="signout"]') && document.querySelector('button[data-testid="signout"]').offsetParent !== null`, 300))) await click('[data-testid="user"]');
+    if (!(await until(`!!document.querySelector('button[data-testid="signout"]')`, 3000))) return false;
+    await click('button[data-testid="signout"]'); return until(`!!document.querySelector('a[data-testid="signin"]') && !document.querySelector('[data-testid="user"]')`); });
   const s2 = await session();
   check(s2.status === 200 && s2.body?.user === null && s2.body?.csrf === null, "GET /api/v1/session after sign-out: user null, csrf null", s2);
   await sleep(300);

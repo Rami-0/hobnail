@@ -46,7 +46,8 @@
     "import/no-cycle": "error",
     "import/no-unassigned-import": "off",
     "unicorn/no-null": "off",
-    "eslint/no-await-in-loop": "off"
+    "eslint/no-await-in-loop": "off",
+    "jsx-a11y/prefer-tag-over-role": "off"
   },
   "overrides": [
     {

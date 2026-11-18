@@ -13,8 +13,14 @@ use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
 pub mod access;
+pub mod bootstrap;
+pub mod containers;
 pub mod error;
 pub mod session;
+pub mod stream;
+pub mod strips;
+#[cfg(test)]
+mod tests;
 #[cfg(test)]
 mod types_tests;
 
@@ -33,12 +39,21 @@ pub async fn route(state: &Arc<AppState>, req: Request<Incoming>) -> Response<Bo
     if let Err(e) = access::check(state, req.headers(), m.route.access) {
         return e.response();
     }
+    let query = req.uri().query().unwrap_or("");
     match m.route.handler {
         Handler::Session => session::get(state, req.headers()),
+        Handler::Bootstrap => bootstrap::get(state, req.headers()),
+        Handler::Containers => containers::list(state).await,
+        Handler::Container => {
+            let name = m.param("name").unwrap_or_default();
+            containers::get(state, req.headers(), name, query).await
+        }
+        Handler::Strips => strips::get(state).await,
+        Handler::Stream => stream::get(state, query, req.method() == hyper::Method::HEAD),
     }
 }
 
-/// A JSON response that no cache stores (every `/api/v1` answer so far).
+/// A JSON response that no cache stores (every `/api/v1` answer).
 pub fn json(status: StatusCode, v: &impl Serialize) -> Response<Body> {
     let mut r = full(status, serde_json::to_vec(v).unwrap_or_default());
     set(&mut r, CONTENT_TYPE, "application/json");
