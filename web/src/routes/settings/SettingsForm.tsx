@@ -7,14 +7,16 @@ import { collectFields, Controls, endpoint, FailureNote, initialFields, saved, t
 
 type Snapshot = { hash: string; values: Values };
 
-export function SettingsForm({ title, path, fields, snapshot, reload, encode, renderActions, wide }: {
+export function SettingsForm({ title, path, fields, snapshot, reload, encode, renderActions, renderDetails, onSaved, wide }: {
   title: string;
   path: string;
   fields: Control[];
   snapshot: Snapshot;
   reload: () => Promise<Snapshot | undefined>;
   encode?: (values: Values) => Values;
-  renderActions?: (input: Values, busy: boolean) => ReactNode;
+  renderActions?: (input: Values, busy: boolean, replace: (values: Values) => void) => ReactNode;
+  renderDetails?: (input: Values, dirty: boolean) => ReactNode;
+  onSaved?: (previous: Values) => void;
   wide?: boolean;
 }) {
   const [draft, setDraft] = useState<{ base: Snapshot; input: Values }>();
@@ -37,6 +39,7 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     const response = await api.post<Save>(endpoint(path), { base_hash: base.hash, ...(encode?.(patch) ?? { values: patch }) });
     if (response.kind === "ok") {
       await reload();
+      onSaved?.(base.values);
       setDraft(undefined);
       setWarnings(response.data.warnings ?? []);
       saved(response.data);
@@ -60,13 +63,14 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
   return <section className="settings-section">
     <h2>{title}</h2>
     <form className={wide ? "settings-form settings-wide" : "settings-form"} noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      {renderDetails?.(input, dirty)}
       <Controls fields={fields} input={input} base={snapshot.values} errors={errors} onChange={(values) => setDraft({ base, input: values })} />
       <FailureNote failure={failure} busy={busy} retry={() => { void refreshSession().then((session) => { if (session.session?.user) void save(); }); }} rebase={() => { void rebase(); }} />
       {warnings.map((warning) => <Note key={warning} kind="warn">{warning}</Note>)}
       <div className="settings-actions">
         <Button type="submit" variant="primary" disabled={!dirty} busy={busy}>Save</Button>
         {dirty && <Button disabled={busy} onClick={() => { setDraft(undefined); setFailure(undefined); setErrors({}); }}>Discard changes</Button>}
-        {renderActions?.(input, busy)}
+        {renderActions?.(input, busy, (values) => setDraft({ base, input: values }))}
       </div>
     </form>
   </section>;
