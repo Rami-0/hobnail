@@ -16,7 +16,7 @@ export default function Bookmarks({ editorOnly }: { editorOnly?: boolean }) {
   return <>
     <FailureNote failure={failure} retry={() => { void load(); }} />
     {data && <Collection kind="bookmark" title="Bookmarks" path="bookmarks" fields={fields} hash={data.hash}
-      entries={data.bookmarks} reorder editorOnly={editorOnly} row={bookmarkRow}
+      entries={data.bookmarks} reorder editorOnly={editorOnly} row={bookmarkRow} body={(patch, input) => ({ name: input.name, url: input.url, ...patch })}
       refresh={async () => {
         const result = await load();
         if (result.kind === "ok") return { hash: result.data.hash, entries: result.data.bookmarks };

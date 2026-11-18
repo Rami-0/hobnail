@@ -9,7 +9,7 @@ import { toast } from "../../ui/toast.ts";
 import { changedFields, dialogState, fieldErrors, rebaseFields, type Values } from "./forms.ts";
 import { collectFields, Controls, endpoint, FailureNote, initialFields, saved, type Control, type Failure, type Save } from "./shared.tsx";
 
-export type Entry = { id: string | number; item: Values; locked?: boolean; locked_reason?: string; enabled?: boolean };
+export type Entry = { id: string | number; item: Values; locked?: boolean; locked_reason?: string; enabled?: boolean; original?: Values };
 type Snapshot = { hash: string; entries: Entry[] };
 type Refresh = () => Promise<Snapshot | undefined>;
 type Operation = { action: "add" | "edit" | "delete" | "reorder"; id?: Entry["id"]; item?: Values; order?: Entry["id"][] };
@@ -63,7 +63,7 @@ export function Collection(props: Props) {
             void (async () => {
               const session = await refreshSession();
               if (!owner || session.session?.user?.name !== owner) return;
-              const restored = await api.post<Save>(endpoint(path), { base_hash: deletedHash, action: "add", item: undo.item });
+              const restored = await api.post<Save>(endpoint(path), { base_hash: deletedHash, action: "add", item: undo.original ?? undo.item });
               if (restored.kind !== "ok") { toast(restored.message, { kind: "bad" }); return; }
               saved(restored.data);
               await refresh();
@@ -84,7 +84,7 @@ export function Collection(props: Props) {
     order[index + offset] = from;
     void run({ action: "reorder", id: from, order });
   }
-  const feedback = <FailureNote failure={failure} busy={busy} retry={() => { void refreshSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
+  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
       <header className="board-heading"><h2>{title}</h2>

@@ -58,7 +58,7 @@ export default function Widgets({ editorOnly }: { editorOnly?: boolean }) {
   const entries = (value: WidgetsData) => value.widgets.map((entry) => {
     const { status } = entry.item;
     const state = status && typeof status === "object" ? status as Values : {};
-    return { ...entry, item: { ...entry.item, enabled: entry.enabled, mode: entry.item.rows && !entry.item.template ? "rows" : "template",
+    return { ...entry, original: entry.item, item: { ...entry.item, enabled: entry.enabled, mode: entry.item.rows && !entry.item.template ? "rows" : "template",
       status_field: state.field, status_ok: state.ok } };
   });
   return <>
