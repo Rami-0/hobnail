@@ -5,6 +5,29 @@ import path from 'node:path';
 import { CSP_LISTENER, input, launch, q, recorder, sleep } from './cdp.mjs';
 import { sweepFixture } from './sweep-fixture.mjs';
 const base = new URL(process.argv[2] || 'http://127.0.0.1:3396');
+if (process.env.ONBOARDING_ONLY === '1') {
+  assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/); assert.match(base.port, /^339[5-9]$/);
+  assert.equal((await fetch(new URL('/api/v1/session',base)).then(r=>r.json())).owner_exists,false,'onboarding sweep needs a fresh instance');
+  const browser = await launch(), evidence = [];
+  try {
+    for (const width of [1440,390]) {
+      const tab = await browser.tab(), rec = recorder(tab,base.origin);
+      try {
+        for (const domain of ['Page','Runtime','Network','Log']) await tab.send(domain+'.enable');
+        await tab.send('Runtime.addBinding',{name:'__hbCsp'});
+        await tab.send('Page.addScriptToEvaluateOnNewDocument',{source:CSP_LISTENER});
+        await tab.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+        const response=await fetch(new URL('/app',base)), csp=response.headers.get('content-security-policy')||'';
+        assert.match(csp,/script-src 'self'/);assert.match(csp,/style-src 'self'/);assert.ok(!/unsafe-inline|unsafe-eval/.test(csp));
+        await tab.send('Page.navigate',{url:new URL('/app',base).href});
+        assert.ok(await tab.until(`!!document.querySelector('[data-testid="onboarding"]')`));await sleep(500);
+        assert.deepEqual([...rec.csp,...rec.console,...rec.exceptions,...rec.failed],[]);
+        evidence.push({width,csp,rec});console.log(`ok ${width} onboarding`);
+      } finally {await tab.close();}
+    }
+  } finally {browser.quit();fs.writeFileSync(path.join(process.env.OUT,'results.json'),JSON.stringify(evidence,null,2));}
+  process.exit(0);
+}
 const fixture = await sweepFixture(base), browser = await launch(), results = [];
 let failures = 0;
 try {
