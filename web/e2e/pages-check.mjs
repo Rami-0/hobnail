@@ -150,7 +150,10 @@ try {
       await inp.key('ArrowUp'); await wait(`document.activeElement?.href===${q(treeFirst)}`, "tree Up returns");
       await inp.key('ArrowUp'); await wait(`document.activeElement?.id==='tree-filter'`, "tree Up returns to the filter");
       await inp.key('Enter'); await wait(`location.pathname===${q(new URL(treeFirst).pathname)}`, "tree Enter opens its first result");
-      if (inp.touch) await inp.click('[data-testid="drawer-open"]');
+      if (inp.touch) {
+        await wait(`document.querySelector('[data-testid="drawer-open"]')?.getAttribute('aria-expanded')==='false' && !document.querySelector('#tree-filter')`, "tree navigation closes the phone drawer");
+        await inp.click('[data-testid="drawer-open"]');
+      }
       await wait(`!!document.querySelector('#tree-filter')`, "tree filter returns with stored input");
       await inp.clear('#tree-filter');
       if (inp.touch) await inp.key('Escape');
