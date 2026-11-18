@@ -301,7 +301,12 @@ pub(crate) fn check(
     write: bool,
 ) -> Result<Option<Session>, Denied> {
     let minimum = match access {
-        Access::Public => return Ok(None),
+        Access::Public => {
+            if write && !auth::same_origin(headers) {
+                return Err(Denied::Write(WriteDenied::BadOrigin));
+            }
+            return Ok(None);
+        }
         Access::Viewer => Role::Viewer,
         Access::Admin => Role::Admin,
         Access::Owner => Role::Owner,

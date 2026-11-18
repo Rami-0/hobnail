@@ -174,9 +174,9 @@ fn insert_session(
     conn.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
     conn.execute(
         "DELETE FROM sessions WHERE token_hash IN
-         (SELECT token_hash FROM sessions ORDER BY created DESC, expires DESC, (token_hash = ?2) DESC
-          LIMIT -1 OFFSET ?1)",
-        params![MAX_SESSIONS, hash],
+         (SELECT token_hash FROM sessions WHERE user_id = ?3
+          ORDER BY created DESC, expires DESC, (token_hash = ?2) DESC LIMIT -1 OFFSET ?1)",
+        params![MAX_SESSIONS, hash, user],
     )?;
     Ok(())
 }
@@ -586,6 +586,31 @@ mod tests {
                 Err(AccountError::Invalid)
             );
         }
+    }
+
+    #[test]
+    fn frequent_logins_do_not_evict_other_users() {
+        let db = Db::open_in_memory().unwrap();
+        db.create_owner("owner", "owner-hash", "owner-session", 1, 100)
+            .unwrap();
+        db.create_invite("invite", Role::Viewer, None, 1, 100)
+            .unwrap();
+        db.accept_invite("invite", "guest", "guest-hash", "first-session", 1, 100)
+            .unwrap();
+        let (guest, _, _) = db.credential("guest").unwrap();
+        for n in 0..MAX_SESSIONS {
+            db.sign_in(
+                guest,
+                "guest-hash",
+                &format!("guest-session-{n}"),
+                2 + n,
+                100,
+            )
+            .unwrap();
+        }
+        assert_eq!(db.session_count(30), (MAX_SESSIONS + 1) as u64);
+        assert!(!db.session_is_valid("first-session", 30));
+        assert!(db.session_is_valid("owner-session", 30));
     }
 
     #[test]

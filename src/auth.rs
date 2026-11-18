@@ -477,7 +477,7 @@ fn url_authority(s: &str) -> Option<&str> {
 
 /// `Origin` (or `Referer` when there is no `Origin`) must name exactly the
 /// request's `Host` (host and port). Neither header → refused.
-fn same_origin(headers: &HeaderMap) -> bool {
+pub(crate) fn same_origin(headers: &HeaderMap) -> bool {
     let Some(host) = headers.get(HOST).and_then(|v| v.to_str().ok()) else {
         return false;
     };
@@ -663,9 +663,6 @@ pub(crate) async fn credential_route(
         set(&mut response, RETRY_AFTER, &secs.to_string());
         response
     };
-    if !same_origin(req.headers()) {
-        return crate::http::server::text(StatusCode::FORBIDDEN, "cross-origin write refused\n");
-    }
     let ctype = req
         .headers()
         .get(CONTENT_TYPE)

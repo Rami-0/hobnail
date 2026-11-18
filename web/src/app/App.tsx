@@ -78,8 +78,8 @@ export function App() {
   }, [redirect]);
   const showCredentials = authPage && s.session !== null;
   useEffect(() => {
-    if (showCredentials) document.getElementById("root")?.setAttribute("data-ready", "1");
-  }, [showCredentials]);
+    if (ready && showCredentials) document.getElementById("root")?.setAttribute("data-ready", "1");
+  }, [ready, showCredentials]);
 
 
 

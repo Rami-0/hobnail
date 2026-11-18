@@ -250,7 +250,7 @@ pub const EVENTS_KEEP_SECS: i64 = 180 * 86_400;
 pub const EVENTS_MAX: i64 = 100_000;
 /// Config revisions kept (newest).
 pub const REVISIONS_KEEP: i64 = 200;
-/// Concurrent sessions kept (the oldest are dropped past this).
+/// Concurrent sessions kept per account (the oldest are dropped past this).
 const MAX_SESSIONS: i64 = 20;
 /// A sliding session expiry is only written when it moves by at least this
 /// much, so a busy page does not turn every request into a write.
