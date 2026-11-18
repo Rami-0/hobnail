@@ -873,3 +873,37 @@ fn pane_is_served_plain_and_the_script_makes_it_busy() {
     assert!(html.contains(r#"<p class="js-late">The log viewer needs JavaScript. You can still <a href="/api/logs/download?"#));
     assert!(crate::http::server::LOGS_JS.contains(r#"this.body.setAttribute("aria-busy""#));
 }
+
+#[test]
+fn scoped_stack_limit_applies_after_visibility() {
+    use crate::api::access::Principal;
+    use crate::db::accounts::{Role, Scopes};
+    let mut containers: Vec<_> = (0..30)
+        .map(|n| crate::ui::testutil::ctr(&format!("a{n:02}"), Some("shop"), "running"))
+        .collect();
+    containers.push(crate::ui::testutil::ctr("z-last", Some("shop"), "running"));
+    let state = crate::ui::testutil::state_with(containers, "");
+    let board = "11111111111111111111111111111111";
+    state.db.dashboard(|conn| -> rusqlite::Result<()> {
+        conn.execute("INSERT INTO boards (id,name,created,updated) VALUES (?1,'Logs grant',0,0)", [board])?;
+        conn.execute("INSERT INTO board_items (board_id,kind,config,layout) VALUES (?1,'container',?2,'{}')", rusqlite::params![board, r#"{"kind":"container","target":{"by":"compose","project":"shop","service":"z-last"}}"#])?;
+        Ok(())
+    }).unwrap();
+    let viewer = Principal {
+        id: 1,
+        name: "viewer".into(),
+        role: Role::Viewer,
+        disabled: false,
+        created: 0,
+        updated: 0,
+        scopes: Some(Scopes {
+            boards: vec![board.into()],
+            integrations: vec![],
+        }),
+    };
+    let visible = viewer.container_visibility(&state);
+    assert_eq!(
+        super::targets(&state, &[("stack".into(), "shop".into())], 4, &visible),
+        vec!["z-last"]
+    );
+}

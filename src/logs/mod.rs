@@ -159,10 +159,17 @@ fn targets(
     visible: &crate::api::access::ContainerVisibility,
 ) -> Vec<String> {
     if let Some(stack) = query_get(q, "stack") {
-        return stack_members(state, stack)
-            .into_iter()
-            .filter(|name| visible.allows(name))
+        let cfg = state.config.current();
+        let mut names: Vec<_> = state
+            .snapshot()
+            .containers
+            .iter()
+            .filter(|c| visible.allows(&c.name) && in_stack(&cfg, c, stack))
+            .map(|c| c.name.clone())
             .collect();
+        names.sort();
+        names.truncate(24);
+        return names;
     }
     let mut out: Vec<String> = vec![];
     for n in query_get(q, "c").unwrap_or("").split(',') {
