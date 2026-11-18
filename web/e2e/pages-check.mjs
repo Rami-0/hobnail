@@ -119,6 +119,7 @@ try {
       await inp.key("g");
       await inp.key("a");
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
+      await wait('Number(localStorage.getItem("rh-seen")) > 0', "leaving Overview remembers the visit");
 
       await load("/app/alerts", ".history-events li");
       await wait(`document.querySelector(${q('[aria-label="Firing now"]')})?.textContent.includes("svc004")`, "firing alert arrives through the live model", 15000);
@@ -145,10 +146,12 @@ try {
       await wait(`document.querySelector(${q(disclosure)}).parentElement.open`, "Host disclosure survives updates");
       await tab.shot(path.join(out, `${label}-host.png`));
 
-      const root = "/app/containers/svc001";
+      const root = "/app/containers/svc043";
       await load(root + "?range=24h&tab=metrics", '[data-testid="chart-pids"]', "metrics");
+      assert.ok(await tab.ev(exists('[data-testid="why"]')), "Metrics keeps the Why banner");
       await inp.click('[data-testid="ctr-tabs"] a[href*="tab=inspect"]');
       await wait(exists('[data-testid="container-inspect"]'), "opens Inspect");
+      assert.ok(await tab.ev(exists('[data-testid="why"]')), "Inspect keeps the Why banner");
       assert.equal(await tab.ev('new URLSearchParams(location.search).get("range")'), "24h");
       assert.equal(await tab.ev('document.body.textContent.includes("fake-not-a-secret")'), false);
       await tab.shot(path.join(out, `${label}-inspect.png`));
@@ -158,10 +161,12 @@ try {
       await wait('!document.body.textContent.includes("fake-not-a-secret")', "hides environment");
       await inp.click('[data-testid="ctr-tabs"] a[href*="tab=processes"]');
       await wait(exists('[data-testid="container-processes"] tbody tr'), "process rows render");
+      assert.ok(await tab.ev(exists('[data-testid="why"]')), "Processes keeps the Why banner");
       assert.equal(await tab.ev('new URLSearchParams(location.search).get("range")'), "24h");
       await tab.shot(path.join(out, `${label}-processes.png`));
       await inp.click('[data-testid="ctr-tabs"] a[href*="tab=events"]');
       await wait(exists('[data-testid="container-events"]'), "opens the container event page");
+      assert.ok(await tab.ev(exists('[data-testid="why"]')), "Events keeps the Why banner");
       assert.equal(await tab.ev('new URLSearchParams(location.search).get("range")'), "24h");
       await tab.shot(path.join(out, `${label}-events.png`));
       const churn = await api("/api/v1/containers/svc008/events");
