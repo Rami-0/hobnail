@@ -2532,3 +2532,90 @@ async fn session_distinguishes_unavailable_database_from_fresh_installation() {
     assert_eq!(session["owner_exists"], false);
     assert!(session["user"].is_null());
 }
+
+/// JSON equivalents of the classic Settings fragment, edit and cache checks.
+#[tokio::test]
+async fn settings_json_values_and_hashes_require_an_admin_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let config = r#"# raw-marker
+[page]
+greeting = "greeting-marker"
+
+[docker]
+exclude = ["exclude-marker"]
+
+[[groups]]
+name = "group-marker"
+
+[containers.override-marker]
+name = "Override marker"
+
+[[bookmarks]]
+name = "Wiki marker"
+url = "https://wiki.example/bookmark-marker"
+
+[[widgets]]
+id = "widget-marker"
+type = "custom-api"
+url = "http://widget.example/marker"
+
+[channels.channel-marker]
+type = "webhook"
+url_env = "RH_GATE_MARKER"
+
+[[alerts]]
+name = "rule-marker"
+type = "container"
+channels = ["channel-marker"]
+
+[history]
+sample_interval = "45s"
+"#;
+    std::fs::write(st.config.path(), config).unwrap();
+    std::fs::write(st.env.data_dir.join("custom.css"), "/* css-marker */").unwrap();
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let hash = crate::auth::sha256_hex(config.as_bytes());
+    for (path, values) in [
+        ("bookmarks", &["Wiki marker", "bookmark-marker"][..]),
+        ("widgets", &["widget-marker", "widget.example"]),
+        (
+            "notifications",
+            &["RH_GATE_MARKER", "channel-marker", "rule-marker"],
+        ),
+        ("env", &["RH_GATE_MARKER"]),
+        (
+            "containers",
+            &["exclude-marker", "group-marker", "Override marker"],
+        ),
+        ("general", &["greeting-marker"]),
+        ("history", &["45s"]),
+        ("config", &["raw-marker"]),
+        ("appearance", &["css-marker"]),
+        ("meta", &[]),
+        ("revisions", &[]),
+        ("security", &[]),
+    ] {
+        let url = format!("/api/settings/{path}");
+        let anon = req(addr, "GET", &url, &[], "").await;
+        assert_eq!(anon.status, 401, "{url}");
+        assert!(!anon.body.contains(&hash), "{url}");
+        let signed = req(addr, "GET", &url, &[("Cookie", &cookie)], "").await;
+        assert_eq!(signed.status, 200, "{url}: {}", signed.body);
+        assert_json_no_store(&signed, &url);
+        for value in values {
+            assert!(!anon.body.contains(value), "{url} exposed {value}");
+            assert!(signed.body.contains(value), "{url} omitted {value}");
+        }
+        let data = json_of(&signed, &url);
+        match path {
+            "security" | "revisions" => {}
+            "appearance" => assert_eq!(
+                data["hash"],
+                crate::auth::sha256_hex(b"/* css-marker */")
+            ),
+            _ => assert_eq!(data["hash"], hash, "{url}"),
+        }
+    }
+}
