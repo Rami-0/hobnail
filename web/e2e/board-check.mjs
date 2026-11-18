@@ -146,7 +146,7 @@ try {
   await go("/app/containers", visible("row"));
   const sameNames = (selector, attribute) => `JSON.stringify([...document.querySelectorAll(${JSON.stringify(selector)})].map((row) => row.getAttribute(${JSON.stringify(attribute)})).sort()) === ${JSON.stringify(JSON.stringify(expectedNames))}`;
   await wait(sameNames('[data-testid="row"]', "data-name"), "scoped Viewer container list shows exactly the board containers");
-  await wait(sameNames('#side .ctr a[href^="/app/containers/"]', "title"), "scoped Viewer sidebar tree shows exactly the board containers");
+  await wait(sameNames('#side .ctr a[href^="/app/containers/"]:not(.logs)', "title"), "scoped Viewer sidebar tree shows exactly the board containers");
   rec.allow(({ method, status, url }) => method === "GET" && status === 404 && new URL(url).pathname === `/api/v1/boards/${hiddenBoardId}` ? "intentional out-of-scope board" : false);
   await go(`/app/boards/${hiddenBoardId}`, 'document.querySelector("main h1")?.textContent === "No such page"');
   check(await tab.ev(`!${visible("board-edit")}`), "out-of-scope board renders not found without edit controls");
