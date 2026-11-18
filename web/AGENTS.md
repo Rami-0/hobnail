@@ -255,3 +255,14 @@ visible row window. Controls remain React components from `src/ui/`.
 | `[data-log-id][data-timestamp][data-level]` | One mounted log row; timestamp in milliseconds |
 | `[data-testid="log-older"]`, `[data-testid="log-latest"]` | Older window and jump-to-latest actions |
 | `[data-testid="log-matches"]` | Current match / total in this pane |
+
+`[data-testid="log-body"]` also exposes `data-search-ms` (matching/filtering
+work in the latest frame, measured with `performance.now()`) and
+`data-search-lines` (retained rows searched). These are measurement attributes,
+not the input-to-paint latency. `log-members` contains compose-member links.
+The live and older queues share a maximum of 256 decoded lines per frame.
+`web/e2e/logs-check.mjs` defaults to both widths/themes; use `--log-fixtures`
+when starting fake-instance and `E2E_ENV=LOG_FIXTURES LOG_FIXTURES=1` for its
+real missing-container and read-error cases. The reconnect test dispatches an
+EventSource error to the captured real source, then checks the subsequent real
+request's cursor and backoff; it does not change the SSE protocol.
