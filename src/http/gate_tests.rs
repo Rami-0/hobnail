@@ -1778,13 +1778,13 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
         "/api/logout",
         "/api/state",
         "/api/stream",
-        "/api/history/system",
-        "/api/history/container/web",
+        "/api/history/system?metric=cpu",
+        "/api/history/container/web?metric=cpu",
         "/api/events",
         "/api/palette",
-        "/api/logs/stream",
-        "/api/logs/download",
-        "/api/logs/levels",
+        "/api/logs/stream?c=web",
+        "/api/logs/download?c=web",
+        "/api/logs/levels?c=web",
         "/api/logs/status",
         "/api/containers/web/env",
         "/api/containers/web/top",
@@ -1820,6 +1820,8 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
     ];
     let public = [
         "/healthz",
+        "/api/v1/session",
+        "/api/v1/invites/validate?token=example",
         "/app",
         "/app/login",
         "/app/invite/example",
@@ -1835,7 +1837,7 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
         .iter()
         .map(|s| format!("/api/settings/{s}"))
         .collect();
-    for method in ["GET", "HEAD"] {
+    for method in ["GET", "HEAD", "OPTIONS"] {
         for path in protected
             .into_iter()
             .chain(settings.iter().map(String::as_str))
@@ -1854,6 +1856,10 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
         }
         for path in pages {
             let r = req_bounded(addr, method, path, &[]).await;
+            if method == "OPTIONS" {
+                assert_eq!(r.status, 401, "{method} {path}");
+                continue;
+            }
             assert_eq!(r.status, 303, "{method} {path}");
             assert_eq!(
                 header(&r.head, "location").as_deref(),
@@ -1865,12 +1871,16 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
             let path = format!("/settings/{slug}");
             assert_eq!(
                 req_bounded(addr, method, &path, &[]).await.status,
-                303,
-                "{path}"
+                if method == "OPTIONS" { 401 } else { 303 },
+                "{method} {path}"
             );
         }
         for path in public {
             let r = req_bounded(addr, method, path, &[]).await;
+            if method == "OPTIONS" {
+                assert_eq!(r.status, 401, "{method} {path}");
+                continue;
+            }
             assert!(
                 !matches!(r.status, 303 | 401 | 403),
                 "{method} {path}: {}",
