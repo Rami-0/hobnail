@@ -97,6 +97,12 @@ try {
       if (width === 390) await inp.touchDrag(scrollBox.x, scrollBox.y-40, scrollBox.x, scrollBox.y+40, 16);
       else await tab.send('Input.dispatchMouseEvent', {type:'mouseWheel',x:scrollBox.x,y:scrollBox.y,deltaX:0,deltaY:-4});
       await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll up stops following");
+      // Move well clear of the physical bottom clamp for geometry checks,
+      // as the behavioral reference does; the tiny gesture above tests follow.
+      if (width===390) { for(let drag=0;drag<3;drag++) await inp.touchDrag(scrollBox.x,scrollBox.y-100,scrollBox.x,scrollBox.y+100,16); }
+      else await tab.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:scrollBox.x,y:scrollBox.y,deltaX:0,deltaY:-900});
+      await sleep(250);
+
       if (width === 390) { await inp.click('.log-filters'); await sleep(500); }
       const anchor = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), br=b.getBoundingClientRect(); const all=[...b.querySelectorAll('[data-log-id]')]; const r=all.find(r=>r.getBoundingClientRect().top >= br.top-.5) || all.find(r=>r.getBoundingClientRect().bottom > br.top+1); return {id:r.dataset.logId, offset:r.getBoundingClientRect().top-br.top}; })()`);
       for (const label of ['Wrap','Time','Wrap','Time']) {
