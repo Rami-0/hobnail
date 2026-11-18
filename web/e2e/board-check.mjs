@@ -53,7 +53,7 @@ try {
   check((await api("GET", `/boards/${boardId}/draft`)).data === null, "Cancel deletes server draft");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await addLink("first"); await addLink("second");
   await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`); await inp.key("ArrowDown", { modifiers: 1 });
-  await wait(`document.querySelector('[data-section="0"][data-item="0"] h3')?.textContent === "second"`, "Alt+Down moves an item");
+  await wait(`document.querySelector('[data-section="0"][data-item="0"] h3')?.textContent === "second" && document.activeElement === document.querySelector('[data-section="0"][data-item="1"] .drag-handle')`, "Alt+Down moves an item and restores focus");
   await inp.key("ArrowRight", { modifiers: 8 });
   await wait(`document.querySelector('[data-section="0"][data-item="1"] input[id$="desktop"]')?.value === "5"`, "Shift+Right resizes the moved item");
   await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(".suggestions button")', "suggestions include discovered containers"); await inp.click('.suggestions button'); await wait(`!${visible("board-picker")}`);
