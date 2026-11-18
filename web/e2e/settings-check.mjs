@@ -189,7 +189,7 @@ try {
     }
   }
 } finally {
-  await browser.close();
+  browser.quit();
   for (const id of createdUsers) await call(`/api/v1/users/${id}`, "DELETE", undefined, owner);
   const final = ok(await call("/api/settings/config", "GET", undefined, owner), "read final config");
   if (final.hash !== initial.hash) ok(await call("/api/settings/config", "POST", { base_hash: final.hash, text: initial.text }, owner), "restore config");
