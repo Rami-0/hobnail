@@ -31,7 +31,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
@@ -533,14 +532,9 @@ interface SectionProps {
  * be), so the next slice fills it and nothing below moves (no layout shift).
  */
 function Waiting({ n }: { n: number }) {
-  if (n <= 0) return null;
-  return (
-    <tr className="row-wait" aria-hidden="true">
-      <td colSpan={10} style={{ "--n": n } as CSSProperties}>
-        <span className="sr">More rows are on their way</span>
-      </td>
-    </tr>
-  );
+  return Array.from({ length: Math.max(0, n) }, (_, i) => <tr key={i} className="row-wait" aria-hidden="true">
+    {["c-name", "c-stack", "c-image", "c-state", "c-up", "c-hist", "c-num", "c-num", "c-ports", "c-act"].map((className, column) => <td key={column} className={className} />)}
+  </tr>);
 }
 
 function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
