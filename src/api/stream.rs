@@ -1,22 +1,15 @@
-//! `GET /api/v1/stream?topics=containers,stats,system` (Public): the JSON
-//! server-sent events of the React client. One `event:` name and a
-//! one-line JSON `data:` per message:
+//! Signed-in server-sent events for the React client.
 //!
-//! - `hello` [`Hello`] first; then `system` once, when a sample exists;
-//! - `containers`: the whole [`ContainersView`] when anything but the
-//!   numbers changed (a container came or went, its state, ports, ...);
-//! - `stats` [`StatsEvent`]: the numbers, on every other list update (each
-//!   stats refresh);
-//! - `system` [`SystemView`] on every host sample;
-//! - `config {}` when the config reloaded (refetch bootstrap + containers);
-//! - `resync {}` when this client fell behind (refetch everything).
+//! - `hello` [`Hello`] first, then `system` once when requested and available.
+//! - `containers` [`ContainersView`] when container metadata or state changes.
+//! - `stats` [`StatsEvent`] at the container stats refresh interval.
+//! - `system` [`SystemView`] on host samples.
+//! - `boards` [`super::boards::BoardEvent`] for boards the current account can see.
+//! - `config {}` on configuration changes and `resync {}` after a lagged subscription.
 //!
-//! Unknown topics are ignored; none (or only unknown ones) means all three.
-//! `boards` sends board IDs and versions only to accounts with board access.
-//! `config` and `resync` go to everyone:
-//! the stream never carries session-only data. The connection counts as a
-//! viewer (the live loop samples only while someone watches) for as long as
-//! its body is alive; a `: ping` comment every 25 s keeps proxies open.
+//! Unknown topics are ignored. No recognized topics means all topics. The
+//! connection counts as a viewer while its body is alive, and a `: ping`
+//! comment every 25 seconds keeps proxies open.
 
 use std::convert::Infallible;
 use std::pin::Pin;

@@ -20,6 +20,7 @@ use crate::{
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
 pub enum IntegrationKind {
     Http,
 }
@@ -31,10 +32,10 @@ pub struct IntegrationInput {
     name: String,
     kind: IntegrationKind,
     base_url: String,
-    #[cfg_attr(test, ts(optional))]
+    #[cfg_attr(test, ts(optional = nullable))]
     icon: Option<String>,
     enabled: bool,
-    #[cfg_attr(test, ts(optional))]
+    #[cfg_attr(test, ts(optional = nullable))]
     secret: Option<String>,
 }
 
@@ -42,6 +43,8 @@ pub struct IntegrationInput {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationSecretInput {
+    /// The URL shown when the token was entered. Only its origin is compared.
+    base_url: String,
     secret: String,
 }
 
@@ -85,6 +88,7 @@ pub struct IntegrationVerdict {
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
 pub(super) enum VerdictClass {
     Success,
     Dns,
@@ -212,13 +216,21 @@ fn save(
     get(conn, &id, true)
 }
 
-fn target(conn: &Connection, id: &str) -> Result<(String, Option<(String, String)>), ApiError> {
+fn target(
+    conn: &Connection,
+    id: &str,
+) -> Result<(String, Option<client::BoundCredential>), ApiError> {
     let view = get(conn, id, true)?;
     let credential = conn
         .query_row(
             "SELECT secret_origin,secret FROM integrations WHERE id=?1 AND secret IS NOT NULL",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| {
+                Ok(client::BoundCredential {
+                    origin: r.get(0)?,
+                    token: r.get(1)?,
+                })
+            },
         )
         .optional()?;
     Ok((view.base_url, credential))
@@ -227,7 +239,7 @@ fn target(conn: &Connection, id: &str) -> Result<(String, Option<(String, String
 async fn test_connection(
     state: &AppState,
     url: String,
-    credential: Option<(String, String)>,
+    credential: Option<client::BoundCredential>,
 ) -> IntegrationVerdict {
     let started = Instant::now();
     let policy = state.config.current();
@@ -301,16 +313,45 @@ pub(super) async fn route(
             ));
         }
         Handler::IntegrationSetSecret | Handler::IntegrationClearSecret => {
-            let secret = if m.route.handler == Handler::IntegrationSetSecret {
-                let IntegrationSecretInput { secret } = super::read_json(req, 8192).await?;
+            let replacement = if m.route.handler == Handler::IntegrationSetSecret {
+                let IntegrationSecretInput { base_url, secret } =
+                    super::read_json(req, 8192).await?;
                 secret_value(&secret)?;
-                Some(secret)
+                let origin = client::origin(&base_url).ok_or_else(|| {
+                    ApiError::bad_request(
+                        "supply the integration URL shown when the token was entered",
+                        Some("base_url"),
+                    )
+                })?;
+                Some((origin, secret))
             } else {
                 None
             };
             db.dashboard(|c| {
-                c.execute("UPDATE integrations SET secret=?2, secret_origin=CASE WHEN ?2 IS NULL THEN NULL ELSE origin END WHERE id=?1", params![id, secret])?;
-                get(c,id,true)
+                let saved: String = c
+                    .query_row("SELECT origin FROM integrations WHERE id=?1", [id], |r| {
+                        r.get(0)
+                    })
+                    .optional()?
+                    .ok_or_else(ApiError::not_found)?;
+                if let Some((origin, token)) = replacement {
+                    if saved != origin {
+                        return Err(ApiError::bad_request(
+                            "the integration origin changed; reload it before entering a token",
+                            Some("base_url"),
+                        ));
+                    }
+                    c.execute(
+                        "UPDATE integrations SET secret=?2, secret_origin=?3 WHERE id=?1",
+                        params![id, token, origin],
+                    )?;
+                } else {
+                    c.execute(
+                        "UPDATE integrations SET secret=NULL, secret_origin=NULL WHERE id=?1",
+                        [id],
+                    )?;
+                }
+                get(c, id, true)
             })?
         }
         Handler::IntegrationDelete => {

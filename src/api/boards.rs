@@ -32,7 +32,7 @@ pub struct BoardSummary {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardCreate {
     name: String,
-    #[cfg_attr(test, ts(optional))]
+    #[cfg_attr(test, ts(optional = nullable))]
     icon: Option<String>,
 }
 
@@ -79,16 +79,21 @@ pub struct GridSpans {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case", tag = "kind"))]
 pub enum BoardPayload {
     Container {
         target: ContainerMatch,
+        #[cfg_attr(test, ts(optional = nullable))]
         title: Option<String>,
+        #[cfg_attr(test, ts(optional = nullable))]
         icon: Option<String>,
+        #[cfg_attr(test, ts(optional = nullable))]
         link: Option<String>,
     },
     Link {
         title: String,
         url: String,
+        #[cfg_attr(test, ts(optional = nullable))]
         icon: Option<String>,
     },
     Widget {
@@ -102,6 +107,7 @@ pub enum BoardPayload {
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case", tag = "by", deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case", tag = "by"))]
 pub enum ContainerMatch {
     Compose { project: String, service: String },
     Name { name: String },
@@ -160,7 +166,7 @@ pub struct BoardDraft {
 pub struct BoardUpdate {
     version: u32,
     name: String,
-    #[cfg_attr(test, ts(optional))]
+    #[cfg_attr(test, ts(optional = nullable))]
     icon: Option<String>,
     position: u32,
 }
@@ -681,7 +687,7 @@ pub(super) async fn route(
             super::validate_icon(icon.as_deref())?;
             let board = db.dashboard(|c| -> Result<_, ApiError> {
                 let id: String = c.query_row("INSERT INTO boards (name,icon,position,created,updated)
-                    VALUES (?1,?2,(SELECT coalesce(max(position)+1,0) FROM boards),?3,?3) RETURNING id",
+                    VALUES (?1,?2,(SELECT min(coalesce(max(position)+1,0),4294967295) FROM boards),?3,?3) RETURNING id",
                     params![name,icon,now], |r| r.get(0))?;
                 get(c,&id)
             })?;
@@ -726,12 +732,6 @@ pub(super) async fn route(
             let input: BoardUpdate = super::read_json(req, 8192).await?;
             super::validate_label(&input.name, "name")?;
             super::validate_icon(input.icon.as_deref())?;
-            if input.position >= u32::MAX - 1 {
-                return Err(ApiError::bad_request(
-                    "position is out of range",
-                    Some("position"),
-                ));
-            }
             let result = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c,id)?;
                 if board.version != input.version { return Ok(Err(board.version)); }
@@ -763,6 +763,9 @@ pub(super) async fn route(
                 Ok(board.version.saturating_add(1))
             })?;
             publish(state, id, version);
+            // The removed grants prevent scoped subscribers from receiving the
+            // board ID. A generic invalidation lets them refresh navigation.
+            let _ = state.events.send("reload".into());
             super::no_content()
         }
         Handler::BoardDraft => {
@@ -816,4 +819,71 @@ pub(super) async fn route(
 
 fn publish(state: &AppState, id: &str, version: u32) {
     let _ = state.events.send(format!("board:{id}:{version}").into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn board_validation_checks_ids_links_spans_and_targets() {
+        let db = crate::db::Db::open_in_memory().unwrap();
+        db.recover_owner(None, "test", 1).unwrap();
+        let owner = db.accounts().unwrap().pop().unwrap();
+        let original = BoardDocument {
+            version: 0,
+            sections: Vec::new(),
+        };
+        let mut board: BoardDocument = serde_json::from_value(serde_json::json!({
+            "version": 0,
+            "sections": [{
+                "title": "Links",
+                "position": 1,
+                "items": [{
+                    "position": 2,
+                    "spans": {"mobile": 4, "tablet": 8, "desktop": 12, "rows": 1},
+                    "payload": {"kind": "link", "title": "Example", "url": "https://example.test"}
+                }]
+            }]
+        }))
+        .unwrap();
+        db.dashboard(|conn| -> Result<(), ApiError> {
+            let config = crate::config::Config::default();
+            let check = |doc: &BoardDocument| validate(doc, &original, &owner, conn, &config);
+            assert!(check(&board).is_ok());
+            board.sections[0].id = Some("arbitrary".into());
+            assert_eq!(
+                check(&board).unwrap_err().field.as_deref(),
+                Some("sections")
+            );
+            board.sections[0].id = None;
+            let item = &mut board.sections[0].items[0];
+            item.spans.desktop = 13;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("spans"));
+            let item = &mut board.sections[0].items[0];
+            item.spans.desktop = 12;
+            item.payload = BoardPayload::Link {
+                title: "Unsafe".into(),
+                url: "javascript:alert(1)".into(),
+                icon: None,
+            };
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("url"));
+            board.sections[0].items[0].payload = BoardPayload::Widget {
+                widget_id: "unknown".into(),
+            };
+            assert_eq!(
+                check(&board).unwrap_err().field.as_deref(),
+                Some("widget_id")
+            );
+            board.sections[0].items[0].payload = BoardPayload::Integration {
+                integration_id: "a".repeat(32),
+            };
+            assert_eq!(
+                check(&board).unwrap_err().field.as_deref(),
+                Some("integration_id")
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
 }

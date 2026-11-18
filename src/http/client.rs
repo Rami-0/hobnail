@@ -121,20 +121,29 @@ pub(crate) fn origin(url: &str) -> Option<String> {
     })
 }
 
+pub(crate) struct BoundCredential {
+    pub origin: String,
+    pub token: String,
+}
+
 /// One request to the saved destination. Redirects are terminal responses.
 /// Recheck the actual request URI before a credential can become a header.
 pub(crate) async fn send_bound(
     url: String,
-    credential: Option<(String, String)>,
+    credential: Option<BoundCredential>,
     policy: &HttpPolicy,
 ) -> Result<Response, String> {
     let destination = origin(&url).ok_or("blocked invalid destination")?;
     let mut req = Request::get(url);
-    if let Some((bound_origin, secret)) = credential {
+    if let Some(BoundCredential {
+        origin: bound_origin,
+        token,
+    }) = credential
+    {
         if destination != bound_origin {
             return Err("blocked credential destination".into());
         }
-        req = req.header("authorization", format!("Bearer {secret}"));
+        req = req.header("authorization", format!("Bearer {token}"));
     }
     send(req, policy).await
 }

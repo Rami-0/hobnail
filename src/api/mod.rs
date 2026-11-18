@@ -85,13 +85,7 @@ pub(crate) async fn route(
             }
             let mut response =
                 crate::ui::icons::dashboard_icon(state, &format!("{name}.svg"), None).await;
-            if response
-                .headers()
-                .get(CACHE_CONTROL)
-                .is_some_and(|v| v == "public, max-age=86400")
-            {
-                set(&mut response, CACHE_CONTROL, "private, max-age=86400");
-            }
+            set(&mut response, CACHE_CONTROL, "no-store");
             response
         }
         Handler::Onboard => {
