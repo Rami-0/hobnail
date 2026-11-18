@@ -731,6 +731,32 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
 }
 
 #[tokio::test]
+async fn disabled_integration_cannot_send_its_credential() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let created = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({
+                "name":"Disabled","kind":"http","enabled":false,
+                "base_url":"https://example.test","secret":"saved-token"
+            }),
+            201,
+        )
+        .await;
+    assert_eq!(created["has_secret"], true);
+    let path = format!(
+        "/api/v1/integrations/{}/test",
+        created["id"].as_str().unwrap()
+    );
+    let response = owner.call("POST", &path, Value::Null).await;
+    assert_api_error(&response, 400, "bad_request", &path);
+    assert!(response.body.contains("Enable this integration"));
+}
+
+#[tokio::test]
 async fn connection_verdict_enforces_outbound_policy() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

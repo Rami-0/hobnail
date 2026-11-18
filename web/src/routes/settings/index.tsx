@@ -105,7 +105,7 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
     {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
     <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{(item.admin?.base_url ?? item.origin)}</p>{item.admin?.enabled === false && <p>Disabled</p>}
       {verdicts[item.id] && <Note kind={verdicts[item.id]?.ok ? "ok" : "warn"} testId="integration-verdict">{verdicts[item.id]?.class}: {verdicts[item.id]?.message}{verdicts[item.id]?.class === "tls" && " Only public certificate authorities are trusted."}</Note>}</div>
-      {admin && <div className="settings-actions"><Button onClick={() => edit(item)}>Edit</Button><Button busy={busy} data-testid="integration-test" onClick={async () => {
+      {admin && <div className="settings-actions"><Button onClick={() => edit(item)}>Edit</Button><Button busy={busy} disabled={item.admin?.enabled === false} data-testid="integration-test" onClick={async () => {
         setBusy(true); const result = await api.post<IntegrationVerdict>(`/api/v1/integrations/${item.id}/test`);
         if (result.kind === "ok") setVerdicts((old) => ({ ...old, [item.id]: result.data })); else setError(result.message); setBusy(false);
       }}>Test connection</Button>{manage && <Button className="danger" onClick={() => setDeleting(item)}>Delete</Button>}</div>}

@@ -222,7 +222,13 @@ fn target(
     conn: &Connection,
     id: &str,
 ) -> Result<(String, Option<client::BoundCredential>), ApiError> {
-    let view = get(conn, id, true)?;
+    let details = get(conn, id, true)?.admin.expect("admin details");
+    if !details.enabled {
+        return Err(ApiError::bad_request(
+            "Enable this integration before testing its connection.",
+            None,
+        ));
+    }
     let credential = conn
         .query_row(
             "SELECT secret_origin,secret FROM integrations WHERE id=?1 AND secret IS NOT NULL",
@@ -235,7 +241,7 @@ fn target(
             },
         )
         .optional()?;
-    Ok((view.admin.expect("admin details").base_url, credential))
+    Ok((details.base_url, credential))
 }
 
 fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
@@ -379,8 +385,8 @@ pub(super) async fn route(
             return Ok(super::no_content());
         }
         Handler::IntegrationTest => {
-            limit_test(state, user.id)?;
             let (url, credential) = db.dashboard(|c| target(c, id))?;
+            limit_test(state, user.id)?;
             return Ok(super::json(
                 StatusCode::OK,
                 &test_connection(state, url, credential).await,
