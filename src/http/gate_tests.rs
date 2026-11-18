@@ -1803,6 +1803,7 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
         "/containers?frag=table",
         "/containers/web",
         "/containers/web/logs",
+        "/stacks/shop/logs",
         "/history",
         "/alerts",
         "/login",
@@ -1905,10 +1906,9 @@ async fn public_credential_writes_require_same_origin_and_known_host() {
 
 fn credentials_of(response: &Resp) -> (String, String) {
     let cookie = header(&response.head, "set-cookie").unwrap();
-    let csrf = json_of(response, "signed in")["csrf"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    assert_json_no_store(response, "signed in");
+    let data: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+    let csrf = data["csrf"].as_str().unwrap().to_owned();
     (cookie.split(';').next().unwrap().to_owned(), csrf)
 }
 
@@ -1991,7 +1991,8 @@ async fn invite_roles_and_account_management() {
         )
         .await;
         assert_eq!(r.status, 201, "{}", r.body);
-        let v = json_of(&r, "created invite");
+        assert_json_no_store(&r, "created invite");
+        let v: serde_json::Value = serde_json::from_str(&r.body).unwrap();
         let token = v["token"].as_str().unwrap();
         let r = req(addr, "GET", "/api/v1/invites", &owner_headers, "").await;
         assert!(!r.body.contains(token));

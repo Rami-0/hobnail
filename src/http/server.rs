@@ -588,9 +588,9 @@ mod tests {
             1
         );
         assert_eq!(
-            html.matches("<script src=").count(),
+            html.matches(r#"<script src="/static/app.js?v="#).count(),
             1,
-            "one script request"
+            "one app script request"
         );
     }
 
