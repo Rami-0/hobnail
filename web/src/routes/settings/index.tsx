@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
@@ -17,6 +17,8 @@ import { Switch } from "../../ui/Switch.tsx";
 import { Note, EmptyState } from "../../ui/Note.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
+
+const Users = lazy(() => import("./Users.tsx"));
 
 export default function SettingsPage() {
   const { route } = useRoute();
@@ -37,6 +39,7 @@ export default function SettingsPage() {
       items={available.map((id) => ({ id, label: settingsTabs[id], href: `/app/settings/${id}` }))} />}
     {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
     {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
+    {allowed && tab === "users" && <Suspense fallback={<p role="status">Loading users…</p>}><Users /></Suspense>}
   </div>;
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
