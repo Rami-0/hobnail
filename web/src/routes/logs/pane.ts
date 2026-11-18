@@ -1,5 +1,5 @@
 import { api } from "../../api/session.ts";
-import { chipName, filterRows, matcher, nextMatch, Ring, type LogLine, type MatchPosition, type Row } from "./model.ts";
+import { chipName, filterRows, matcher, matchRanges, nextMatch, Ring, type LogLine, type MatchPosition, type Row } from "./model.ts";
 
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
@@ -13,6 +13,14 @@ export interface PaneStatus { state: string; count: number; matches: number; cur
 // One animation-frame flush and a visible window bound work independently of tail size.
 export class LogPane {
   private static panes = new Set<LogPane>();
+  private static highlights = new Map<LogPane, Range[]>();
+  private static paintHighlights(): void {
+    const browser = globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown; CSS?: { highlights?: Map<string, unknown> } };
+    if (!browser.Highlight || !browser.CSS?.highlights) return;
+    const ranges = [...LogPane.highlights.values()].flat();
+    if (ranges.length) browser.CSS.highlights.set("rh-log-search", new browser.Highlight(...ranges));
+    else browser.CSS.highlights.delete("rh-log-search");
+  }
   private static stepped = new WeakSet<Event>();
   private static match: MatchPosition | null = null;
   readonly ring: Ring;
@@ -108,7 +116,7 @@ export class LogPane {
   };
   private disconnect(): void { this.source?.close(); this.older?.close(); clearTimeout(this.retry); this.source = this.older = null; }
   close(): void {
-    LogPane.panes.delete(this);
+    LogPane.panes.delete(this); LogPane.highlights.delete(this); LogPane.paintHighlights();
     if (!LogPane.panes.size) LogPane.match = null;
     window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
@@ -137,7 +145,7 @@ export class LogPane {
     es.addEventListener("meta", (e) => {
       const m = JSON.parse((e as MessageEvent<string>).data) as { c: number; name: string; running: boolean; status: string };
       this.names.set(m.c, m.name);
-      if (!m.running) this.message = `This container is stopped. ${m.status}`;
+      if (!m.running) this.message = this.query.startsWith("stack=") ? `${m.name} is stopped. Showing its last lines. ${m.status}` : `This container is stopped. ${m.status}`;
       this.schedule();
     });
     es.addEventListener("l", (e) => {
@@ -402,9 +410,25 @@ export class LogPane {
     }
     requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
     if ((this.pending.length || this.pendingOlder.length) && !this.options.paused) this.schedule();
+    this.highlight();
     this.report({ state: this.options.paused && this.state === "live" ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following, waiting: this.pending.length,
       message: search.error ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
+  }
+  private highlight(): void {
+    const ranges: Range[] = [];
+    if (this.options.search) for (const element of this.content.querySelectorAll(".log-text")) {
+      const nodes: Array<{ node: Text; start: number; end: number }> = [];
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let node: Node | null, text = "";
+      while ((node = walker.nextNode())) { const start = text.length; text += node.textContent ?? ""; nodes.push({ node: node as Text, start, end: text.length }); }
+      for (const [start, end] of matchRanges(text, this.options.search, this.options.regex, this.options.sensitive)) {
+        const first = nodes.find((n) => start >= n.start && start < n.end), last = nodes.find((n) => end > n.start && end <= n.end);
+        if (first && last) { const range = document.createRange(); range.setStart(first.node, start-first.start); range.setEnd(last.node, end-last.start); ranges.push(range); }
+      }
+    }
+    if (ranges.length) LogPane.highlights.set(this, ranges); else LogPane.highlights.delete(this);
+    LogPane.paintHighlights();
   }
   private searchKey = "";
   private countsKey = "";

@@ -110,3 +110,12 @@ export function chipName(name: string, stack: string, limit: number): string {
   if (stack && name.startsWith(stack) && /^[-_]/.test(name.slice(stack.length))) name = name.slice(stack.length + 1);
   return name.length <= limit ? name : name.slice(0, Math.ceil(limit / 2) - 1) + "…" + name.slice(-Math.floor(limit / 2));
 }
+
+export function matchRanges(text: string, query: string, regex: boolean, sensitive: boolean): Array<[number, number]> {
+  if (!query) return [];
+  try {
+    const pattern = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expression = new RegExp(pattern, sensitive ? "g" : "gi");
+    return [...text.matchAll(expression)].filter((m) => m[0].length > 0).slice(0, 1000).map((m) => [m.index, m.index + m[0].length]);
+  } catch { return []; }
+}

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName } from "./model.ts";
+import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -50,4 +50,11 @@ test("stack chips remove the project prefix and retain both identifying ends", (
   assert.equal(chipName("shop_web_1", "shop", 12), "web_1");
   assert.equal(chipName("shop-very-long-service-2", "shop", 12), "very-…vice-2");
   assert.equal(chipName("shopping_web", "shop", 20), "shopping_web");
+});
+
+test("highlight ranges preserve literal punctuation and reject invalid or empty matches", () => {
+  assert.deepEqual(matchRanges("[a] [A]", "[a]", false, false), [[0,3],[4,7]]);
+  assert.deepEqual(matchRanges("red RED", "red", true, true), [[0,3]]);
+  assert.deepEqual(matchRanges("text", "[", true, false), []);
+  assert.deepEqual(matchRanges("text", "^", true, false), []);
 });

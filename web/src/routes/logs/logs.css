@@ -10,3 +10,5 @@
 .log-container-context{margin-block:16px;min-width:0}.log-container-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.log-container-head>div{flex:1;min-width:0}.log-container-head h1{font-size:20px;display:flex;align-items:center;gap:8px;overflow-wrap:anywhere;margin:0}.log-container-head p{font-size:12px;overflow-wrap:anywhere}.log-level-history{margin-top:16px}.log-level-history figure{margin:12px 0}.log-level-history figcaption{font-size:12px;color:var(--text-2)}
 
 .log-container-head>.icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;border-radius:9px;object-fit:contain}.log-container-head>.avatar{font-weight:700;color:var(--on-accent);background:var(--accent)}
+
+::highlight(rh-log-search){background:var(--warn);color:var(--bg)}
