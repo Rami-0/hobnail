@@ -133,6 +133,20 @@ try {
   check((await api("PUT", `/boards/${boardId}`, (await api("GET", `/boards/${boardId}`)).data.document, viewer)).status === 403, "Viewer writes return 403");
   check((await api("GET", "/integrations", undefined, viewer)).data.length === 0, "Viewer integration scope filters results");
   check((await api("GET", "/boards", undefined, viewer)).data.every((board) => board.id === boardId), "Viewer board navigation is scope-filtered");
+  const expectedNames = (await api("GET", `/boards/${boardId}`)).data.resolved
+    .flatMap((item) => item.container ? [item.container.name] : []).sort();
+  const allNames = (await api("GET", "/containers")).data.groups.flatMap((group) => group.containers.map((row) => row.name));
+  check(expectedNames.length > 0 && allNames.length > expectedNames.length, "fixture includes both granted and excluded containers");
+  check(await tab.ev(`(() => {
+    const links = [...document.querySelectorAll('[data-testid="sidebar"] a')];
+    return !links.some((link) => link.pathname.startsWith("/app/settings"))
+      && JSON.stringify(links.filter((link) => link.pathname.startsWith("/app/boards/")).map((link) => link.pathname))
+        === JSON.stringify([${JSON.stringify(`/app/boards/${boardId}`)}]);
+  })()`), "scoped Viewer navigation shows only the granted board and no Settings");
+  await go("/app/containers", visible("row"));
+  const sameNames = (selector, attribute) => `JSON.stringify([...document.querySelectorAll(${JSON.stringify(selector)})].map((row) => row.getAttribute(${JSON.stringify(attribute)})).sort()) === ${JSON.stringify(JSON.stringify(expectedNames))}`;
+  await wait(sameNames('[data-testid="row"]', "data-name"), "scoped Viewer container list shows exactly the board containers");
+  await wait(sameNames('#side .ctr a[href^="/app/containers/"]', "title"), "scoped Viewer sidebar tree shows exactly the board containers");
   rec.allow(({ method, status, url }) => method === "GET" && status === 404 && new URL(url).pathname === `/api/v1/boards/${hiddenBoardId}` ? "intentional out-of-scope board" : false);
   await go(`/app/boards/${hiddenBoardId}`, 'document.querySelector("main h1")?.textContent === "No such page"');
   check(await tab.ev(`!${visible("board-edit")}`), "out-of-scope board renders not found without edit controls");
