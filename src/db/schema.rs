@@ -81,6 +81,92 @@ ALTER TABLE ctr_roll ADD COLUMN n INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX events_ts ON events (ts);
 CREATE INDEX events_kind_ts ON events (kind, ts, subject);
 ",
+    // v7: accounts and database-backed dashboard configuration.
+    "
+DELETE FROM kv WHERE key = 'auth.password';
+DROP TABLE sessions;
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer')),
+  disabled INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+  scoped INTEGER NOT NULL DEFAULT 0 CHECK (scoped IN (0, 1)),
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL,
+  CHECK (role != 'owner' OR (disabled = 0 AND scoped = 0))
+);
+CREATE UNIQUE INDEX users_one_owner ON users (role) WHERE role = 'owner';
+CREATE TRIGGER users_keep_owner BEFORE DELETE ON users
+WHEN OLD.role = 'owner' BEGIN SELECT RAISE(ABORT, 'cannot delete owner'); END;
+CREATE TRIGGER users_keep_owner_role BEFORE UPDATE OF role ON users
+WHEN OLD.role = 'owner' AND NEW.role != 'owner'
+BEGIN SELECT RAISE(ABORT, 'cannot demote owner'); END;
+CREATE TABLE sessions (
+  token_hash TEXT PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created INTEGER NOT NULL,
+  expires INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX sessions_user ON sessions (user_id);
+CREATE TRIGGER users_revoke_disabled AFTER UPDATE OF disabled ON users
+WHEN NEW.disabled = 1 BEGIN DELETE FROM sessions WHERE user_id = NEW.id; END;
+CREATE TABLE access_grants (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('board', 'integration')),
+  target_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, kind, target_id)
+) WITHOUT ROWID;
+CREATE TABLE invites (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+  token_hash TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+  scopes TEXT CHECK (scopes IS NULL OR json_valid(scopes)),
+  created INTEGER NOT NULL,
+  expires INTEGER NOT NULL,
+  used_at INTEGER,
+  revoked_at INTEGER
+);
+CREATE TABLE boards (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+);
+CREATE TABLE integrations (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config)),
+  secret TEXT,
+  secret_origin TEXT,
+  CHECK ((secret IS NULL AND secret_origin IS NULL)
+      OR (secret IS NOT NULL AND secret_origin IS NOT NULL AND secret_origin = origin))
+);
+CREATE TABLE board_items (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  integration_id TEXT REFERENCES integrations(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  config TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config)),
+  layout TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(layout))
+);
+CREATE INDEX board_items_board ON board_items (board_id);
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL CHECK (json_valid(value))
+) WITHOUT ROWID;
+CREATE TABLE drafts (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL CHECK (json_valid(value)),
+  updated INTEGER NOT NULL,
+  PRIMARY KEY (user_id, key)
+) WITHOUT ROWID;
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
@@ -143,4 +229,48 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<(), String> {
             .map_err(e)?;
     }
     tx.commit().map_err(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_migration_discards_credentials_and_preserves_other_settings() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        for sql in &MIGRATIONS[..6] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch(
+            "PRAGMA user_version = 6;
+             INSERT INTO kv VALUES ('auth.password', 'old'), ('theme', 'dark');
+             INSERT INTO sessions VALUES ('old', 0, 1);",
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let count = |sql| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM sessions"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM kv WHERE key = 'theme'"), 1);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM kv WHERE key = 'auth.password'"),
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM boards"), 0);
+        conn.execute(
+            "INSERT INTO users (name, password_hash, role, created, updated)
+                      VALUES ('alice', 'hash', 'owner', 1, 1)",
+            [],
+        )
+        .unwrap();
+        for sql in [
+            "INSERT INTO users (name, password_hash, role, created, updated)
+             VALUES ('bob', 'hash', 'owner', 1, 1)",
+            "UPDATE users SET role = 'admin'",
+            "UPDATE users SET disabled = 1",
+            "DELETE FROM users",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "{sql}");
+        }
+    }
 }
