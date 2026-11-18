@@ -434,10 +434,10 @@ export class LogPane {
         for (const row of slice) fragment.append(this.row(row));
         this.content.replaceChildren(fragment);
       }
-      this.top.style.height = `${this.offsets[start] ?? 0}px`;
-      const after = end < this.visible.length ? (this.offsets[end] ?? total) : total;
-      this.bottom.style.height = `${Math.max(0, total - after)}px`;
-      this.measure(); total = this.layout(); this.restore();
+      this.content.style.transform = `translateY(${this.offsets[start] ?? 0}px)`;
+      this.measure(); total = this.layout();
+      this.top.style.height = `${total}px`;
+      this.restore();
     }
     if (!this.following && this.anchor) {
       const element = this.content.querySelector<HTMLElement>(`[data-log-id="${this.anchor.id}"]`);
