@@ -38,6 +38,7 @@ struct DisabledRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ScopeRequest {
+    #[serde(deserialize_with = "Deserialize::deserialize")]
     scopes: Option<Scopes>,
 }
 

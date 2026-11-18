@@ -1033,4 +1033,146 @@ mod tests {
         );
         assert!(state.db.account_session(&token, now_s(), now_s()).is_none());
     }
+
+    #[test]
+    fn rate_limit_backoff_sequence_and_cap() {
+        let mut l = RateLimiter::default();
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let mut t = 1_000_000u64;
+        let mut waits = Vec::new();
+        for _ in 0..9 {
+            assert!(l.check(ip, t).is_ok());
+            l.failure(ip, t);
+            let w = l.check(ip, t).unwrap_err();
+            waits.push(w);
+            // One ms before the end it still waits; at the end it is free.
+            assert!(l.check(ip, t + w * 1000 - 1).is_err());
+            t += w * 1000;
+        }
+        assert_eq!(waits, vec![1, 2, 4, 8, 16, 32, 60, 60, 60]);
+        // A success clears it.
+        l.success(ip);
+        assert!(l.check(ip, t).is_ok());
+        // 15 minutes without failures forget the counter.
+        l.failure(ip, t);
+        l.failure(ip, t + 1000);
+        assert_eq!(l.check(ip, t + 1000), Err(2));
+        let later = t + FORGET_AFTER_MS + 2000;
+        l.failure(ip, later);
+        assert_eq!(l.check(ip, later), Err(1), "counter restarted");
+    }
+
+    #[test]
+    fn rate_limit_global() {
+        let mut l = RateLimiter::default();
+        let t = 5_000_000u64;
+        // Five different clients fail once each: no global back-off yet.
+        for n in 1..=GLOBAL_FREE {
+            l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, n as u8)), t);
+        }
+        let fresh = IpAddr::V4(Ipv4Addr::new(10, 2, 0, 1));
+        assert!(l.check(fresh, t).is_ok());
+        // The next failure anywhere starts the global back-off.
+        l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 99)), t);
+        assert_eq!(l.check(fresh, t), Err(1));
+        for _ in 0..20 {
+            l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 99)), t);
+        }
+        assert_eq!(l.check(fresh, t), Err(60), "capped at 60 s");
+        // A client that signed in before is not held by the global slot
+        // (only by its own), so the owner cannot be locked out this way.
+        let owner = IpAddr::V4(Ipv4Addr::new(10, 3, 0, 1));
+        l.success(owner);
+        for _ in 0..20 {
+            l.failure(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 99)), t);
+        }
+        assert_eq!(l.check(fresh, t), Err(60));
+        assert!(l.check(owner, t).is_ok());
+        l.failure(owner, t);
+        assert_eq!(l.check(owner, t), Err(1), "its own back-off still applies");
+        // Bounded memory under many clients.
+        for n in 0..1000u32 {
+            l.failure(IpAddr::V4(Ipv4Addr::from(0x0b00_0000 + n)), t);
+        }
+        assert!(l.ips.len() <= MAX_TRACKED_IPS);
+        for n in 0..100u32 {
+            l.success(IpAddr::V4(Ipv4Addr::from(0x0c00_0000 + n)));
+        }
+        assert_eq!(l.trusted.len(), MAX_TRUSTED);
+    }
+
+    #[test]
+    fn csrf_is_derived_from_the_session() {
+        let t = "0f".repeat(32);
+        assert_eq!(csrf_for(&t), csrf_for(&t));
+        assert_eq!(csrf_for(&t).len(), 64);
+        assert_ne!(csrf_for(&t), csrf_for(&"0e".repeat(32)));
+        assert_ne!(
+            csrf_for(&t),
+            sha256_hex(t.as_bytes()),
+            "not the stored hash"
+        );
+        assert!(ct_eq(b"abc", b"abc"));
+        assert!(!ct_eq(b"abc", b"abd"));
+        assert!(!ct_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn cookie_format() {
+        let c = session_cookie(&"aa".repeat(32));
+        assert!(c.starts_with("rh_session="));
+        for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"] {
+            assert!(c.contains(part), "{c}");
+        }
+    }
+
+    #[test]
+    fn safe_next_rules() {
+        for bad in [
+            "/\t/evil.example",
+            "/\u{0}",
+            "/ /evil",
+            "/%09/evil.example",
+            "//evil.example",
+            "/\\evil.example",
+            "https://evil.example",
+            "javascript:alert(1)",
+            "",
+            "evil",
+            "/\n/evil.example",
+            "/\r/evil.example",
+            "/\u{7f}x",
+            "/%2F/evil.example",
+            "/%5Cevil.example",
+            "/%20/evil",
+            "/a%20b", // decoded form has a space
+            "/%00",
+            "/%zz",
+            "/%E2%80%",
+            "/ü",
+            "\\\\evil.example",
+        ] {
+            assert_eq!(safe_next(bad), None, "{bad:?}");
+        }
+        for good in [
+            "/",
+            "/containers?state=running",
+            "/containers/web-1",
+            "/history#cpu",
+            "/a%2Db",
+        ] {
+            assert_eq!(safe_next(good), Some(good), "{good:?}");
+        }
+        assert_eq!(safe_next(&format!("/{}", "a".repeat(5000))), None);
+    }
+
+    #[test]
+    fn origin_parsing() {
+        assert_eq!(url_authority("http://a:1"), Some("a:1"));
+        assert_eq!(url_authority("https://a:1/x?y"), Some("a:1"));
+        assert_eq!(url_authority("http://[::1]:3200/"), Some("[::1]:3200"));
+        assert_eq!(url_authority("ftp://a"), None);
+        assert_eq!(url_authority("http://"), None);
+        assert_eq!(url_authority("http://u@a"), None);
+    }
 }

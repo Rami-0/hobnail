@@ -1068,11 +1068,7 @@ async fn api_v1_write_origin_and_referer() {
     assert_api_error(&r, 405, "method_not_allowed", "Referer only");
 }
 
-/// The `/api/v1` access table walked as a visitor (password set, `[logs]
-/// require_login` at its default): every `Session` and `LogsGate` read
-/// answers 401 in the error shape with no data, every `Public` one answers
-/// something else. Every write row must be listed in `WRITES` (so the gate
-/// tests above cover it). New rows are covered without touching this test.
+/// Walk the v1 declarations as a visitor with no cookie or a forged cookie.
 #[tokio::test]
 async fn api_v1_access_table_walked_as_a_visitor() {
     use crate::api::access::{Access, ROUTES};
@@ -1095,6 +1091,14 @@ async fn api_v1_access_table_walked_as_a_visitor() {
             );
             continue;
         }
+        assert_eq!(
+            r.access == Access::Public,
+            matches!(
+                path.as_str(),
+                "/api/v1/session" | "/api/v1/invites/validate"
+            ),
+            "{what}: public reads are explicitly listed",
+        );
         for cookie in [None, Some(forged.as_str())] {
             let h: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
             for m in ["GET", "HEAD"] {
@@ -1827,15 +1831,15 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
         "/icon-512.png",
         "/apple-touch-icon.png",
     ];
-    let settings = SETTINGS_READS.iter().map(|s| format!("/api/settings/{s}"));
+    let settings: Vec<_> = SETTINGS_READS
+        .iter()
+        .map(|s| format!("/api/settings/{s}"))
+        .collect();
     for method in ["GET", "HEAD"] {
-        for path in protected.into_iter().chain(
-            settings
-                .clone()
-                .collect::<Vec<_>>()
-                .iter()
-                .map(String::as_str),
-        ) {
+        for path in protected
+            .into_iter()
+            .chain(settings.iter().map(String::as_str))
+        {
             let r = req_bounded(addr, method, path, &[]).await;
             assert_eq!(r.status, 401, "{method} {path}");
             assert_eq!(
@@ -2085,6 +2089,13 @@ async fn invite_roles_and_account_management() {
         .await;
         assert_eq!(r.status, 200, "{}", r.body);
         assert!(get_session(addr, &h).await["user"].is_null());
+        let r = req(addr, "PUT", &format!("{base}/scopes"), &owner_headers, "{}").await;
+        assert_api_error(
+            &r,
+            400,
+            "bad_request",
+            "omitting scopes cannot broaden access",
+        );
         let r = req(
             addr,
             "PUT",

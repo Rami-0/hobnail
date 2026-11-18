@@ -16,9 +16,7 @@
 //! context lines itself (`static/logs.js`).
 //!
 //! Log text is never written to the app's own log, the database or alert
-//! messages. Logs need a signed-in user (
-//! default true): container logs often contain secrets. Only containers the
-//! dashboard shows can be tailed (not ones hidden or excluded by the owner).
+//! messages. Logs require a session. Tails are limited to visible containers.
 
 pub mod client;
 pub mod frame;

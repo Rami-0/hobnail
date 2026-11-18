@@ -5,7 +5,7 @@
 //!   healthcheck            GET /healthz on the first RH_LISTEN address (for Docker)
 //!   check-config [path]    validate a config file and exit
 //!   notify-test <channel>  send a test notification to a configured channel
-//!   set-password           set the login password (TTY without echo, or stdin)
+//!   set-password [name]    recover the owner account (password from TTY or stdin)
 //!   mock-receiver [addr]   local fake webhook/Slack/Telegram receiver for tests
 //!   version
 

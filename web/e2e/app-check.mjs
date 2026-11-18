@@ -11,13 +11,10 @@
 //     every stylesheet answers text/css and every script text/javascript, and
 //     that the styles applied (document.styleSheets non-empty and the custom
 //     property CSS_VAR, default --bg, resolves on :root);
-//   - signs in through the UI with real key and mouse events and out again:
-//     signed-out shell a[data-testid=signin] -> /app/login, form[data-testid=
-//     login] with input[name=password] and button[type=submit]; ONE wrong
-//     password first (first pass only) must show [data-testid=login-error];
-//     signed in the shell shows [data-testid=user] with "admin" and
-//     button[data-testid=signout]; after signing out the sign-in link is back
-//     and GET /api/v1/session answers user null.
+//   - onboards a fresh instance through the browser, then checks username
+//     and password sign-in with real key and mouse events. One failed attempt
+//     exercises the visible login error and the rate limit. The account menu
+//     signs out and returns the browser to /app/login.
 // Screenshots per width, scheme and state go to OUT (default: a new temp dir).
 //   HB_PASSWORD=... node web/e2e/app-check.mjs <base URL>
 //   HB_PASSWORD=... scripts/e2e.sh web/e2e/app-check.mjs <base URL>   (no host Node)
