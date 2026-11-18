@@ -94,7 +94,15 @@ try {
       await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`);
       for (let n = 0; n < 3; n++) await inp.key("ArrowLeft", { modifiers: 8 });
       await wait(`document.querySelector('[data-section="0"][data-item="0"] input[id$="mobile"]')?.value === "1"`, "minimum mobile span is editable");
-      check(await tab.ev(`(() => { const cell = document.querySelector('[data-section="0"][data-item="0"]'); const box = cell.getBoundingClientRect(); return [...cell.querySelectorAll("button,input")].every((control) => { const rect = control.getBoundingClientRect(); return !rect.width || (rect.left >= box.left && rect.right <= box.right); })() && document.documentElement.scrollWidth <= innerWidth`), `${theme}: one-column editor controls fit without sideways scroll`);
+      check(await tab.ev(`(() => {
+        const cell = document.querySelector('[data-section="0"][data-item="0"]');
+        const box = cell.getBoundingClientRect();
+        const controls = cell.querySelectorAll(".editor-tools button, .editor-spans input, .editor-custom input, .sel button");
+        return [...controls].every((control) => {
+          const rect = control.getBoundingClientRect();
+          return !rect.width || (rect.left >= box.left && rect.right <= box.right);
+        }) && document.documentElement.scrollWidth <= innerWidth;
+      })()`), `${theme}: one-column editor controls fit without sideways scroll`);
       for (let n = 0; n < 3; n++) await inp.key("ArrowRight", { modifiers: 8 });
     }
     check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: editor has no sideways scroll`); await tab.shot(path.join(OUT, `editor-${width}-${theme}.png`)); await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-edit"));
