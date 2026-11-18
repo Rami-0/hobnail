@@ -110,14 +110,36 @@ pub(crate) async fn route(
         | Handler::SessionsRevoke => {
             accounts::route(state, req, m, principal.expect("account gate")).await
         }
-        Handler::Containers => containers::list(state).await,
+        Handler::Containers => {
+            containers::list(
+                state,
+                principal
+                    .expect("viewer gate")
+                    .account
+                    .container_visibility(state),
+            )
+            .await
+        }
         Handler::Container => {
             let name = m.param("name").unwrap_or_default();
-            let admin =
-                principal.expect("viewer gate").account.role >= crate::db::accounts::Role::Admin;
+            let account = principal.expect("viewer gate").account;
+            let visible = account.container_visibility(state);
+            if !account.can_see_container(&visible, name) {
+                return ApiError::not_found().response();
+            }
+            let admin = !account.is_scoped() && account.role >= crate::db::accounts::Role::Admin;
             containers::get(state, name, query, admin).await
         }
-        Handler::Strips => strips::get(state).await,
+        Handler::Strips => {
+            strips::get(
+                state,
+                principal
+                    .expect("viewer gate")
+                    .account
+                    .container_visibility(state),
+            )
+            .await
+        }
         Handler::Stream => stream::get(
             state,
             query,

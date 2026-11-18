@@ -42,16 +42,17 @@ pub fn code(c: Cell) -> u8 {
     }
 }
 
-pub fn strips(state: &AppState, now: i64) -> Strips {
+pub fn strips(state: &AppState, now: i64, visible: &super::access::ContainerVisibility) -> Strips {
     let cfg = state.config.current();
     let snap = state.snapshot();
     // Visibility only: stats and the host do not change who is listed.
-    let groups = view::build_groups(&cfg, &snap, &Default::default(), "");
+    let mut groups = view::build_groups(&cfg, &snap, &Default::default(), "");
     let st = view::strips(state, now);
     let codes = |s: &crate::db::strips::Strip| s.cells.iter().map(|c| code(*c)).collect();
     let mut containers = BTreeMap::new();
     let mut stacks = BTreeMap::new();
-    for g in &groups {
+    for g in &mut groups {
+        g.cards.retain(|c| !c.container || visible.allows(&c.name));
         let mut any = false;
         for c in g.cards.iter().filter(|c| c.container) {
             any = true;
@@ -70,10 +71,13 @@ pub fn strips(state: &AppState, now: i64) -> Strips {
     }
 }
 
-pub async fn get(state: &std::sync::Arc<AppState>) -> hyper::Response<crate::http::server::Body> {
+pub async fn get(
+    state: &std::sync::Arc<AppState>,
+    visible: super::access::ContainerVisibility,
+) -> hyper::Response<crate::http::server::Body> {
     let st = state.clone();
     let now = crate::util::unix_now() as i64;
-    match tokio::task::spawn_blocking(move || strips(&st, now)).await {
+    match tokio::task::spawn_blocking(move || strips(&st, now, &visible)).await {
         Ok(v) => super::json(hyper::StatusCode::OK, &v),
         Err(_) => super::containers::internal(),
     }

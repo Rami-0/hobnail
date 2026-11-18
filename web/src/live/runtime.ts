@@ -197,6 +197,7 @@ function onMessage(m: StreamMessage): void {
   switch (m.type) {
     case "boards":
       void fetchBootstrap();
+      if (stripsWanted > 0) void fetchStrips();
       for (const cb of boardListeners) cb(m.data as { id: string; version: number });
       return;
     case "hello":

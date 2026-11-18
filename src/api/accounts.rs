@@ -280,6 +280,9 @@ async fn handle(
                 _ => unreachable!("account route"),
             };
             db.change_account(id, change, now)?;
+            if handler == Handler::UserScopes {
+                state.changed("reload");
+            }
         }
     }
     Ok(super::json(StatusCode::OK, &json!({"ok": true})))

@@ -232,6 +232,26 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         Ok(session) => session,
         Err(denied) => return denied.response(v1, page),
     };
+    if let Some(session) = &session {
+        if let Err(denied) = access::check_scope(
+            &session.account,
+            access,
+            lookup.as_ref(),
+            &path,
+            req.uri().query().unwrap_or_default(),
+        ) {
+            return denied.response(v1, page);
+        }
+        if let Some(name) = path.strip_prefix("/api/history/container/") {
+            let visible = session.account.container_visibility(&state);
+            if visible.is_scoped()
+                && !crate::db::api::percent_decode(name)
+                    .is_some_and(|name| session.account.can_see_container(&visible, &name))
+            {
+                return crate::db::api::json_error(StatusCode::NOT_FOUND, "container not found");
+            }
+        }
+    }
     let mut response = dispatch(&state, req, &path, host, read, lookup, session.as_ref()).await;
     if let Some(session) = session {
         crate::auth::refresh_cookie(&state, &session, &mut response);
@@ -302,7 +322,9 @@ async fn dispatch(
         }
         p if p.starts_with("/icons/") => crate::ui::icon_response(state, &p[7..]),
         p if p.starts_with("/api/logs/") => {
-            crate::logs::route(state, &req, &session.expect("viewer gate").hash).await
+            let session = session.expect("viewer gate");
+            let visible = session.account.container_visibility(state);
+            crate::logs::route(state, &req, &session.hash, &visible).await
         }
         p if p.starts_with("/api/containers/") => {
             crate::ui::pages::container::api(state, &req).await
@@ -417,7 +439,7 @@ fn sse(state: Arc<AppState>, host: String, session_hash: String) -> Response<Bod
         loop {
             tokio::select! {
                 m = sub.recv() => {
-                    if !st.db.session_is_valid(&session_hash, crate::auth::now_s()) { break; }
+                    if !st.db.account_session(&session_hash, crate::auth::now_s()).is_some_and(|account| !account.is_scoped()) { break; }
                     let id = match m {
                         Ok(id) => id,
                         Err(broadcast::error::RecvError::Lagged(_)) => Arc::from("reload"),
@@ -433,7 +455,7 @@ fn sse(state: Arc<AppState>, host: String, session_hash: String) -> Response<Bod
                     if tx.send(msg).await.is_err() { break; }
                 }
                 _ = ping.tick() => {
-                    if !st.db.session_is_valid(&session_hash, crate::auth::now_s()) { break; }
+                    if !st.db.account_session(&session_hash, crate::auth::now_s()).is_some_and(|account| !account.is_scoped()) { break; }
                     if tx.send(Bytes::from_static(b": ping\n\n")).await.is_err() { break; }
                 }
                 _ = tx.closed() => break,

@@ -296,13 +296,6 @@ pub(super) async fn route(
         Handler::Integration => db.dashboard(|c| get(c, id, user.role >= Role::Admin))?,
         Handler::IntegrationCreate | Handler::IntegrationUpdate => {
             let create = m.route.handler == Handler::IntegrationCreate;
-            if create && user.role != Role::Owner && user.scopes.is_some() {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    "scoped accounts cannot create integrations",
-                ));
-            }
             let input = super::read_json(req, 16384).await?;
             let saved = db.dashboard(|c| save(c, (!create).then_some(id), input))?;
             return Ok(super::json(

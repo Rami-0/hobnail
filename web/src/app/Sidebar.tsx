@@ -113,6 +113,7 @@ interface StackItemProps {
   active: string | null;
   folded: boolean;
   filtering: boolean;
+  scoped: boolean;
   strip: number[] | undefined;
   onFold: (stack: string, folded: boolean) => void;
 }
@@ -123,6 +124,7 @@ function sameStack(a: StackItemProps, b: StackItemProps): boolean {
     a.active === b.active &&
     a.folded === b.folded &&
     a.filtering === b.filtering &&
+    a.scoped === b.scoped &&
     a.strip === b.strip &&
     a.onFold === b.onFold &&
     JSON.stringify(a.stack) === JSON.stringify(b.stack) &&
@@ -136,6 +138,7 @@ const StackItem = memo(function StackItem({
   active,
   folded,
   filtering,
+  scoped,
   strip,
   onFold,
 }: {
@@ -144,6 +147,7 @@ const StackItem = memo(function StackItem({
   active: string | null;
   folded: boolean;
   filtering: boolean;
+  scoped: boolean;
   strip: number[] | undefined;
   onFold: (stack: string, folded: boolean) => void;
 }) {
@@ -173,7 +177,7 @@ const StackItem = memo(function StackItem({
         >
           {stack.running}/{stack.total}
         </span>
-        {stack.project && (
+        {!scoped && stack.project && (
           <a className="ia logs" href={stackLogsUrl(stack.name)} title="Logs of the whole stack (current interface)" aria-label={`Logs of the stack ${stack.title}`}>
             {LOGS_ICON}
           </a>
@@ -190,9 +194,9 @@ const StackItem = memo(function StackItem({
               <span className="nm">{c.title}</span>
               {!c.running && <span className="sr"> ({c.label})</span>}
             </a>
-            <a className="ia logs" href={logsUrl(c.name)} title="Logs (current interface)" aria-label={`Logs of ${c.title}`}>
+            {!scoped && <a className="ia logs" href={logsUrl(c.name)} title="Logs (current interface)" aria-label={`Logs of ${c.title}`}>
               {LOGS_ICON}
-            </a>
+            </a>}
           </li>
         ))}
       </ul>
@@ -322,6 +326,7 @@ function Tree({ active, filterRef }: { active: string | null; filterRef: Ref<HTM
             active={active}
             folded={!!folded[stack.name]}
             filtering={filtering}
+            scoped={!!b?.scoped}
             strip={strips?.stacks[stack.name]}
             onFold={onFold}
           />
@@ -405,7 +410,8 @@ export function Sidebar({
         />
         {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
           icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
-        <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />
+        {b && (!b.scoped || b.role === "admin") && <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        {b && !b.scoped && <>
         <div className="nav-sep label" aria-hidden="true">
           Current interface
         </div>
@@ -427,6 +433,7 @@ export function Sidebar({
             ) : null
           }
         />
+        </>}
         <button type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
           <FunnelIcon aria-hidden="true" />
           <span className="nav-label">Stacks and containers</span>

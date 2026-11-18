@@ -641,10 +641,13 @@ fn series(db: &crate::db::Db, name: &str, w: &Window, signed: bool) -> SeriesSet
 
 // ---------------------------------------------------------------- handlers
 
-pub async fn list(state: &std::sync::Arc<AppState>) -> hyper::Response<crate::http::server::Body> {
+pub async fn list(
+    state: &std::sync::Arc<AppState>,
+    visible: super::access::ContainerVisibility,
+) -> hyper::Response<crate::http::server::Body> {
     let st = state.clone();
     let now = crate::util::unix_now() as i64;
-    match tokio::task::spawn_blocking(move || current_view(&st, now)).await {
+    match tokio::task::spawn_blocking(move || visible.filter_view(current_view(&st, now))).await {
         Ok(v) => super::json(hyper::StatusCode::OK, &v),
         Err(_) => internal(),
     }

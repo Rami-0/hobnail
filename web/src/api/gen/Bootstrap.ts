@@ -4,7 +4,7 @@ import type { Features } from "./Features.ts";
 import type { Refresh } from "./Refresh.ts";
 import type { Role } from "./Role.ts";
 
-export type Bootstrap = { role: Role, boards: Array<BoardNavigation>, default_board: string | null, remote_icons: boolean,
+export type Bootstrap = { role: Role, scoped: boolean, boards: Array<BoardNavigation>, default_board: string | null, remote_icons: boolean,
 /**
  * `[page] title`, else the host name.
  */

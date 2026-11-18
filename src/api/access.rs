@@ -1,8 +1,16 @@
 //! Route declarations and the shared authentication and role gate.
 
+//!
+//! Owners and unscoped accounts use the role gate alone. Scoped accounts
+//! retain admin access only for editing granted boards and integrations.
+//! Container reads use the union of container targets on granted boards.
+//! Legacy pages and host-wide reads are unavailable to scoped accounts.
+
+use std::collections::HashSet;
+
 use hyper::{HeaderMap, Method};
 
-use super::error::ApiError;
+use super::{boards::ContainerMatch, error::ApiError};
 use crate::auth::{self, Session, WriteDenied};
 use crate::db::accounts::Role;
 use crate::state::AppState;
@@ -10,6 +18,58 @@ use crate::state::AppState;
 pub use crate::db::accounts::Account as Principal;
 
 impl Principal {
+    pub fn is_scoped(&self) -> bool {
+        self.role != Role::Owner && self.scopes.is_some()
+    }
+
+    pub fn can_see_container(&self, visible: &ContainerVisibility, name: &str) -> bool {
+        !self.is_scoped() || visible.allows(name)
+    }
+
+    pub(super) fn container_targets(
+        &self,
+        conn: &rusqlite::Connection,
+    ) -> Result<Option<HashSet<ContainerMatch>>, ApiError> {
+        let Some(scopes) = self.scopes.as_ref().filter(|_| self.is_scoped()) else {
+            return Ok(None);
+        };
+        let mut targets = HashSet::new();
+        let mut stmt =
+            conn.prepare("SELECT config FROM board_items WHERE board_id=?1 AND kind='container'")?;
+        for id in &scopes.boards {
+            let configs = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+            for config in configs {
+                if let super::boards::BoardPayload::Container { target, .. } =
+                    super::boards::decode(&config?)?
+                {
+                    targets.insert(target);
+                }
+            }
+        }
+        Ok(Some(targets))
+    }
+
+    pub fn container_visibility(&self, state: &AppState) -> ContainerVisibility {
+        if !self.is_scoped() {
+            return ContainerVisibility(None);
+        }
+        let targets = state
+            .db
+            .dashboard(|conn| self.container_targets(conn))
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        ContainerVisibility(Some(
+            state
+                .snapshot()
+                .containers
+                .iter()
+                .filter(|c| targets.contains(&ContainerMatch::from(*c)))
+                .map(|c| c.name.clone())
+                .collect(),
+        ))
+    }
+
     pub fn can_see_board(&self, id: &str) -> bool {
         self.role == Role::Owner
             || self
@@ -25,6 +85,96 @@ impl Principal {
                 .as_ref()
                 .is_none_or(|s| s.integrations.iter().any(|i| i == id))
     }
+}
+
+/// An unrestricted view, or the names visible in the request's snapshot.
+pub struct ContainerVisibility(Option<HashSet<String>>);
+
+impl ContainerVisibility {
+    pub fn allows(&self, name: &str) -> bool {
+        self.0.as_ref().is_none_or(|names| names.contains(name))
+    }
+
+    pub fn is_scoped(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub(super) fn filter_view(
+        &self,
+        mut view: super::containers::ContainersView,
+    ) -> super::containers::ContainersView {
+        if self.is_scoped() {
+            view.docker_error = None;
+            view.groups.retain_mut(|group| {
+                group.containers.retain(|row| self.allows(&row.name));
+                group.running = group
+                    .containers
+                    .iter()
+                    .filter(|row| row.state == "running")
+                    .count() as u32;
+                group.stopped = group.containers.len() as u32 - group.running;
+                !group.containers.is_empty()
+            });
+        }
+        view
+    }
+}
+
+/// Apply scoped restrictions before dispatch. New admin routes require full
+/// admin access unless explicitly listed here.
+pub(crate) fn check_scope(
+    principal: &Principal,
+    access: Access,
+    lookup: Option<&Lookup>,
+    path: &str,
+    query: &str,
+) -> Result<(), Denied> {
+    if !principal.is_scoped() {
+        return Ok(());
+    }
+    if let Some(lookup) = lookup {
+        if let Lookup::Found(m) = lookup {
+            if access == Access::Admin {
+                let id = m.param("id").unwrap_or_default();
+                let granted = match m.route.handler {
+                    Handler::BoardSave
+                    | Handler::BoardUpdate
+                    | Handler::BoardSuggestions
+                    | Handler::BoardDraft
+                    | Handler::BoardDraftSave
+                    | Handler::BoardDraftDelete => principal.can_see_board(id),
+                    Handler::IntegrationUpdate
+                    | Handler::IntegrationSetSecret
+                    | Handler::IntegrationClearSecret
+                    | Handler::IntegrationTest => principal.can_see_integration(id),
+                    _ => false,
+                };
+                if !granted {
+                    return Err(Denied::Role);
+                }
+            }
+            if m.route.handler == Handler::Stream && super::stream::Topics::requested(query).system
+            {
+                return Err(Denied::Role);
+            }
+        }
+        return Ok(());
+    }
+    if access == Access::Admin {
+        return Err(Denied::Role);
+    }
+    if matches!(path, "/api/logout" | "/custom.css")
+        || path.starts_with("/api/history/container/")
+        || matches!(
+            path,
+            "/api/logs/stream" | "/api/logs/download" | "/api/logs/levels"
+        )
+        || path.starts_with("/static/")
+        || path.starts_with("/icons/")
+    {
+        return Ok(());
+    }
+    Err(Denied::Role)
 }
 
 /// Who may call a route.

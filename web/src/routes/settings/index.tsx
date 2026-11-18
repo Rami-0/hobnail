@@ -21,11 +21,14 @@ export default function SettingsPage() {
   const b = useBootstrap();
   const tab = route.name === "settings" ? route.tab : "boards";
   const admin = b?.role === "owner" || b?.role === "admin";
+  if (!b) return null;
+  if (b.scoped && !admin) return <div className="page"><h1>Settings</h1><p>Settings require administrative access.</p></div>;
+  const manage = admin && !b.scoped;
   return <div className="page settings-page"><h1>Settings</h1><TabNav label="Settings" current={tab} items={[
     { id: "boards", label: "Boards", href: "/app/settings/boards" }, { id: "integrations", label: "Integrations", href: "/app/settings/integrations" },
-  ]} />{tab === "boards" ? <Boards admin={admin} /> : <Integrations admin={admin} />}</div>;
+  ]} />{tab === "boards" ? <Boards admin={admin} manage={manage} /> : <Integrations admin={admin} manage={manage} />}</div>;
 }
-function Boards({ admin }: { admin: boolean }) {
+function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [settings, setSettings] = useState<DashboardSettings>({ default_board: null });
   const [editing, setEditing] = useState<BoardSummary | "new" | null>(null);
@@ -50,9 +53,9 @@ function Boards({ admin }: { admin: boolean }) {
     }
     await refresh(); setBusy(false);
   };
-  return <section className="settings-section" data-testid="settings-boards"><header className="board-heading"><div><h2>Boards</h2><p className="muted">Choose what appears on each board. New boards start empty.</p></div>{admin && <Button variant="primary" data-testid="board-create" onClick={() => { setFields({}); setEditing("new"); }}>Create board</Button>}</header>
+  return <section className="settings-section" data-testid="settings-boards"><header className="board-heading"><div><h2>Boards</h2><p className="muted">Choose what appears on each board. New boards start empty.</p></div>{manage && <Button variant="primary" data-testid="board-create" onClick={() => { setFields({}); setEditing("new"); }}>Create board</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
-    {admin && <Select label="Default board" value={settings.default_board ?? ""} options={[{ value: "", label: "Home" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} onChange={async (value) => {
+    {manage && <Select label="Default board" value={settings.default_board ?? ""} options={[{ value: "", label: "Home" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} onChange={async (value) => {
       const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { default_board: value || null } });
       if (result.kind === "ok") { setSettings(result.data); await fetchBootstrap(); } else setError(result.message);
     }} />}
@@ -60,7 +63,7 @@ function Boards({ admin }: { admin: boolean }) {
     <div className="settings-list">{boards.map((board, index) => <div key={board.id} className="settings-row"><a href={`/app/boards/${board.id}`}>{board.name}</a>{admin && <div className="settings-actions">
       <Button aria-label={`Move ${board.name} up`} disabled={busy || index === 0} onClick={() => { void move(board, boards[index - 1]); }}>↑</Button>
       <Button aria-label={`Move ${board.name} down`} disabled={busy || index === boards.length - 1} onClick={() => { void move(board, boards[index + 1]); }}>↓</Button>
-      <Button onClick={() => { setFields({}); setEditing(board); }}>Edit</Button><Button className="danger" onClick={() => setDeleting(board)}>Delete</Button></div>}</div>)}</div>
+      <Button onClick={() => { setFields({}); setEditing(board); }}>Edit</Button>{manage && <Button className="danger" onClick={() => setDeleting(board)}>Delete</Button>}</div>}</div>)}</div>
     <Dialog open={editing !== null} title={editing === "new" ? "Create board" : "Edit board"} onClose={() => setEditing(null)} testId="board-form" footer={<><Button onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" form="board-form" variant="primary" busy={busy}>Save</Button></>}>
       {editing && <form id="board-form" onSubmit={async (e) => { e.preventDefault(); if (busy) return; const form = new FormData(e.currentTarget); setBusy(true); setFields({});
         const body = { name: String(form.get("name")), icon: String(form.get("icon")) || null, ...(editing === "new" ? {} : { version: editing.version, position: editing.position }) };
@@ -77,7 +80,7 @@ function Boards({ admin }: { admin: boolean }) {
     }}>Delete board</Button></>}><p>Delete “{deleting?.name}” and its layout? Services and integrations remain available.</p></Dialog>
   </section>;
 }
-function Integrations({ admin }: { admin: boolean }) {
+function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [items, setItems] = useState<IntegrationView[]>([]);
   const [editing, setEditing] = useState<IntegrationView | "new" | null>(null);
   const [deleting, setDeleting] = useState<IntegrationView | null>(null);
@@ -97,7 +100,7 @@ function Integrations({ admin }: { admin: boolean }) {
   const edit = (item: IntegrationView | "new") => { setEditing(item); setUrl(item === "new" ? "" : (item.admin?.base_url ?? item.origin)); setSecret(""); setEnabled(item === "new" ? true : item.admin?.enabled ?? true); setFields({}); };
   const bound = editing && editing !== "new" ? editing.admin?.secret_origin : null;
   const changed = needsSecret(bound, url);
-  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{admin && <Button variant="primary" data-testid="integration-create" onClick={() => edit("new")}>Add integration</Button>}</header>
+  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="primary" data-testid="integration-create" onClick={() => edit("new")}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
     {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
     <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{(item.admin?.base_url ?? item.origin)}</p>{item.admin?.enabled === false && <p>Disabled</p>}
@@ -105,7 +108,7 @@ function Integrations({ admin }: { admin: boolean }) {
       {admin && <div className="settings-actions"><Button onClick={() => edit(item)}>Edit</Button><Button busy={busy} data-testid="integration-test" onClick={async () => {
         setBusy(true); const result = await api.post<IntegrationVerdict>(`/api/v1/integrations/${item.id}/test`);
         if (result.kind === "ok") setVerdicts((old) => ({ ...old, [item.id]: result.data })); else setError(result.message); setBusy(false);
-      }}>Test connection</Button><Button className="danger" onClick={() => setDeleting(item)}>Delete</Button></div>}
+      }}>Test connection</Button>{manage && <Button className="danger" onClick={() => setDeleting(item)}>Delete</Button>}</div>}
     </div>)}</div>
     <Dialog open={!!editing} title={editing === "new" ? "Add integration" : "Edit integration"} onClose={close} testId="integration-form" footer={<><Button onClick={close}>Cancel</Button><Button type="submit" form="integration-form" variant="primary" busy={busy}>Save</Button></>}>
       {editing && <form id="integration-form" onSubmit={async (e) => {

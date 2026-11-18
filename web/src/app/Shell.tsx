@@ -283,6 +283,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       if (!act) return;
       switch (act.kind) {
         case "go":
+          if (b?.scoped && act.page !== "containers" && !(act.page === "settings" && b.role === "admin")) return;
           e.preventDefault();
           navigate(GO_HREF[act.page]());
           return;
@@ -304,6 +305,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           moveKeyRow(act.dir);
           return;
         case "logs": {
+          if (b?.scoped) return;
           const u = logsTarget(current);
           if (u) {
             e.preventDefault();
@@ -321,7 +323,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("focusin", onFocus);
     };
-  }, [current, setOpen]);
+  }, [b?.scoped, b?.role, current, setOpen]);
 
   // ---- banners ----
   const dockerError = b?.features.docker ? (ctrs.data?.docker_error ?? b.docker_error) : null;
@@ -360,7 +362,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
               <Brand site={null} />
             </span>
             <div className="top-title">{title}</div>
-            <Vitals />
+            {b && !b.scoped && <Vitals />}
             <ThemeButton />
             <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
               <RefreshCwIcon aria-hidden="true" />
@@ -409,6 +411,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <BoxIcon aria-hidden="true" />
           <span>Containers</span>
         </a>
+        {b && !b.scoped && <>
         <a className="bb-i" href="/logs">
           <ScrollTextIcon aria-hidden="true" />
           <span>
@@ -422,6 +425,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           </span>
           {(b?.alerts_firing ?? 0) > 0 && <b className="bb-n">{b?.alerts_firing}</b>}
         </a>
+        </>}
         <button
           type="button"
           className="bb-i"

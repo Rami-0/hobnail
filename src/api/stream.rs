@@ -107,7 +107,7 @@ impl Topics {
         boards: true,
     };
 
-    pub fn parse(query: &str) -> Topics {
+    pub(super) fn requested(query: &str) -> Topics {
         let q = crate::ui::fmt::parse_query(query);
         let mut t = Topics {
             containers: false,
@@ -126,6 +126,11 @@ impl Topics {
                 }
             }
         }
+        t
+    }
+
+    pub fn parse(query: &str) -> Topics {
+        let t = Self::requested(query);
         if t.containers || t.stats || t.system || t.boards {
             t
         } else {
@@ -242,9 +247,11 @@ impl hyper::body::Body for StreamBody {
 }
 
 /// The current list and its signature.
-fn current(state: &AppState) -> (ContainersView, u64) {
+fn current(state: &AppState, account: &super::access::Principal) -> (ContainersView, u64) {
     let now = crate::util::unix_now() as i64;
-    let v = super::containers::current_view(state, now);
+    let v = account
+        .container_visibility(state)
+        .filter_view(super::containers::current_view(state, now));
     let sig = signature(&v, &state.snapshot());
     (v, sig)
 }
@@ -260,8 +267,11 @@ async fn run(
         return;
     }
     let list = topics.containers || topics.stats;
-    let mut sig = list.then(|| current(&st).1);
-    if topics.system {
+    let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else {
+        return;
+    };
+    let mut sig = list.then(|| current(&st, &account).1);
+    if topics.system && !account.is_scoped() {
         if let Some(s) = system_view(&st) {
             if tx.send(event("system", &s)).await.is_err() {
                 return;
@@ -273,9 +283,11 @@ async fn run(
     loop {
         let msg = tokio::select! {
             m = sub.recv() => match m {
-                Ok(id) => match &*id {
+                Ok(id) => {
+                    let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
+                    match &*id {
                     "groups" if list => {
-                        let (v, s) = current(&st);
+                        let (v, s) = current(&st, &account);
                         if topics.containers && sig != Some(s) {
                             sig = Some(s);
                             event("containers", &v)
@@ -285,25 +297,25 @@ async fn run(
                             continue;
                         }
                     }
-                    "sys" if topics.system => match system_view(&st) {
+                    "sys" if topics.system && !account.is_scoped() => match system_view(&st) {
                         Some(s) => event("system", &s),
                         None => continue,
                     },
                     "reload" => {
                         // The client refetches the list.
                         if list {
-                            sig = Some(current(&st).1);
+                            sig = Some(current(&st, &account).1);
                         }
                         event("config", &serde_json::json!({}))
                     }
                     raw if topics.boards && raw.starts_with("board:") => {
                         let Some((id, version)) = raw[6..].split_once(':') else { continue };
                         let Ok(version) = version.parse() else { continue };
-                        let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
                         if !account.can_see_board(id) { continue; }
                         event("boards", &super::boards::BoardEvent { id: id.into(), version })
                     }
                     _ => continue,
+                    }
                 },
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     sig = None;

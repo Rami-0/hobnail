@@ -227,11 +227,16 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         );
     }
     for method in ["GET", "PUT", "PATCH", "DELETE"] {
+        let (status, code) = if method == "GET" {
+            (404, "not_found")
+        } else {
+            (403, "forbidden")
+        };
         let path = format!("/api/v1/boards/{hidden}");
         assert_api_error(
             &admin.call(method, &path, json!({})).await,
-            404,
-            "not_found",
+            status,
+            code,
             &path,
         );
     }
@@ -242,10 +247,15 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         ("DELETE", "draft"),
     ] {
         let path = format!("/api/v1/boards/{hidden}/{suffix}");
+        let (status, code) = if suffix == "suggestions" {
+            (404, "not_found")
+        } else {
+            (403, "forbidden")
+        };
         assert_api_error(
             &admin.call(method, &path, json!({})).await,
-            404,
-            "not_found",
+            status,
+            code,
             &path,
         );
     }
@@ -258,10 +268,15 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         ("POST", "/test"),
     ] {
         let path = format!("/api/v1/integrations/{hidden_i}{suffix}");
+        let (status, code) = if method == "GET" {
+            (404, "not_found")
+        } else {
+            (403, "forbidden")
+        };
         assert_api_error(
             &admin.call(method, &path, json!({})).await,
-            404,
-            "not_found",
+            status,
+            code,
             &path,
         );
     }
@@ -304,8 +319,9 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
     );
 
     let settings = "/api/v1/settings";
-    for id in ["nonexistent", hidden.as_str()] {
-        let r = admin
+    {
+        let id = "nonexistent";
+        let r = owner
             .call("PATCH", settings, json!({"default_board":id}))
             .await;
         assert_api_error(&r, 400, "bad_request", "invalid default");
@@ -314,6 +330,14 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
             "default_board"
         );
     }
+    assert_api_error(
+        &admin
+            .call("PATCH", settings, json!({"default_board":visible}))
+            .await,
+        403,
+        "forbidden",
+        settings,
+    );
     owner
         .json("PATCH", settings, json!({"default_board":hidden}), 200)
         .await;
@@ -396,6 +420,110 @@ async fn upstream_request(socket: &mut TcpStream) -> String {
         incoming.push(socket.read_u8().await.unwrap());
     }
     String::from_utf8(incoming).unwrap()
+}
+
+#[tokio::test]
+async fn scoped_viewers_only_read_containers_on_their_boards() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st.clone()).await).await;
+    let board = owner.board("Service").await;
+    let path = format!("/api/v1/boards/{board}");
+    owner.json("PUT", &path, json!({"version":0,"sections":[{
+        "title":"Services","position":0,"items":[{
+            "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+            "payload":{"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}
+        }]
+    }]}), 200).await;
+    let scopes = json!({"boards":[board],"integrations":[]});
+    let viewer = owner.guest("scoped-reader", "viewer", scopes.clone()).await;
+    let admin = owner.guest("scoped-editor", "admin", scopes).await;
+
+    let list = viewer
+        .json("GET", "/api/v1/containers", Value::Null, 200)
+        .await;
+    assert_eq!(list["groups"][0]["containers"][0]["name"], "web");
+    assert_eq!(list["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(list["groups"][0]["containers"].as_array().unwrap().len(), 1);
+    assert_eq!(list["groups"][0]["stopped"], 0);
+    let strips = viewer.json("GET", "/api/v1/strips", Value::Null, 200).await;
+    assert_eq!(strips["containers"].as_object().unwrap().len(), 1);
+    assert_eq!(strips["stacks"]["shop"], strips["containers"]["web"]);
+    for (route, status) in [
+        ("/api/v1/containers/web", 200),
+        ("/api/v1/containers/db", 404),
+        ("/api/history/container/web?metric=cpu", 200),
+        ("/api/history/container/db?metric=cpu", 404),
+        ("/api/logs/levels?c=web", 200),
+        ("/api/logs/levels?c=db", 404),
+        ("/api/logs/stream?c=db", 400),
+        ("/api/logs/download?c=db", 400),
+        ("/api/logs/status", 403),
+        ("/api/state", 403),
+        ("/api/events", 403),
+        ("/api/history/system?metric=cpu", 403),
+        ("/api/palette", 403),
+        ("/api/v1/stream?topics=system", 403),
+        ("/api/stream", 403),
+        ("/", 403),
+        ("/containers/web", 403),
+    ] {
+        assert_eq!(
+            viewer.call("GET", route, Value::Null).await.status,
+            status,
+            "{route}"
+        );
+    }
+    for route in [
+        "/settings",
+        "/settings/general",
+        "/api/settings",
+        "/api/settings/config",
+        "/api/containers/web/env",
+        "/api/containers/web/health",
+        "/api/containers/web/top",
+    ] {
+        assert_eq!(
+            admin.call("GET", route, Value::Null).await.status,
+            403,
+            "{route}"
+        );
+    }
+    for (method, route) in [
+        ("POST", "/api/v1/boards".to_string()),
+        ("POST", "/api/v1/integrations".to_string()),
+        ("DELETE", path.clone()),
+    ] {
+        assert_eq!(
+            admin.call(method, &route, json!({})).await.status,
+            403,
+            "{route}"
+        );
+    }
+    let (mut stream, _) = Stream::open(
+        owner.addr,
+        "/api/v1/stream?topics=containers,stats",
+        &viewer.cookie,
+    )
+    .await;
+    assert_eq!(stream.next().await.0, "hello");
+    st.changed("groups");
+    let (topic, stats) = stream.next().await;
+    assert_eq!(topic, "stats");
+    assert_eq!(
+        stats["containers"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["web"]
+    );
+    owner
+        .json("PUT", &path, json!({"version":1,"sections":[]}), 200)
+        .await;
+    let (topic, list) = stream.next().await;
+    assert_eq!(topic, "containers");
+    assert_eq!(list["groups"], json!([]));
 }
 
 #[tokio::test]

@@ -13,6 +13,7 @@ pub const STATS_SECS: u64 = 5;
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Bootstrap {
     pub role: Role,
+    pub scoped: bool,
     pub boards: Vec<BoardNavigation>,
     pub default_board: Option<String>,
     pub remote_icons: bool,
@@ -89,6 +90,7 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
     let snap = state.snapshot();
     Ok(Bootstrap {
         role,
+        scoped: user.is_scoped(),
         boards,
         default_board,
         remote_icons: cfg.icons.remote,
@@ -104,11 +106,18 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
             stats: cfg.page.show_stats,
             docker: cfg.docker.enabled,
             history: state.db.is_enabled(),
-            system: cfg.system.enabled,
+            system: !user.is_scoped() && cfg.system.enabled,
         },
-        docker_error: super::containers::docker_error(cfg, &snap),
-        config_error: loaded.error.clone().filter(|_| role >= Role::Admin),
-        alerts_firing: state.alerts.lock().unwrap().incidents.len() as u32,
+        docker_error: super::containers::docker_error(cfg, &snap).filter(|_| !user.is_scoped()),
+        config_error: loaded
+            .error
+            .clone()
+            .filter(|_| role >= Role::Admin && !user.is_scoped()),
+        alerts_firing: if user.is_scoped() {
+            0
+        } else {
+            state.alerts.lock().unwrap().incidents.len() as u32
+        },
         refresh: Refresh {
             system_secs: cfg.system.refresh.0.as_secs().max(1),
             stats_secs: STATS_SECS,

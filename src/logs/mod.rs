@@ -250,12 +250,14 @@ pub async fn route(
     state: &Arc<AppState>,
     req: &hyper::Request<hyper::body::Incoming>,
     session_hash: &str,
+    visible: &crate::api::access::ContainerVisibility,
 ) -> hyper::Response<Body> {
     let q = parse_query(req.uri().query().unwrap_or(""));
     let cfg = state.config.current();
     match req.uri().path() {
         "/api/logs/stream" => {
-            let names = targets(state, &q, 4);
+            let mut names = targets(state, &q, 4);
+            names.retain(|name| visible.allows(name));
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
@@ -267,7 +269,8 @@ pub async fn route(
             )
         }
         "/api/logs/download" => {
-            let names = targets(state, &q, 4);
+            let mut names = targets(state, &q, 4);
+            names.retain(|name| visible.allows(name));
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
@@ -286,6 +289,9 @@ pub async fn route(
             let Some(name) = query_get(&q, "c").filter(|n| client::valid_name(n)) else {
                 return text(StatusCode::BAD_REQUEST, "c= is required\n");
             };
+            if !visible.allows(name) {
+                return text(StatusCode::NOT_FOUND, "container not found\n");
+            }
             let range = query_get(&q, "range")
                 .and_then(crate::db::Range::parse)
                 .unwrap_or(crate::db::Range::H24);

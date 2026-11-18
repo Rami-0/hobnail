@@ -11,7 +11,7 @@ use super::{
     error::ApiError,
     integrations::{self, IntegrationView},
 };
-use crate::{db::accounts::Role, http::server::Body, model::Container, state::AppState};
+use crate::{http::server::Body, model::Container, state::AppState};
 
 // A full document with the largest supported set of links must round-trip
 // after the server adds section and item IDs.
@@ -238,7 +238,7 @@ fn get(conn: &Connection, id: &str) -> Result<BoardSummary, ApiError> {
     .ok_or_else(ApiError::not_found)
 }
 
-fn decode<T: DeserializeOwned>(s: &str) -> Result<T, ApiError> {
+pub(super) fn decode<T: DeserializeOwned>(s: &str) -> Result<T, ApiError> {
     serde_json::from_str(s).map_err(|_| rusqlite::Error::InvalidQuery.into())
 }
 
@@ -568,6 +568,7 @@ fn suggestions(
     now: i64,
     doc: &BoardDocument,
     integrations: Vec<IntegrationView>,
+    visible: &super::access::ContainerVisibility,
 ) -> Vec<BoardSuggestion> {
     let cfg = state.config.current();
     let mut existing: HashSet<_> = doc
@@ -587,7 +588,7 @@ fn suggestions(
         let present = doc.sections.iter().flat_map(|s| &s.items).any(
             |i| matches!(&i.payload, BoardPayload::Container { target: t,.. } if *t == target),
         );
-        if !present && containers.insert(target.clone()) {
+        if !present && visible.allows(&row.name) && containers.insert(target.clone()) {
             add(
                 row.title,
                 BoardPayload::Container {
@@ -599,7 +600,7 @@ fn suggestions(
             );
         }
     }
-    for b in &cfg.bookmarks {
+    for b in cfg.bookmarks.iter().filter(|_| !visible.is_scoped()) {
         if safe_link(&b.url, "url").is_ok() && super::validate_label(&b.name, "title").is_ok() {
             let icon = b
                 .icon
@@ -615,7 +616,7 @@ fn suggestions(
             );
         }
     }
-    for widget in &cfg.widgets {
+    for widget in cfg.widgets.iter().filter(|_| !visible.is_scoped()) {
         add(
             widget.title.clone().unwrap_or_else(|| widget.id.clone()),
             BoardPayload::Widget {
@@ -658,14 +659,6 @@ pub(super) async fn route(
     }
     let draft_key = format!("board:{id}");
     let handler = m.route.handler;
-    if matches!(handler, Handler::BoardCreate) && user.role != Role::Owner && user.scopes.is_some()
-    {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "forbidden",
-            "scoped accounts cannot create boards",
-        ));
-    }
     let response = match handler {
         Handler::Boards => super::json(StatusCode::OK, &db.dashboard(|c| list(c, user))?),
         Handler::Board | Handler::BoardSuggestions => {
@@ -680,7 +673,10 @@ pub(super) async fn route(
             if handler == Handler::Board {
                 super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
             } else {
-                super::json(StatusCode::OK, &suggestions(state, now, &doc, visible))
+                super::json(
+                    StatusCode::OK,
+                    &suggestions(state, now, &doc, visible, &user.container_visibility(state)),
+                )
             }
         }
         Handler::BoardCreate => {
@@ -725,6 +721,7 @@ pub(super) async fn route(
             match result {
                 Ok((doc, visible, board)) => {
                     publish(state, id, board.version);
+                    state.changed("groups");
                     super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
                 }
                 Err(version) => conflict(version),

@@ -27,7 +27,7 @@ import type { Why } from "../../api/gen/Why.ts";
 import { api, useSession } from "../../api/session.ts";
 import { navigate, useRoute } from "../../app/router.ts";
 import { ago, bindingLink, bytes, duration, localTime, pct, rowLink, viewerHost } from "../../format/index.ts";
-import { onConfigChange, useContainers, useNow, useStat } from "../../live/index.ts";
+import { onConfigChange, useBootstrap, useContainers, useNow, useStat } from "../../live/index.ts";
 import { EmptyState } from "../../ui/Note.tsx";
 import { Sparkline } from "../../ui/Sparkline.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
@@ -77,7 +77,8 @@ export default function ContainerPage() {
   const session = useSession();
   const role = session.session?.user?.role;
   const signed = role !== undefined;
-  const canEdit = role === "admin" || role === "owner";
+  const bootstrap = useBootstrap();
+  const canEdit = !!bootstrap && !bootstrap.scoped && (role === "admin" || role === "owner");
   const live = useContainers();
   const now = useNow();
   const host = viewerHost(window.location.hostname);
@@ -243,7 +244,7 @@ export default function ContainerPage() {
         </output>
       )}
       {detail.why && <WhyNote why={detail.why} name={row.name} signed={signed} now={now} />}
-      <TabNav label="Container sections" items={tabs(row.name, range)} current="overview" testId="ctr-tabs" />
+      <TabNav label="Container sections" items={tabs(row.name, range).filter((tab) => !bootstrap?.scoped || tab.id === "overview")} current="overview" testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
         <div className="cell">
@@ -336,9 +337,9 @@ export default function ContainerPage() {
         <section className="panel" aria-labelledby="cd-tl" data-testid="timeline">
           <div className="panel-h">
             <h2 id="cd-tl">Timeline</h2>
-            <a className="panel-a" href={`/containers/${encodeURIComponent(row.name)}?tab=events`}>
+            {!bootstrap?.scoped && <a className="panel-a" href={`/containers/${encodeURIComponent(row.name)}?tab=events`}>
               All events
-            </a>
+            </a>}
           </div>
           {detail.events.length === 0 ? (
             <p className="muted">No events recorded for this container yet.</p>
@@ -351,7 +352,7 @@ export default function ContainerPage() {
                   </time>
                   <span className={`pill ${levelClass(e.level)}`}>{eventLabel(e.kind)}</span>
                   {e.message && <span className="muted detail">{e.message}</span>}
-                  {e.kind.startsWith("container.") && (
+                  {!bootstrap?.scoped && e.kind.startsWith("container.") && (
                     <a className="ia logs" href={logsAt(row.name, e.at)} title="Logs at that moment" aria-label={`Logs of ${row.name} at that moment`}>
                       <ScrollTextIcon aria-hidden="true" />
                     </a>
@@ -408,9 +409,9 @@ export default function ContainerPage() {
         <section className="panel" aria-labelledby="cd-rules">
           <div className="panel-h">
             <h2 id="cd-rules">Alert rules</h2>
-            <a className="panel-a" href="/alerts">
+            {!bootstrap?.scoped && <a className="panel-a" href="/alerts">
               All alerts
-            </a>
+            </a>}
           </div>
           {detail.rules.length === 0 ? (
             <p className="muted">No alert rule covers this container.</p>
