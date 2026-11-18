@@ -23,6 +23,27 @@ export class LogPane {
   }
   private static stepped = new WeakSet<Event>();
   private static match: MatchPosition | null = null;
+  private static searchIdentity = "";
+  private static initialMatchPending = false;
+  private static searchFrame = 0;
+  private static selectMatch(next: MatchPosition): void {
+    LogPane.match = next;
+    for (const pane of LogPane.panes) {
+      pane.current = pane.query === next.pane ? next.id : null;
+      if (pane.current !== null) pane.seek(pane.current);
+      pane.signature = ""; pane.schedule();
+    }
+  }
+  private static initialMatch(): void {
+    if (!LogPane.initialMatchPending || LogPane.searchFrame) return;
+    LogPane.searchFrame = requestAnimationFrame(() => {
+      LogPane.searchFrame = 0;
+      if ([...LogPane.panes].some((pane) => pane.searchKey !== LogPane.searchIdentity)) return;
+      const hits = [...LogPane.panes].flatMap((pane) => pane.hits.map((row) => ({ pane: pane.query, id: row.id, t: row.t })));
+      const newest = nextMatch(hits, null, -1);
+      if (newest) { LogPane.initialMatchPending = false; LogPane.selectMatch(newest); }
+    });
+  }
   readonly ring: Ring;
   private source: EventSource | null = null;
   private older: EventSource | null = null;
@@ -117,7 +138,7 @@ export class LogPane {
   private disconnect(): void { this.source?.close(); this.older?.close(); clearTimeout(this.retry); this.source = this.older = null; }
   close(): void {
     LogPane.panes.delete(this); LogPane.highlights.delete(this); LogPane.paintHighlights();
-    if (!LogPane.panes.size) LogPane.match = null;
+    if (!LogPane.panes.size) { LogPane.match = null; LogPane.searchIdentity = ""; LogPane.initialMatchPending = false; cancelAnimationFrame(LogPane.searchFrame); LogPane.searchFrame = 0; }
     window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
     this.observer.disconnect();
@@ -210,13 +231,9 @@ export class LogPane {
     const current = LogPane.match ?? hits.filter((hit) => [...LogPane.panes].some((pane) => pane.query === hit.pane && pane.current === hit.id)).toSorted((a, b) => a.t - b.t).at(-1) ?? null;
     const next = nextMatch(hits, current, direction);
     if (!next) return;
-    LogPane.match = next;
-    for (const pane of LogPane.panes) {
-      pane.current = pane.query === next.pane ? next.id : null;
-      if (pane.current !== null) pane.seek(pane.current);
-      pane.signature = ""; pane.schedule();
-    }
+    LogPane.selectMatch(next);
   }
+
   private seek(id: number): void {
     const i = this.visible.findIndex((r) => r.id === id);
     if (i < 0) return;
@@ -376,11 +393,14 @@ export class LogPane {
 
     let total = this.layout();
     if (this.searchKey !== changedSearch) {
-      this.searchKey = changedSearch; LogPane.match = null;
-      const newest = this.hits.at(-1);
-      this.current = newest?.id ?? null;
-      if (newest && this.options.search) this.seek(newest.id);
+      this.searchKey = changedSearch;
+      this.current = null;
+      if (LogPane.searchIdentity !== changedSearch) {
+        LogPane.searchIdentity = changedSearch; LogPane.match = null;
+        LogPane.initialMatchPending = !!this.options.search;
+      }
     }
+    LogPane.initialMatch();
     if (this.target && !this.pickedTarget && this.visible.length) {
       const next = this.visible.find((r) => r.t >= (this.target ?? 0));
       if (next) { this.pickedTarget = true; this.current = next.id; this.seek(next.id); if (next.t > this.target + 1000) this.message = `No line at that moment. Next line: ${new Date(next.t).toLocaleString()}`; }
