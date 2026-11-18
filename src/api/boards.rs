@@ -332,6 +332,7 @@ fn validate(
         .filter_map(|i| Some((i.id.as_deref()?, &i.payload)))
         .collect();
     let visible_targets = user.container_targets(conn)?;
+    let visible_widgets = user.widget_targets(conn)?;
     for section in &doc.sections {
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
             return Err(ApiError::bad_request(
@@ -404,9 +405,14 @@ fn validate(
                 BoardPayload::Widget { widget_id } => {
                     super::validate_label(widget_id, "widget_id")?;
                     let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old }) if old == widget_id);
-                    if !unchanged && !config.widgets.iter().any(|widget| widget.id == *widget_id) {
+                    if !unchanged
+                        && (visible_widgets
+                            .as_ref()
+                            .is_some_and(|targets| !targets.contains(widget_id))
+                            || !config.widgets.iter().any(|widget| widget.id == *widget_id))
+                    {
                         return Err(ApiError::bad_request(
-                            "unknown widget reference",
+                            "invalid widget reference",
                             Some("widget_id"),
                         ));
                     }

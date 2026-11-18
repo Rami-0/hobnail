@@ -283,6 +283,22 @@ async fn run(
         return;
     };
     let mut sig = list.then(|| current(&st, &account).1);
+    if topics.widget {
+        let config = st.config.current();
+        for widget in config
+            .widgets
+            .iter()
+            .filter(|w| account.can_see_widget(&st, &w.id))
+        {
+            if tx
+                .send(event("widget", &super::widgets::view(&st, widget)))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
     if topics.system && !account.is_scoped() {
         if let Some(s) = system_view(&st) {
             if tx.send(event("system", &s)).await.is_err() {
@@ -325,7 +341,7 @@ async fn run(
                     "alerts" if topics.alerts && !account.is_scoped() => {
                         event("alerts", &serde_json::json!({"firing": super::alerts::firing(&st).len()}))
                     }
-                    raw if topics.widget && !account.is_scoped() && raw.starts_with("w-") => {
+                    raw if topics.widget && raw.starts_with("w-") && account.can_see_widget(&st, &raw[2..]) => {
                         let config = st.config.current();
                         let Some(widget) = config.widgets.iter().find(|w| w.id == raw[2..]) else { continue };
                         event("widget", &super::widgets::view(&st, widget))
@@ -371,14 +387,9 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String)
     } else {
         let (tx, rx) = mpsc::channel::<Bytes>(QUEUE);
         let sub = state.events.subscribe();
-        let guard = state.viewer_guard();
-        tokio::spawn(run(
-            state.clone(),
-            Topics::parse(query),
-            session_hash,
-            sub,
-            tx,
-        ));
+        let topics = Topics::parse(query);
+        let guard = state.viewer_guard(topics.widget);
+        tokio::spawn(run(state.clone(), topics, session_hash, sub, tx));
         Response::new(StreamBody { rx, _guard: guard }.boxed_unsync())
     };
     set(&mut r, CONTENT_TYPE, "text/event-stream");

@@ -115,6 +115,7 @@ pub struct AppState {
     /// Woken when the first viewer connects.
     pub wake: Notify,
     viewers: AtomicUsize,
+    widget_viewers: AtomicUsize,
 }
 
 impl AppState {
@@ -147,6 +148,7 @@ impl AppState {
             events,
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),
+            widget_viewers: AtomicUsize::new(0),
             env,
         })
     }
@@ -170,11 +172,18 @@ impl AppState {
         self.viewers.load(Ordering::Relaxed)
     }
 
-    pub fn viewer_guard(self: &Arc<Self>) -> ViewerGuard {
+    pub fn widget_viewers(&self) -> usize {
+        self.widget_viewers.load(Ordering::Relaxed)
+    }
+
+    pub fn viewer_guard(self: &Arc<Self>, widgets: bool) -> ViewerGuard {
+        if widgets {
+            self.widget_viewers.fetch_add(1, Ordering::Relaxed);
+        }
         if self.viewers.fetch_add(1, Ordering::Relaxed) == 0 {
             self.wake.notify_one();
         }
-        ViewerGuard(self.clone())
+        ViewerGuard(self.clone(), widgets)
     }
 
     pub fn uptime_secs(&self) -> u64 {
@@ -183,10 +192,13 @@ impl AppState {
 }
 
 /// Counts a connected live viewer for as long as it is alive.
-pub struct ViewerGuard(Arc<AppState>);
+pub struct ViewerGuard(Arc<AppState>, bool);
 
 impl Drop for ViewerGuard {
     fn drop(&mut self) {
+        if self.1 {
+            self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
+        }
         self.0.viewers.fetch_sub(1, Ordering::Relaxed);
     }
 }

@@ -49,7 +49,7 @@ pub async fn run(state: Arc<AppState>) {
         }
 
         let unix_now = crate::util::unix_now();
-        for w in cfg.widgets.iter() {
+        for w in cfg.widgets.iter().filter(|_| state.widget_viewers() > 0) {
             let due = {
                 let cache = state.widgets.lock().unwrap();
                 cache
@@ -59,10 +59,16 @@ pub async fn run(state: Arc<AppState>) {
             if !due || !in_flight.lock().unwrap().insert(w.id.clone()) {
                 continue;
             }
-            let (st, w, fl) = (state.clone(), w.clone(), in_flight.clone());
+            let (st, w, fl, run_config) =
+                (state.clone(), w.clone(), in_flight.clone(), cfg.clone());
             tokio::spawn(async move {
-                let out = crate::widgets::run(&w, &st.config.current().http).await;
-                st.widgets.lock().unwrap().insert(w.id.clone(), out);
+                let out = crate::widgets::run(&w, &run_config.http).await;
+                {
+                    let mut cache = st.widgets.lock().unwrap();
+                    if Arc::ptr_eq(&run_config, &st.config.current()) {
+                        cache.insert(w.id.clone(), out);
+                    }
+                }
                 fl.lock().unwrap().remove(&w.id);
                 st.changed(&format!("w-{}", w.id));
             });

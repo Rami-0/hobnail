@@ -26,27 +26,57 @@ impl Principal {
         !self.is_scoped() || visible.allows(name)
     }
 
-    pub(super) fn container_targets(
+    fn scoped_targets<T: Eq + std::hash::Hash>(
         &self,
         conn: &rusqlite::Connection,
-    ) -> Result<Option<HashSet<ContainerMatch>>, ApiError> {
+        kind: &str,
+        project: impl Fn(super::boards::BoardPayload) -> Option<T>,
+    ) -> Result<Option<HashSet<T>>, ApiError> {
         let Some(scopes) = self.scopes.as_ref().filter(|_| self.is_scoped()) else {
             return Ok(None);
         };
         let mut targets = HashSet::new();
         let mut stmt =
-            conn.prepare("SELECT config FROM board_items WHERE board_id=?1 AND kind='container'")?;
+            conn.prepare("SELECT config FROM board_items WHERE board_id=?1 AND kind=?2")?;
         for id in &scopes.boards {
-            let configs = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+            let configs = stmt.query_map([id.as_str(), kind], |r| r.get::<_, String>(0))?;
             for config in configs {
-                if let super::boards::BoardPayload::Container { target, .. } =
-                    super::boards::decode(&config?)?
-                {
+                if let Some(target) = project(super::boards::decode(&config?)?) {
                     targets.insert(target);
                 }
             }
         }
         Ok(Some(targets))
+    }
+
+    pub(super) fn container_targets(
+        &self,
+        conn: &rusqlite::Connection,
+    ) -> Result<Option<HashSet<ContainerMatch>>, ApiError> {
+        self.scoped_targets(conn, "container", |item| match item {
+            super::boards::BoardPayload::Container { target, .. } => Some(target),
+            _ => None,
+        })
+    }
+
+    pub(super) fn widget_targets(
+        &self,
+        conn: &rusqlite::Connection,
+    ) -> Result<Option<HashSet<String>>, ApiError> {
+        self.scoped_targets(conn, "widget", |item| match item {
+            super::boards::BoardPayload::Widget { widget_id } => Some(widget_id),
+            _ => None,
+        })
+    }
+
+    pub(super) fn can_see_widget(&self, state: &AppState, id: &str) -> bool {
+        !self.is_scoped()
+            || state
+                .db
+                .dashboard(|conn| self.widget_targets(conn))
+                .ok()
+                .flatten()
+                .is_some_and(|targets| targets.contains(id))
     }
 
     pub fn container_visibility(&self, state: &AppState) -> ContainerVisibility {
@@ -167,7 +197,7 @@ pub(crate) fn check_scope(
             }
             if m.route.handler == Handler::Stream && {
                 let topics = super::stream::Topics::requested(query);
-                topics.system || topics.widget || topics.alerts || topics.host
+                topics.system || topics.alerts || topics.host
             } {
                 return Err(Denied::Role);
             }

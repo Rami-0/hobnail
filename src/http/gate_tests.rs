@@ -2101,7 +2101,6 @@ async fn invite_roles_and_account_management() {
         );
         for path in [
             "/api/v1/widgets",
-            "/api/v1/stream?topics=widget",
             "/api/v1/alerts",
             "/api/v1/host",
             "/api/v1/host/history",
@@ -2111,6 +2110,11 @@ async fn invite_roles_and_account_management() {
         ] {
             assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
         }
+        let (mut widget_stream, _) =
+            Stream::open(addr, "/api/v1/stream?topics=widget", &cookie).await;
+        assert_eq!(widget_stream.next().await.0, "hello");
+        assert!(widget_stream.quiet(100).await);
+        drop(widget_stream);
         let r = req(
             addr,
             "POST",

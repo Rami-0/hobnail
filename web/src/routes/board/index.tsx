@@ -69,12 +69,12 @@ export default function BoardPage() {
   useEffect(() => onConfigChange(() => { if (!editing) void load(); }), [load, editing]);
   const hasWidgets = view?.resolved.some((item) => item.widget !== null);
   useEffect(() => {
-    if (b?.scoped !== false || !hasWidgets || editing) return;
+    if (!b || !hasWidgets || editing) return;
     return watchReadTopic("widget", (data) => {
       const widget = data as WidgetView;
       setWidgetUpdates((previous) => ({ ...previous, [widget.id]: widget }));
     });
-  }, [b?.scoped, hasWidgets, editing]);
+  }, [b, hasWidgets, editing]);
   useEffect(() => watchBoards((event) => { if (event.id === id) { if (editing) setChanged(event.version > editing.version); else void load(); } }), [id, load, editing]);
   useEffect(() => {
     if (!admin) return;

@@ -16,6 +16,8 @@ pub(super) struct WidgetView {
     fetched_at: Option<u64>,
     duration_ms: Option<u64>,
     body: Option<WidgetBody>,
+    #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
+    values: std::collections::BTreeMap<String, serde_json::Value>,
     error: Option<String>,
 }
 
@@ -45,6 +47,15 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
         body: output
             .filter(|_| error.is_none())
             .map(|o| o.display.clone()),
+        values: output
+            .into_iter()
+            .flat_map(|o| {
+                config
+                    .fields
+                    .keys()
+                    .filter_map(|key| o.values.get(key).map(|value| (key.clone(), value.clone())))
+            })
+            .collect(),
         error: error.map(crate::ui::widgets::plain_error),
     }
 }

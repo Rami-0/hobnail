@@ -435,7 +435,7 @@ pub fn sse_event(event: &str, data: &str) -> Bytes {
 fn sse(state: Arc<AppState>, host: String, session_hash: String) -> Response<Body> {
     let (tx, rx) = mpsc::channel::<Bytes>(16);
     let mut sub = state.events.subscribe();
-    let guard = state.viewer_guard();
+    let guard = state.viewer_guard(true);
     let st = state.clone();
     tokio::spawn(async move {
         if tx.send(sse_event("hello", st.build.sha)).await.is_err() {
