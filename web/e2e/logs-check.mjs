@@ -161,10 +161,29 @@ try {
       if (width===390) await inp.click('.log-filters');
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
       const dl = await fetch(new URL(download, base), { headers }); assert.equal(dl.status, 200); assert.ok(dl.headers.get("content-disposition").includes("attachment")); assert.ok((await dl.text()).includes("<script"));
+      await load(`/app/containers/svc001/logs?search=%5B&re=1`, '[data-testid="filter"]');
+      await wait('document.querySelector(".log-note")?.textContent.includes("plain text")', "linked regex requires opt-in");
+      assert.equal(await tab.ev('document.querySelector("[data-testid=filter]").getAttribute("aria-invalid")'), 'false');
+      await load(`/app/containers/svc001/logs#t=${Date.now()+60000}`, '[data-testid="log-pane"]');
+      await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("still to come")', "future timestamp keeps live tail");
       console.log(label, "stack and panes");
       await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
-      await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await wait('[...document.querySelectorAll("[data-testid=log-body]")].every(b=>b.dataset.searchLines==="5000")', "all panes loaded", 25000); await tab.shot(path.join(out, `${label}-four.png`));
+      await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes");
+      await wait('[...document.querySelectorAll("[data-testid=log-body]")].every(b=>b.dataset.searchLines==="5000")', "all panes loaded", 25000);
+      await tab.ev(`globalThis.fourOld=logSources.filter(s=>s.readyState===1 && s.url.includes('c=svc001')).at(-1);fourOld.dispatchEvent(new Event('error'))`);
+      await wait(`logSources.some(s=>s!==fourOld&&s.readyState===1&&s.url.includes('c=svc001'))`, "four-pane cursor reconnect", 10000);
+      measurements.fourBurstObserveStartedAt=Date.now();
+      await tab.ev(`globalThis.fourTasks=[];globalThis.fourObserver=new PerformanceObserver(l=>fourTasks.push(...l.getEntries().map(e=>e.duration)));fourObserver.observe({type:'longtask',buffered:false});`);
+      await sleep(7200); measurements.fourBurstMaxTaskMs=await tab.ev('Math.max(0,...fourTasks)'); measurements.fourBurstObserveEndedAt=Date.now();
+      await tab.ev('fourObserver.disconnect()');
+      assert.ok(await tab.ev(`logSources.filter(s=>s.readyState===1&&s.url.includes('c=svc001')).at(-1).wireCount>=1500`), "four-pane burst arrived");
+      const fourShot = path.join(out, `${label}-four.png`);
+      if (width===390) {
+        const metrics=await tab.send('Page.getLayoutMetrics'), size=metrics.result.cssContentSize;
+        const capture=await tab.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:size.height,scale:1}});
+        fs.writeFileSync(fourShot,Buffer.from(capture.result.data,'base64'));
+      } else await tab.shot(fourShot);
       await tab.ev('document.querySelector("[data-testid=log-pane] header>a[aria-label^=Close]")?.click()');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===3', "close pane in place");
       const leaveAt = Date.now(); await tab.ev('document.querySelector("nav.crumb a").click()'); await wait('!!document.querySelector("[data-testid=logs-picker]")', "route leave"); measurements.leaveAt = leaveAt;
@@ -185,6 +204,7 @@ try {
       assert.deepEqual(rec.csp, [], "zero CSP violations");
       assert.deepEqual([...rec.console, ...rec.exceptions], [], "zero console errors");
       results.push(measurements);
+      assert.ok(measurements.fourBurstMaxTaskMs <= 100, `four-pane burst maximum ${measurements.fourBurstMaxTaskMs} ms exceeds 100 ms`);
       assert.ok(measurements.burstMaxTaskMs <= 100, `burst maximum ${measurements.burstMaxTaskMs} ms exceeds 100 ms`);
     } catch (e) { failures.push(`${label}: ${e.stack}`); await tab.shot(path.join(out, `${label}-failure.png`)); }
     finally { if (!results.includes(measurements)) results.push(measurements); fs.writeFileSync(path.join(out, `${label}-recorder.json`), JSON.stringify(rec)); await tab.close(); }
