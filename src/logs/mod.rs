@@ -296,7 +296,7 @@ pub async fn route(
             let Some(name) = query_get(&q, "c").filter(|n| client::valid_name(n)) else {
                 return text(StatusCode::BAD_REQUEST, "c= is required\n");
             };
-            if !visible.allows(name) {
+            if !visible.allows(name) || !may_tail(state, name) {
                 return text(StatusCode::NOT_FOUND, "container not found\n");
             }
             let range = query_get(&q, "range")
