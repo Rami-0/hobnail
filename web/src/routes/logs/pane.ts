@@ -1,6 +1,9 @@
 import { api } from "../../api/session.ts";
 import { filterRows, matcher, Ring, type LogLine, type Row } from "./model.ts";
 
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
+
 export interface ViewOptions {
   search: string; regex: boolean; sensitive: boolean; only: boolean; context: number;
   levels: string; wrap: boolean; time: boolean; paused: boolean;
@@ -272,7 +275,7 @@ export class LogPane {
   private estimate(row: Row): number {
     if (!this.options.wrap) return 28;
     const reserved = (this.options.time ? 116 : 0) + (this.query.startsWith("stack=") ? 100 : 0) + 24;
-    const columns = Math.max(15, (this.box.clientWidth - reserved) / 7.5);
+    const columns = Math.max(15, (this.width - reserved) / 7.5);
     return 8 + 20 * Math.max(1, Math.ceil((row.fold?.summary.length ?? row.plain.length) / columns));
   }
   private layout(): number {
@@ -315,6 +318,8 @@ export class LogPane {
   private flush(): void {
     this.restoring = true;
     this.fit();
+    const width = this.box.clientWidth;
+    if (width !== this.width) { this.width = width; this.heights.clear(); this.signature = ""; }
     let accepted = 0;
     if (!this.options.paused && this.pending.length) {
       const batch = this.pending.splice(0, 256); accepted = batch.length;
@@ -383,9 +388,9 @@ export class LogPane {
     el.className = `log-row ${this.options.wrap ? "" : "log-nowrap"} ${row.id === this.current ? "log-current" : ""} ${row.id === this.selected?.id ? "log-selected" : ""}`;
     el.dataset.logId = String(row.id); el.dataset.level = row.l ?? "o"; el.dataset.timestamp = String(row.t);
     if (this.options.time) {
-      const time = document.createElement("time"); time.dateTime = new Date(row.t).toISOString();
-      const date = new Date(row.t);
-      time.textContent = (date.toDateString() === new Date().toDateString() ? "" : date.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " ") + date.toLocaleTimeString(undefined, { hour12: false });
+      const time = document.createElement("time");
+      const date = new Date(row.t); time.dateTime = date.toISOString();
+      time.textContent = (date.toDateString() === new Date().toDateString() ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
       el.append(time);
     }
     if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = row.c; chip.title = row.c;
