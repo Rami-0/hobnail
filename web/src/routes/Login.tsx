@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { InviteValidation } from "../api/gen/InviteValidation.ts";
 import { api, refreshSession, useSession } from "../api/session.ts";
 import { safeNext, useRoute } from "../app/router.ts";
-import { Button } from "../ui/index.ts";
+import { Button } from "../ui/Button.tsx";
 
 export function Login({ token }: { token?: string }) {
   const { session } = useSession();

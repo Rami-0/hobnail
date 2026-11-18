@@ -12,7 +12,13 @@ import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } fr
 
 import type { ApiResult } from "../../api/client.ts";
 import { api, refreshSession } from "../../api/session.ts";
-import { Button, Dialog, Field, Note, Select, Switch, TextInput, toast, type MessageKind, type TextInputProps } from "../../ui/index.ts";
+import { Button } from "../../ui/Button.tsx";
+import { Dialog } from "../../ui/Dialog.tsx";
+import { Field, TextInput, type TextInputProps } from "../../ui/Field.tsx";
+import { Note, type MessageKind } from "../../ui/Note.tsx";
+import { Select } from "../../ui/Select.tsx";
+import { Switch } from "../../ui/Switch.tsx";
+import { toast } from "../../ui/toast.ts";
 import {
   canRetarget,
   changes,

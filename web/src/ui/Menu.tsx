@@ -1,9 +1,6 @@
-// Menu (DESIGN.md §11.9; the old account menu, static/app.js): a button
-// that opens a list of actions under it. Opening focuses the first item;
-// Up/Down/Home/End move; Esc closes and returns focus to the button; Tab, a
-// click outside or choosing an item closes it.
-import type { ReactNode } from "react";
-import { Menu as SdkMenu, MenuContent, MenuItem as SdkMenuItem, MenuTrigger } from "@ui-sdk/react/menu";
+import { lazy, Suspense, useState, type ReactNode } from "react";
+import { Button } from "./Button.tsx";
+const MenuImpl = lazy(() => import("./MenuImpl.tsx"));
 
 export interface MenuItem {
   label: ReactNode;
@@ -28,26 +25,12 @@ export interface MenuProps {
   align?: "start" | "end";
 }
 
-export function Menu({ label, trigger, items, header, testId, triggerClassName, align = "end" }: MenuProps) {
-  return (
-    <div className="menu-wrap">
-      <SdkMenu>
-        <MenuTrigger type="button" className={triggerClassName ?? "icon-btn"}
-          aria-label={label} title={label} data-testid={testId}>
-          {trigger}
-        </MenuTrigger>
-        <MenuContent className={`menu-body ${align}`} aria-label={label} align={align} sideOffset={6}>
-          {header && <div className="menu-who">{header}</div>}
-          {items.map((it, i) => (
-            // Items are a fixed list for each menu.
-            // eslint-disable-next-line react/no-array-index-key
-            <SdkMenuItem key={i} value={String(i)} className={it.danger ? "menu-item danger" : "menu-item"}
-              data-testid={it.testId} onSelect={() => { it.onSelect(); }}>
-              {it.icon}<span>{it.label}</span>
-            </SdkMenuItem>
-          ))}
-        </MenuContent>
-      </SdkMenu>
-    </div>
-  );
+export function Menu(props: MenuProps) {
+  const [loaded, setLoaded] = useState(false);
+  const trigger = <Button className={props.triggerClassName ?? "icon-btn"} aria-haspopup="menu" aria-expanded={false}
+    aria-label={props.label} title={props.label} data-testid={props.testId}
+    onClick={() => setLoaded(true)} onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); setLoaded(true); } }}>
+    {props.trigger}
+  </Button>;
+  return loaded ? <Suspense fallback={trigger}><MenuImpl {...props} /></Suspense> : trigger;
 }

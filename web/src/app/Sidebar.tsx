@@ -30,7 +30,7 @@ import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMem
 
 import { useSession } from "../api/session.ts";
 import { useBootstrap, useContainers, useStrips } from "../live/index.ts";
-import { HealthStrip } from "../ui/index.ts";
+import { HealthStrip } from "../ui/Sparkline.tsx";
 import { CHEVRON_RIGHT_ICON, LOGS_ICON } from "./glyphs.tsx";
 import { LiveIndicator } from "./Live.tsx";
 import { local, readFolded, readTreeQuery, session, settingsHref, writeFolded, writeTreeQuery } from "./prefs.ts";

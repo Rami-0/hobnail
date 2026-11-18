@@ -8,7 +8,8 @@ import { useSession } from "../api/session.ts";
 import { Home } from "../routes/Home.tsx";
 import { Login } from "../routes/Login.tsx";
 import { NotFound } from "../routes/NotFound.tsx";
-import { Banner, Button } from "../ui/index.ts";
+import { Banner } from "../ui/Note.tsx";
+import { Button } from "../ui/Button.tsx";
 import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 

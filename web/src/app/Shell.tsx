@@ -16,7 +16,8 @@ import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useSt
 
 import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
-import { Banner, Button } from "../ui/index.ts";
+import { Banner } from "../ui/Note.tsx";
+import { Button } from "../ui/Button.tsx";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";

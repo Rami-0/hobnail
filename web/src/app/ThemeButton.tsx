@@ -5,7 +5,7 @@
 import { ContrastIcon, FlameIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useSyncExternalStore, type ReactNode } from "react";
 
-import { toast } from "../ui/index.ts";
+import { toast } from "../ui/toast.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, THEME_LABEL, THEME_NAME, type Theme } from "./theme.ts";
 
 const ICON: Record<Theme, ReactNode> = {

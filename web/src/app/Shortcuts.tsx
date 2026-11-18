@@ -3,7 +3,7 @@
 // "/" names this page's filter (NAV-62). ⌘ instead of Ctrl on a Mac.
 import type { ReactNode } from "react";
 
-import { Dialog } from "../ui/index.ts";
+import { Dialog } from "../ui/Dialog.tsx";
 import { pageFilter } from "./page-filter.ts";
 import { modName } from "./keys.ts";
 

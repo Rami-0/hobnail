@@ -1,7 +1,8 @@
 import { LogOutIcon, UserIcon } from "lucide-react";
 
 import { api, useSession } from "../api/session.ts";
-import { Menu, toast } from "../ui/index.ts";
+import { Menu } from "../ui/Menu.tsx";
+import { toast } from "../ui/toast.ts";
 
 async function signOut(): Promise<void> {
   const r = await api.post("/api/logout");

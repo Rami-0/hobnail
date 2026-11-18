@@ -6,7 +6,8 @@
 import type { ReactNode } from "react";
 
 import { useBootstrap, useSystem, useVitalsRings, vitalsOf } from "../live/index.ts";
-import { level, Sparkline } from "../ui/index.ts";
+import { level } from "../ui/svg.ts";
+import { Sparkline } from "../ui/Sparkline.tsx";
 import { bytes, pct0 } from "./fmt.ts";
 
 function Chip({
