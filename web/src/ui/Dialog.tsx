@@ -36,6 +36,7 @@ export interface DialogProps {
   /** True while the dialog holds unsaved input: closing asks first. */
   guard?: () => boolean;
   footer?: ReactNode;
+  cancelLabel?: string;
   children?: ReactNode;
   initialFocus?: RefObject<HTMLElement | null>;
   testId?: string;
@@ -54,6 +55,7 @@ export function Dialog({
   onClose,
   guard,
   footer,
+  cancelLabel,
   children,
   initialFocus,
   testId,
@@ -179,7 +181,7 @@ export function Dialog({
             </button>
           </div>
           <div className="dlg-b">{children}</div>
-          {(footer || asking) && (
+          {(footer || cancelLabel || asking) && (
             <div className="dlg-ft">
               {asking ? (
                 <div className="dlg-guard" role="group" aria-label="Unsaved changes">
@@ -198,7 +200,7 @@ export function Dialog({
                   </Button>
                 </div>
               ) : (
-                footer
+                <>{cancelLabel && <Button onClick={() => request("cancel")}>{cancelLabel}</Button>}{footer}</>
               )}
             </div>
           )}

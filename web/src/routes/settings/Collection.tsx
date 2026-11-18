@@ -36,7 +36,11 @@ export function Collection(props: Props) {
   const { search, setSearch } = useRoute();
   const selected = dialogState(search, kind);
   const entry = !selected || selected.id === null ? undefined : entries.find((item) => String(item.id) === selected.id);
-  const [removing, setRemoving] = useState<Entry>();
+  const [opened, setOpened] = useState<{ id: string; entry: Entry }>();
+  if (selected?.id && entry && opened?.id !== selected.id) setOpened({ id: selected.id, entry });
+  if (!selected && opened) setOpened(undefined);
+  const editEntry = selected?.id === opened?.id ? opened?.entry : entry;
+  const [removing, setRemoving] = useState<{ entry: Entry; hash: string }>();
   const [failure, setFailure] = useState<Failure>();
   const [busy, setBusy] = useState(false);
   const refs = useRef(new Map<Entry["id"], HTMLElement>());
@@ -49,9 +53,9 @@ export function Collection(props: Props) {
     if (busy) return;
     setBusy(true);
     setFailure(undefined);
-    const result = await api.post<Save>(endpoint(path), { base_hash: hash, ...operation });
+    const result = await api.post<Save>(endpoint(path), { base_hash: operation.action === "delete" ? removing?.hash ?? hash : hash, ...operation });
     if (result.kind === "ok") {
-      const undo = operation.action === "delete" && removing ? removing : undefined;
+      const undo = operation.action === "delete" ? removing?.entry : undefined;
       setRemoving(undefined);
       const latest = await refresh();
       if (undo) {
@@ -107,17 +111,17 @@ export function Collection(props: Props) {
             </>}
             {extra?.(item)}
             <Button aria-label={`Edit ${name}`} disabled={item.locked || busy} onClick={() => setSearch({ add: null, edit: `${kind}:${item.id}` })}>Edit</Button>
-            <Button className="danger" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving(item); }}>Delete</Button>
+            <Button className="danger" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving({ entry: item, hash }); }}>Delete</Button>
           </div>
         </div>;
       })}</div>
     </>}
-    {selected && (selected.id === null || entry) && <Edit key={selected.id ?? "new"} props={props} entry={entry} close={close} focus={focus} />}
-    {selected && selected.id !== null && !entry && <Note kind="warn" action={<Button onClick={close}>Close</Button>}>This entry no longer exists.</Note>}
+    {selected && (selected.id === null || editEntry) && <Edit key={selected.id ?? "new"} props={props} entry={editEntry} close={close} focus={focus} />}
+    {selected && selected.id !== null && !editEntry && <Note kind="warn" action={<Button onClick={close}>Close</Button>}>This entry no longer exists.</Note>}
     <Dialog open={!!removing} title={`Delete ${kind}?`} onClose={() => { if (!busy) setRemoving(undefined); }}
       footer={<><Button onClick={() => setRemoving(undefined)} disabled={busy}>Cancel</Button>
-        <Button className="danger" busy={busy} onClick={() => { if (removing) void run({ action: "delete", id: removing.id }); }}>Delete</Button></>}>
-      <p>Delete {String(removing?.item.name ?? removing?.item.pattern ?? removing?.id ?? "")}?</p>
+        <Button className="danger" busy={busy} onClick={() => { if (removing) void run({ action: "delete", id: removing.entry.id }); }}>Delete</Button></>}>
+      <p>Delete {String(removing?.entry.item.name ?? removing?.entry.item.pattern ?? removing?.entry.id ?? "")}?</p>
       {feedback}
     </Dialog>
   </section>;
@@ -197,7 +201,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
     setRename(false);
   }
   return <Dialog open title={`${base.entry ? "Edit" : "Add"} ${kind}`} onClose={() => { if (!busy) close(); }} guard={() => dirty}
-    testId="settings-edit" footer={<>
+    testId="settings-edit" cancelLabel="Cancel" footer={<>
       {props.preview && !base.entry?.locked && <Button busy={busy} onClick={async () => {
         if (busy) return;
         const item = check();
