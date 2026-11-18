@@ -77,7 +77,7 @@ export default defineConfig(({ command }) => {
       // exceeded M2b's 60 KB gzip cap. React and SDK imports keep their normal
       // interaction boundaries instead of joining a global vendor bundle.
       rolldownOptions: { output: { strictExecutionOrder: true, codeSplitting: { groups: [
-        { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 200_000 },
+        { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 450_000 },
       ] } } },
       // Inline nothing as data: URLs; every asset is a hashed file the
       // server caches for a year.

@@ -2,8 +2,8 @@
 // that imports Recharts; the container page reaches it through a lazy
 // import, so Recharts is its own chunk and stays out of the first route.
 //
-// What Recharts does here natively: the lines and the max band (a range
-// Area over [average, maximum]), axes, grid, the tooltip and its crosshair,
+// Recharts draws the lines, axes, grid, tooltip and crosshair. The max
+// band uses its axis scales. Recharts also provides the
 // keyboard tooltip (accessibilityLayer), and the linked crosshair across
 // both charts (`syncId`, index-synced: both charts share one row array, see
 // series.ts `chartRows`). Lines break at the empty rows chartRows puts into
@@ -17,14 +17,12 @@
 // (buttons, remembered in localStorage under the old UI's key).
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  Area,
-  CartesianGrid,
   ComposedChart,
   Line,
-  ReferenceDot,
   Tooltip,
   usePlotArea,
   useXAxisScale,
+  useYAxisScale,
   XAxis,
   YAxis,
   type TooltipContentProps,
@@ -300,7 +298,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
             height={180}
             margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
           >
-            <CartesianGrid vertical={false} className="ch-grid" />
+            <PlotGrid values={[bottom, (top + bottom) / 2, top]} />
             <XAxis
               dataKey="t"
               type="number"
@@ -330,19 +328,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
               cursor={{ className: "ch-cursor" }}
               content={<Tip kind={kind} unit={unit} compare={showCompare} span={span} markers={markers} />}
             />
-            {showMax && (
-              <Area
-                dataKey={bandKey}
-                className="ch-band"
-                stroke="none"
-                fill="currentColor"
-                fillOpacity={0.16}
-                isAnimationActive={false}
-                connectNulls={false}
-                activeDot={false}
-                name="Max"
-              />
-            )}
+            {showMax && <Band rows={rows} bandKey={bandKey} />}
             {showAvg && (
               <Line
                 dataKey={kind}
@@ -357,11 +343,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
               />
             )}
             {showCompare && <Line dataKey="mem" stroke="currentColor" strokeOpacity={0.55} strokeDasharray="4 3" name="Yesterday" dot={false} isAnimationActive={false} />}
-            {showAvg &&
-              lone.map((i) => {
-                const r = rows[i] as ChartRow;
-                return <ReferenceDot key={r.t} x={r.t} y={r[kind] as number} r={2.5} className="ch-dot" fill="currentColor" stroke="none" />;
-              })}
+            {showAvg && <LoneDots rows={rows} kind={kind} indices={lone} />}
             <MarkerLines markers={markers} />
             <PlotProbe onPlot={onPlot} />
           </ComposedChart>
@@ -389,6 +371,50 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
       )}
     </figure>
   );
+}
+
+function PlotGrid({ values }: { values: number[] }) {
+  const plot = usePlotArea();
+  const y = useYAxisScale();
+  if (!plot || !y) return null;
+  return <g className="ch-grid" aria-hidden="true">{values.map((value) => {
+    const py = y(value);
+    return <line key={value} x1={plot.x} x2={plot.x + plot.width} y1={py} y2={py} />;
+  })}</g>;
+}
+
+// A range band and isolated samples use the same Recharts scales as the line.
+function Band({ rows, bandKey }: { rows: ChartRow[]; bandKey: "cpuBand" | "memBand" }) {
+  const x = useXAxisScale();
+  const y = useYAxisScale();
+  if (!x || !y) return null;
+  let high: string[] = [];
+  let low: string[] = [];
+  let path = "";
+  const close = () => {
+    if (high.length) path += `M${high.join("L")}L${low.toReversed().join("L")}Z`;
+    high = [];
+    low = [];
+  };
+  for (const row of rows) {
+    const band = row[bandKey];
+    const left = x(row.t);
+    if (!band || left === undefined) { close(); continue; }
+    high.push(`${left},${y(band[1])}`);
+    low.push(`${left},${y(band[0])}`);
+  }
+  close();
+  return <path d={path} fill="currentColor" fillOpacity={.16} aria-hidden="true" />;
+}
+
+function LoneDots({ rows, kind, indices }: { rows: ChartRow[]; kind: Kind; indices: number[] }) {
+  const x = useXAxisScale();
+  const y = useYAxisScale();
+  if (!x || !y) return null;
+  return <g aria-hidden="true">{indices.map((index) => {
+    const row = rows[index];
+    return row && <circle key={row.t} cx={x(row.t)} cy={y(row[kind])} r={2.5} fill="currentColor" />;
+  })}</g>;
 }
 
 /** Tells the chart where its plot is (for the drag), from Recharts' layout. */
