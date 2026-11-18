@@ -107,7 +107,7 @@ export default function LogsPage() {
   const [regex, setRegex] = useState(false), [wrap, setWrap] = useState(() => stored("wrap")), [time, setTime] = useState(() => stored("time")), [paused, setPaused] = useState(false), [expanded, setExpanded] = useState(false);
   const search = route.search.get("search") ?? "", sensitive = route.search.get("case") === "1", show = route.search.get("show") ?? "all", levels = route.search.get("levels") ?? "ewido";
   const range = route.search.get("range") ?? (route.search.has("from") || route.search.has("to") ? "custom" : "");
-  const [from, setFrom] = useState(""), [to, setTo] = useState(""), [previousRange, setPreviousRange] = useState(""), [rangeError, setRangeError] = useState("");
+  const [from, setFrom] = useState(""), [to, setTo] = useState(""), [previousRange, setPreviousRange] = useState(""), [rangeError, setRangeError] = useState(""), [rangeErrorField, setRangeErrorField] = useState("from");
   const since = route.search.get("since") ?? route.search.get("from"), until = route.search.get("until") ?? route.search.get("to");
   const closedRange = (since && Number.isFinite(Number(since)) ? `&since=${Number(since)}` : "") + (until && Number.isFinite(Number(until)) ? `&until=${Number(until)}` : "");
   const rangeQuery = range === "custom" ? closedRange || previousRange : range ? `&since=${encodeURIComponent(range)}` : "";
@@ -152,11 +152,11 @@ export default function LogsPage() {
     </div></div>
     {linked.regexFromLink && !regex && <p className="log-note">Search from the link is plain text. Turn on .* to use it as a regular expression.</p>}
     {range === "custom" && <form className="log-custom" onSubmit={(e) => { e.preventDefault(); const f = from ? new Date(from).getTime() / 1000 : null, t = to ? new Date(to).getTime() / 1000 : null;
-      if (!f && !t) { setRangeError("Choose a From or To time."); return; }
-      if (f && f > Date.now() / 1000) { setRangeError("From is in the future."); return; }
-      if (f && t && t <= f) { setRangeError("To must be later than From."); return; }
+      if (!f && !t) { setRangeError("Choose a From or To time."); setRangeErrorField("from"); document.getElementById("logs-from")?.focus(); return; }
+      if (f && f > Date.now() / 1000) { setRangeError("From is in the future."); setRangeErrorField("from"); document.getElementById("logs-from")?.focus(); return; }
+      if (f && t && t <= f) { setRangeError("To must be later than From."); setRangeErrorField("to"); document.getElementById("logs-to")?.focus(); return; }
       setRangeError(""); setSearch({ since: f ? String(f) : null, until: t ? String(t) : null }, { replace: true });
-    }}><Field id="logs-from" label="From" error={rangeError}><TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field id="logs-to" label="To"><TextInput type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Button type="submit">Apply</Button></form>}
+    }}><Field id="logs-from" label="From" error={rangeErrorField === "from" ? rangeError : ""}><TextInput type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} /></Field><Field id="logs-to" label="To" error={rangeErrorField === "to" ? rangeError : ""}><TextInput type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} /></Field><Button type="submit">Apply</Button></form>}
     <div className="log-panes" style={{ gridTemplateColumns: `repeat(${stack ? 1 : Math.max(1, panes.length)}, minmax(0, 1fr))` }}>
       {stack && stackExists ? <Pane key={`stack:${stack}`} title={stack} stack query={`stack=${encodeURIComponent(stack)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} /> : panes.map((name) => <Pane key={name} title={name} query={`c=${encodeURIComponent(name)}`} picker={picker} options={options} range={rangeQuery} target={permalink(route.hash)} close={route.route.name === "logs" ? `/app/logs${panes.length > 1 ? `?c=${encodeURIComponent(panes.filter((n) => n !== name).join(","))}` : ""}` : undefined} />)}
     </div>
