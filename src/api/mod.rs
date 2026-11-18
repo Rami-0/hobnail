@@ -69,7 +69,9 @@ pub(crate) async fn route(
         Handler::Containers => containers::list(state).await,
         Handler::Container => {
             let name = m.param("name").unwrap_or_default();
-            containers::get(state, name, query).await
+            let admin =
+                principal.expect("viewer gate").account.role >= crate::db::accounts::Role::Admin;
+            containers::get(state, name, query, admin).await
         }
         Handler::Strips => strips::get(state).await,
         Handler::Stream => stream::get(

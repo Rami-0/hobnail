@@ -1,4 +1,4 @@
-//! JSON read API over the history database. Open like the page (GET only;
+//! Signed-in JSON read API over the history database (GET only;
 //! the central router only sends GET/HEAD here). See docs/DESIGN.md section 4.
 //!
 //! - `GET /api/history/system?metric=cpu&range=24h[&agg=max]`
@@ -23,13 +23,16 @@ use crate::state::AppState;
 
 const MAX_NAME: usize = 256;
 
-pub async fn route(state: &Arc<AppState>, req: &Request<hyper::body::Incoming>) -> Response<Body> {
+pub async fn route(
+    state: &Arc<AppState>,
+    req: &Request<hyper::body::Incoming>,
+    admin: bool,
+) -> Response<Body> {
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
     let db = state.db.clone();
     let now = crate::util::unix_now() as i64;
-    let signed_in = crate::auth::current_user(state, req.headers()).is_some();
-    let res = tokio::task::spawn_blocking(move || answer(&db, &path, &query, now, signed_in))
+    let res = tokio::task::spawn_blocking(move || answer(&db, &path, &query, now, admin))
         .await
         .unwrap_or_else(|_| Err((StatusCode::INTERNAL_SERVER_ERROR, "query failed".into())));
     match res {

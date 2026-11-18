@@ -77,7 +77,7 @@ pub fn bootstrap(state: &AppState, role: Role, now: i64) -> Bootstrap {
             system: cfg.system.enabled,
         },
         docker_error: super::containers::docker_error(cfg, &snap),
-        config_error: loaded.error.clone(),
+        config_error: loaded.error.clone().filter(|_| role >= Role::Admin),
         alerts_firing: state.alerts.lock().unwrap().incidents.len() as u32,
         refresh: Refresh {
             system_secs: cfg.system.refresh.0.as_secs().max(1),

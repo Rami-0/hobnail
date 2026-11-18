@@ -2188,3 +2188,78 @@ async fn locked_onboarding_requires_console_recovery() {
     assert_eq!(session["onboarding_locked"], false);
     assert_eq!(session["owner_exists"], true);
 }
+
+#[tokio::test]
+async fn viewer_cannot_read_administrative_details() {
+    use crate::db::accounts::Role;
+    let st = privacy_state("viewer").await;
+    break_config(&st);
+    let now = crate::auth::now_s();
+    st.db
+        .create_invite("privacy-invite", Role::Viewer, None, now, now + 60)
+        .unwrap();
+    let token = "ab".repeat(32);
+    st.db
+        .accept_invite(
+            "privacy-invite",
+            "guest",
+            "unused",
+            &crate::auth::sha256_hex(token.as_bytes()),
+            now,
+            now + 60,
+        )
+        .unwrap();
+    let addr = start(st).await;
+    let cookie = format!("rh_session={token}");
+    let h = [("Cookie", cookie.as_str())];
+    for path in [
+        "/api/settings/config",
+        "/api/settings/env",
+        "/api/settings/revisions",
+        "/api/settings/export",
+        "/api/settings/security",
+        "/settings",
+        "/settings/security",
+        "/api/containers/web/env",
+        "/api/containers/web/health",
+        "/api/containers/web/top",
+    ] {
+        assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
+    }
+    let bootstrap = json_of(
+        &req(addr, "GET", "/api/v1/bootstrap", &h, "").await,
+        "viewer bootstrap",
+    );
+    assert!(bootstrap["config_error"].is_null());
+    let detail = json_of(
+        &req(addr, "GET", "/api/v1/containers/web", &h, "").await,
+        "viewer detail",
+    );
+    assert!(detail["why"]["probe"].is_null());
+    assert_eq!(detail["why"]["checks"], serde_json::json!([]));
+    assert!(!detail.to_string().contains("auth.login_failed"));
+    for path in [
+        "/api/events",
+        "/api/events?kind=auth.",
+        "/history",
+        "/containers/web",
+    ] {
+        let response = req(addr, "GET", path, &h, "").await;
+        assert_eq!(response.status, 200, "{path}");
+        assert!(!response.body.contains("192.0.2.7"), "{path}");
+        assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
+    }
+    let (owner, _) = login(addr).await;
+    for name in ["secret-ovr", "secret-lbl", "secret-exc"] {
+        for endpoint in ["env", "health", "top"] {
+            let path = format!("/api/containers/{name}/{endpoint}");
+            assert_eq!(
+                req(addr, "GET", &path, &[("Cookie", &owner)], "")
+                    .await
+                    .status,
+                404,
+                "{path}"
+            );
+        }
+    }
+}
