@@ -21,6 +21,11 @@ const configure = async (text, hash) => {
 await configure(config.text + "\n[logs]\ntail = 5000\nring = 5000\n", config.hash);
 const picker = await fetch(new URL("/api/v1/logs/picker", base), { headers }).then((r) => r.json());
 const group = picker.groups.find((g) => g.project && g.containers.some((c) => c.name === "svc001")); assert.ok(group);
+async function saveTrace(tab, label) {
+  const finished=tab.once('Tracing.tracingComplete',30000); await tab.send('Tracing.end'); const result=await finished;
+  if (result?.stream) { let data=''; for (;;) { const chunk=await tab.send('IO.read',{handle:result.stream,size:4<<20}); if(chunk.error) break; data+=chunk.result.base64Encoded?Buffer.from(chunk.result.data,'base64').toString():chunk.result.data; if(chunk.result.eof) break; } await tab.send('IO.close',{handle:result.stream}); fs.writeFileSync(path.join(out,`${label}-trace.json`),data); }
+  const cpu=await tab.send('Profiler.stop'); fs.writeFileSync(path.join(out,`${label}-cpu.json`),JSON.stringify(cpu.result.profile));
+}
 const browser = await launch(); const results = []; const failures = [];
 try {
   for (const width of (process.env.WIDTHS || "1440 390").split(/\s+/).map((v) => parseInt(v))) for (const theme of (process.env.SCHEMES || "dark light").split(/\s+/)) {
@@ -69,6 +74,7 @@ try {
       await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("5,000 / 5,000")', "5000-line ring");
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       await sleep(1000);
+      if(process.env.TRACE_LOGS==='1') { await tab.send('Profiler.enable'); await tab.send('Profiler.start'); await tab.send('Tracing.start',{transferMode:'ReturnAsStream',traceConfig:{includedCategories:['devtools.timeline','disabled-by-default-devtools.timeline','toplevel','blink.user_timing','__metadata']}}); }
       measurements.burstObserveStartedAt=Date.now();
       await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(list => logTasks.push(...list.getEntries().map(e=>e.duration))); logObserver.observe({type:'longtask',buffered:false});`);
       await sleep(7000);
@@ -77,6 +83,9 @@ try {
       measurements.wireLines = await tab.ev('Math.max(...logSources.map(s=>s.wireCount))');
       assert.ok(measurements.wireLines>=6500, "initial 5000 plus the 1500-line burst arrived");
       await tab.ev('logObserver.disconnect()');
+      if(process.env.TRACE_LOGS==='1') await saveTrace(tab,label);
+      if(process.env.PROFILE_ONLY==='1') { measurements.profilingOnly=true; results.push(measurements); assert.ok(measurements.burstMaxTaskMs<=100,`profile burst maximum ${measurements.burstMaxTaskMs} ms`); continue; }
+
       measurements.mountedRows = await tab.ev('document.querySelectorAll("[data-log-id]").length');
       assert.ok(measurements.mountedRows < 150, "rows are windowed");
       await wait(`(() => { const b=document.querySelector('[data-testid=log-body]'); return b.scrollHeight-b.scrollTop-b.clientHeight < 2; })()`, "follows newest after burst");
