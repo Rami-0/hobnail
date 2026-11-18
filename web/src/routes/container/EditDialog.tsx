@@ -17,6 +17,7 @@ import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput, type TextInputProps } from "../../ui/Field.tsx";
 import { Note, type MessageKind } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
+import { SignInPrompt } from "../../ui/SignInPrompt.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { toast } from "../../ui/toast.ts";
 import {
@@ -29,7 +30,6 @@ import {
   readOverride,
   requestBody,
   savedText,
-  signInHref,
   validate,
   type OvKey,
   type OvValues,
@@ -234,11 +234,6 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
     void save();
   };
 
-  const signIn = (
-    <a className="btn primary sm" data-testid="signin-newtab" href={signInHref(window.location.pathname, window.location.search)} target="_blank" rel="noopener noreferrer">
-      Sign in (new tab)
-    </a>
-  );
   let actions = null;
   switch (note?.act) {
     case "stale":
@@ -255,14 +250,7 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
       break;
     case "signin-save":
     case "signin-load":
-      actions = (
-        <>
-          {signIn}
-          <Button className="sm" data-testid="retry" busy={busy} onClick={() => void retryAfterSignIn(note.act === "signin-save" ? "save" : "load")}>
-            Retry
-          </Button>
-        </>
-      );
+      actions = <SignInPrompt busy={busy} retry={() => void retryAfterSignIn(note.act === "signin-save" ? "save" : "load")} />;
       break;
     case "retry-load":
       actions = (
