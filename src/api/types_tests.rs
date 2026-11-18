@@ -88,6 +88,7 @@ fn files() -> Vec<(String, String)> {
         render::<super::bootstrap::BoardNavigation>(),
         render::<super::dashboard_settings::DashboardSettings>(),
         render::<BuildInfoView>(),
+        render::<super::bookmarks::BookmarkView>(),
         render::<ContainerDetail>(),
         render::<ContainerRow>(),
         render::<ContainersView>(),

@@ -1195,6 +1195,10 @@ hide = true
 [containers.web]
 url = "http://{host}:9000/{name}"
 
+[[bookmarks]]
+name = "Example"
+url = "https://example.com"
+
 [[alerts]]
 name = "shop-down"
 type = "container"
@@ -2076,6 +2080,10 @@ async fn invite_roles_and_account_management() {
             403
         );
 
+        assert_eq!(
+            req(addr, "GET", "/api/v1/bookmarks", &h, "").await.status,
+            403
+        );
         let r = req(
             addr,
             "POST",
@@ -2295,6 +2303,11 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let bookmarks = req(addr, "GET", "/api/v1/bookmarks", &h, "").await;
+    assert_eq!(
+        json_of(&bookmarks, "viewer bookmarks")[0]["name"],
+        "Example"
+    );
     let path = "/api/v1/history?range=24h&cmp=1&events=all";
     let history = req(addr, "GET", path, &h, "").await;
     assert!(history

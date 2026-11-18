@@ -13,6 +13,7 @@ use crate::state::AppState;
 pub mod access;
 mod accounts;
 mod boards;
+mod bookmarks;
 pub mod bootstrap;
 pub mod containers;
 mod dashboard_settings;
@@ -128,6 +129,7 @@ pub(crate) async fn route(
             let admin = !account.is_scoped() && account.role >= crate::db::accounts::Role::Admin;
             containers::get(state, name, query, admin).await
         }
+        Handler::Bookmarks => bookmarks::get(state),
         Handler::History => {
             history::get(state, query, principal.expect("viewer gate").account.role).await
         }
