@@ -49,6 +49,7 @@ const LOOSE = Number(opt("loose", 0));
 const SYS = opt("sys", null);
 const CHURN = Number(opt("churn", 0));
 const HOSTILE = flag("hostile");
+const LOG_FIXTURES = flag("log-fixtures");
 const QUIET = flag("quiet");
 
 const T0 = Math.floor(Date.now() / 1000);
@@ -253,6 +254,8 @@ const logReport = path.join(path.dirname(SOCK), "log-connections.json");
 const saveLogReport = () => fs.writeFileSync(logReport, JSON.stringify(logConnections));
 
 function logs(c, q, res) {
+  if (LOG_FIXTURES && c.name === "svc149") return json(res, 404, { message: "Container disappeared" });
+  if (LOG_FIXTURES && c.name === "svc148") return json(res, 500, { message: "Fixture log read failure" });
   const now = Math.floor(Date.now() / 1000);
   const since = q.get("since") ? parseFloat(q.get("since")) : 0, until = q.get("until") ? parseFloat(q.get("until")) : Infinity;
   let lines = [];
