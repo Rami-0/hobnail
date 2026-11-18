@@ -2068,7 +2068,9 @@ async fn invite_roles_and_account_management() {
             serde_json::json!({"valid": false, "role": null, "expires": null})
         );
         let r = req(addr, "GET", "/api/v1/bootstrap", &h, "").await;
-        assert_eq!(json_of(&r, "role in bootstrap")["role"], role);
+        let bootstrap = json_of(&r, "role in bootstrap");
+        assert_eq!(bootstrap["role"], role);
+        assert_eq!(bootstrap["scoped"], true);
         let r = req(
             addr,
             "POST",
@@ -2077,12 +2079,7 @@ async fn invite_roles_and_account_management() {
             r#"{"text":"[page]"}"#,
         )
         .await;
-        assert_eq!(
-            r.status,
-            if role == "admin" { 200 } else { 403 },
-            "{role}: {}",
-            r.body
-        );
+        assert_eq!(r.status, 403, "{role}: {}", r.body);
         let r = req(addr, "GET", "/api/v1/users", &h, "").await;
         assert_api_error(&r, 403, "forbidden", role);
         let r = req(

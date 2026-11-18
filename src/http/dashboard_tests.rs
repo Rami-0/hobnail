@@ -276,6 +276,17 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         );
     }
 
+    let integration_path = format!("/api/v1/integrations/{visible_i}");
+    assert_api_error(
+        &admin.call("DELETE", &integration_path, Value::Null).await,
+        403,
+        "forbidden",
+        &integration_path,
+    );
+    assert_eq!(
+        admin.json("GET", &integration_path, Value::Null, 200).await["admin"]["base_url"],
+        "https://example.test/path"
+    );
     for suffix in ["suggestions", "draft"] {
         let path = format!("/api/v1/boards/{visible}/{suffix}");
         assert_api_error(
