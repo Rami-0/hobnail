@@ -199,10 +199,11 @@ export class LogPane {
     this.following = false; this.anchor = { id, offset: 0 };
     this.box.scrollTop = this.offsets[i] ?? 0; this.lastTop = this.box.scrollTop;
   }
-  private resize = () => this.schedule();
+  private resize = () => { this.restoring = true; this.schedule(); };
   private touch = () => { this.restoring = false; };
   private wheel = (e: WheelEvent) => { this.restoring = false; if (e.deltaY < 0) { this.following = false; this.mark(); this.schedule(); } };
   private scroll = () => {
+    if (this.width !== this.box.clientWidth) { this.restoring = true; this.schedule(); return; }
     if (this.restoring) return;
     const top = this.box.scrollTop;
     if (top < this.lastTop - 0.1) this.following = false;
