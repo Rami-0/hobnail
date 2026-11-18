@@ -84,6 +84,12 @@ try {
       await inp.click("[data-check-action]");
       await tab.ev('document.querySelectorAll("[data-check-action]").forEach((el) => el.removeAttribute("data-check-action"))');
     };
+    const selectContainer = async (name) => {
+      await wait(`Array.from(document.querySelectorAll('[data-testid="settings-containers"] label.cb')).some(el=>el.textContent.trim()===${q(name)})`, `container selection ${name} is loaded`);
+      await tab.ev(`Array.from(document.querySelectorAll('[data-testid="settings-containers"] label.cb')).find(el=>el.textContent.trim()===${q(name)}).querySelector('[role="switch"]').setAttribute('data-container-check','')`);
+      await inp.click('[data-container-check]');
+      await tab.ev(`document.querySelector('[data-container-check]')?.removeAttribute('data-container-check')`);
+    };
     const cookie = async (session) => {
       const equals = session.cookie.indexOf("=");
       await tab.send("Network.setCookie", { name: session.cookie.slice(0, equals), value: session.cookie.slice(equals + 1),
@@ -177,8 +183,8 @@ try {
         ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
 
         await go("/app/settings/containers", present('[data-testid="settings-containers"]'));
-        await inp.click('[role="switch"][aria-label="svc001"]');
-        await inp.click('[role="switch"][aria-label="svc002"]');
+        await selectContainer('svc001');
+        await selectContainer('svc002');
         await wait(text('[aria-label="Bulk edit"]', "2 selected"), "bulk bar counts its selection");
         await fill('#settings-bulk-group', `Browser bulk ${width}`);
         await button('[aria-label="Bulk edit"]', "Set group");
@@ -186,7 +192,7 @@ try {
         const bulkSaved = ok(await call("/api/settings/containers", "GET", undefined, owner), "read bulk overrides");
         assert.equal(bulkSaved.overrides.svc001.group, `Browser bulk ${width}`);
         assert.equal(bulkSaved.overrides.svc002.group, `Browser bulk ${width}`);
-        for (const name of ['svc001','svc002']) await inp.click(`[role="switch"][aria-label="${name}"]`);
+        for (const name of ['svc001','svc002']) await selectContainer(name);
         await button('[aria-label="Bulk edit"]', "Remove overrides"); await button(dialog, "Remove overrides");
         await wait(`!${present(dialog)}`, "bulk removal confirms and saves");
         let groupState = ok(await call("/api/settings/containers", "GET", undefined, owner), "read group order");
