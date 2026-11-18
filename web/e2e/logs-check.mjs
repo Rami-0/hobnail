@@ -32,7 +32,10 @@ try {
     const choose = async (label, value) => {
       await inp.click(`[aria-label="${label}"]`);
       await wait(`!!document.querySelector('[role="option"][data-value="${value}"]')`, `option ${label} ${value}`);
-      await inp.click(`[role="option"][data-value="${value}"]`);
+      const values = label === "Show" ? ["all","0","1","3","10"] : ["","15m","1h","6h","24h","start","custom"];
+      await inp.key("Home");
+      for (let i=0; i<values.indexOf(value); i++) await inp.key("ArrowDown");
+      await inp.key("Enter");
     };
     const setQuery = async (text) => { await inp.clear('[data-testid="filter"]'); if (text) await inp.type(text); };
     const setDate = async (id, text) => tab.ev(`{const e=document.getElementById(${q(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${q(text)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}`);
