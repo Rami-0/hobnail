@@ -430,7 +430,7 @@ export function Sidebar({
           <span className="nav-label">Stacks and containers</span>
         </button>
       </nav>
-      <Tree active={active} filterRef={filterRef} />
+      {(!phone || open) && <Tree active={active} filterRef={filterRef} />}
       <div className="side-foot">
         <LiveIndicator />
         <button type="button" className="linklike keys-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onKeys}>
