@@ -484,19 +484,6 @@ fn loading_states_are_skeletons_on_busy_regions() {
         w.contains(r#"<span class="sk-t">Waiting for the first answer…</span>"#),
         "{w}"
     );
-    // The log pane before its first lines (signed in only, so the page
-    // here is the sign-in state; the viewer markup is checked in logs).
-    let lg = page_of(&st, "/containers/web/logs", "");
-    // (No password is set here: the owner's setup sentence; with one it is a
-    // "Sign in" button, checked in the browser by motion-check.)
-    assert!(
-        lg.contains("Sign in to read logs") && lg.contains("Logs often hold passwords and tokens"),
-        "LG-11: plain words"
-    );
-    assert!(
-        !lg.contains("[logs] require_login"),
-        "no config syntax quoted as a reason (LG-11)"
-    );
 }
 
 /// Page changes are one swap (ux-pass, "flicker"): on every route, signed

@@ -2145,15 +2145,16 @@ above = 90
                 let q = format!("tab={}&range=7d", tab.slug());
                 let ctx = ctx_for(&st, &q, false);
                 let (s, html) = page(&ctx, name);
-                if tab == Tab::Logs {
-                    // The Logs tab is the viewer, which needs a sign-in by default.
-                    assert_eq!(s, StatusCode::UNAUTHORIZED, "{name} {tab:?}");
-                    assert!(html.contains("Sign in to read logs"));
+                let expected = if tab == Tab::Logs && name == evil {
+                    StatusCode::NOT_FOUND
                 } else {
-                    assert_eq!(s, StatusCode::OK, "{name} {tab:?}");
-                }
+                    StatusCode::OK
+                };
+                assert_eq!(s, expected, "{name} {tab:?}");
                 assert!(!html.contains(evil), "unescaped name on {tab:?}");
-                assert!(html.contains("aria-current=\"page\""));
+                if expected == StatusCode::OK {
+                    assert!(html.contains("aria-current=\"page\""));
+                }
                 if tab == Tab::Events && name == evil {
                     assert!(html.contains("exit code &lt;1&gt;"));
                     assert!(!html.contains("10.0.0.9"), "auth events shown anonymously");

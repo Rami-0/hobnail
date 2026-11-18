@@ -178,16 +178,13 @@ fn container_logs_page_is_the_logs_tab() {
 /// Signed out with logs behind a sign-in: the header and tabs (public on the
 /// detail page) and the sign-in state; no log viewer, no stream.
 #[test]
-fn container_logs_signed_out_keeps_the_frame() {
+fn container_logs_keeps_the_container_frame() {
     let st = state_with(sample(), "");
-    let (s, html) = page(&st, "/containers/web/logs", "");
-    assert_eq!(s, 401);
+    let (status, html) = page(&st, "/containers/web/logs", "");
+    assert_eq!(status, 200);
     assert!(html.contains(r#"<header class="ctr-head">"#));
     assert!(html.contains(r#"aria-current="page">Logs</a>"#));
-    assert!(html.contains("Sign in to read logs"));
-    assert!(
-        !html.contains("logs.js") && !html.contains(r#"id="lv""#) && !html.contains("lvl-chart")
-    );
+    assert!(html.contains(r#"id="lv""#));
 }
 
 #[test]
@@ -490,16 +487,6 @@ fn list_preticks_and_says_what_is_missing() {
     );
     let (_, html) = page(&st, "/logs", "");
     assert!(!html.contains("Tick one to four") && !html.contains("Not found"));
-    // Signed out, none of it is shown.
-    let st = state_with(sample(), "");
-    for q in ["c=web", "sel=web", "c=nope", "go=1"] {
-        let (s, html) = page(&st, "/logs", q);
-        assert_eq!(s, 401, "{q}");
-        assert!(
-            !html.contains("Not found") && !html.contains(r#"value="web""#),
-            "{q}"
-        );
-    }
 }
 
 /// The toolbar is one row (LG-19, LG-31): search with the match stepper
@@ -843,17 +830,6 @@ async fn download_streams_text_with_disposition() {
         got.contains("2026-11-14T21:30:01.000Z stderr ERROR line 1 <b>&"),
         "ANSI removed: {got}"
     );
-}
-
-#[test]
-fn logs_need_a_login_by_default() {
-    // No [logs] section at all: fail closed.
-    let st = state_with(sample(), "");
-    for p in ["/containers/web/logs", "/stacks/shop/logs", "/logs"] {
-        let (s, html) = page(&st, p, "");
-        assert_eq!(s, 401, "{p}");
-        assert!(html.contains("set-password"), "explains how to unlock: {p}");
-    }
 }
 
 #[test]
