@@ -1,4 +1,4 @@
-import { ansi, filterRows, jsonFold, matcher, Ring, type LogLine, type Row } from "./model.ts";
+import { filterRows, matcher, Ring, type LogLine, type Row } from "./model.ts";
 
 export interface ViewOptions {
   search: string; regex: boolean; sensitive: boolean; only: boolean; context: number;
@@ -239,7 +239,7 @@ export class LogPane {
     if (!this.options.wrap) return 28;
     const reserved = (this.options.time ? 116 : 0) + (this.query.startsWith("stack=") ? 100 : 0) + 24;
     const columns = Math.max(15, (this.box.clientWidth - reserved) / 7.5);
-    return 8 + 20 * Math.max(1, Math.ceil((jsonFold(row.plain)?.summary.length ?? row.plain.length) / columns));
+    return 8 + 20 * Math.max(1, Math.ceil((row.fold?.summary.length ?? row.plain.length) / columns));
   }
   private layout(): number {
     let height = 0; this.offsets = [];
@@ -276,7 +276,7 @@ export class LogPane {
     this.restoring = true;
     this.fit();
     if (!this.options.paused && this.pending.length) {
-      const batch = this.pending; this.pending = [];
+      const batch = this.pending.splice(0, 256);
       if (!this.following) this.unseen += batch.length;
       this.ring.append(batch);
       for (const line of batch) this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
@@ -320,6 +320,7 @@ export class LogPane {
       this.measure(); total = this.layout(); this.restore(total);
     }
     requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
+    if (this.pending.length && !this.options.paused) this.schedule();
     this.report({ state: this.options.paused ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following,
       message: search.error ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
@@ -339,7 +340,7 @@ export class LogPane {
       const hash = [...new TextEncoder().encode(row.c)].reduce((h, b) => Math.imul(h ^ b, 16777619) >>> 0, 2166136261);
       chip.style.color = `hsl(${hash % 360} 55% 62%)`; el.append(chip); }
     const text = document.createElement("span"); text.className = "log-text";
-    const fold = jsonFold(row.plain);
+    const fold = row.fold;
     if (fold) {
       const details = document.createElement("details"), summary = document.createElement("summary"), pre = document.createElement("pre");
       summary.textContent = fold.summary; pre.textContent = fold.pretty;
@@ -351,7 +352,7 @@ export class LogPane {
       });
       details.append(summary, pre); text.append(details);
     } else {
-      for (const segment of ansi(row.m)) {
+      for (const segment of row.segments) {
         const span = document.createElement("span"); span.className = segment.classes;
         if (segment.fg) span.style.color = segment.fg; if (segment.bg) span.style.backgroundColor = segment.bg;
         // Link only explicit http(s) URLs, with no interpretation of other text.

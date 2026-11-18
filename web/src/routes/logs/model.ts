@@ -1,14 +1,17 @@
 /* eslint-disable no-control-regex -- ANSI escape and terminal control stripping is intentional. */
 // Pure log contracts and transformations. Stream timestamps remain milliseconds.
 export interface LogLine { c: string; t: number; m: string; s?: number; l?: string; x?: number }
-export interface Row extends LogLine { id: number; plain: string }
+export interface Row extends LogLine { id: number; plain: string; segments: Segment[]; fold: ReturnType<typeof jsonFold> }
 export class Ring {
   rows: Row[] = [];
   next = 0;
   readonly cap: number;
   constructor(cap: number) { this.cap = cap; }
   append(lines: LogLine[], older = false): void {
-    const incoming = lines.map((l) => ({ ...l, id: this.next++, plain: ansi(l.m).map((s) => s.text).join("") }));
+    const incoming = lines.map((line) => {
+      const segments = ansi(line.m), plain = segments.map((segment) => segment.text).join("");
+      return { ...line, id: this.next++, plain, segments, fold: jsonFold(plain) };
+    });
     const room = Math.max(0, this.cap - this.rows.length);
     this.rows = older ? [...(room ? incoming.slice(-room) : []), ...this.rows] : [...this.rows, ...incoming].slice(-this.cap);
     this.rows.sort((a, b) => a.t - b.t || a.id - b.id);
