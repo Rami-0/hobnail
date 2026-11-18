@@ -117,14 +117,10 @@ pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background
 .dlg{flex-direction:column;width:min(560px,calc(100vw - 32px));max-height:88vh;max-height:min(88dvh,780px);margin:auto;padding:0;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--raised);color:var(--text);box-shadow:var(--shadow-3);overflow:hidden}
 .dlg[data-open]{display:flex}
 .dlg.wide{width:min(760px,calc(100vw - 32px))}
-.dlg::backdrop{background:var(--scrim)}
 .dlg{opacity:0;transform:translateY(12px) scale(.97);
  transition:opacity var(--dur-2) var(--ease-in),transform var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
 .dlg[data-open]{opacity:1;transform:none;transition-duration:var(--dur-3);transition-timing-function:var(--ease-out)}
 @starting-style{.dlg[data-open]{opacity:0;transform:translateY(12px) scale(.97)}}
-.dlg::backdrop{opacity:0;transition:opacity var(--dur-2) var(--ease-in),overlay var(--dur-2) allow-discrete,display var(--dur-2) allow-discrete}
-.dlg[data-open]::backdrop{opacity:1;transition-duration:var(--dur-3)}
-@starting-style{.dlg[data-open]::backdrop{opacity:0}}
 .dlg-h{display:flex;align-items:flex-start;gap:var(--s-3);padding:var(--s-4) var(--s-4) var(--s-3) var(--s-5);flex:none}
 .dlg-t{flex:1;min-width:0;display:grid;gap:2px}
 .dlg-h h2{font:650 var(--fs-h2)/1.25 var(--font);letter-spacing:-.015em;overflow-wrap:anywhere}
