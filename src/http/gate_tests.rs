@@ -2004,7 +2004,8 @@ async fn invite_roles_and_account_management() {
                 "valid": true, "role": role, "expires": v["invite"]["expires"]
             })
         );
-        let account = serde_json::json!({"username":role, "password":PW, "token":token});
+        let account =
+            serde_json::json!({"username":format!("guest-{role}"), "password":PW, "token":token});
         let r = req(
             addr,
             "POST",
@@ -2059,7 +2060,7 @@ async fn invite_roles_and_account_management() {
             .accounts()
             .unwrap()
             .into_iter()
-            .find(|u| u.name == role)
+            .find(|u| u.name == format!("guest-{role}"))
             .unwrap();
         assert!(account.can_see_board(&scope));
         assert!(!account.can_see_board("other"));
