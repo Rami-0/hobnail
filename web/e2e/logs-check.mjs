@@ -52,6 +52,7 @@ try {
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 844 : 900, deviceScaleFactor: 1, mobile: inp.touch });
       await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: 5 });
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      console.log(label, "picker");
       await load("/app/logs", '[data-testid="logs-picker-row"]'); await tab.shot(path.join(out, `${label}-list.png`));
       await inp.click('[data-testid="filter"]'); await inp.type("svc001");
       await wait('document.querySelectorAll("[data-testid=logs-picker-row]").length === 1', "picker filter");
@@ -85,6 +86,7 @@ try {
       await tab.ev(`document.querySelector('[data-testid=log-latest]').click()`);
       await wait('!document.querySelector("[data-testid=log-latest]")', "jump resumes following");
 
+      console.log(label, "controls");
       await clickText("Pause"); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "paused"', "pause state");
       const keptId = await tab.ev('document.querySelector("[data-log-id]").dataset.logId');
       const currentConfig = await fetch(new URL('/api/settings/config',base), {headers}).then(r=>r.json());
@@ -110,6 +112,7 @@ try {
       await choose("Show", "all"); await setQuery("["); await inp.click('[aria-label="Regular expression"]');
       await wait('document.querySelector("[data-testid=filter]").getAttribute("aria-invalid")==="true"', "invalid regex stays safe");
       await inp.click('[aria-label="Regular expression"]'); await setQuery("");
+      console.log(label, "ranges");
       for (const preset of ["15m", "1h", "6h", "24h", "start"]) { await choose("Range",preset); await wait(`new URL(location.href).searchParams.get('range')===${q(preset)}`, `range ${preset}`); }
       await choose("Range", "custom"); await clickText("Apply");
       await wait('!!document.querySelector(".log-custom [aria-invalid=true]")', "empty custom range validation");
@@ -121,6 +124,7 @@ try {
       await sleep(400);
       await tab.ev(`document.querySelector('[data-testid=log-body] details summary')?.click()`);
       assert.ok(await tab.ev(`!!document.querySelector('[data-testid=log-body] details[open] pre')`), "JSON folds and opens");
+      console.log(label, "clipboard and reconnect");
       await tab.send("Browser.grantPermissions", {origin:base.origin, permissions:["clipboardReadWrite","clipboardSanitizedWrite"]});
       const expectedCopy = await tab.ev(`(()=>{const r=document.querySelector('.log-row:not(:has(details))'); r.click(); return r.querySelector('.log-text').textContent;})()`);
       await clickText("Copy line"); assert.equal(await tab.ev('navigator.clipboard.readText()'), expectedCopy, "copy plain line text");
@@ -138,6 +142,7 @@ try {
       if (width===390) await inp.click('.log-filters');
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
       const dl = await fetch(new URL(download, base), { headers }); assert.equal(dl.status, 200); assert.ok(dl.headers.get("content-disposition").includes("attachment")); assert.ok((await dl.text()).includes("<script"));
+      console.log(label, "stack and panes");
       await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await tab.shot(path.join(out, `${label}-four.png`));
