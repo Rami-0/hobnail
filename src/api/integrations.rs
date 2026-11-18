@@ -1,7 +1,7 @@
 //! Generic HTTP integrations. Hobnail trusts public certificate authorities only.
 //! Private CAs and self-signed certificates fail verification. There is no bypass.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use hyper::{body::Incoming, Request, Response, StatusCode};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -238,6 +238,22 @@ fn target(
     Ok((view.admin.expect("admin details").base_url, credential))
 }
 
+fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
+    let now = Instant::now();
+    let mut attempts = state.integration_tests.lock().unwrap();
+    attempts.retain(|_, (started, _)| now.duration_since(*started) < Duration::from_secs(10));
+    let (_, count) = attempts.entry(account).or_insert((now, 0));
+    if *count >= 3 {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "Wait ten seconds before testing another integration.",
+        ));
+    }
+    *count += 1;
+    Ok(())
+}
+
 async fn test_connection(
     state: &AppState,
     url: String,
@@ -363,6 +379,7 @@ pub(super) async fn route(
             return Ok(super::no_content());
         }
         Handler::IntegrationTest => {
+            limit_test(state, user.id)?;
             let (url, credential) = db.dashboard(|c| target(c, id))?;
             return Ok(super::json(
                 StatusCode::OK,

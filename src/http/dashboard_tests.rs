@@ -528,7 +528,7 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
 
 #[tokio::test]
 async fn stolen_admin_session_cannot_read_or_retarget_a_secret() {
-    let st = state();
+    let st = crate::ui::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
     crate::auth::set_password_for_tests(&st.db, PW);
     let owner = Client::owner(start(st).await).await;
     let admin = owner.guest("stolen-admin", "admin", Value::Null).await;
@@ -670,7 +670,7 @@ async fn integration_test_reports_public_root_failure() {
             .await
             .is_err());
     });
-    let st = state();
+    let st = crate::ui::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
     crate::auth::set_password_for_tests(&st.db, PW);
     let owner = Client::owner(start(st).await).await;
     let created = owner.json("POST","/api/v1/integrations",json!({
@@ -727,8 +727,7 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
 
 #[tokio::test]
 async fn connection_verdict_enforces_outbound_policy() {
-    let st =
-        crate::ui::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['only.example.test']\n");
+    let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
     let owner = Client::owner(start(st).await).await;
     let created = owner
@@ -736,7 +735,7 @@ async fn connection_verdict_enforces_outbound_policy() {
             "POST",
             "/api/v1/integrations",
             json!({
-                "name":"Blocked","kind":"http","enabled":true,"base_url":"http://127.0.0.1"
+                "name":"Blocked","kind":"http","enabled":true,"base_url":"http://localhost"
             }),
             201,
         )
@@ -745,9 +744,24 @@ async fn connection_verdict_enforces_outbound_policy() {
         "/api/v1/integrations/{}/test",
         created["id"].as_str().unwrap()
     );
-    let r = owner.json("POST", &path, Value::Null, 200).await;
-    assert_eq!(r["class"], "blocked");
-    assert_eq!(r["ok"], false);
+    for _ in 0..3 {
+        let r = owner.json("POST", &path, Value::Null, 200).await;
+        assert_eq!(r["class"], "blocked");
+        assert_eq!(r["ok"], false);
+    }
+    assert_api_error(
+        &owner.call("POST", &path, Value::Null).await,
+        429,
+        "rate_limited",
+        &path,
+    );
+    let other = owner
+        .guest("independent-budget", "admin", Value::Null)
+        .await;
+    assert_eq!(
+        other.json("POST", &path, Value::Null, 200).await["class"],
+        "blocked"
+    );
 }
 
 #[tokio::test]

@@ -14,6 +14,7 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::{Method, Request as HRequest, Response as HResponse};
 use hyper_util::rt::TokioIo;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -83,8 +84,16 @@ impl Response {
 /// Send a request. Errors are human-readable and never include the URL's
 /// path or query (which may carry a secret such as a webhook token).
 pub async fn send(req: Request, policy: &HttpPolicy) -> Result<Response, String> {
+    send_with_policy(req, policy, false).await
+}
+
+async fn send_with_policy(
+    req: Request,
+    policy: &HttpPolicy,
+    integration: bool,
+) -> Result<Response, String> {
     let timeout = req.timeout;
-    match tokio::time::timeout(timeout, send_inner(req, policy)).await {
+    match tokio::time::timeout(timeout, send_inner(req, policy, integration)).await {
         Ok(r) => r,
         Err(_) => Err(format!("timed out after {}ms", timeout.as_millis())),
     }
@@ -145,10 +154,42 @@ pub(crate) async fn send_bound(
         }
         req = req.header("authorization", format!("Bearer {token}"));
     }
-    send(req, policy).await
+    send_with_policy(req, policy, true).await
 }
 
-async fn send_inner(req: Request, policy: &HttpPolicy) -> Result<Response, String> {
+fn restricted_integration_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ip.octets()[0] == 0
+                || ip.octets()[0] >= 240
+                || [
+                    Ipv4Addr::new(100, 100, 100, 200),
+                    Ipv4Addr::new(168, 63, 129, 16),
+                    Ipv4Addr::new(192, 0, 0, 192),
+                ]
+                .contains(&ip)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4() {
+                return restricted_integration_ip(v4.into());
+            }
+            let segments = ip.segments();
+            ip.is_unicast_link_local() || ip.is_multicast()
+                || segments[0] == 0x2002 // 6to4 can embed restricted IPv4 addresses.
+                || segments[..2] == [0x64, 0xff9b] // Well-known NAT64 prefixes.
+                || ip == Ipv6Addr::new(0xfd00, 0xec2, 0, 0, 0, 0, 0, 0x254)
+        }
+    }
+}
+
+async fn send_inner(
+    req: Request,
+    policy: &HttpPolicy,
+    integration: bool,
+) -> Result<Response, String> {
     let uri: hyper::Uri = req.url.parse().map_err(|_| "invalid URL".to_string())?;
     let scheme = uri.scheme_str().unwrap_or("http").to_ascii_lowercase();
     let host = uri.host().ok_or("URL has no host")?.to_string();
@@ -181,6 +222,15 @@ async fn send_inner(req: Request, policy: &HttpPolicy) -> Result<Response, Strin
     if addresses.is_empty() {
         return Err(format!("resolve {host_bare}: no addresses"));
     }
+    if integration
+        && policy.allow_hosts.is_empty()
+        && addresses
+            .iter()
+            .any(|addr| restricted_integration_ip(addr.ip()))
+    {
+        return Err("blocked integration address".into());
+    }
+    // Connect using the exact addresses that passed the policy check.
     let tcp = TcpStream::connect(addresses.as_slice())
         .await
         .map_err(|e| format!("connect {host_bare}:{port}: {e}"))?;
@@ -277,4 +327,41 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
         Arc::new(cfg)
     })
     .clone()
+}
+
+#[cfg(test)]
+mod integration_policy_tests {
+    use super::restricted_integration_ip;
+
+    #[test]
+    fn restrict_special_destinations_but_allow_private_services() {
+        for ip in [
+            "0.0.0.0",
+            "::",
+            "127.0.0.1",
+            "::1",
+            "169.254.169.254",
+            "::ffff:169.254.169.254",
+            "fe80::1",
+            "224.0.0.1",
+            "ff02::1",
+            "100.100.100.200",
+            "168.63.129.16",
+            "192.0.0.192",
+            "fd00:ec2::254",
+            "64:ff9b::a9fe:a9fe",
+            "2002:a9fe:a9fe::1",
+        ] {
+            assert!(restricted_integration_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "10.0.0.2",
+            "172.16.1.1",
+            "192.168.1.1",
+            "fd01::1",
+            "8.8.8.8",
+        ] {
+            assert!(!restricted_integration_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
 }
