@@ -17,7 +17,7 @@ function observer(): IntersectionObserver | null {
     (entries) => {
       for (const e of entries) cbs.get(e.target)?.(e.isIntersecting);
     },
-    { rootMargin: "100px 0px" },
+    { rootMargin: "300px 0px" },
   );
   return io;
 }

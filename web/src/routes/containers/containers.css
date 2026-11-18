@@ -58,6 +58,18 @@
 
 /* ---- table ---- */
 .ctr-page .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;contain:paint}
+.ctbl{table-layout:fixed}
+.ctbl .c-name{width:auto}
+.ctbl .c-stack{width:90px}
+.ctbl .c-image{width:160px}
+.ctbl .c-state{width:90px}
+.ctbl .c-up{width:72px}
+.ctbl .c-hist{width:110px}
+.ctbl .c-hist .hstrip{width:100%}
+.ctbl .c-num:not(.c-up){width:110px}
+.ctbl .c-ports{width:74px}
+.ctbl .c-act{width:64px}
+.ctbl .c-num .cell-spark{width:30px;margin-left:4px}
 .ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
 .ctbl caption b{color:var(--text);font-weight:600}
 .ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
@@ -94,7 +106,7 @@
 .c-up .num{min-width:0}
 .c-ports{width:1%;white-space:nowrap}
 .c-act{width:112px;text-align:right;white-space:nowrap}
-.ctbl .c-hist{width:132px}
+
 .c-hist .hstrip{width:120px;height:12px}
 .row.stopped .nm{color:var(--text-2)}
 .row.stopped .c-image .img{color:var(--text-3)}
