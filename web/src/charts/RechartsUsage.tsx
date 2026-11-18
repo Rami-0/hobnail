@@ -15,7 +15,7 @@
 // plot, so they are focusable and named), local-time
 // ticks (series.ts `ticks`), lone points as dots, and the legend toggles
 // (buttons, remembered in localStorage under the old UI's key).
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ComposedChart,
   Line,
@@ -130,8 +130,11 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   const [stage, setStage] = useState(0);
   useEffect(() => {
     if (stage >= (metrics?.length ?? 2)) return;
-    const t = window.setTimeout(() => startTransition(() => setStage((n) => n + 1)), 0);
-    return () => window.clearTimeout(t);
+    let timer = 0;
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(() => startTransition(() => setStage((n) => n + 1)), 0);
+    });
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
   }, [stage, metrics?.length]);
   const common = { rows, series, markers, xt, off, toggle, onZoom, onMarker, recording };
   if (metrics) return <div className="charts two">
@@ -180,7 +183,7 @@ interface Plot {
   width: number;
 }
 
-function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom, onMarker, recording, unit = kind === "cpu" ? "pct" : "bytes", testKey = kind, compare = false, sync = "ctr-usage" }: OneProps) {
+const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom, onMarker, recording, unit = kind === "cpu" ? "pct" : "bytes", testKey = kind, compare = false, sync = "ctr-usage" }: OneProps) {
   const bandKey = kind === "cpu" ? "cpuBand" : "memBand";
   const hasBand = rows.some((r) => r[bandKey] !== null);
   const showAvg = !off.includes("avg");
@@ -372,7 +375,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
       )}
     </figure>
   );
-}
+});
 
 function PlotGrid({ values }: { values: number[] }) {
   const plot = usePlotArea();
