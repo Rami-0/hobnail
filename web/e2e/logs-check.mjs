@@ -188,7 +188,7 @@ try {
       await load(`/app/containers/svc001/logs#t=${Date.now()+60000}`, '[data-testid="log-pane"]');
       await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("still to come")', "future timestamp keeps live tail");
       console.log(label, "stack and panes");
-      await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
+      await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await wait('document.querySelector("[data-testid=log-body]").dataset.searchLines==="5000"', "merged stack reaches its ring cap",25000); await wait('(()=>{const b=document.querySelector("[data-testid=log-body]");return b.scrollHeight-b.scrollTop-b.clientHeight<2})()', "stack follows the newest line"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes");
       await wait('[...document.querySelectorAll("[data-testid=log-body]")].every(b=>b.dataset.searchLines==="5000")', "all panes loaded", 25000);

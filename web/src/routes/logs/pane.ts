@@ -175,7 +175,7 @@ export class LogPane {
         this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
       }
       // Paused input stays bounded too; reconnect resumes after the last received line.
-      if (this.pending.length > this.cap) this.pending.splice(0, this.pending.length - this.cap);
+      if (this.pending.length > this.cap) { this.pending.sort((a, b) => a.t - b.t); this.pending.splice(0, this.pending.length - this.cap); }
       this.schedule();
     });
     es.addEventListener("err", (e) => {
