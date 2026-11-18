@@ -4,3 +4,5 @@
 .log-actions{position:absolute;bottom:32px;right:8px;z-index:2;border:1px solid var(--border);border-radius:6px}.log-pane:has(.log-actions) .log-jump{bottom:82px}.log-copy{position:fixed;left:-10000px;top:0}.log-history-start{display:block;color:var(--text-3);font-size:11px;border-top:1px dashed var(--border)}.log-members{padding:8px 12px;font-size:12px}.log-members a{display:inline-block;margin:4px 8px 4px 0}
 
 .log-toolbar .btn[aria-pressed=true]{border-color:var(--accent-fg);color:var(--accent-fg);background:var(--surface-2)}.log-levels .btn[aria-pressed=false]{border-style:dashed;text-decoration:line-through}
+
+.log-levels .btn{gap:4px}.log-level-count{display:inline-block;min-width:5ch;text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono)}
