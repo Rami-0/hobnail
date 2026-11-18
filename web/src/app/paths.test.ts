@@ -43,7 +43,7 @@ test("containers and one container", () => {
   assert.deepEqual(routeParams({ name: "container", ctr: "web" }), { name: "web" });
   assert.deepEqual(routeParams({ name: "containers" }), {});
   for (const bad of [
-    "/app/containers/web/logs",
+
     "/app/containers/a%2Fb",
     "/app/containers/%zz",
     "/app/containers/%00x",
@@ -159,4 +159,11 @@ test("board and Settings routes stay inside the client", () => {
   assert.deepEqual(routeParams(matchRoute(`/app/boards/${id}`)), { id });
   assert.deepEqual(matchRoute("/app/settings/integrations"), { name: "settings", tab: "integrations" });
   assert.equal(matchRoute("/app/boards/not-an-id").name, "not_found");
+});
+
+test("logs routes decode container and stack names", () => {
+  assert.deepEqual(matchRoute("/app/logs"), { name: "logs" });
+  assert.deepEqual(matchRoute("/app/containers/web/logs"), { name: "container_logs", ctr: "web" });
+  assert.deepEqual(matchRoute("/app/stacks/shop/logs"), { name: "stack_logs", stack: "shop" });
+  assert.equal(matchRoute("/app/containers/a%2Fb/logs").name, "not_found");
 });

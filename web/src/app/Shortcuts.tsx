@@ -52,6 +52,16 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["/"]}>
           {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands"}
         </Row>
+        <Row k={["/"]}>Logs: focus search</Row>
+        <Row k={["↵"]}>Log search: older match</Row>
+        <Row k={["Shift", "↵"]}>Log search: newer match</Row>
+        <Row k={["Esc"]}>Log search: clear</Row>
+        <Row k={["End"]}>Logs: jump to latest</Row>
+        <Row k={["↵"]}>Log pane: select a line and focus Copy</Row>
+        <Row k={["↑"]}>Log actions: previous line</Row>
+        <Row k={["↓"]}>Log actions: next line</Row>
+        <Row k={["Esc"]}>Log actions: return to the pane</Row>
+        <Row k={["Tab"]}>Log actions: move between Copy and Link</Row>
         <Row k={["Alt", "↑ / ↓"]}>Board edit: move an item within its section</Row>
         <Row k={["Alt", "← / →"]}>Board edit: move an item between sections</Row>
         <Row k={["Shift", "arrows"]}>Board edit: resize width or rows on a focused Move or Resize control</Row>

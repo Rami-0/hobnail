@@ -63,6 +63,10 @@ const problems = [];
 for (const file of files(src)) {
   const rel = relative(root, file).split(sep).join("/");
   const text = readFileSync(file, "utf8");
+  // Keep an explicit log-viewer invariant even if the general CSP list changes.
+  if (rel.startsWith("src/routes/logs/") && /dangerouslySetInnerHTML|(?:\.|\[\s*["'])innerHTML/.test(text)) {
+    problems.push(`${rel}: log text must be rendered through text nodes`);
+  }
   const lines = text.split("\n");
   lines.forEach((line, i) => {
     for (const [re, what] of BANNED) {

@@ -239,3 +239,19 @@ same-session conflicts use the original document for a three-way rebase.
 The Vite PostCSS pass trims rules scoped exclusively to unused SDK primitives
 from the pinned stylesheet. Update its primitive list when introducing a new
 SDK wrapper. Global SDK variables and shared styles remain in the import.
+
+## React logs
+
+`src/routes/logs/pane.ts` owns the descendants of one ref container per pane.
+It inserts text nodes and spans, keeps a bounded data ring, and mounts only a
+visible row window. Controls remain React components from `src/ui/`.
+
+| Selector | Meaning |
+|---|---|
+| `[data-testid="logs-picker"]`, `[data-testid="logs-picker-row"]` | Filterable grouped picker and container row |
+| `[data-testid="logs-viewer"]` | Single, stack or split viewer |
+| `[data-testid="log-pane"][data-state]` | Pane and stream state |
+| `[data-testid="log-body"]` | Scrollable window, keyboard line selection |
+| `[data-log-id][data-timestamp][data-level]` | One mounted log row; timestamp in milliseconds |
+| `[data-testid="log-older"]`, `[data-testid="log-latest"]` | Older window and jump-to-latest actions |
+| `[data-testid="log-matches"]` | Current match / total in this pane |

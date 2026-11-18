@@ -10,6 +10,9 @@ export type Route =
   | { name: "invite"; token: string }
   | { name: "containers" }
   | { name: "history" }
+  | { name: "logs" }
+  | { name: "container_logs"; ctr: string }
+  | { name: "stack_logs"; stack: string }
   | { name: "overview" }
   | { name: "host" }
   | { name: "alerts" }
@@ -53,10 +56,20 @@ export function matchRoute(pathname: string): Route {
       return { name: "host" };
     case "/overview":
       return { name: "overview" };
+    case "/logs": return { name: "logs" };
     case "/history":
       return { name: "history" };
     case "/containers":
       return { name: "containers" };
+  }
+  const log = /^\/(containers|stacks)\/([^/]+)\/logs$/.exec(clean);
+  if (log) {
+    try {
+      const name = decodeURIComponent(log[2] ?? "");
+      // eslint-disable-next-line no-control-regex
+      if (name && !name.includes("/") && !name.includes("\\") && !/[\u0000-\u001f\u007f]/.test(name)) return log[1] === "containers" ? { name: "container_logs", ctr: name } : { name: "stack_logs", stack: name };
+    } catch { /* Invalid encoded segment. */ }
+    return { name: "not_found", path: pathname };
   }
   const board = /^\/boards\/([a-f0-9]{32})$/.exec(clean);
   if (board?.[1]) return { name: "board", id: board[1] };
