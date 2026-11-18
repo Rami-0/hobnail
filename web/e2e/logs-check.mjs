@@ -10,7 +10,15 @@ const out = process.env.OUT; fs.mkdirSync(out, { recursive: true });
 const session = await fetch(new URL("/api/v1/session", base)).then((r) => r.json());
 const signed = await fetch(new URL(session.owner_exists ? "/api/login" : "/api/v1/onboarding/owner", base), { method: "POST", headers: { Origin: base.origin, "Content-Type": "application/json" }, body: JSON.stringify({ username: "admin", password: process.env.HB_PASSWORD }) });
 assert.ok(signed.ok); const cookie = signed.headers.get("set-cookie").split(";")[0], split = cookie.indexOf("=");
-const headers = { Cookie: cookie };
+const credentials = await signed.json();
+const headers = { Cookie: cookie, Origin: base.origin, "Content-Type": "application/json", "X-RH-CSRF": credentials.csrf };
+const config = await fetch(new URL("/api/settings/config", base), { headers }).then((r) => r.json());
+assert.ok(!/^\[logs\]/m.test(config.text), "fixture expects no explicit logs section");
+const configure = async (text, hash) => {
+  const r = await fetch(new URL("/api/settings/config", base), { method: "POST", headers, body: JSON.stringify({ text, base_hash: hash }) });
+  assert.ok(r.ok, `configure logs ${r.status}: ${await r.text()}`);
+};
+await configure(config.text + "\n[logs]\ntail = 5000\nring = 5000\n", config.hash);
 const picker = await fetch(new URL("/api/v1/logs/picker", base), { headers }).then((r) => r.json());
 const group = picker.groups.find((g) => g.project && g.containers.some((c) => c.name === "svc001")); assert.ok(group);
 const browser = await launch(); const results = []; const failures = [];
@@ -38,6 +46,23 @@ try {
       await wait('document.querySelectorAll("[data-testid=logs-picker-row]").length === 1', "picker filter");
       assert.ok((await tab.ev("location.search")).includes("q=svc001"));
       await inp.key("Enter"); await wait('!!document.querySelector("[data-testid=log-body] [data-log-id]")', "Enter opens first match");
+      await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("5,000 / 5,000")', "5000-line ring");
+      if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+      await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(list => logTasks.push(...list.getEntries().map(e=>e.duration))); logObserver.observe({type:'longtask',buffered:false});`);
+      await sleep(7000);
+      measurements.burstMaxTaskMs = await tab.ev('Math.max(0,...logTasks)');
+      await tab.ev('logObserver.disconnect()');
+      measurements.mountedRows = await tab.ev('document.querySelectorAll("[data-log-id]").length');
+      assert.ok(measurements.mountedRows < 150, "rows are windowed");
+      await wait(`(() => { const b=document.querySelector('[data-testid=log-body]'); return b.scrollHeight-b.scrollTop-b.clientHeight < 2; })()`, "follows newest after burst");
+      await tab.shot(path.join(out, `${label}-single.png`));
+      assert.equal(await tab.ev('!!document.querySelector("#hostile-log,#hostile-img") || !!globalThis.logPwned'), false, "hostile markup creates no elements");
+      assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile log remains literal text");
+      await tab.ev(`{const b=document.querySelector('[data-testid=log-body]'); b.scrollTop-=100;}`);
+      await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll up stops following");
+      await tab.ev(`document.querySelector('[data-testid=log-latest]').click()`);
+      await wait('!document.querySelector("[data-testid=log-latest]")', "jump resumes following");
+
       await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "live"', "live state");
       await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(l=>{for(const e of l.getEntries())logTasks.push(e.duration)}); logObserver.observe({type:'longtask',buffered:false});`);
       await sleep(7600);
@@ -55,7 +80,10 @@ try {
       await clickText("Wrap"); await clickText("Time");
       assert.ok(await tab.ev(`!!document.querySelector('[data-log-id="${anchor}"]')`), "reader row survives toggles");
       await clickText("Pause"); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "paused"', "pause state"); await clickText("Resume");
-      await inp.click('[data-testid="filter"]'); await inp.type("ERROR"); await wait('Number(document.querySelector("[data-testid=log-matches]")?.textContent.split("/")[1]) > 0', "plain search counter");
+      await inp.click('[data-testid="filter"]');
+      await tab.ev(`globalThis.searchStarted=performance.now()`);
+      await inp.type("ERROR"); await wait('Number(document.querySelector("[data-testid=log-matches]")?.textContent.split("/")[1]) > 0', "plain search counter");
+      measurements.search5000Ms = await tab.ev('performance.now()-searchStarted');
       await inp.key("Enter"); await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
@@ -69,9 +97,15 @@ try {
       await sleep(2500);
       const status = await fetch(new URL("/api/logs/status", base), { headers }).then((r) => r.json()); assert.equal(status.viewer_streams, 0, "viewer stream closed after leave"); measurements.streamCountZeroAfterMs = Date.now() - leaveAt;
       measurements.consoleErrors = [...rec.console, ...rec.exceptions]; measurements.cspViolations = rec.csp;
+      assert.deepEqual(rec.csp, [], "zero CSP violations");
+      assert.deepEqual([...rec.console, ...rec.exceptions], [], "zero console errors");
       results.push(measurements);
+      assert.ok(measurements.burstMaxTaskMs <= 100, `burst maximum ${measurements.burstMaxTaskMs} ms exceeds 100 ms`);
     } catch (e) { failures.push(`${label}: ${e.stack}`); await tab.shot(path.join(out, `${label}-failure.png`)); }
     finally { fs.writeFileSync(path.join(out, `${label}-recorder.json`), JSON.stringify(rec)); await tab.close(); }
   }
-} finally { browser.quit(); fs.writeFileSync(path.join(out, "results.json"), JSON.stringify({ results, failures }, null, 2)); }
+} finally {
+  const current = await fetch(new URL("/api/settings/config", base), { headers }).then((r) => r.json());
+  await configure(config.text, current.hash);
+  browser.quit(); fs.writeFileSync(path.join(out, "results.json"), JSON.stringify({ results, failures }, null, 2)); }
 console.log(JSON.stringify({ results, failures }, null, 2)); assert.deepEqual(failures, []);
