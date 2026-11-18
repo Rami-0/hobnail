@@ -80,8 +80,17 @@ try {
   for (const width of [1440, 390]) for (const theme of ["dark", "light"]) {
     await tab.send("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 844 : 900, deviceScaleFactor: 1, mobile: width === 390 });
     await tab.ev(`document.documentElement.dataset.theme = ${q(theme)}`); await sleep(250);
-    check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: board has no sideways scroll`); await tab.shot(path.join(OUT, `board-${width}-${theme}.png`));
-    await edit(); await sleep(250); check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: editor has no sideways scroll`); await tab.shot(path.join(OUT, `editor-${width}-${theme}.png`)); await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-edit"));
+    check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: board has no sideways scroll`);
+    if (width === 390) check(await tab.ev(`(() => { const heading = document.querySelector(".board-section h2"); const title = heading.textContent; heading.textContent = "W".repeat(80); const ok = document.documentElement.scrollWidth <= innerWidth; heading.textContent = title; return ok; })()`), `${theme}: an 80-character section title wraps on mobile`); await tab.shot(path.join(OUT, `board-${width}-${theme}.png`));
+    await edit(); await sleep(250);
+    if (width === 390) {
+      await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`);
+      for (let n = 0; n < 3; n++) await inp.key("ArrowLeft", { modifiers: 8 });
+      await wait(`document.querySelector('[data-section="0"][data-item="0"] input[id$="mobile"]')?.value === "1"`, "minimum mobile span is editable");
+      check(await tab.ev(`(() => { const cell = document.querySelector('[data-section="0"][data-item="0"]'); const box = cell.getBoundingClientRect(); return [...cell.querySelectorAll("button,input")].every((control) => { const rect = control.getBoundingClientRect(); return !rect.width || (rect.left >= box.left && rect.right <= box.right); })() && document.documentElement.scrollWidth <= innerWidth`), `${theme}: one-column editor controls fit without sideways scroll`);
+      for (let n = 0; n < 3; n++) await inp.key("ArrowRight", { modifiers: 8 });
+    }
+    check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: editor has no sideways scroll`); await tab.shot(path.join(OUT, `editor-${width}-${theme}.png`)); await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-edit"));
   }
   await tab.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await go("/app/settings/integrations", visible("integration-create")); await inp.click('[data-testid="integration-create"]'); await wait(visible("integration-form"));

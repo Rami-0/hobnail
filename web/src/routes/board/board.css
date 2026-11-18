@@ -7,3 +7,8 @@
 .board-title{display:flex;align-items:center;gap:var(--s-3);min-width:0}.board-title h1{min-width:0}
 
 .editor-fields{border:0;padding:0;margin:0;min-width:0;display:grid;gap:var(--s-5)}
+/* A one-column tile must keep every editing control inside its own cell. */
+.board-section h2,.board-editor h1{overflow-wrap:anywhere}.board-heading>div{min-width:0;max-width:100%}
+.editor-cell .board-tile-head{flex-wrap:wrap}.editor-tools>.btn{min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.editor-cell .sel{flex-direction:column;align-items:stretch}.editor-cell .sel-l,.editor-cell .sel .in{white-space:normal;overflow-wrap:anywhere}.editor-cell .sel .in{height:auto;min-height:var(--ctl-h)}
+.editor-spans{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
