@@ -1,7 +1,7 @@
 import { eventLabel } from "../container/events.ts";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
-import { api } from "../../api/session.ts";
+import { useRead } from "../../live/read.ts";
 import { containerHref, logsHref } from "../../app/paths.ts";
 import { navigate, useRoute } from "../../app/router.ts";
 import { useBootstrap, useContainers } from "../../live/index.ts";
@@ -18,27 +18,15 @@ export default function History() {
   const bootstrap = useBootstrap();
   const sessionScoped = bootstrap?.scoped;
   const { data: containers } = useContainers();
-  const [data, setData] = useState<HistoryView>();
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (sessionScoped !== false) return;
-    const controller = new AbortController();
-    void api.get<HistoryView>(`/api/v1/history?${query}`, { signal: controller.signal }).then((result) => {
-      if (controller.signal.aborted) return;
-      if (result.kind === "ok") {
-        setData(result.data);
-        setError("");
-      } else setError(result.message);
-    });
-    return () => controller.abort();
-  }, [query, sessionScoped]);
+  const { data, error } = useRead<HistoryView>(sessionScoped === false ? `/api/v1/history?${query}` : null);
 
   const selected = hash.startsWith("#ev-") ? Number(hash.slice(4)) : null;
   const extra = data?.markers.find((e) => e.id === selected && !data.events.some((row) => row.id === e.id));
   useEffect(() => {
-    if (selected === null || !data) return;
-    document.getElementById(`ev-${selected}`)?.scrollIntoView({ block: "nearest" });
-  }, [selected, data]);
+    if (!data) return;
+    const target = selected === null ? (hash === "#events" ? "events" : "") : `ev-${selected}`;
+    if (target) document.getElementById(target)?.scrollIntoView({ block: "nearest" });
+  }, [selected, hash, data]);
   if (sessionScoped) return <p className="page">History is unavailable with board-scoped access.</p>;
 
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));

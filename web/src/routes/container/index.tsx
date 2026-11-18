@@ -128,10 +128,6 @@ export default function ContainerPage() {
     if (was && stateKey && stateKey !== was) refetch();
   }, [stateKey, refetch]);
 
-  useEffect(() => {
-    const t = load.kind === "ok" ? load.data.row.title : name;
-    document.title = `${t} · Hobnail`;
-  }, [load, name]);
 
   // Tile sparklines: the newest history points, then the live readings.
   // Another container's detail (a link from one page to the next) is not shown under this name.

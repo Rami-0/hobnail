@@ -19,12 +19,21 @@ import "./overview.css";
 const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const SEEN = "rh-seen";
 
+function readSeen(): number {
+  try {
+    const value = Number(local()?.getItem(SEEN));
+    return Number.isSafeInteger(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function Overview() {
   const boot = useBootstrap();
   const allowed = boot?.scoped === false;
   const admin = allowed && boot.role !== "viewer";
   const now = useNow();
-  const [seen] = useState(() => Number(local()?.getItem(SEEN)) || 0);
+  const [seen] = useState(readSeen);
   const { data: overview, error } = useRead<OverviewView>(allowed ? `/api/v1/overview?since=${seen}${admin ? "&probes=1" : ""}` : null, "alerts", 15000);
   const { data: widgets } = useRead<WidgetView[]>(allowed ? "/api/v1/widgets" : null, "widget");
   const { data: bookmarks } = useRead<BookmarkView[]>(allowed ? "/api/v1/bookmarks" : null);
