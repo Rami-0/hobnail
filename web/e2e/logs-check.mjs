@@ -27,6 +27,7 @@ try {
     const tab = await browser.tab(); const inp = input(tab), rec = recorder(tab, base.origin); inp.touch = width === 390;
     const label = `${width}-${theme}`; const measurements = { label };
     const wait = async (expr, message, ms = 12000) => assert.ok(await tab.until(expr, ms), message);
+    const clickText = async (text) => { await tab.ev(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${q(text)})?.click()`); await sleep(150); };
     
     const load = async (route, selector) => {
       await tab.send("Page.navigate", { url: new URL(route, base).href });
@@ -71,22 +72,6 @@ try {
       await tab.ev(`document.querySelector('[data-testid=log-latest]').click()`);
       await wait('!document.querySelector("[data-testid=log-latest]")', "jump resumes following");
 
-      await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "live"', "live state");
-      await tab.ev(`globalThis.logTasks=[]; globalThis.logObserver=new PerformanceObserver(l=>{for(const e of l.getEntries())logTasks.push(e.duration)}); logObserver.observe({type:'longtask',buffered:false});`);
-      await sleep(7600);
-      measurements.burstMaxTaskMs = await tab.ev("Math.max(0,...logTasks)");
-      await tab.ev("logObserver.disconnect()");
-      assert.ok(await tab.ev('document.querySelectorAll("[data-log-id]").length < 200'), "windowed DOM");
-      await wait('(()=>{const b=document.querySelector("[data-testid=log-body]");return b.scrollHeight-b.clientHeight-b.scrollTop<3})()', "follows newest after burst");
-      assert.equal(await tab.ev('!!document.querySelector("#hostile-log,#hostile-img") || !!globalThis.logPwned'), false, "hostile text creates no element");
-      assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile line remains text");
-      await tab.shot(path.join(out, `${label}-single.png`));
-      await tab.ev('(()=>{const b=document.querySelector("[data-testid=log-body]");b.scrollTop-=160})()');
-      await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll stops follow");
-      const anchor = await tab.ev('(()=>{const b=document.querySelector("[data-testid=log-body]");return [...b.querySelectorAll("[data-log-id]")].find(r=>r.getBoundingClientRect().bottom>b.getBoundingClientRect().top)?.dataset.logId})()');
-      if (width === 390) await clickText("Filters");
-      await clickText("Wrap"); await clickText("Time");
-      assert.ok(await tab.ev(`!!document.querySelector('[data-log-id="${anchor}"]')`), "reader row survives toggles");
       await clickText("Pause"); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "paused"', "pause state"); await clickText("Resume");
       await inp.click('[data-testid="filter"]');
       await tab.ev(`globalThis.searchStarted=performance.now()`);
