@@ -1,6 +1,7 @@
 import { LogOutIcon, UserIcon } from "lucide-react";
 
 import { api, useSession } from "../api/session.ts";
+import { navigate } from "./router.ts";
 import { Menu } from "../ui/Menu.tsx";
 import { toast } from "../ui/toast.ts";
 
@@ -36,7 +37,7 @@ export function Account() {
             Signed in as <strong>{user.name}</strong>
           </>
         }
-        items={[{ label: "Sign out", icon: <LogOutIcon aria-hidden="true" />, testId: "signout", onSelect: () => void signOut() }]}
+        items={[{ label: "Account", onSelect: () => navigate("/app/account") }, { label: "Sign out", icon: <LogOutIcon aria-hidden="true" />, testId: "signout", onSelect: () => void signOut() }]}
       />
     </div>
   );

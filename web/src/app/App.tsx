@@ -18,6 +18,7 @@ const AlertsPage = lazy(() => import("../routes/alerts/index.tsx"));
 const OverviewPage = lazy(() => import("../routes/overview/index.tsx"));
 const HostPage = lazy(() => import("../routes/host/index.tsx"));
 const HistoryPage = lazy(() => import("../routes/history/index.tsx"));
+const AccountPage = lazy(() => import("../routes/account/index.tsx"));
 const SettingsPage = lazy(() => import("../routes/settings/index.tsx"));
 const BoardPage = lazy(() => import("../routes/board/index.tsx"));
 const loadContainers = () => import("../routes/containers/index.tsx");
@@ -40,6 +41,7 @@ function titleOf(r: Route): string {
     case "host": return "Host";
     case "history": return "History";
     case "board": return "Board";
+    case "account": return "Account";
     case "settings": return "Settings";
     case "login":
       return "Sign in";
@@ -146,6 +148,9 @@ export function App() {
       break;
     case "history":
       page = <HistoryPage />;
+      break;
+    case "account":
+      page = <AccountPage />;
       break;
     case "settings":
       page = <SettingsPage key={route.tab} />;

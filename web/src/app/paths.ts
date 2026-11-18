@@ -7,6 +7,7 @@ export const BASE = "/app";
 export type Route =
   | { name: "home" }
   | { name: "login" }
+  | { name: "account" }
   | { name: "invite"; token: string }
   | { name: "containers" }
   | { name: "history" }
@@ -48,6 +49,7 @@ export function matchRoute(pathname: string): Route {
   switch (clean) {
     case "/":
       return { name: "home" };
+    case "/account": return { name: "account" };
     case "/login":
       return { name: "login" };
     case "/alerts":
