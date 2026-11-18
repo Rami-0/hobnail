@@ -2,14 +2,14 @@
 // it is drawn with a known session; the browser checks wait for it).
 // The Containers and container pages are lazy chunks (their default
 // exports); the charts under the container page are a further lazy chunk.
-import { lazy, Suspense, useDeferredValue } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect } from "react";
 
 import { useSession } from "../api/session.ts";
 import { Home } from "../routes/Home.tsx";
 import { Login } from "../routes/Login.tsx";
 import { NotFound } from "../routes/NotFound.tsx";
 import { Banner, Button } from "../ui/index.ts";
-import { useRoute, type Route } from "./router.ts";
+import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
 const loadContainers = () => import("../routes/containers/index.tsx");
@@ -63,12 +63,24 @@ function Loading() {
 }
 
 export function App() {
-  const { route } = useRoute();
+  const { route, pathname, query, hash } = useRoute();
   const s = useSession();
   // The first render is a placeholder; the shell and the page follow in a
   // transition, which React renders in slices (a plain first render is one
   // long task on a slow phone).
   const ready = useDeferredValue(true, false);
+  const authPage = route.name === "login" || route.name === "invite";
+  const redirect = s.session && !s.session.user && !authPage
+    ? `/app/login?next=${encodeURIComponent(pathname + query + hash)}`
+    : null;
+  useEffect(() => {
+    if (redirect) navigate(redirect, { replace: true });
+  }, [redirect]);
+  const showCredentials = authPage && s.session !== null;
+  useEffect(() => {
+    if (showCredentials) document.getElementById("root")?.setAttribute("data-ready", "1");
+  }, [showCredentials]);
+
 
 
   // The placeholder has the shell's frame (sidebar column, top bar), so
@@ -87,13 +99,23 @@ export function App() {
     );
   }
 
+  if (showCredentials) {
+    return <Login token={route.name === "invite" ? route.token : undefined} />;
+  }
+  if (!s.session?.user) {
+    return s.status === "error" ? (
+      <main id="main" className="page narrow">
+        <Banner kind="bad" action={<Button className="sm" onClick={() => window.location.reload()}>Reload</Button>}>
+          Could not read the session: {s.message}.
+        </Banner>
+      </main>
+    ) : <Loading />;
+  }
+
   let page;
   switch (route.name) {
     case "home":
       page = <Home />;
-      break;
-    case "login":
-      page = <Login />;
       break;
     case "containers":
       page = <ContainersPage />;
@@ -107,20 +129,6 @@ export function App() {
   }
   return (
     <Shell title={titleOf(route)}>
-      {s.status === "error" && !s.session ? (
-        <div className="page narrow">
-          <Banner
-            kind="bad"
-            action={
-              <Button className="sm" onClick={() => window.location.reload()}>
-                Reload
-              </Button>
-            }
-          >
-            Could not read the session: {s.message}.
-          </Banner>
-        </div>
-      ) : null}
       <Suspense fallback={<Loading />}>{page}</Suspense>
     </Shell>
   );

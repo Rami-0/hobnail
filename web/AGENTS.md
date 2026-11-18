@@ -117,12 +117,14 @@ CSP; check CSP against the built client served by Rust.
 | Selector | When |
 |---|---|
 | `#root[data-ready="1"]` | booted: first render with a known session committed |
-| `a[data-testid="signin"]` | signed out (not on the login page); links to `/app/login` |
-| `form[data-testid="login"]` with `input[name="password"]` and `button[type="submit"]` | the login page |
+| `a[data-testid="signin"]` | on the invitation page; links to `/app/login` |
+| `form[data-testid="login"]` with `input[name="username"]`, `input[name="password"]`, and `button[type="submit"]` | the login page |
+| `form[data-testid="onboarding"]` | first owner setup, with username, password and confirmation |
+| `form[data-testid="invite"]` | invitation acceptance, with username, password and confirmation |
 | `[data-testid="login-error"]` | a failed sign-in (wrong password, rate limit countdown, …) |
-| `[data-testid="user"]` (contains the user name, `admin`) | signed in |
+| `[data-testid="user"]` (contains the user name) | signed in |
 | `button[data-testid="user"]` | signed in: the account menu button (contains the user name); opens the menu |
-| `button[data-testid="signout"]` | signed in, inside the account menu (open it first); posts `/api/logout`, refreshes the session, stays on the page |
+| `button[data-testid="signout"]` | signed in, inside the account menu (open it first); posts `/api/logout`, returns to sign-in with the current page as the return target |
 | `nav[data-testid="sidebar"]` | the sidebar's page list |
 | `[data-testid="tree-stack"][data-stack="<name>"]`, inside it `[data-testid="tree-count"]` | a stack of the sidebar tree and its running/total count |
 | `[data-testid="live-status"][data-state="live\|reconnecting\|stopped\|connecting"]` | the live indicator (sidebar foot) |
@@ -134,7 +136,7 @@ CSP; check CSP against the built client served by Rust.
 | `[data-testid="docker-banner"]`, `[data-testid="config-banner"]` | Docker unreachable; config error (signed in only) |
 
 Also present: `[data-testid="theme"]` (theme button), `[data-testid="no-password"]`
-(login page, no password set). The `[data-testid="user"]` element became the
+(owner onboarding). The `[data-testid="user"]` element became the
 account menu's button in Phase 1, so the sign-out check opens it before
 clicking `signout`.
 
