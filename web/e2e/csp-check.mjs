@@ -47,6 +47,7 @@ try {
       await tab.send('Page.navigate', { url: new URL(route, base).href });
       assert.ok(await tab.until(`!!document.querySelector(${q(selector)})`,15000), route);
       await sleep(500);
+      assert.ok(await tab.until(`!document.querySelector('.ch-wait')`,20000), `all charts finish staging on ${route}`);
       console.log(`ok ${width} ${route}`); results.push({ width, route, csp });
     };
     const open = async (selector, ready) => {

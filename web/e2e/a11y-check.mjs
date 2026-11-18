@@ -58,7 +58,9 @@ try {
       for(const [route,selector] of fixture.routes) {
         await tab.send('Page.navigate',{url:new URL(route,base).href});
         assert.ok(await tab.until(`!!document.querySelector(${q(selector)})`,15000),route);
-        await sleep(600); await audit(route);
+        await sleep(600);
+        assert.ok(await tab.until(`!document.querySelector('.ch-wait')`,20000), `all charts finish staging on ${route}`);
+        await audit(route);
         if(route===`/app/boards/${fixture.board.id}`) {
           await inp.click('[data-testid="board-edit"]'); assert.ok(await tab.until(`!!document.querySelector('[data-testid="board-editor"]')`));
           await audit(route+' edit'); await inp.click('[data-testid="board-cancel"]');
