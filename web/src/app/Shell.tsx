@@ -218,6 +218,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   // Leaving through a link in the open drawer replaces its history entry,
   // so Back from the next page comes straight back here (static/app.js).
   useEffect(() => {
+    if (!full) return;
     const side = sideRef.current;
     if (!side) return;
     const onClick = (e: globalThis.MouseEvent) => {
