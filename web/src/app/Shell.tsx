@@ -269,7 +269,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
 
   // ---- the keyboard map ----
   const keyState = useRef<KeyState>({ gAt: 0 });
-  const current = loc.route.name === "container" ? loc.route.ctr : null;
+  const current = loc.route.name === "container" || loc.route.name === "container_logs" ? loc.route.ctr : null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;

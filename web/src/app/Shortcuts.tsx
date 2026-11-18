@@ -33,9 +33,9 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
       <dl className="keys-l">
         {!scoped && <Row k={["g", "o"]}>Overview</Row>}
         <Row k={["g", "c"]}>Containers</Row>
+        <Row k={["g", "l"]}>Logs</Row>
         {!scoped && <>
         <Row k={["g", "h"]}>Host</Row>
-        <Row k={["g", "l"]}>Logs</Row>
         <Row k={["g", "y"]}>History</Row>
         <Row k={["g", "a"]}>Alerts</Row>
         </>}
