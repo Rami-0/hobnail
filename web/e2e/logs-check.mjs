@@ -63,7 +63,7 @@ try {
       await tab.ev(`{const b=document.querySelector('[data-testid=log-body]'); b.scrollTop-=100;}`);
       await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll up stops following");
       if (width === 390) { await inp.click('.log-filters'); await sleep(500); }
-      const anchor = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), br=b.getBoundingClientRect(); const r=[...b.querySelectorAll('[data-log-id]')].find(r=>r.getBoundingClientRect().bottom > br.top+1); return {id:r.dataset.logId, offset:r.getBoundingClientRect().top-br.top}; })()`);
+      const anchor = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), br=b.getBoundingClientRect(); const all=[...b.querySelectorAll('[data-log-id]')]; const r=all.find(r=>r.getBoundingClientRect().top >= br.top-.5) || all.find(r=>r.getBoundingClientRect().bottom > br.top+1); return {id:r.dataset.logId, offset:r.getBoundingClientRect().top-br.top}; })()`);
       for (const label of ['Wrap','Time','Wrap','Time']) {
         await tab.ev(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${q(label)}).click()`);
         await sleep(200);
