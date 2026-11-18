@@ -49,7 +49,7 @@ try {
     try {
       for (const d of ["Page", "Runtime", "Network", "Log"]) await tab.send(d + ".enable");
       await tab.send("Runtime.addBinding", { name: "__hbCsp" }); await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: CSP_LISTENER });
-      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `globalThis.logSources=[]; const OriginalEventSource=EventSource; globalThis.EventSource=class extends OriginalEventSource {constructor(...args){super(...args); if(String(args[0]).includes('/api/logs/stream?')) {logSources.push(this);this.wireCount=0;this.addEventListener('l',e=>{this.wireCount+=JSON.parse(e.data).length;});}}};` });
+      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `globalThis.logSources=[]; const OriginalEventSource=EventSource; globalThis.EventSource=class extends OriginalEventSource {constructor(...args){super(...args); if(String(args[0]).includes('/api/logs/stream?')) {logSources.push(this);this.wireCount=0;this.addEventListener('l',e=>{const lines=JSON.parse(e.data);this.wireCount+=lines.length;this.receivedT=Math.max(this.receivedT||0,...lines.map(l=>l.t));});}}};` });
       await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `localStorage.setItem('rh-theme',${q(theme)});` });
       await tab.send("Network.setCookie", { name: cookie.slice(0, split), value: cookie.slice(split + 1), url: base.origin, path: "/", httpOnly: true, sameSite: "Strict" });
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: width === 390 ? 844 : 900, deviceScaleFactor: 1, mobile: inp.touch });
@@ -148,11 +148,14 @@ try {
       const expectedCopy = await tab.ev(`(()=>{const r=document.querySelector('.log-row:not(:has(details))'); r.click(); return r.querySelector('.log-text').textContent;})()`);
       await clickText("Copy line"); assert.equal(await tab.ev('navigator.clipboard.readText()'), expectedCopy, "copy plain line text");
       await clickText("Copy link"); const copiedLink = await tab.ev('navigator.clipboard.readText()'); assert.match(copiedLink, /#t=\d/);
+      await clickText("Pause"); await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("waiting")', "pause keeps incoming text queued", 6000);
+      const receivedCursor = await tab.ev('logSources.filter(s=>s.readyState===1).at(-1).receivedT');
       const beforeReconnect = Date.now(), requestCount = logRequests.length;
       await tab.ev(`logSources.filter(s=>s.readyState===1).at(-1).dispatchEvent(new Event('error'))`);
       await wait(`document.querySelector('[data-testid=log-pane]').dataset.state.includes('retrying')`, "disconnected state");
+      await clickText("Resume");
       await wait(`document.querySelector('[data-testid=log-pane]').dataset.state==='live'`, "reconnect live", 10000);
-      const reconnect = logRequests.slice(requestCount).find(r=>new URL(r.url).searchParams.has('since')); assert.ok(reconnect, "reconnect sends cursor"); measurements.reconnectMs = reconnect.at-beforeReconnect;
+      const reconnect = logRequests.slice(requestCount).find(r=>new URL(r.url).searchParams.has('since')); assert.ok(reconnect, "reconnect sends cursor"); assert.ok(Number(new URL(reconnect.url).searchParams.get("since")) > receivedCursor/1000, "cursor advances beyond queued received text"); measurements.reconnectMs = reconnect.at-beforeReconnect;
       assert.ok(measurements.reconnectMs>=1900, "initial reconnect backoff");
       await load(copiedLink, '[data-testid="log-body"] [data-log-id]');
       await wait('!!document.querySelector(".log-current")', "timestamp permalink selects a line");
