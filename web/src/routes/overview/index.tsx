@@ -50,6 +50,7 @@ export default function Overview() {
     window.addEventListener("pagehide", mark);
     document.addEventListener("visibilitychange", onHidden);
     return () => {
+      mark();
       window.removeEventListener("pagehide", mark);
       document.removeEventListener("visibilitychange", onHidden);
     };

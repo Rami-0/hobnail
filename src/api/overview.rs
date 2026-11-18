@@ -170,7 +170,9 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
     }
     let scan = state.db.events(
         &EventFilter {
-            since: since.filter(|t| *t > 0).map(|t| (t + 1).min(now - 3600)),
+            since: since
+                .filter(|t| *t > 0)
+                .map(|t| t.saturating_add(1).min(now - 3600)),
             limit: 200,
             ..Default::default()
         }
