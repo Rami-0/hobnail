@@ -350,6 +350,11 @@ export class LogPane {
     if (!this.options.paused && !this.pending.length && this.pendingOlder.length && accepted < 256) {
       this.ring.append(this.pendingOlder.splice(-(256 - accepted)), true);
     }
+    if (this.query.startsWith("stack=")) {
+      const stack = new URLSearchParams(this.query).get("stack") ?? "";
+      const length = Math.max(1, ...[...this.names.values()].map((name) => chipName(name, stack, this.width < 700 ? 12 : 20).length));
+      this.box.style.setProperty("--log-name-width", `${length}ch`);
+    }
     const search = matcher(this.options.search, this.options.regex, this.options.sensitive);
     const searchStarted = performance.now();
     const filtered = filterRows(this.ring.rows, search.test, this.options.only, this.options.context, this.options.levels);
