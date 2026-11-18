@@ -2611,10 +2611,7 @@ sample_interval = "45s"
         let data = json_of(&signed, &url);
         match path {
             "security" | "revisions" => {}
-            "appearance" => assert_eq!(
-                data["hash"],
-                crate::auth::sha256_hex(b"/* css-marker */")
-            ),
+            "appearance" => assert_eq!(data["hash"], crate::auth::sha256_hex(b"/* css-marker */")),
             _ => assert_eq!(data["hash"], hash, "{url}"),
         }
     }
