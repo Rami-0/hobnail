@@ -65,19 +65,51 @@ export type Control = {
   required?: boolean;
   default?: unknown;
   max?: number;
-  format?: "url" | "link" | "duration" | "number" | "list" | "map" | "json" | "text" | "switch" | "code";
+  format?: "url" | "link" | "duration" | "number" | "list" | "paths" | "rows" | "text" | "switch" | "code";
   options?: readonly string[];
   show?: (values: Values) => boolean;
   locked?: (base: Values) => boolean;
   validate?: (value: string) => string | undefined;
 };
 
-export function displayValue(field: Control, value: unknown): string {
+type Pair = { key: string; label: string; value: string };
+
+function pairs(input: unknown): Pair[] {
+  try { return JSON.parse(String(input || "[]")) as Pair[]; } catch { return []; }
+}
+
+function displayValue(field: Control, value: unknown): string {
   if (value === null || value === undefined) return "";
   if (field.format === "list" && Array.isArray(value)) return value.join(", ");
-  if (field.format === "map" && typeof value === "object") return Object.entries(value).map(([key, entry]) => `${key}=${entry}`).join("\n");
-  if (field.format === "json" || typeof value === "object") return JSON.stringify(value, null, 2);
-  return String(value);
+  if (field.format === "paths" || field.format === "rows") {
+    const entries = Array.isArray(value) ? value : Object.entries(value).map(([label, path]) => ({ label, value: path }));
+    return JSON.stringify(entries.map(({ label, value: entry }, index) => ({ key: String(index), label, value: entry })));
+  }
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+function PairFields({ id, field, value, error, change }: {
+  id: string; field: Control; value: string; error?: string; change: (value: string) => void;
+}) {
+  const entries = pairs(value);
+  const update = (next: Pair[]) => change(next.length ? JSON.stringify(next) : "");
+  const what = field.format === "paths" ? "field" : "row";
+  const names = what === "field" ? ["Field name", "Path in the response"] : ["Label", "Value template"];
+  return <fieldset className="settings-form">
+    <legend>{field.label}</legend>
+    {field.hint && <p className="muted">{field.hint}</p>}
+    {entries.map((pair) => <div key={pair.key} className="settings-pair">
+      {(["label", "value"] as const).map((key, index) => <Field key={key} id={`${id}-${pair.key}-${key}`} label={names[index]}>
+        <TextInput value={pair[key]} onChange={(event) => {
+          update(entries.map((entry) => entry.key === pair.key ? { ...entry, [key]: event.target.value } : entry));
+        }} />
+      </Field>)}
+      <Button aria-label={`Remove ${what}${pair.label ? ` ${pair.label}` : ""}`}
+        onClick={() => update(entries.filter((entry) => entry.key !== pair.key))}>Remove</Button>
+    </div>)}
+    {error && <Note kind="bad">{error}</Note>}
+    <div><Button onClick={() => update([...entries, { key: String(Math.max(-1, ...entries.map((entry) => Number(entry.key))) + 1), label: "", value: "" }])}>Add {what}</Button></div>
+  </fieldset>;
 }
 
 export function initialFields(fields: Control[], item: Values): Values {
@@ -92,9 +124,10 @@ export function collectFields(fields: Control[], input: Values) {
   const values: Values = {};
   for (const field of fields) {
     const { key, format } = field;
-    const value = input[key];
-    if (typeof value === "boolean") { values[key] = value; continue; }
-    const raw = String(value ?? "");
+    const entered = input[key];
+    if (field.show && !field.show(input) && entered === "") { values[key] = null; continue; }
+    if (typeof entered === "boolean") { values[key] = entered; continue; }
+    const raw = String(entered ?? "");
     const text = format === "code" ? raw : raw.trim();
     if (!text) {
       if (field.required && (!field.show || field.show(input))) errors[key] = "This field is required.";
@@ -120,17 +153,15 @@ export function collectFields(fields: Control[], input: Values) {
       if (!Number.isFinite(Number(text))) errors[key] = "Enter a number.";
       else values[key] = Number(text);
     }
-    if (format === "json") {
-      try { values[key] = JSON.parse(text) as unknown; }
-      catch { errors[key] = "Enter valid JSON."; }
-    }
-    if (format === "map") {
-      const entries = text.split("\n").filter((line) => line.trim()).map((line) => {
-        const split = line.indexOf("=");
-        return split < 1 ? [] : [line.slice(0, split).trim(), line.slice(split + 1).trim()];
-      });
-      if (entries.some((entry) => !entry[0] || !entry[1])) errors[key] = "Use one name=value pair per line.";
-      else values[key] = Object.fromEntries(entries);
+    if (format === "paths" || format === "rows") {
+      const entries = pairs(text).filter((pair) => pair.label.trim() || pair.value.trim());
+      if (entries.some((pair) => !pair.label.trim() || !pair.value.trim())) errors[key] = "Complete both values in each row.";
+      else values[key] = !entries.length ? null : format === "rows"
+        ? entries.map(({ label, value }) => ({ label: label.trim(), value: value.trim() }))
+        : Object.fromEntries(entries.map(({ label, value }) => [label.trim(), value.trim()]));
+      if (format === "paths" && new Set(entries.map((pair) => pair.label.trim())).size !== entries.length) {
+        errors[key] = "Use each field name once.";
+      }
     }
   }
   return { values, errors };
@@ -149,6 +180,7 @@ export function Controls({ fields, input, base, errors, onChange }: {
     const disabled = field.locked?.(base);
     const change = (value: string | boolean) => onChange({ ...input, [key]: value });
     const value = String(input[key] ?? "");
+    if (format === "paths" || format === "rows") return <PairFields key={key} id={`${id}-${key}`} field={field} value={value} error={errors[key]} change={change} />;
     if (format === "switch") return <div key={key}>
       <Switch label={label} checked={input[key] === true} onChange={change} disabled={disabled} />
       {errors[key] && <Note kind="bad">{errors[key]}</Note>}
@@ -156,8 +188,8 @@ export function Controls({ fields, input, base, errors, onChange }: {
     return <Field key={key} id={`${id}-${key}`} label={label} error={errors[key]} hint={field.hint}>
       {field.options ? <Select label={label} value={value} onChange={change} disabled={disabled}
         options={field.options.map((option) => ({ value: option, label: option || "Default" }))} />
-        : format === "code" || format === "map" || format === "json"
-          ? <Textarea name={key} className="settings-code mono" rows={format === "code" ? 14 : 3}
+        : format === "code"
+          ? <Textarea name={key} className="settings-code mono" rows={14}
               wrap="soft" spellCheck={false} value={value} onChange={(event) => change(event.target.value)} disabled={disabled} />
           : <TextInput name={key} value={value} placeholder={field.placeholder} required={field.required}
               inputMode={format === "number" ? "decimal" : format === "url" ? "url" : undefined}

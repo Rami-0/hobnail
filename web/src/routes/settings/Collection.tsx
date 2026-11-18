@@ -89,7 +89,7 @@ export function Collection(props: Props) {
     if (from === undefined || to === undefined) return;
     order[index] = to;
     order[index + offset] = from;
-    void run({ action: "reorder", id: from, order });
+    void run({ action: "reorder", id: typeof from === "number" ? to : from, order });
   }
   const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>

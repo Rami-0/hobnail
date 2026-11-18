@@ -21,10 +21,10 @@ const fields: Control[] = [
   { key: "refresh", format: "duration", label: "Refresh", placeholder: "30s" },
   { key: "timeout", format: "duration", label: "Timeout", placeholder: "5s" },
   { key: "enabled", label: "Enabled", format: "switch", default: true },
-  { key: "fields", label: "Fields", format: "map", hint: "One name=path pair per line." },
+  { key: "fields", label: "Fields", format: "paths", hint: "Give each field a name and a path in the response, such as items.0.name." },
   { key: "mode", label: "Show as", options: ["template", "rows"], default: "template" },
   { key: "template", label: "Template", show: (item) => item.mode === "template", hint: "Use double braces around field names." },
-  { key: "rows", label: "Display rows", format: "json", show: (item) => item.mode === "rows", hint: 'Enter a list of {"label":"…","value":"…"} objects.' },
+  { key: "rows", label: "Display rows", format: "rows", show: (item) => item.mode === "rows", hint: "Use double braces around field names in each value template." },
   { key: "status_field", label: "Status field" },
   { key: "status_ok", label: "OK values", format: "list", hint: "Separate multiple values with commas." },
 ];
