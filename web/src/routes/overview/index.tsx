@@ -1,3 +1,4 @@
+import { ScrollTextIcon } from "lucide-react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -59,6 +60,11 @@ export default function Overview() {
     };
   }, [allowed, now]);
   if (boot?.scoped) return <p className="page">Overview is unavailable with board-scoped access.</p>;
+  const bookmarkGroups = new Map<string, BookmarkView[]>();
+  for (const bookmark of bookmarks ?? []) {
+    const group = bookmark.group || "Bookmarks";
+    bookmarkGroups.set(group, [...bookmarkGroups.get(group) ?? [], bookmark]);
+  }
   const groups = containers?.groups ?? [];
   const rows = groups.flatMap((g) => g.containers);
   const names = new Set(rows.map((r) => r.name));
@@ -91,7 +97,7 @@ export default function Overview() {
       {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={`${item.name}:${item.reason}:${item.detail}`} data-name={item.container ? item.name : undefined}>
         <span className={`dot ${item.severity}`} /> <a href={item.href}>{item.title}</a> · {item.detail}
         {item.since !== null && <> · <RelativeTime at={item.since} /></>}
-        {item.container && <>{" · "}<a href={logsHref(item.name, item.since)}>Logs</a></>}
+        {item.container && <>{" · "}<a className="ia" aria-label={`Logs of ${item.title}`} title="Logs" href={logsHref(item.name, item.since)}><ScrollTextIcon aria-hidden="true" /></a></>}
         {item.probe && <small className="overview-probe">{item.probe}</small>}
       </li>)}</ul></>}
       </div>
@@ -157,9 +163,12 @@ export default function Overview() {
     </Suspense>}
     {(admin || !!bookmarks?.length) && <section className="panel history-block"><h2>Bookmarks</h2>
       {admin && <a href="/app/overview?add=bookmark">Add bookmark</a>}
-      <ul className="history-events">{bookmarks?.map((b) => <li key={`${b.name}:${b.url}`}>
-        <a href={b.url} target="_blank" rel="noopener noreferrer">{b.name}</a>{b.description && <> · {b.description}</>}
-      </li>)}</ul>
+      {[...bookmarkGroups].map(([group, items]) => <div key={group}>
+        {(bookmarkGroups.size > 1 || group !== "Bookmarks") && <h3>{group}</h3>}
+        <ul className="history-events">{items.map((b) => <li key={`${b.name}:${b.url}`}>
+          <a href={b.url} target="_blank" rel="noopener noreferrer">{b.name}</a>{b.description && <> · {b.description}</>}
+        </li>)}</ul>
+      </div>)}
     </section>}
   </div>;
 }
