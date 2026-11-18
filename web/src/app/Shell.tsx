@@ -104,6 +104,13 @@ function logsTarget(current: string | null): string | null {
 export function Shell({ title, children }: { title: string; children: ReactNode }) {
   const loc = useRoute();
   const session = useSession();
+  useEffect(() => {
+    const sheet = document.createElement("link");
+    sheet.rel = "stylesheet";
+    sheet.href = "/custom.css";
+    document.head.append(sheet);
+    return () => sheet.remove();
+  }, []);
   const b = useBootstrap();
   const ctrs = useContainers();
   const hidden = useHiddenProblems();

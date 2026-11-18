@@ -71,8 +71,10 @@ const enc = encodeURIComponent(CTR);
 
 // ---- the API, from the check (its own session) ----
 async function login() {
-  const r = await fetch(base + "/api/login", { method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN }, body: JSON.stringify({ password: PW, next: "/app" }) });
-  if (r.status !== 200) throw new Error(`sign-in failed: HTTP ${r.status}`);
+  const session = await fetch(base + "/api/v1/session").then((r) => r.json());
+  const path = session.owner_exists ? "/api/login" : "/api/v1/onboarding/owner";
+  const r = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", Origin: ORIGIN }, body: JSON.stringify({ username: "admin", password: PW }) });
+  if (!r.ok) throw new Error(`sign-in failed: HTTP ${r.status}`);
   const c = r.headers.get("set-cookie").split(";")[0];
   const i = c.indexOf("=");
   return { name: c.slice(0, i), value: c.slice(i + 1), cookie: c, csrf: (await r.json()).csrf };

@@ -42,12 +42,5 @@
         </ul>
       </div>
     </noscript>
-    <!-- The owner's token overrides (Settings, Appearance), served by Rust,
-         empty when unset. In the body on purpose: Vite appends the app's own
-         stylesheet at the end of <head>, and custom.css must come after it to
-         win, as in the old UI. A parser-inserted sheet still holds the entry
-         module (scripts wait for pending style sheets), so the first render
-         already has it. -->
-    <link rel="stylesheet" href="/custom.css" />
   </body>
 </html>

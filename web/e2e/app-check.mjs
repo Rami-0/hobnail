@@ -238,12 +238,27 @@ async function runPass(size, scheme) {
   check(applied.sheets > 0 && applied.v !== "", `styles applied (${applied.sheets} sheets, ${CSS_VAR} = ${applied.v || "unset"}, body ${applied.bg})`, applied);
   await shot(name + "-1-signed-out");
 
-  // 2. the sign-in link
-  const href = await ev(`document.querySelector('a[data-testid="signin"]')?.getAttribute("href") ?? null`);
-  if (!check(href !== null && new URL(href, base).pathname === "/app/login", 'signed out: a[data-testid="signin"] links to /app/login', href)) return summarise();
-  if (!(await step("clicking it opens /app/login with the login form", async () => { await click('a[data-testid="signin"]'); return until(`location.pathname === "/app/login" && !!document.querySelector('form[data-testid="login"] input[name="password"]') && !!document.querySelector('form[data-testid="login"] button[type="submit"]')`); }))) { await shot(name + "-login-missing"); return summarise(); }
+  // A fresh data directory starts at browser onboarding.
+  const before = await session();
+  if (before.body?.owner_exists === false) {
+    const onboarding = 'form[data-testid="onboarding"]';
+    if (!(await step("fresh instance opens owner onboarding", () => until(`!!document.querySelector('${onboarding}')`)))) return summarise();
+    for (const [field, value] of [["username", "admin"], ["password", PW], ["confirm", PW]]) {
+      await click(`${onboarding} input[name="${field}"]`);
+      await typeText(value);
+    }
+    await click(`${onboarding} button[type="submit"]`);
+    if (!(await step("onboarding signs in the owner", () => until(`!!document.querySelector('[data-testid="user"]')`, 10000)))) return summarise();
+    await click('[data-testid="user"]');
+    await click('button[data-testid="signout"]');
+  }
+  if (!(await step("signed-out navigation opens the login form", () => until(`location.pathname === "/app/login" && !!document.querySelector('form[data-testid="login"] input[name="username"]')`)))) {
+    await shot(name + "-login-missing"); return summarise();
+  }
   await shot(name + "-2-login");
   const pwSel = 'form[data-testid="login"] input[name="password"]', submit = 'form[data-testid="login"] button[type="submit"]';
+  await click('form[data-testid="login"] input[name="username"]');
+  await typeText("admin");
 
   // 3. one wrong password, the first pass only
   if (!wrongTried) {
@@ -270,16 +285,16 @@ async function runPass(size, scheme) {
   }
   check(!(await pathname()).startsWith("/app/login"), "and leaves the login page", await pathname());
   const s1 = await session();
-  check(s1.status === 200 && s1.body?.user === "admin" && typeof s1.body?.csrf === "string", "GET /api/v1/session: user admin with a csrf token", s1);
+  check(s1.status === 200 && s1.body?.user?.name === "admin" && s1.body?.user?.role === "owner" && typeof s1.body?.csrf === "string", "GET /api/v1/session: user admin with a csrf token", s1);
   await sleep(300);
   await shot(name + "-4-signed-in");
 
   // 5. sign out
-  await step('signing out brings a[data-testid="signin"] back', async () => {
+  await step('signing out returns to the login form', async () => {
     // Phase 1: sign out sits in the account menu that [data-testid="user"] opens.
     if (!(await until(`!!document.querySelector('button[data-testid="signout"]') && document.querySelector('button[data-testid="signout"]').offsetParent !== null`, 300))) await click('[data-testid="user"]');
     if (!(await until(`!!document.querySelector('button[data-testid="signout"]')`, 3000))) return false;
-    await click('button[data-testid="signout"]'); return until(`!!document.querySelector('a[data-testid="signin"]') && !document.querySelector('[data-testid="user"]')`); });
+    await click('button[data-testid="signout"]'); return until(`!!document.querySelector('form[data-testid="login"]') && !document.querySelector('[data-testid="user"]')`); });
   const s2 = await session();
   check(s2.status === 200 && s2.body?.user === null && s2.body?.csrf === null, "GET /api/v1/session after sign-out: user null, csrf null", s2);
   await sleep(300);
