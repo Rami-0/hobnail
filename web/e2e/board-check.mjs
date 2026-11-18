@@ -46,7 +46,10 @@ try {
   await fill('#board-form input[name="name"]', "M2 browser board"); await inp.click('button[form="board-form"][type="submit"]'); await wait(`!${visible("board-form")}`, "create board closes form");
   boardId = (await api("GET", "/boards")).data.find((board) => board.name === "M2 browser board").id;
   await go(`/app/boards/${boardId}`, visible("board-empty")); check((await api("GET", `/boards/${boardId}`)).data.document.sections.length === 0, "a new board is empty");
-  await edit(); await inp.click('[data-testid="board-add-section"]'); await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-empty"), "Cancel discards layout changes");
+  await edit(); await inp.click('[data-testid="board-add-section"]'); await addLink("discarded");
+  await inp.click('[data-section="0"][data-item="0"] .editor-tools button:last-child');
+  await wait(`document.activeElement === document.querySelector('[data-testid="board-add-item"]')`, "removing the last item restores focus to Add item");
+  await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-empty"), "Cancel discards layout changes");
   check((await api("GET", `/boards/${boardId}/draft`)).data === null, "Cancel deletes server draft");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await addLink("first"); await addLink("second");
   await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`); await inp.key("ArrowDown", { modifiers: 1 });
@@ -54,6 +57,10 @@ try {
   await inp.key("ArrowRight", { modifiers: 8 });
   await wait(`document.querySelector('[data-section="0"][data-item="1"] input[id$="desktop"]')?.value === "5"`, "Shift+Right resizes the moved item");
   await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(".suggestions button")', "suggestions include discovered containers"); await inp.click('.suggestions button'); await wait(`!${visible("board-picker")}`);
+  const handle = await inp.box('[data-section="0"][data-item="1"] .drag-handle');
+  const destination = await inp.box('section[data-section="0"] .editor-section-head', false);
+  await inp.drag(handle.x, handle.y, destination.x, destination.y);
+  await wait(`document.querySelector('[data-section="0"][data-item="2"] h3')?.textContent === "first" && document.activeElement === document.querySelector('[data-section="0"][data-item="2"] .drag-handle')`, "pointer drop at section end preserves order and focus");
   const before = boardPuts; await inp.click('[data-testid="board-save"]'); await wait(`!${visible("board-editor")}`, "Save exits edit mode"); check(boardPuts - before === 1, "Save sends exactly one board PUT");
   await tab.send("Page.reload"); await wait('document.querySelectorAll("[data-testid=board-tile]").length === 3', "reload preserves saved items");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`, "draft saved to server");

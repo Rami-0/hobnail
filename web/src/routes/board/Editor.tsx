@@ -38,7 +38,12 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const path = `/api/v1/boards/${view.board.id}`;
   const modified = dirty(base, doc);
   const change = (action: Action, message: string) => { if (operation.current) return; setDoc((previous) => reduceDocument(previous, action)); setAnnouncement(message); setDraftState("Draft pending"); };
-  const focusItem = (section: number, item: number) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-section="${section}"][data-item="${item}"]` )?.querySelector<HTMLButtonElement>(".drag-handle")?.focus());
+  const focusItem = (section: number, item: number) => requestAnimationFrame(() => {
+    const button = root.current?.querySelector<HTMLButtonElement>(`[data-section="${section}"][data-item="${item}"] .drag-handle`)
+      ?? root.current?.querySelector<HTMLButtonElement>(`section[data-section="${section}"] [data-testid="board-add-item"]`)
+      ?? root.current?.querySelector<HTMLButtonElement>('[data-testid="board-add-section"]');
+    button?.focus();
+  });
   const saveDraft = (document: BoardDocument) => {
     pendingDraft.current = pendingDraft.current.then(async () => {
       const result = await api.request("PUT", `${path}/draft`, { body: document });
@@ -87,7 +92,9 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     else { if (result.kind === "stale") setConflict(true); setError(result.message); operation.current = false; setBusy(false); }
   };
   const move = (s: number, i: number, target: number, position: number) => {
-    change({ type: "move", section: s, item: i, toSection: target, to: position }, `Item moved to section ${target + 1}, position ${position + 1}`); focusItem(target, position);
+    const end = Math.max(0, (doc.sections[target]?.items.length ?? 0) - (s === target ? 1 : 0));
+    const destination = Math.min(end, Math.max(0, position));
+    change({ type: "move", section: s, item: i, toSection: target, to: destination }, `Item moved to section ${target + 1}, position ${destination + 1}`); focusItem(target, destination);
   };
   const key = (event: KeyboardEvent, s: number, i: number) => {
     if (!(event.altKey || event.shiftKey) || !event.key.startsWith("Arrow") || event.target instanceof HTMLInputElement) return;
@@ -133,7 +140,7 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     <fieldset className="editor-fields" disabled={busy}><legend className="sr">Board layout</legend>
     {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section">
       <div className="editor-section-head"><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
-        <div className="settings-actions"><Button aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => change({ type: "delete-section", section: s }, "Section removed")}>Delete section</Button></div>
+        <div className="settings-actions"><Button aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => { change({ type: "delete-section", section: s }, "Section removed"); focusItem(Math.min(s, doc.sections.length - 2), 0); }}>Delete section</Button></div>
       </div><div className="board-grid">{section.items.map((item, i) => <div key={item.id ?? `item-${i}`} className="board-cell editor-cell" data-section={s} data-item={i}
         style={{ "--mobile": item.spans.mobile, "--tablet": item.spans.tablet, "--desktop": item.spans.desktop, "--rows": item.spans.rows } as CSSProperties}>
         <Tile item={item} resolved={view.resolved.find((r) => r.id === item.id)} />
