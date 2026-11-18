@@ -205,6 +205,12 @@ try {
         const capture=await tab.send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:size.height,scale:1}});
         fs.writeFileSync(fourShot,Buffer.from(capture.result.data,'base64'));
       } else await tab.shot(fourShot);
+      await setQuery("ERROR");
+      await wait(`[...document.querySelectorAll('[data-testid=log-matches]')].length===4 && [...document.querySelectorAll('[data-testid=log-matches]')].every(e=>Number(e.textContent.split('/')[1])>0)`, "search across all panes");
+      await inp.key("Enter"); await wait('document.querySelectorAll(".log-current").length===1', "one global search selection");
+      const firstMatch = await tab.ev('Number(document.querySelector(".log-current").dataset.timestamp)');
+      await inp.key("Enter"); await sleep(200);
+      assert.ok(await tab.ev('Number(document.querySelector(".log-current").dataset.timestamp)') <= firstMatch, "older match steps chronologically across panes");
       await tab.ev('document.querySelector("[data-testid=log-pane] header>a[aria-label^=Close]")?.click()');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===3', "close pane in place");
       const leaveAt = Date.now(); await tab.ev('document.querySelector("nav.crumb a").click()'); await wait('!!document.querySelector("[data-testid=logs-picker]")', "route leave"); measurements.leaveAt = leaveAt;

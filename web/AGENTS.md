@@ -250,6 +250,7 @@ visible row window. Controls remain React components from `src/ui/`.
 |---|---|
 | `[data-testid="logs-picker"]`, `[data-testid="logs-picker-row"]` | Filterable grouped picker and container row |
 | `[data-testid="logs-viewer"]` | Single, stack or split viewer |
+| `[data-testid="log-container-head"]`, `[data-testid="ctr-tabs"]` | Container identity and its range-preserving section links |
 | `[data-testid="log-pane"][data-state]` | Pane and stream state |
 | `[data-testid="log-body"]` | Scrollable window, keyboard line selection |
 | `[data-log-id][data-timestamp][data-level]` | One mounted log row; timestamp in milliseconds |
@@ -260,7 +261,7 @@ visible row window. Controls remain React components from `src/ui/`.
 work in the latest frame, measured with `performance.now()`) and
 `data-search-lines` (retained rows searched). These are measurement attributes,
 not the input-to-paint latency. `log-members` contains compose-member links.
-The live and older queues share a maximum of 256 decoded lines per frame.
+The live and older queues share a maximum of 128 decoded lines per frame.
 `web/e2e/logs-check.mjs` defaults to both widths/themes; use `--log-fixtures`
 when starting fake-instance and `E2E_ENV=LOG_FIXTURES LOG_FIXTURES=1` for its
 real missing-container and read-error cases. The reconnect test dispatches an
