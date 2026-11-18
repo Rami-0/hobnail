@@ -109,16 +109,38 @@ fn facts(host: &Host, admin: bool) -> Vec<HostGroup> {
             .map(|(n, c)| val(&format!("Core {n}"), "pct", c.map(|c| c.busy)))
             .collect(),
     );
-    if host.psi.is_some() {
+    if let Some(psi) = &host.psi {
         group(
             "Pressure",
             crate::host::collect::PSI_RES
                 .iter()
-                .zip(host.psi_now)
-                .flat_map(|(resource, (some, full))| {
+                .enumerate()
+                .flat_map(|(i, resource)| {
+                    let p = psi[i].as_ref();
                     [
-                        val(&format!("{resource} some"), "pct", some),
-                        val(&format!("{resource} full"), "pct", full),
+                        val(&format!("{resource} some now"), "pct", host.psi_now[i].0),
+                        val(
+                            &format!("{resource} some 10 s"),
+                            "pct",
+                            p.map(|p| p.some.avg[0]),
+                        ),
+                        val(
+                            &format!("{resource} some 1 min"),
+                            "pct",
+                            p.map(|p| p.some.avg[1]),
+                        ),
+                        val(
+                            &format!("{resource} some 5 min"),
+                            "pct",
+                            p.map(|p| p.some.avg[2]),
+                        ),
+                        val(
+                            &format!("{resource} full 10 s"),
+                            "pct",
+                            p.and_then(|p| p.full)
+                                .filter(|_| *resource != "cpu")
+                                .map(|p| p.avg[0]),
+                        ),
                     ]
                 })
                 .collect(),
@@ -233,16 +255,26 @@ fn facts(host: &Host, admin: bool) -> Vec<HostGroup> {
         "Sensors",
         host.sensors
             .iter()
-            .map(|s| {
-                val(
-                    &format!("{} {}", s.chip, s.label),
-                    if s.kind == SensorKind::Temp {
-                        "temp"
-                    } else {
-                        "rpm"
-                    },
-                    Some(s.value),
-                )
+            .flat_map(|s| {
+                let unit = if s.kind == SensorKind::Temp {
+                    "temp"
+                } else {
+                    "rpm"
+                };
+                let label = format!("{} {}", s.chip, s.label);
+                [
+                    val(&label, unit, Some(s.value)),
+                    val(&format!("{label} high"), unit, s.max),
+                    val(
+                        &format!("{label} critical"),
+                        unit,
+                        if s.kind == SensorKind::Temp {
+                            s.crit
+                        } else {
+                            None
+                        },
+                    ),
+                ]
             })
             .collect(),
     );
