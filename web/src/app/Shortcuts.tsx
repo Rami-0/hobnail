@@ -3,6 +3,7 @@
 // "/" names this page's filter (NAV-62). ⌘ instead of Ctrl on a Mac.
 import type { ReactNode } from "react";
 
+import { useBootstrap } from "../live/index.ts";
 import { Dialog } from "../ui/Dialog.tsx";
 import { pageFilter } from "./page-filter.ts";
 import { modName } from "./keys.ts";
@@ -25,22 +26,26 @@ function Row({ k, children }: { k: string[]; children: ReactNode }) {
 const OLD = <span className="muted"> (current interface)</span>;
 
 export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const boot = useBootstrap();
+  const scoped = boot?.scoped;
   const mod = modName(navigator.platform || navigator.userAgent);
   const f = open ? pageFilter() : null;
   return (
     <Dialog open={open} title="Keyboard shortcuts" onClose={onClose} testId="shortcuts" className="keys">
       <dl className="keys-l">
-        <Row k={["g", "o"]}>Overview{OLD}</Row>
+        {!scoped && <Row k={["g", "o"]}>Overview{OLD}</Row>}
         <Row k={["g", "c"]}>Containers</Row>
+        {!scoped && <>
         <Row k={["g", "h"]}>Host{OLD}</Row>
         <Row k={["g", "l"]}>Logs{OLD}</Row>
         <Row k={["g", "y"]}>History{OLD}</Row>
         <Row k={["g", "a"]}>Alerts{OLD}</Row>
-        <Row k={["g", "s"]}>Settings</Row>
+        </>}
+        {(!scoped || boot.role === "admin") && <Row k={["g", "s"]}>Settings</Row>}
         <Row k={["j"]}>Next row that opens something</Row>
         <Row k={["k"]}>Previous row</Row>
         <Row k={["↵"]}>Open the row</Row>
-        <Row k={["l"]}>Logs of the focused or open container{OLD}</Row>
+        {!scoped && <Row k={["l"]}>Logs of the focused or open container{OLD}</Row>}
         <Row k={["/"]}>
           {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "This page's filter (this page has none)"}
         </Row>

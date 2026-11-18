@@ -148,10 +148,11 @@ export default function ContainerPage() {
       el.focus({ preventScroll: true });
       return;
     }
+    if (bootstrap?.scoped) return;
     // Not among the 12 newest: the old History timeline around it.
     const ev = detail?.series.markers.find((m) => m.id === id);
     window.location.assign(historyHref(id, at, ev?.level ?? "warn"));
-  }, [detail]);
+  }, [bootstrap?.scoped, detail]);
 
   if (load.kind === "missing" && !detail) {
     return (
@@ -243,7 +244,7 @@ export default function ContainerPage() {
           <span>Docker is not reachable ({dockerError}). Showing the last known state.</span>
         </output>
       )}
-      {detail.why && <WhyNote why={detail.why} name={row.name} signed={signed} now={now} />}
+      {detail.why && <WhyNote why={detail.why} name={row.name} signed={signed} scoped={!!bootstrap?.scoped} now={now} />}
       <TabNav label="Container sections" items={tabs(row.name, range).filter((tab) => !bootstrap?.scoped || tab.id === "overview")} current="overview" testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
@@ -482,7 +483,7 @@ export default function ContainerPage() {
  * that moment; signed in, the probe's first line and the last checks
  * (folded on a phone); signed out, a sign-in link and no probe output.
  */
-function WhyNote({ why, name, signed, now }: { why: Why; name: string; signed: boolean; now: number }) {
+function WhyNote({ why, name, signed, scoped, now }: { why: Why; name: string; signed: boolean; scoped: boolean; now: number }) {
   const healthFailing = /health check/i.test(why.title);
   const phone = typeof window !== "undefined" && window.matchMedia?.("(max-width: 640px)").matches;
   const next = `/app/containers/${encodeURIComponent(name)}`;
@@ -513,9 +514,9 @@ function WhyNote({ why, name, signed, now }: { why: Why; name: string; signed: b
             </>
           ) : null}
           {why.detail && <> · {why.detail}</>}{" "}
-          <a className="cd-why-logs" href={logsAt(name, why.logs_at)}>
+          {!scoped && <a className="cd-why-logs" href={logsAt(name, why.logs_at)}>
             {why.logs_at !== null ? `Logs around ${localTime(why.logs_at)}` : "Logs"}
-          </a>
+          </a>}
         </p>
         {signed && why.checks.length > 0 && (
           <details className="cd-probes" open={!phone}>
