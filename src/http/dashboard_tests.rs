@@ -247,15 +247,10 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         ("DELETE", "draft"),
     ] {
         let path = format!("/api/v1/boards/{hidden}/{suffix}");
-        let (status, code) = if suffix == "suggestions" {
-            (404, "not_found")
-        } else {
-            (403, "forbidden")
-        };
         assert_api_error(
             &admin.call(method, &path, json!({})).await,
-            status,
-            code,
+            403,
+            "forbidden",
             &path,
         );
     }
@@ -277,6 +272,16 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
             &admin.call(method, &path, json!({})).await,
             status,
             code,
+            &path,
+        );
+    }
+
+    for suffix in ["suggestions", "draft"] {
+        let path = format!("/api/v1/boards/{visible}/{suffix}");
+        assert_api_error(
+            &viewer.call("GET", &path, Value::Null).await,
+            403,
+            "forbidden",
             &path,
         );
     }

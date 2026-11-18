@@ -303,7 +303,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         method: "GET",
         pattern: "/api/v1/boards/<id>/suggestions",
-        access: Access::Viewer,
+        access: Access::Admin,
         handler: Handler::BoardSuggestions,
     },
     Route {
