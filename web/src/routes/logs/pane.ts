@@ -93,7 +93,7 @@ export class LogPane {
   }
   update(options: ViewOptions): void {
     const changed = options.wrap !== this.options.wrap || options.time !== this.options.time;
-    if (!this.following) this.mark();
+    if (!this.following && !this.anchor) this.mark();
     this.restoring = true;
     this.options = options;
     if (changed) { this.heights.clear(); this.signature = ""; }
