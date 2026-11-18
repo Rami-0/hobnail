@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;

@@ -190,7 +190,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     use crate::api::access::{self, Access, Lookup};
     let v1 = path.starts_with("/api/v1/");
     let lookup = v1.then(|| access::lookup(req.method(), &path));
-    let asset = read
+    let public_asset = read
         && (path == "/app"
             || path.starts_with("/app/")
             || path.starts_with("/assets/")
@@ -212,7 +212,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         Some(Lookup::Found(m)) => m.route.access,
         // Unknown paths have no handler or data. Keep v1 404/405 for reads.
         Some(_) if read => Access::Public,
-        _ if asset
+        _ if public_asset
             || (read && path == "/healthz")
             || (req.method() == Method::POST && path == "/api/login") =>
         {
