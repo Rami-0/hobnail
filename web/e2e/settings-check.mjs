@@ -72,6 +72,7 @@ try {
     const fill = async (selector, value) => {
       await inp.clear(selector);
       await tab.send("Input.insertText", { text: value });
+      await tab.ev('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     };
     const button = async (selector, caption) => {
       const marked = await tab.ev(`(() => {
