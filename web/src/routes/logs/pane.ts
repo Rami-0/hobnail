@@ -104,7 +104,7 @@ export class LogPane {
   };
   private disconnect(): void { this.source?.close(); this.older?.close(); clearTimeout(this.retry); this.source = this.older = null; }
   close(): void {
-    this.box.dispatchEvent(new CustomEvent("rh:log-counts", { bubbles: true, detail: { query: this.query, counts: null } }));
+    window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
     this.observer.disconnect();
     window.removeEventListener("resize", this.resize);
@@ -288,8 +288,8 @@ export class LogPane {
       const el = child as HTMLElement; this.heights.set(Number(el.dataset.logId), el.offsetHeight);
     }
   }
-  private restore(total: number): void {
-    if (this.following) this.box.scrollTop = Math.max(0, total - this.box.clientHeight);
+  private restore(): void {
+    if (this.following) this.box.scrollTop = this.box.scrollHeight;
     else if (this.anchor) {
       const index = this.visible.findIndex((r) => r.id === this.anchor?.id);
       if (index >= 0) this.box.scrollTop = (this.offsets[index] ?? 0) + this.anchor.offset;
@@ -345,7 +345,7 @@ export class LogPane {
     const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
     this.visible = filtered.rows; this.hits = filtered.hits; this.counts = filtered.counts;
     const countKey = Object.values(this.counts).join(",");
-    if (countKey !== this.countsKey) { this.countsKey = countKey; this.box.dispatchEvent(new CustomEvent("rh:log-counts", { bubbles: true, detail: { query: this.query, counts: this.counts } })); }
+    if (countKey !== this.countsKey) { this.countsKey = countKey; window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: this.counts } })); }
 
     let total = this.layout();
     if (this.searchKey !== changedSearch) {
@@ -358,10 +358,11 @@ export class LogPane {
       const next = this.visible.find((r) => r.t >= (this.target ?? 0));
       if (next) { this.pickedTarget = true; this.current = next.id; this.seek(next.id); if (next.t > this.target + 1000) this.message = `No line at that moment. Next line: ${new Date(next.t).toLocaleString()}`; }
     }
-    this.restore(total);
-    for (let pass = 0; pass < 2; pass++) {
-      const start = Math.max(0, this.indexAt(this.box.scrollTop) - 8);
-      const end = Math.min(this.visible.length, this.indexAt(this.box.scrollTop + this.box.clientHeight) + 10);
+    if (!this.following) this.restore();
+    for (let pass = 0; pass < (this.following ? 1 : 2); pass++) {
+      const position = this.following ? Math.max(0, total - this.box.clientHeight) : this.box.scrollTop;
+      const start = Math.max(0, this.indexAt(position) - 8);
+      const end = this.following ? this.visible.length : Math.min(this.visible.length, this.indexAt(this.box.scrollTop + this.box.clientHeight) + 10);
       const slice = this.visible.slice(start, end);
       const signature = slice.map((r) => `${r.id}:${r.id === this.current}:${r.id === this.selected?.id}`).join(",") + this.options.wrap + this.options.time;
       if (signature !== this.signature) {
@@ -373,7 +374,12 @@ export class LogPane {
       this.top.style.height = `${this.offsets[start] ?? 0}px`;
       const after = end < this.visible.length ? (this.offsets[end] ?? total) : total;
       this.bottom.style.height = `${Math.max(0, total - after)}px`;
-      this.measure(); total = this.layout(); this.restore(total);
+      this.measure(); total = this.layout(); this.restore();
+    }
+    if (!this.following && this.anchor) {
+      const element = this.content.querySelector<HTMLElement>(`[data-log-id="${this.anchor.id}"]`);
+      if (element) this.box.scrollTop += element.getBoundingClientRect().top - this.box.getBoundingClientRect().top + this.anchor.offset;
+      this.lastTop = this.box.scrollTop;
     }
     requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
     if ((this.pending.length || this.pendingOlder.length) && !this.options.paused) this.schedule();
