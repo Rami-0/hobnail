@@ -330,6 +330,7 @@ fn validate(
         .flat_map(|s| &s.items)
         .filter_map(|i| Some((i.id.as_deref()?, &i.payload)))
         .collect();
+    let visible_targets = user.container_targets(conn)?;
     for section in &doc.sections {
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
             return Err(ApiError::bad_request(
@@ -368,6 +369,17 @@ fn validate(
                     icon,
                     link,
                 } => {
+                    let unchanged = matches!(previous, Some(BoardPayload::Container { target: old, .. }) if old == target);
+                    if !unchanged
+                        && visible_targets
+                            .as_ref()
+                            .is_some_and(|targets| !targets.contains(target))
+                    {
+                        return Err(ApiError::bad_request(
+                            "invalid container reference",
+                            Some("target"),
+                        ));
+                    }
                     match target {
                         ContainerMatch::Compose { project, service } => {
                             super::validate_label(project, "project")?;

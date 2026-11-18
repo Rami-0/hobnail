@@ -428,6 +428,81 @@ async fn upstream_request(socket: &mut TcpStream) -> String {
 }
 
 #[tokio::test]
+async fn scoped_board_edits_cannot_introduce_targets_or_reuse_foreign_ids() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Granted").await;
+    let foreign = owner.board("Foreign").await;
+    let integration = owner.json("POST", "/api/v1/integrations", json!({
+        "name":"Private connection","kind":"http","enabled":true,"base_url":"https://example.test/private"
+    }), 201).await;
+    let item = |payload| {
+        json!({
+            "position":0, "spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1}, "payload":payload
+        })
+    };
+    let integration = item(json!({"kind":"integration","integration_id":integration["id"]}));
+    let on_board = item(
+        json!({"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}),
+    );
+    let foreign_container =
+        item(json!({"kind":"container","target":{"by":"compose","project":"shop","service":"db"}}));
+    let doc = |items: Vec<Value>| json!({"version":0,"sections":[{"title":"Services","position":0,"items":items}]});
+    let path = format!("/api/v1/boards/{board}");
+    let draft = format!("{path}/draft");
+    let saved = owner
+        .json("PUT", &path, doc(vec![integration.clone(), on_board]), 200)
+        .await;
+    let foreign = owner
+        .json(
+            "PUT",
+            &format!("/api/v1/boards/{foreign}"),
+            doc(vec![foreign_container.clone()]),
+            200,
+        )
+        .await;
+    let admin = owner
+        .guest("scoped-board-editor", "admin", json!({"boards":[board]}))
+        .await;
+
+    let visible = admin.json("GET", &path, Value::Null, 200).await;
+    assert_eq!(visible["resolved"][0]["missing"], true);
+    assert_eq!(visible["resolved"][0]["integration"], Value::Null);
+    assert_eq!(visible["resolved"][1]["container"]["name"], "web");
+    let unchanged = saved["document"].clone();
+    let cross_board_section = &foreign["document"]["sections"][0];
+    let mut bad_section = unchanged.clone();
+    bad_section["sections"][0]["id"] = cross_board_section["id"].clone();
+    let mut bad_item = unchanged.clone();
+    bad_item["sections"][0]["items"][0]["id"] = cross_board_section["items"][0]["id"].clone();
+    for route in [&draft, &path] {
+        for payload in [&integration, &foreign_container] {
+            let mut adding = unchanged.clone();
+            adding["sections"][0]["items"]
+                .as_array_mut()
+                .unwrap()
+                .push(payload.clone());
+            assert_api_error(
+                &admin.call("PUT", route, adding).await,
+                400,
+                "bad_request",
+                route,
+            );
+        }
+        for invalid in [&bad_section, &bad_item] {
+            assert_api_error(
+                &admin.call("PUT", route, invalid.clone()).await,
+                400,
+                "bad_request",
+                route,
+            );
+        }
+        admin.json("PUT", route, unchanged.clone(), 200).await;
+    }
+}
+
+#[tokio::test]
 async fn scoped_viewers_only_read_containers_on_their_boards() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
