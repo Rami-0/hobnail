@@ -109,7 +109,7 @@ try {
         await tab.ev(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${q(label)}).click()`);
         await sleep(200);
         const after = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), r=b.querySelector('[data-log-id="${anchor.id}"]'); return r ? r.getBoundingClientRect().top-b.getBoundingClientRect().top : null; })()`);
-        if (after === null || Math.abs(after-anchor.offset)>=4) console.log("anchor drift", anchor, await tab.ev(`(()=>{const b=document.querySelector('[data-testid=log-body]'),edge=b.getBoundingClientRect().top;return {top:b.scrollTop,height:b.clientHeight,total:b.scrollHeight,rows:[...b.querySelectorAll('[data-log-id]')].map(r=>({id:r.dataset.logId,y:r.getBoundingClientRect().top-edge,h:r.offsetHeight})),debug:b.dataset.anchorDebug}})()`));
+        if (after === null || Math.abs(after-anchor.offset)>=4) console.log("anchor drift", anchor, await tab.ev(`(()=>{const b=document.querySelector('[data-testid=log-body]'),edge=b.getBoundingClientRect().top;return {top:b.scrollTop,height:b.clientHeight,total:b.scrollHeight,rows:[...b.querySelectorAll('[data-log-id]')].map(r=>({id:r.dataset.logId,y:r.getBoundingClientRect().top-edge,h:r.offsetHeight}))}})()`));
         assert.ok(after !== null && Math.abs(after-anchor.offset)<4, `${label} keeps reader line: ${after} vs ${anchor.offset}`);
       }
       await tab.send('Emulation.setDeviceMetricsOverride',{width:width===390?410:1360,height:width===390?844:900,deviceScaleFactor:1,mobile:inp.touch}); await sleep(350);

@@ -148,7 +148,7 @@ export class LogPane {
         this.pending.push(line);
         this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
       }
-      // Paused input stays bounded too. The cursor advances only when flushed.
+      // Paused input stays bounded too; reconnect resumes after the last received line.
       if (this.pending.length > this.cap) this.pending.splice(0, this.pending.length - this.cap);
       this.schedule();
     });
@@ -314,7 +314,7 @@ export class LogPane {
       }
     }
     this.lastTop = this.box.scrollTop;
-    this.box.dataset.anchorDebug = JSON.stringify(this.anchor);
+
   }
   private fit(): void {
     const panes = this.box.closest(".log-panes");
@@ -336,7 +336,7 @@ export class LogPane {
     if (width !== this.width) { this.width = width; this.heights.clear(); this.signature = ""; }
     let accepted = 0;
     if (!this.options.paused && this.pending.length) {
-      const batch = this.pending.splice(0, 256); accepted = batch.length;
+      const batch = this.pending.splice(0, 128); accepted = batch.length;
       if (!this.following) this.unseen += batch.length;
       this.ring.append(batch);
       for (const line of batch) {
@@ -348,8 +348,8 @@ export class LogPane {
       for (const id of this.heights.keys()) if (!retained.has(id)) this.heights.delete(id);
       for (const id of this.openedJson) if (!retained.has(id)) this.openedJson.delete(id);
     }
-    if (!this.options.paused && !this.pending.length && this.pendingOlder.length && accepted < 256) {
-      this.ring.append(this.pendingOlder.splice(-(256 - accepted)), true);
+    if (!this.options.paused && !this.pending.length && this.pendingOlder.length && accepted < 128) {
+      this.ring.append(this.pendingOlder.splice(-(128 - accepted)), true);
     }
     if (this.query.startsWith("stack=")) {
       const stack = new URLSearchParams(this.query).get("stack") ?? "";
