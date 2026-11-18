@@ -194,11 +194,14 @@ server draft endpoint. Never put credentials in drafts, URLs or storage.
 | Selector | Meaning |
 |---|---|
 | `[data-testid="board"]`, `[data-testid="board-empty"]` | board read page and empty state |
+| `[data-testid="board-tile"]` | a rendered board item, including missing targets |
 | `button[data-testid="board-edit"]` | Admin/Owner edit entry |
 | `[data-testid="board-editor"]` | active editor |
 | `[data-testid="board-save"]`, `[data-testid="board-cancel"]` | explicit save / discard |
 | `[data-testid="board-add-section"]`, `[data-testid="board-add-item"]` | add a section / open picker |
 | `[data-testid="board-picker"]`, `form[data-testid="board-link-form"]` | searchable suggestions and manual link form |
+| `[data-testid="board-suggestion"]` | one filtered suggestion action |
+| `[data-testid="board-leave"]` | unsaved-navigation prompt; Keep editing / Leave and keep draft |
 | `[data-section="<index>"][data-item="<index>"] .drag-handle` | item Move / Resize controls; Alt+arrows moves, Shift+arrows resizes |
 | `[data-testid="draft-status"]` | pending / saved / failed server draft status |
 | `[data-testid="board-draft"]`, `[data-testid="draft-resume"]`, `[data-testid="draft-discard"]` | draft recovery choices |
