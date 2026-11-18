@@ -298,7 +298,10 @@ const server = http.createServer((req, res) => {
   if ((m = p.match(/^\/containers\/([^/]+)\/(json|top|logs)$/))) {
     const c = byRef(m[1]);
     if (!c) return json(res, 404, { message: `No such container: ${decodeURIComponent(m[1])}` });
-    if (m[2] === "json") return json(res, 200, inspect(c));
+    if (m[2] === "json") {
+      if (LOG_FIXTURES && c.name === "svc149") return json(res, 404, { message: "Container disappeared before inspect" });
+      return json(res, 200, inspect(c));
+    }
     if (m[2] === "top") {
       if (!running(c)) return json(res, 409, { message: `container ${c.id} is not running` });
       const custom = (u.searchParams.get("ps_args") || "").includes("%cpu");
