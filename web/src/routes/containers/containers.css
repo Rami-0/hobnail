@@ -3,23 +3,10 @@
    static/components.css and static/app.css; scoped to the two pages so the
    shell's own styles are not touched. Phones (<= 640 px) get stacked rows
    that skip layout and paint while off screen (content-visibility). */
-:is(.ctr-page,.cd-page) .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--off)}
-:is(.ctr-page,.cd-page) .dot.ok{background:var(--ok)}
-:is(.ctr-page,.cd-page) .dot.warn{background:var(--warn)}
-:is(.ctr-page,.cd-page) .dot.bad{background:var(--bad)}
-:is(.ctr-page,.cd-page) .dot.off{background:none;box-shadow:inset 0 0 0 1.5px var(--off)}
-:is(.ctr-page,.cd-page) .pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-xs);font-weight:500;color:var(--text-2);white-space:nowrap}
-:is(.ctr-page,.cd-page) .pill.ok{color:var(--ok-fg);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
-:is(.ctr-page,.cd-page) .pill.warn{color:var(--warn-fg);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
-:is(.ctr-page,.cd-page) .pill.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 55%,transparent)}
 :is(.ctr-page,.cd-page) .icon{width:20px;height:20px;border-radius:5px;flex:none;object-fit:contain}
 :is(.ctr-page,.cd-page) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
-:is(.ctr-page,.cd-page) .ia{position:relative;display:inline-flex;align-items:center;justify-content:center;width:var(--ia);height:var(--ia);flex:none;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--text-3);cursor:pointer}
-:is(.ctr-page,.cd-page) .ia:hover{color:var(--text);background:var(--tint-2);text-decoration:none}
-:is(.ctr-page,.cd-page) .ia svg{width:16px;height:16px}
 :is(.ctr-page,.cd-page) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
 :is(.ctr-page,.cd-page) .ra .btn.sm{gap:6px}
-:is(.ctr-page,.cd-page) .btn.icon{padding:0;width:var(--ctl-h)}
 :is(.ctr-page,.cd-page) fieldset.seg{margin:0;min-inline-size:0}
 :is(.ctr-page,.cd-page) .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
 :is(.ctr-page,.cd-page) .seg>:is(a,button){display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:.8929rem;font-weight:500;white-space:nowrap;cursor:pointer;text-decoration:none}
@@ -124,12 +111,6 @@ tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
 tbody.none td{padding:0}
 /* rows still to come (index.tsx Waiting): their height, so nothing moves when they arrive */
 .ctbl tr.row-wait td{height:var(--row);padding:0;border-bottom:1px solid var(--line)}
-.hstrip{display:block;width:100%;height:10px;border-radius:2px;overflow:hidden;shape-rendering:crispEdges}
-.hstrip .o{fill:var(--ok);opacity:.78}
-.hstrip .w{fill:var(--warn)}
-.hstrip .b{fill:var(--bad)}
-.hstrip .f{fill:var(--border);opacity:.55}
-.hstrip .u{fill:var(--line);opacity:.45}
 @media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
 @media (max-width:900px){.c-num .cell-spark{display:none}.c-num{width:80px}.ctbl .c-ports,.ctbl .c-hist{display:none}}
 
