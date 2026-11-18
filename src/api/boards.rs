@@ -146,6 +146,7 @@ pub struct ResolvedItem {
     missing: bool,
     container: Option<ContainerRow>,
     integration: Option<IntegrationView>,
+    widget: Option<super::widgets::WidgetView>,
 }
 
 #[derive(Serialize)]
@@ -528,6 +529,7 @@ fn resolve(
     for item in document.sections.iter().flat_map(|s| &s.items) {
         let mut container = None;
         let mut integration = None;
+        let mut widget = None;
         let missing = match &item.payload {
             BoardPayload::Container {
                 target,
@@ -550,7 +552,12 @@ fn resolve(
                 container.is_none()
             }
             BoardPayload::Widget { widget_id } => {
-                !config.widgets.iter().any(|w| w.id == *widget_id)
+                widget = config
+                    .widgets
+                    .iter()
+                    .find(|w| w.id == *widget_id)
+                    .map(|config| super::widgets::view(state, config));
+                widget.is_none()
             }
             BoardPayload::Integration { integration_id } => {
                 integration = integrations
@@ -566,6 +573,7 @@ fn resolve(
             missing,
             container,
             integration,
+            widget,
         });
     }
     BoardView {

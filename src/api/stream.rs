@@ -97,6 +97,7 @@ pub struct Topics {
     pub stats: bool,
     pub system: bool,
     pub boards: bool,
+    pub widget: bool,
 }
 
 impl Topics {
@@ -105,6 +106,7 @@ impl Topics {
         stats: true,
         system: true,
         boards: true,
+        widget: false,
     };
 
     pub(super) fn requested(query: &str) -> Topics {
@@ -114,6 +116,7 @@ impl Topics {
             stats: false,
             system: false,
             boards: false,
+            widget: false,
         };
         for v in q.iter().filter(|(k, _)| k == "topics").map(|(_, v)| v) {
             for name in v.split(',').map(str::trim) {
@@ -122,6 +125,7 @@ impl Topics {
                     "stats" => t.stats = true,
                     "system" => t.system = true,
                     "boards" => t.boards = true,
+                    "widget" => t.widget = true,
                     _ => {}
                 }
             }
@@ -131,7 +135,7 @@ impl Topics {
 
     pub fn parse(query: &str) -> Topics {
         let t = Self::requested(query);
-        if t.containers || t.stats || t.system || t.boards {
+        if t.containers || t.stats || t.system || t.boards || t.widget {
             t
         } else {
             Topics::ALL
@@ -307,6 +311,11 @@ async fn run(
                             sig = Some(current(&st, &account).1);
                         }
                         event("config", &serde_json::json!({}))
+                    }
+                    raw if topics.widget && !account.is_scoped() && raw.starts_with("w-") => {
+                        let config = st.config.current();
+                        let Some(widget) = config.widgets.iter().find(|w| w.id == raw[2..]) else { continue };
+                        event("widget", &super::widgets::view(&st, widget))
                     }
                     raw if topics.boards && raw.starts_with("board:") => {
                         let Some((id, version)) = raw[6..].split_once(':') else { continue };

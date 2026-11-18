@@ -27,6 +27,7 @@ pub mod strips;
 mod tests;
 #[cfg(test)]
 mod types_tests;
+mod widgets;
 
 use access::{Handler, Lookup};
 use error::ApiError;
@@ -129,6 +130,7 @@ pub(crate) async fn route(
             let admin = !account.is_scoped() && account.role >= crate::db::accounts::Role::Admin;
             containers::get(state, name, query, admin).await
         }
+        Handler::Widgets => widgets::get(state),
         Handler::Bookmarks => bookmarks::get(state),
         Handler::History => {
             history::get(state, query, principal.expect("viewer gate").account.role).await

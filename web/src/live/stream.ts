@@ -15,11 +15,11 @@ import { FIRST_RETRY_MS, nextRetryMs } from "./backoff.ts";
 export type LiveStatus = "connecting" | "live" | "reconnecting" | "stopped";
 
 /** Stream topics, in the order the URL lists them. */
-export const TOPICS = ["containers", "stats", "system", "boards"] as const;
+export const TOPICS = ["containers", "stats", "system", "boards", "widget"] as const;
 export type Topic = (typeof TOPICS)[number];
 
 /** Event names the server sends (src/api/stream.rs). */
-export const EVENTS = ["hello", "containers", "stats", "system", "config", "resync", "boards"] as const;
+export const EVENTS = ["hello", "containers", "stats", "system", "config", "resync", "boards", "widget"] as const;
 export type EventName = (typeof EVENTS)[number];
 
 export interface StreamMessage {

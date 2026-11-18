@@ -1195,6 +1195,12 @@ hide = true
 [containers.web]
 url = "http://{host}:9000/{name}"
 
+[[widgets]]
+id = "probe-widget"
+type = "custom-api"
+url = "https://example.com/private"
+headers = { Authorization = "widget-secret" }
+
 [[bookmarks]]
 name = "Example"
 url = "https://example.com"
@@ -2084,6 +2090,9 @@ async fn invite_roles_and_account_management() {
             req(addr, "GET", "/api/v1/bookmarks", &h, "").await.status,
             403
         );
+        for path in ["/api/v1/widgets", "/api/v1/stream?topics=widget"] {
+            assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
+        }
         let r = req(
             addr,
             "POST",
@@ -2303,6 +2312,10 @@ async fn viewer_cannot_read_administrative_details() {
         assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
+    let widgets = req(addr, "GET", "/api/v1/widgets", &h, "").await;
+    assert_eq!(json_of(&widgets, "viewer widgets")[0]["id"], "probe-widget");
+    assert!(!widgets.body.contains("widget-secret"));
+    assert!(!widgets.body.contains("/private"));
     let bookmarks = req(addr, "GET", "/api/v1/bookmarks", &h, "").await;
     assert_eq!(
         json_of(&bookmarks, "viewer bookmarks")[0]["name"],

@@ -64,6 +64,16 @@ export function watchBoards(cb: (event: { id: string; version: number }) => void
   return () => { boardListeners.delete(cb); off(); };
 }
 
+export type ReadTopic = "widget";
+const reads = new Map<ReadTopic, Set<(data: unknown) => void>>();
+export function watchReadTopic(topic: ReadTopic, cb: (data: unknown) => void): () => void {
+  const listeners = reads.get(topic) ?? new Set();
+  reads.set(topic, listeners);
+  listeners.add(cb);
+  const release = wantTopic(topic);
+  return () => { listeners.delete(cb); release(); };
+}
+
 const configListeners = new Set<() => void>();
 
 /** Called after the server's config changed (and after a resync): refetch what depends on it. */
@@ -195,6 +205,9 @@ function refetchAll(): void {
 
 function onMessage(m: StreamMessage): void {
   switch (m.type) {
+    case "widget":
+      scheduler.queue(() => { for (const cb of reads.get(m.type) ?? []) cb(m.data); });
+      return;
     case "boards":
       void fetchBootstrap();
       if (stripsWanted > 0) void fetchStrips();

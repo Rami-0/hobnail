@@ -108,6 +108,8 @@ fn files() -> Vec<(String, String)> {
         render::<StatsRow>(),
         render::<Strips>(),
         render::<SystemView>(),
+        render::<crate::widgets::WidgetBody>(),
+        render::<super::widgets::WidgetView>(),
         render::<Why>(),
         render::<WhyCheck>(),
     ]

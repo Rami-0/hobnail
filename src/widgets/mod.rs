@@ -192,11 +192,22 @@ pub struct StatusConfig {
     pub ok: Vec<Value>,
 }
 
+/// The display body shared by the two clients, with all values as text.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct WidgetBody {
+    pub headline: Option<String>,
+    pub rows: Vec<(String, String)>,
+    pub text: Option<String>,
+}
+
 /// Result of one widget run.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct WidgetOutput {
     /// Rendered (escaped) HTML body of the widget on success.
     pub html: Option<String>,
+    #[serde(skip)]
+    pub display: WidgetBody,
     /// Extracted values by name, for alert rules (`widget` rules read these).
     /// Every field, plus `_status` (HTTP status / exit code), `_ms`
     /// (latency), `_ok` (status rule result, when one is set) and `_text`
@@ -504,6 +515,11 @@ fn present(w: &WidgetConfig, c: &Compiled, data: Data, out: &mut WidgetOutput) {
         @if let Some(p) = &pre { pre.w-text { (p) } }
     };
     out.html = Some(html.into_string());
+    out.display = WidgetBody {
+        headline,
+        rows,
+        text: pre,
+    };
 }
 
 fn truthy(v: &Value) -> bool {
