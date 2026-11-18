@@ -11,7 +11,7 @@
 //! `GET /api/containers/<name>/env`, which answers 401 without a session.
 
 use hyper::header::CACHE_CONTROL;
-use hyper::{HeaderMap, StatusCode};
+use hyper::StatusCode;
 use maud::{html, Markup, PreEscaped};
 
 use crate::alerts::RuleKind;
@@ -1570,14 +1570,12 @@ pub async fn api(
     req: &hyper::Request<hyper::body::Incoming>,
 ) -> hyper::Response<crate::http::server::Body> {
     let path = req.uri().path().to_string();
-    let headers = req.headers().clone();
     let st = state.clone();
     match tokio::task::spawn_blocking(move || {
         let socket = st.env.docker_socket.clone();
         api_inner(
             &st,
             &path,
-            &headers,
             &|id| crate::docker::inspect_blocking(&socket, id),
             &|id| crate::docker::top_blocking(&socket, id),
         )
@@ -1595,7 +1593,6 @@ type TopFn<'a> = &'a dyn Fn(&str) -> Result<Top, String>;
 fn api_inner(
     state: &crate::state::AppState,
     path: &str,
-    headers: &HeaderMap,
     inspect: InspectFn,
     top: TopFn,
 ) -> hyper::Response<crate::http::server::Body> {
@@ -1606,30 +1603,19 @@ fn api_inner(
     };
     let name = url_decode(raw);
     let snap = state.snapshot();
-    let Some(c) = snap.containers.iter().find(|c| c.name == name) else {
+    let cfg = state.config.current();
+    let Some(c) = snap
+        .containers
+        .iter()
+        .find(|c| c.name == name && cfg.docker.enabled && !crate::ui::view::is_excluded(&cfg, c))
+    else {
         return json_error(StatusCode::NOT_FOUND, "no such container");
     };
     let v = match what {
-        "env" => {
-            // The session check comes first: nothing is fetched for an
-            // anonymous request.
-            if crate::auth::current_user(state, headers).is_none() {
-                return json_error(
-                    StatusCode::UNAUTHORIZED,
-                    "sign in to reveal environment values",
-                );
-            }
-            match inspect(&c.id) {
-                Ok(i) => serde_json::json!({ "env": i.config.env_pairs() }),
-                Err(e) => return json_error(StatusCode::BAD_GATEWAY, &e),
-            }
-        }
-        "health" | "top" if crate::auth::current_user(state, headers).is_none() => {
-            return json_error(
-                StatusCode::UNAUTHORIZED,
-                "sign in to see commands and health-check output",
-            );
-        }
+        "env" => match inspect(&c.id) {
+            Ok(i) => serde_json::json!({ "env": i.config.env_pairs() }),
+            Err(e) => return json_error(StatusCode::BAD_GATEWAY, &e),
+        },
         "health" => match inspect(&c.id) {
             Ok(i) => {
                 let h = i.state.health.unwrap_or_default();
@@ -1765,24 +1751,6 @@ above = 90
         }
     }
 
-    /// A valid session cookie (stored the way `auth` stores it).
-    fn signed_in(st: &Arc<crate::state::AppState>) -> HeaderMap {
-        let token = "cd".repeat(32);
-        let hash: String = ring::digest::digest(&ring::digest::SHA256, token.as_bytes())
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let now = crate::util::unix_now() as i64;
-        assert!(st.db.create_session(&hash, now, now + 3600));
-        let mut h = HeaderMap::new();
-        h.insert(
-            "cookie",
-            hyper::header::HeaderValue::from_str(&format!("rh_session={token}")).unwrap(),
-        );
-        h
-    }
-
     #[test]
     fn parses_inspect_fixture() {
         let i = ins();
@@ -1865,72 +1833,15 @@ above = 90
     }
 
     #[test]
-    fn env_api_needs_a_session() {
+    fn env_api_returns_values_only_for_a_visible_container_after_the_router_gate() {
         let st = state_with(sample(), "");
-        let calls = std::cell::Cell::new(0);
-        let insp = |_: &str| {
-            calls.set(calls.get() + 1);
-            Ok(ins())
-        };
+        let inspect = |_: &str| Ok(ins());
         let top = |_: &str| Err("no docker".to_string());
-        let body = |r: hyper::Response<crate::http::server::Body>| {
-            let s = r.status();
-            let b = futures_body(r);
-            (s, b)
-        };
-        // Anonymous: 401, nothing fetched, no value.
-        let (s, b) = body(api_inner(
-            &st,
-            "/api/containers/web/env",
-            &HeaderMap::new(),
-            &insp,
-            &top,
-        ));
-        assert_eq!(s, StatusCode::UNAUTHORIZED);
-        assert!(!b.contains(SECRET));
-        assert_eq!(calls.get(), 0);
-        // A forged cookie is still anonymous.
-        let mut forged = HeaderMap::new();
-        forged.insert("cookie", "rh_session=00".parse().unwrap());
-        let (s, b) = body(api_inner(
-            &st,
-            "/api/containers/web/env",
-            &forged,
-            &insp,
-            &top,
-        ));
-        assert_eq!(s, StatusCode::UNAUTHORIZED);
-        assert!(!b.contains(SECRET));
-        // Other anonymous endpoints carry no env either.
-        let (s, b) = body(api_inner(
-            &st,
-            "/api/containers/web/health",
-            &HeaderMap::new(),
-            &insp,
-            &top,
-        ));
-        // Health output and process lists need a session (they can carry secrets).
-        assert_eq!(s, StatusCode::UNAUTHORIZED);
-        assert!(!b.contains(SECRET));
-        let (s, _) = body(api_inner(
-            &st,
-            "/api/containers/web/top",
-            &HeaderMap::new(),
-            &insp,
-            &top,
-        ));
-        assert_eq!(s, StatusCode::UNAUTHORIZED);
-        let (s, _) = body(api_inner(
-            &st,
-            "/api/containers/nope/env",
-            &HeaderMap::new(),
-            &insp,
-            &top,
-        ));
-        assert_eq!(s, StatusCode::NOT_FOUND);
-        // Signed in: the values.
-        let h = signed_in(&st);
-        let (s, b) = body(api_inner(&st, "/api/containers/web/env", &h, &insp, &top));
+        let missing = api_inner(&st, "/api/containers/nope/env", &inspect, &top);
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        let response = api_inner(&st, "/api/containers/web/env", &inspect, &top);
+        let s = response.status();
+        let b = futures_body(response);
         assert_eq!(s, StatusCode::OK);
         assert!(b.contains(SECRET));
         let v: serde_json::Value = serde_json::from_str(&b).unwrap();

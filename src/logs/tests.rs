@@ -203,18 +203,13 @@ fn docker_unreachable_banner() {
     assert!(html.contains("Docker is unreachable."));
 }
 
-/// Feature tests opt out of the default login wall explicitly.
 const OPEN: &str = "[logs]\nrequire_login = false\n";
 
 #[test]
-fn require_login_hides_logs() {
-    let st = state_with(sample(), "[logs]\nrequire_login = true\n");
-    assert!(st.config.snapshot().error.is_none());
-    for p in ["/containers/web/logs", "/stacks/shop/logs", "/logs"] {
-        let (s, html) = page(&st, p, "");
-        assert_eq!(s, 401, "{p}");
-        assert!(html.contains("Sign in to read logs"));
-        assert!(!html.contains("logs.js"));
+fn legacy_require_login_setting_still_parses() {
+    for config in [OPEN, "[logs]\nrequire_login = true\n"] {
+        let st = state_with(sample(), config);
+        assert!(st.config.snapshot().error.is_none());
     }
 }
 

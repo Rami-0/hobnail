@@ -253,12 +253,11 @@ async fn dispatch(
         return crate::api::route(state, req, lookup, session.cloned()).await;
     }
     if path.starts_with("/api/settings/") {
-        return crate::settings::route(state, req, session.expect("settings gate").account.clone())
-            .await;
+        return crate::settings::route(state, req, session.expect("settings gate").clone()).await;
     }
     if !read {
         return match path {
-            "/api/login" | "/api/logout" => crate::auth::route(state, req).await,
+            "/api/login" | "/api/logout" => crate::auth::route(state, req, session).await,
             _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
         };
     }
@@ -278,13 +277,13 @@ async fn dispatch(
             session.expect("viewer gate").hash.clone(),
         ),
         "/api/state" => json(&crate::render::state_json(state)),
-        "/api/login" | "/api/logout" => crate::auth::route(state, req).await,
-        "/static/app.css" => asset(req.uri().query(), APP_CSS, CSS, APP_CSS_V),
-        "/static/app.js" => asset(req.uri().query(), APP_JS, JS, APP_JS_V),
-        "/static/logs.css" => asset(req.uri().query(), LOGS_CSS, CSS, LOGS_CSS_V),
-        "/static/logs.js" => asset(req.uri().query(), LOGS_JS, JS, LOGS_JS_V),
-        "/static/settings.css" => asset(req.uri().query(), SETTINGS_CSS, CSS, SETTINGS_CSS_V),
-        "/static/settings.js" => asset(req.uri().query(), SETTINGS_JS, JS, SETTINGS_JS_V),
+        "/api/login" | "/api/logout" => crate::auth::route(state, req, session).await,
+        "/static/app.css" => asset(APP_CSS, CSS),
+        "/static/app.js" => asset(APP_JS, JS),
+        "/static/logs.css" => asset(LOGS_CSS, CSS),
+        "/static/logs.js" => asset(LOGS_JS, JS),
+        "/static/settings.css" => asset(SETTINGS_CSS, CSS),
+        "/static/settings.js" => asset(SETTINGS_JS, JS),
         "/custom.css" => {
             let css =
                 std::fs::read_to_string(state.env.data_dir.join("custom.css")).unwrap_or_default();
@@ -306,24 +305,7 @@ async fn dispatch(
             crate::logs::route(state, &req, &session.expect("viewer gate").hash).await
         }
         p if p.starts_with("/api/containers/") => {
-            let visible = p
-                .strip_prefix("/api/containers/")
-                .and_then(|rest| rest.rsplit_once('/'))
-                .and_then(|(name, _)| crate::db::api::percent_decode(name))
-                .is_some_and(|name| {
-                    let cfg = state.config.current();
-                    cfg.docker.enabled
-                        && state
-                            .snapshot()
-                            .containers
-                            .iter()
-                            .any(|c| c.name == name && !crate::ui::view::is_excluded(&cfg, c))
-                });
-            if visible {
-                crate::ui::pages::container::api(state, &req).await
-            } else {
-                crate::db::api::json_error(StatusCode::NOT_FOUND, "no such container")
-            }
+            crate::ui::pages::container::api(state, &req).await
         }
         p if crate::ui::pwa::route(state, p).is_some() => crate::ui::pwa::route(state, p).unwrap(),
         p if p.starts_with("/api/history/") || p == "/api/events" => {
@@ -337,7 +319,7 @@ async fn dispatch(
         _ => {
             // The legacy renderer uses the presence of a session to expose
             // administrative details. Reuse its redacted rendering for Viewers.
-            if !admin && !matches!(path, "/logs") && !path.starts_with("/logs/") {
+            if !admin && !path.ends_with("/logs") {
                 req.headers_mut().remove(hyper::header::COOKIE);
             }
             crate::ui::routes::route(state, &req, &host).await
@@ -383,26 +365,10 @@ pub fn json(v: &serde_json::Value) -> Response<Body> {
 const CSS: &str = "text/css; charset=utf-8";
 const JS: &str = "text/javascript; charset=utf-8";
 
-/// A compiled-in asset. Cached for a year (`immutable`) only when the URL
-/// asks for exactly this content (`?v=<hash of the bytes>`); any other or no
-/// `v` is `no-cache`, so a stale page never pins a wrong file.
-fn asset(query: Option<&str>, body: &'static str, ctype: &str, v: &str) -> Response<Body> {
+fn asset(body: &'static str, ctype: &str) -> Response<Body> {
     let mut r = full(StatusCode::OK, body);
     set(&mut r, CONTENT_TYPE, ctype);
-    set(&mut r, CACHE_CONTROL, asset_cache(query, v));
     r
-}
-
-fn asset_cache(query: Option<&str>, v: &str) -> &'static str {
-    let asked = query
-        .unwrap_or("")
-        .split('&')
-        .find_map(|kv| kv.strip_prefix("v="));
-    if asked == Some(v) {
-        "public, max-age=31536000, immutable"
-    } else {
-        "no-cache"
-    }
 }
 
 /// SSE body backed by a channel; holding the viewer guard for its lifetime.

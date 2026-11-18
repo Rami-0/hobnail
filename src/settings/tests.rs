@@ -69,29 +69,27 @@ async fn call(st: &Arc<AppState>, method: Method, path: &str, body: Option<J>) -
         .filter(|s| !s.is_empty())
         .map(String::from)
         .collect();
-    let mut headers = HeaderMap::new();
-    if path == "security/password" {
-        let token = "ab".repeat(32);
-        let now = crate::auth::now_s();
-        let hash = crate::auth::sha256_hex(token.as_bytes());
-        if st.db.account_session(&hash, now).is_none() {
-            assert!(st.db.create_session(&hash, now, now + 60));
-        }
-        headers.insert(
-            hyper::header::COOKIE,
-            format!("rh_session={token}").parse().unwrap(),
-        );
+    let token = "ab".repeat(32);
+    let now = crate::auth::now_s();
+    let hash = crate::auth::sha256_hex(token.as_bytes());
+    if st.db.account_session(&hash, now).is_none() {
+        assert!(st.db.create_session(&hash, now, now + 60));
     }
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        hyper::header::COOKIE,
+        format!("rh_session={token}").parse().unwrap(),
+    );
+    let session = crate::auth::request_session(st, &headers).unwrap();
     let resp = api::handle(
         st,
         api::Call {
             method,
             segs,
-            headers,
+            session,
             body: body
                 .map(|b| Bytes::from(serde_json::to_vec(&b).unwrap()))
                 .unwrap_or_default(),
-            user: "admin".into(),
         },
     )
     .await;

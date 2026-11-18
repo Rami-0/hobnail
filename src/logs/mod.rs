@@ -45,11 +45,9 @@ pub use pages::level_chart;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogsConfig {
-    /// Logs pages and `/api/logs/*` need a signed-in user. Default **true**
-    /// (fail closed): container logs often contain secrets (tokens in URLs,
-    /// connection strings). Set `false` to make logs as open as the rest of
-    /// the dashboard.
-    pub require_login: bool,
+    /// Accepted for compatibility. All log routes require a session.
+    #[serde(rename = "require_login")]
+    _require_login: bool,
     /// Containers (name globs) tailed in the background only to count their
     /// lines per level per minute (the level chart). Containers watched by
     /// a `log_match` rule are always counted. Each tailed container is one
@@ -66,7 +64,7 @@ pub struct LogsConfig {
 impl Default for LogsConfig {
     fn default() -> Self {
         Self {
-            require_login: true,
+            _require_login: true,
             count: vec![],
             max_watched: 20,
             ring: 5000,

@@ -59,7 +59,7 @@ pub(crate) use store::read_current;
 pub(crate) async fn route(
     state: &Arc<AppState>,
     req: Request<hyper::body::Incoming>,
-    principal: crate::api::access::Principal,
+    session: crate::auth::Session,
 ) -> Response<Body> {
     let (parts, body) = req.into_parts();
     let read = parts.method == Method::GET || parts.method == Method::HEAD;
@@ -100,9 +100,8 @@ pub(crate) async fn route(
         api::Call {
             method: parts.method,
             segs,
-            headers: parts.headers,
+            session,
             body,
-            user: principal.name,
         },
     )
     .await

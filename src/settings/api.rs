@@ -2,7 +2,7 @@
 //! with request and response shapes, is in the module docs of `settings`.
 
 use bytes::Bytes;
-use hyper::{HeaderMap, Method, Response, StatusCode};
+use hyper::{Method, Response, StatusCode};
 use serde_json::{json, Map, Value as J};
 use std::sync::Arc;
 
@@ -21,9 +21,8 @@ pub struct Call {
     pub method: Method,
     /// Path segments after `/api/settings/`, percent-decoded.
     pub segs: Vec<String>,
-    pub headers: HeaderMap,
+    pub session: crate::auth::Session,
     pub body: Bytes,
-    pub user: String,
 }
 
 pub fn respond(status: StatusCode, v: &J) -> Response<Body> {
@@ -69,7 +68,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     let segs: Vec<&str> = call.segs.iter().map(String::as_str).collect();
     let get = call.method == Method::GET || call.method == Method::HEAD;
     let post = call.method == Method::POST;
-    let user = call.user.as_str();
+    let user = call.session.account.name.as_str();
     let json = Reply::Json;
     Ok(match (get, post, segs.as_slice()) {
         // ---- overview
@@ -236,9 +235,9 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
                 return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
             }
             let state = state.clone();
-            let headers = call.headers.clone();
+            let session = call.session.clone();
             tokio::task::spawn_blocking(move || {
-                crate::auth::change_password(&state, &headers, &r.current, &r.new)
+                crate::auth::change_password_for(&state, &session, &r.current, &r.new)
             })
             .await
             .map_err(|_| {
@@ -251,7 +250,11 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             json(json!({"ok": true}))
         }
         (_, true, ["security", "sign-out-others"]) => {
-            if !crate::auth::sign_out_others(state, &call.headers) {
+            if state
+                .db
+                .sign_out_other_sessions(call.session.account.id, &call.session.hash, None)
+                .is_err()
+            {
                 return Err(ApiError::new(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "could not sign out sessions",
@@ -293,7 +296,7 @@ fn password_error(e: String) -> ApiError {
 
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
-    store::edit(state, &r.base_hash, &call.user, |c| {
+    store::edit(state, &r.base_hash, &call.session.account.name, |c| {
         ops::list_action(c, spec, &r).and_then(ops::precheck)
     })
 }

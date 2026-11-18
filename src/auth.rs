@@ -100,7 +100,11 @@ pub(crate) fn check_write(session: &Session, headers: &HeaderMap) -> Result<(), 
 /// `/api/login` (POST: form or JSON `{password}`; checks Origin, rate limit)
 /// and `/api/logout` (POST, already passed `require_write`).
 /// The peer address is in `req.extensions().get::<http::server::Peer>()`.
-pub async fn route(state: &Arc<AppState>, req: Request<hyper::body::Incoming>) -> Response<Body> {
+pub(crate) async fn route(
+    state: &Arc<AppState>,
+    req: Request<hyper::body::Incoming>,
+    session: Option<&Session>,
+) -> Response<Body> {
     if req.method() != Method::POST {
         let mut r = json_error(StatusCode::METHOD_NOT_ALLOWED, "POST only");
         r.headers_mut()
@@ -108,7 +112,7 @@ pub async fn route(state: &Arc<AppState>, req: Request<hyper::body::Incoming>) -
         return r;
     }
     if req.uri().path() == "/api/logout" {
-        return logout(state, req.headers());
+        return logout(state, session.expect("logout gate"));
     }
     credential_route(state, req, CredentialAction::Login).await
 }
@@ -220,16 +224,6 @@ fn local_path_ok(s: &str) -> bool {
         && !s.contains('\\')
 }
 
-pub fn change_password(
-    state: &AppState,
-    headers: &HeaderMap,
-    current: &str,
-    new: &str,
-) -> Result<(), String> {
-    let session = request_session(state, headers).ok_or("sign in required")?;
-    change_password_for(state, &session, current, new)
-}
-
 pub(crate) fn change_password_for(
     state: &AppState,
     session: &Session,
@@ -280,15 +274,6 @@ pub(crate) fn change_password_for(
         "changed in the app",
     );
     Ok(())
-}
-
-pub fn sign_out_others(state: &AppState, headers: &HeaderMap) -> bool {
-    request_session(state, headers).is_some_and(|s| {
-        state
-            .db
-            .sign_out_other_sessions(s.account.id, &s.hash, None)
-            .is_ok()
-    })
 }
 
 /// Recent `auth.login` / `auth.login_failed` events, newest first.
@@ -946,11 +931,8 @@ fn authenticate(
     }
 }
 
-fn logout(state: &AppState, headers: &HeaderMap) -> Response<Body> {
-    // The router already checked the session, CSRF and Origin.
-    if let Some(s) = session_of(&state.db, headers, now_s()) {
-        state.db.delete_session(&s.hash);
-    }
+fn logout(state: &AppState, session: &Session) -> Response<Body> {
+    state.db.delete_session(&session.hash);
     let mut r = json_response(StatusCode::OK, &serde_json::json!({ "ok": true }));
     set(
         &mut r,

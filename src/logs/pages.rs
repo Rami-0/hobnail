@@ -51,48 +51,6 @@ fn assets(_ctx: &Ctx) -> Markup {
     }
 }
 
-fn login_needed(ctx: &Ctx, title: &str) -> (StatusCode, String) {
-    login_needed_in(ctx, title, crate::ui::pages::crumb_title(title), None)
-}
-
-/// The sign-in state, under `head` (a container's header and tabs: what its
-/// public detail page shows anyway) when there is one.
-fn login_needed_in(
-    ctx: &Ctx,
-    title: &str,
-    heading: Markup,
-    head: Option<Markup>,
-) -> (StatusCode, String) {
-    let next = url_encode(&if ctx.query.is_empty() {
-        ctx.path.to_string()
-    } else {
-        format!("{}?{}", ctx.path, ctx.query)
-    });
-    let body = html! {
-        div.page.cd {
-            @if let Some(h) = head { (h) }
-            // LG-11: a plain sentence and a real button; the script adds a
-            // `#t=` fragment to `next` (the server never sees it).
-            @if crate::auth::password_is_set(ctx.state) {
-                (crate::ui::empty(crate::ui::Empty::First, "", "lock", "Sign in to read logs", html! {
-                    "Logs often hold passwords and tokens, so they are shown only after signing in."
-                }, Some(html! { a.btn.primary.login-next href={"/login?next=" (next)} { (ic("log-in")) "Sign in" } })))
-            } @else {
-                (empty_state("lock", "Sign in to read logs", html! {
-                    "Logs often hold passwords and tokens, so they are shown only after signing in, and no password is set yet: run "
-                    code { "docker exec -it hobnail /hobnail set-password" }
-                    " on the host, or set " code { "require_login = false" } " under "
-                    code { "[logs]" } " to open logs like the rest of the page."
-                }))
-            }
-        }
-    };
-    (
-        StatusCode::UNAUTHORIZED,
-        layout(ctx, Nav::Logs, title, heading, body),
-    )
-}
-
 fn docker_banner(ctx: &Ctx) -> Markup {
     let snap = ctx.state.snapshot();
     html! {
@@ -145,11 +103,6 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
         .unwrap_or(Range::H6);
     let snap = ctx.state.snapshot();
     let c = find(&snap, name).filter(|c| !crate::ui::view::is_excluded(&ctx.cfg, c));
-    if ctx.cfg.logs.require_login && ctx.user.is_none() {
-        let head =
-            c.and_then(|_| crate::ui::pages::container::logs_head(ctx, name, range, html! {}));
-        return login_needed_in(ctx, &title, heading, head);
-    }
     let shown: Vec<crate::model::Container> = snap
         .containers
         .iter()
@@ -205,9 +158,6 @@ pub fn container(ctx: &Ctx, name: &str) -> (StatusCode, String) {
 /// `/stacks/<name>/logs`.
 pub fn stack(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
     let title = format!("Logs · {stack}");
-    if ctx.cfg.logs.require_login && ctx.user.is_none() {
-        return login_needed(ctx, &title);
-    }
     let names = stack_members(ctx.state, stack);
     let snap = ctx.state.snapshot();
     if names.is_empty() && snap.error.is_none() {
@@ -305,9 +255,6 @@ fn note_banner(kind: &str, msg: Markup) -> Markup {
 /// names that do not exist, shows the list again with a note (LG-05).
 pub fn split(ctx: &Ctx) -> (StatusCode, String) {
     let title = "Logs";
-    if ctx.cfg.logs.require_login && ctx.user.is_none() {
-        return login_needed(ctx, title);
-    }
     let q = parse_query(ctx.query);
     let asked = names_in(&q, "c");
     let ok: Vec<String> = asked
