@@ -19,6 +19,9 @@ import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
 
 const Users = lazy(() => import("./Users.tsx"));
+const Security = lazy(() => import("./Security.tsx"));
+const History = lazy(() => import("./History.tsx"));
+const Appearance = lazy(() => import("./Appearance.tsx"));
 const Containers = lazy(() => import("./Containers.tsx"));
 const Notifications = lazy(() => import("./Notifications.tsx"));
 const Widgets = lazy(() => import("./Widgets.tsx"));
@@ -45,6 +48,9 @@ export default function SettingsPage() {
     {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
     {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
     {allowed && tab === "users" && <Suspense fallback={<p role="status">Loading users…</p>}><Users /></Suspense>}
+    {allowed && tab === "security" && <Suspense fallback={<p role="status">Loading settings…</p>}><Security /></Suspense>}
+    {allowed && tab === "history" && <Suspense fallback={<p role="status">Loading settings…</p>}><History /></Suspense>}
+    {allowed && tab === "appearance" && <Suspense fallback={<p role="status">Loading settings…</p>}><Appearance /></Suspense>}
     {allowed && tab === "containers" && <Suspense fallback={<p role="status">Loading containers…</p>}><Containers /></Suspense>}
     {allowed && tab === "notifications" && <Suspense fallback={<p role="status">Loading notifications…</p>}><Notifications /></Suspense>}
     {allowed && tab === "widgets" && <Suspense fallback={<p role="status">Loading widgets…</p>}><Widgets /></Suspense>}
