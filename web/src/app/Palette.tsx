@@ -8,6 +8,7 @@ import { THEMES, THEME_LABEL } from "./theme.ts";
 import { rowLink } from "../format/index.ts";
 import { useBootstrap, useContainers } from "../live/index.ts";
 import { Button } from "../ui/Button.tsx";
+import { TextInput } from "../ui/Field.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import "./palette.css";
 
@@ -37,6 +38,7 @@ function external(href: string): boolean {
 
 export default function Palette({ onClose, onHelp }: { onClose: () => void; onHelp: () => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const id = useId();
   const boot = useBootstrap();
   const { data } = useContainers();
@@ -83,7 +85,13 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
   const rows = [...local, ...web];
   const active = selected === null ? (local.length ? 0 : -1) : Math.min(selected, rows.length - 1);
   useEffect(() => {
-    if (active >= 0) document.getElementById(`${id}-${active}`)?.scrollIntoView({ block: "nearest" });
+    const item = document.getElementById(`${id}-${active}`);
+    const box = list.current;
+    if (!item || !box) return;
+    const row = item.getBoundingClientRect();
+    const parent = box.getBoundingClientRect();
+    if (row.top < parent.top) box.scrollTop += row.top - parent.top;
+    else if (row.bottom > parent.bottom) box.scrollTop += row.bottom - parent.bottom;
   }, [active, id]);
   const open = (item: PaletteItem | undefined) => {
     if (!item) return;
@@ -95,7 +103,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
     }
   };
   return <Dialog open title="Search and commands" onClose={onClose} initialFocus={input} testId="palette" wide>
-    <input ref={input} className="palette-input" value={query} placeholder="Search pages, containers and actions" role="combobox"
+    <TextInput ref={input} className="palette-input" value={query} placeholder="Search pages, containers and actions" role="combobox"
       aria-label="Search and commands" aria-expanded="true" aria-controls={id}
       aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
       onChange={(event) => { setQuery(event.target.value); setSelected(null); }}
@@ -106,7 +114,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
         else if (event.key === "Tab") event.preventDefault();
       }} />
     {text && !local.length && <p role="status">No matches. Press Arrow Down to select web search.</p>}
-    <div className="palette-results" role="listbox" id={id} aria-label="Results">
+    <div ref={list} className="palette-results" role="listbox" id={id} aria-label="Results">
       {rows.map((row, i) => <Button variant="ghost" tabIndex={-1} key={JSON.stringify([row.kind, row.name, row.href, row.detail])}
         role="option" id={`${id}-${i}`} aria-selected={i === active} onPointerMove={() => setSelected(i)} onClick={() => open(row)}>
         <small>{row.kind}</small><span>{row.name}</span>{row.detail && <small>{row.detail}</small>}

@@ -163,6 +163,7 @@ export function Dialog({
     }}>
     <DialogContent
       ref={ref}
+      initialFocus={initialFocus ? () => initialFocus.current : undefined}
       className={cls}
       data-testid={testId}
     >
