@@ -19,6 +19,7 @@ pub struct Session {
     pub user: Option<SessionUser>,
     /// The `X-RH-CSRF` token for writes; null when not signed in.
     pub csrf: Option<String>,
+    pub database: bool,
     pub owner_exists: bool,
     pub onboarding_locked: bool,
     pub build: BuildInfoView,
@@ -58,6 +59,7 @@ fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Sessio
     Session {
         user,
         csrf,
+        database: state.db.is_enabled(),
         owner_exists: state.db.owner_exists(),
         onboarding_locked: state.db.onboarding_locked(),
         build: BuildInfoView {

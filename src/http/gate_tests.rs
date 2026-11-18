@@ -2289,3 +2289,14 @@ async fn session_renewal_sets_a_cookie_once_per_slide() {
         assert!(header(&second.head, "set-cookie").is_none());
     }
 }
+
+#[tokio::test]
+async fn session_distinguishes_unavailable_database_from_fresh_installation() {
+    let mut st = state();
+    Arc::get_mut(&mut st).unwrap().db = crate::db::Db::disabled().into();
+    let addr = start(st).await;
+    let session = get_session(addr, &[]).await;
+    assert_eq!(session["database"], false);
+    assert_eq!(session["owner_exists"], false);
+    assert!(session["user"].is_null());
+}
