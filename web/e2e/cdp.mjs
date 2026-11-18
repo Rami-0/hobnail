@@ -158,6 +158,9 @@ export function input(tab) {
 export function recorder(tab, origin) {
   const short = (u) => (u && u.startsWith(origin) ? u.slice(origin.length) : u);
   const reqs = new Map();
+  // Network log notifications can arrive after the next pass resets its arrays.
+  // Keep only the IDs of explicitly expected failures for this tab lifetime.
+  const allowedRequestIds = new Set();
   const r = { csp: [], console: [], exceptions: [], failed: [], allowed: [], notes: [], allowedUrls: new Set(), allowFns: [] };
   r.allow = (fn) => { r.allowFns.push(fn); return () => r.allowFns.splice(r.allowFns.indexOf(fn), 1); };
   r.reset = () => { for (const k of ["csp", "console", "exceptions", "failed", "allowed", "notes"]) r[k] = []; r.allowedUrls = new Set(); };
@@ -171,7 +174,7 @@ export function recorder(tab, origin) {
   tab.on("Log.entryAdded", ({ entry: e }) => {
     if (/Content Security Policy|violat/i.test(e.text)) r.csp.push(`log(${e.source}): ${e.text}`);
     else if (e.level === "error") {
-      if (e.source === "network" && e.url && r.allowedUrls.has(e.url)) r.allowed.push(`log: ${e.text} ${short(e.url)}`);
+      if (e.source === "network" && ((e.networkRequestId && allowedRequestIds.has(e.networkRequestId)) || (e.url && r.allowedUrls.has(e.url)))) r.allowed.push(`log: ${e.text} ${short(e.url)}`);
       else r.console.push(`log(${e.source}): ${e.text}${e.url ? " " + short(e.url) : ""}`);
     }
   });
@@ -180,8 +183,8 @@ export function recorder(tab, origin) {
     const res = p.response, rq = reqs.get(p.requestId) || { url: res.url, method: "GET" };
     if (res.status < 400) return;
     const what = `${rq.method} ${short(res.url)} -> ${res.status}`;
-    const why = r.allowFns.map((f) => f({ method: rq.method, url: res.url, status: res.status })).find(Boolean);
-    if (why) { r.allowedUrls.add(res.url); r.allowed.push(`${what} (${why})`); } else r.failed.push(what);
+    const why = r.allowFns.map((f) => f({ requestId: p.requestId, method: rq.method, url: res.url, status: res.status })).find(Boolean);
+    if (why) { allowedRequestIds.add(p.requestId); r.allowedUrls.add(res.url); r.allowed.push(`${what} (${why})`); } else r.failed.push(what);
   });
   tab.on("Network.loadingFailed", (p) => {
     const rq = reqs.get(p.requestId) || { url: "?", method: "?" };

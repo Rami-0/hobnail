@@ -133,6 +133,14 @@ try {
 const browser = await launch();
 const tab = await browser.tab();
 const rec = recorder(tab, ORIGIN);
+// A 401 is expected only for a request sent during our deliberate cookie gap.
+// Responses may arrive after reauthentication or after the next pass begins.
+let intentionalAuthGap = false;
+const authGapRequests = new Set();
+tab.on("Network.requestWillBeSent", ({ requestId, request }) => {
+  if (intentionalAuthGap && /^\/api\/(settings|v1)\//.test(new URL(request.url).pathname)) authGapRequests.add(requestId);
+});
+rec.allow(({ requestId, status }) => status === 401 && authGapRequests.has(requestId) && "the expected 401 (request sent while cookie deleted)");
 const inp = input(tab);
 async function quit(code) {
   let ok = false;
@@ -466,8 +474,8 @@ async function editFlows(tag) {
   // (c) 401
   const C = `slice-check-${tag}-c`;
   if (await step("(c) the dialog open again", openDialog)) {
+    intentionalAuthGap = true;
     await tab.send("Network.deleteCookies", { name: s.name, url: base });
-    const off = rec.allow(({ status, url }) => status === 401 && /^\/api\/(settings|v1)\//.test(new URL(url).pathname) && "the expected 401 (cookie deleted)");
     await typeName(C);
     await inp.click(`${DIALOG} button[data-testid="save"]`);
     await step('401: "Sign in (new tab)" link and a Retry button', async () => {
@@ -475,9 +483,9 @@ async function editFlows(tag) {
       return { ok, got: { note: await note(), href: await ev(`document.querySelector('a[data-testid="signin-newtab"]')?.getAttribute("href") ?? null`) } };
     });
     await shot("edit-c-401");
-    off();
     const s2 = await login();
     check(await setBrowserCookie(s2), "signed in again: the new cookie set in the browser");
+    intentionalAuthGap = false;
     await step("Retry saves", async () => {
       await inp.click('button[data-testid="retry"]');
       const ok = await saved(C);
