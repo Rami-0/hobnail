@@ -152,14 +152,23 @@ pub fn logs_at(name: &str, ts_secs: i64) -> String {
 
 /// Containers named by `c=a,b` (at most `max`, only ones `may_tail` allows) or
 /// by `stack=x` (the compose project's containers, at most 24).
-fn targets(state: &AppState, q: &[(String, String)], max: usize) -> Vec<String> {
+fn targets(
+    state: &AppState,
+    q: &[(String, String)],
+    max: usize,
+    visible: &crate::api::access::ContainerVisibility,
+) -> Vec<String> {
     if let Some(stack) = query_get(q, "stack") {
-        return stack_members(state, stack);
+        return stack_members(state, stack)
+            .into_iter()
+            .filter(|name| visible.allows(name))
+            .collect();
     }
     let mut out: Vec<String> = vec![];
     for n in query_get(q, "c").unwrap_or("").split(',') {
         let n = n.trim();
-        if may_tail(state, n) && !out.iter().any(|o| o == n) && out.len() < max {
+        if visible.allows(n) && may_tail(state, n) && !out.iter().any(|o| o == n) && out.len() < max
+        {
             out.push(n.to_string());
         }
     }
@@ -256,8 +265,7 @@ pub async fn route(
     let cfg = state.config.current();
     match req.uri().path() {
         "/api/logs/stream" => {
-            let mut names = targets(state, &q, 4);
-            names.retain(|name| visible.allows(name));
+            let names = targets(state, &q, 4, visible);
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
@@ -269,8 +277,7 @@ pub async fn route(
             )
         }
         "/api/logs/download" => {
-            let mut names = targets(state, &q, 4);
-            names.retain(|name| visible.allows(name));
+            let names = targets(state, &q, 4, visible);
             if names.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "no container (use c= or stack=)\n");
             }
