@@ -641,35 +641,38 @@ fn docker_events_are_recorded() {
 fn sessions() {
     let db = Db::open_in_memory().unwrap();
     assert!(db.create_session("h1", 100, 200));
-    assert!(db.touch_session("h1", 150, 210), "valid");
+    assert!(db.account_session("h1", 150, 210).is_some(), "valid");
     // Moved by < 60 s: no write.
     assert_eq!(
         count(&db, "SELECT expires FROM sessions WHERE token_hash = 'h1'"),
         200
     );
-    assert!(db.touch_session("h1", 150, 400));
+    assert!(db.account_session("h1", 150, 400).is_some());
     assert_eq!(
         count(&db, "SELECT expires FROM sessions WHERE token_hash = 'h1'"),
         400,
         "slid"
     );
-    assert!(!db.touch_session("h1", 400, 900), "expired at 400");
-    assert!(!db.touch_session("nope", 1, 2));
+    assert!(
+        db.account_session("h1", 400, 900).is_none().is_some(),
+        "expired at 400"
+    );
+    assert!(db.account_session("nope", 1, 2).is_none().is_some());
     db.create_session("h2", 100, 1000);
     db.create_session("h3", 100, 1000);
-    db.delete_sessions_except(Some("h2"));
-    assert!(db.touch_session("h2", 101, 101));
-    assert!(!db.touch_session("h3", 101, 101));
+    db.sign_out_other_sessions(1, "h2", None).unwrap();
+    assert!(db.account_session("h2", 101, 101).is_some());
+    assert!(db.account_session("h3", 101, 101).is_none().is_some());
     db.delete_session("h2");
-    assert!(!db.touch_session("h2", 101, 101));
+    assert!(db.account_session("h2", 101, 101).is_none().is_some());
     // At most MAX_SESSIONS are kept; the oldest go.
     for n in 0..30 {
         db.create_session(&format!("s{n}"), 1000 + n, 9999);
     }
     assert_eq!(db.session_count(1100), MAX_SESSIONS as u64);
-    assert!(!db.touch_session("s0", 1100, 1100));
-    assert!(db.touch_session("s29", 1100, 1100));
-    db.delete_sessions_except(None);
+    assert!(db.account_session("s0", 1100, 1100).is_none().is_some());
+    assert!(db.account_session("s29", 1100, 1100).is_some());
+    db.sign_out_other_sessions(1, "", None).unwrap();
     assert_eq!(db.session_count(0), 0);
 }
 
@@ -712,7 +715,7 @@ fn clear_history_keeps_settings() {
     assert_eq!(st.revisions, 1);
     assert_eq!(st.oldest_ts, None);
     assert_eq!(db.kv_get("auth.password").as_deref(), Some("h"));
-    assert!(db.touch_session("s", T0 + 1, T0 + 1));
+    assert!(db.account_session("s", T0 + 1, T0 + 1).is_some());
     // Recording works again afterwards.
     db.record_containers(T0 + 5000, &[("a", &c)]);
     assert_eq!(

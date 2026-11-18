@@ -52,7 +52,7 @@ fn main() {
         "healthcheck" => rt.block_on(healthcheck()),
         "check-config" => check_config(rest),
         "notify-test" => rt.block_on(alerts::cli_notify_test(rest)),
-        "set-password" => auth::cli_set_password(),
+        "set-password" => auth::cli_set_password(rest),
         "mock-receiver" => rt.block_on(mock::run(rest)),
         "version" | "--version" | "-V" => {
             let b = state::BuildInfo::current();
@@ -67,7 +67,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password | mock-receiver [addr] | version]"
+                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password [username] | mock-receiver [addr] | version]"
             );
             2
         }

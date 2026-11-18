@@ -235,11 +235,17 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             if r.new.is_empty() || r.new.len() > 1024 {
                 return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
             }
-            crate::auth::change_password(state, &r.current, &r.new).map_err(password_error)?;
+            crate::auth::change_password(state, &call.headers, &r.current, &r.new)
+                .map_err(password_error)?;
             json(json!({"ok": true}))
         }
         (_, true, ["security", "sign-out-others"]) => {
-            crate::auth::sign_out_others(state, &call.headers);
+            if !crate::auth::sign_out_others(state, &call.headers) {
+                return Err(ApiError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "could not sign out sessions",
+                ));
+            }
             json(json!({"ok": true}))
         }
 
