@@ -139,7 +139,7 @@ try {
       await load(`/app/stacks/${encodeURIComponent(group.name)}/logs`, ".log-name"); await wait('document.querySelector(".log-name").textContent.includes("svc")', "member indexes resolve to names"); await tab.shot(path.join(out, `${label}-stack.png`));
       await load("/app/logs?c=svc001,svc002,svc003,svc005", '[data-testid="log-body"] [data-log-id]');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===4', "four panes"); await tab.shot(path.join(out, `${label}-four.png`));
-      await tab.ev('document.querySelector("[data-testid=log-pane] header>a")?.click()');
+      await tab.ev('document.querySelector("[data-testid=log-pane] header>a[aria-label^=Close]")?.click()');
       await wait('document.querySelectorAll("[data-testid=log-pane]").length===3', "close pane in place");
       const leaveAt = Date.now(); await tab.ev('document.querySelector("nav.crumb a").click()'); await wait('!!document.querySelector("[data-testid=logs-picker]")', "route leave"); measurements.leaveAt = leaveAt;
       await sleep(2500);
