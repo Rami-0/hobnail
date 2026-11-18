@@ -176,6 +176,19 @@ try {
         assert.equal(saved.page.title, "Concurrent title");
         ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
 
+        await go("/app/settings/containers", present('[data-testid="settings-containers"]'));
+        await inp.click('[role="switch"][aria-label="svc001"]');
+        await inp.click('[role="switch"][aria-label="svc002"]');
+        await wait(text('[aria-label="Bulk edit"]', "2 selected"), "bulk bar counts its selection");
+        await fill('#settings-bulk-group', `Browser bulk ${width}`);
+        await button('[aria-label="Bulk edit"]', "Set group");
+        await wait(`!${present('[aria-label="Bulk edit"]')}`, "bulk group save clears selection");
+        const bulkSaved = ok(await call("/api/settings/containers", "GET", undefined, owner), "read bulk overrides");
+        assert.equal(bulkSaved.overrides.svc001.group, `Browser bulk ${width}`);
+        assert.equal(bulkSaved.overrides.svc002.group, `Browser bulk ${width}`);
+        for (const name of ['svc001','svc002']) await inp.click(`[role="switch"][aria-label="${name}"]`);
+        await button('[aria-label="Bulk edit"]', "Remove overrides"); await button(dialog, "Remove overrides");
+        await wait(`!${present(dialog)}`, "bulk removal confirms and saves");
         await go("/app/settings/containers?add=pattern", present(editor));
         await fill(editor + ' input[name="pattern"]', "settings-check-missing*");
         await wait(text(editor + ' [role="status"]', "0 matching containers"), "exclude dialog shows a match count");
@@ -199,6 +212,17 @@ try {
         await button(editor, "Save");
         await wait(text(".settings-row", widget), "custom API widget is saved");
 
+        const notifications = ok(await call("/api/settings/notifications", "GET", undefined, owner), "read notification fixtures");
+        const channel = `browser-refused-${width}`;
+        const addedChannel = ok(await call("/api/settings/channels", "POST", { base_hash: notifications.hash, action: "add", item: { name: channel, type: "webhook", url: "http://127.0.0.1:1/refused", timeout: "1s" } }, owner), "seed refused channel");
+        ok(await call("/api/settings/alerts", "POST", { base_hash: addedChannel.hash, action: "add", item: { name: `browser-rule-${width}`, type: "http", url: "http://127.0.0.1:1/refused", enabled: false, channels: [channel] } }, owner), "seed channel reference");
+        await go("/app/settings/notifications", text('.settings-row', channel));
+        await tab.ev(`Array.from(document.querySelectorAll('[data-testid="settings-channel-list"] .settings-row')).find(row=>row.querySelector('h3')?.textContent===${q(channel)}).setAttribute('data-channel-check','')`);
+        await button('[data-channel-check]', "Send test");
+        await wait(text('[data-channel-check] [role="alert"]', ""), "refused notification test is shown as an error");
+        await inp.click(`button[aria-label=${q('Delete '+channel)}]`); await button(dialog,"Delete");
+        await wait(text(dialog, "rule"), "a referenced channel cannot be deleted");
+        await inp.key("Escape");
         await go("/app/settings/appearance", present('textarea[name="css"]'));
         await fill('textarea[name="css"]', "body{\n}}");
         await wait(text('[data-testid="css-syntax"]', "line 2: a } without"), "CSS syntax warning gives the offending line");
