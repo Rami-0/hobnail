@@ -2226,7 +2226,7 @@ async fn viewer_cannot_read_administrative_details() {
         "/api/settings/config",
         "/api/settings/env",
         "/api/settings/revisions",
-        "/api/settings/export",
+        "/api/settings/history/export",
         "/api/settings/security",
         "/settings",
         "/settings/security",
@@ -2241,6 +2241,12 @@ async fn viewer_cannot_read_administrative_details() {
         "viewer bootstrap",
     );
     assert!(bootstrap["config_error"].is_null());
+    let state = json_of(
+        &req(addr, "GET", "/api/state", &h, "").await,
+        "viewer state",
+    );
+    assert!(state["config"]["error"].is_null());
+    assert!(state["config"]["path"].is_null());
     let detail = json_of(
         &req(addr, "GET", "/api/v1/containers/web", &h, "").await,
         "viewer detail",
@@ -2253,10 +2259,12 @@ async fn viewer_cannot_read_administrative_details() {
         "/api/events?kind=auth.",
         "/history",
         "/containers/web",
+        "/containers/web/logs",
     ] {
         let response = req(addr, "GET", path, &h, "").await;
         assert_eq!(response.status, 200, "{path}");
         assert!(!response.body.contains("192.0.2.7"), "{path}");
+        assert!(!response.body.contains(CONFIG_SECRET), "{path}");
         assert!(!response.body.contains("SECRET-PROBE-OUTPUT"), "{path}");
     }
     let (owner, _) = login(addr).await;

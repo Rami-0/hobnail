@@ -19,7 +19,7 @@ pub fn fragment(state: &AppState, id: &str, host: &str) -> Option<String> {
 }
 
 /// `/api/state`: everything we know, as JSON, for debugging and scripts.
-pub fn state_json(state: &AppState) -> serde_json::Value {
+pub fn state_json(state: &AppState, admin: bool) -> serde_json::Value {
     let loaded = state.config.snapshot();
     let snap = state.snapshot();
     json!({
@@ -27,11 +27,11 @@ pub fn state_json(state: &AppState) -> serde_json::Value {
         "uptime_secs": state.uptime_secs(),
         "viewers": state.viewers(),
         "config": {
-            "path": state.config.path().display().to_string(),
+            "path": admin.then(|| state.config.path().display().to_string()),
             "exists": loaded.file_exists,
             "generation": loaded.generation,
             "loaded_at": loaded.loaded_at,
-            "error": loaded.error,
+            "error": loaded.error.as_ref().filter(|_| admin),
         },
         "containers": &*snap,
         "container_stats": state.container_stats.lock().unwrap().1,

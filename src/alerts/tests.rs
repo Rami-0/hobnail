@@ -552,7 +552,7 @@ channels = ["hook", "slack", "tg"]
     assert_eq!(mock.received().len(), 6);
 
     // Nothing secret anywhere we expose.
-    let api = crate::render::state_json(&st).to_string();
+    let api = crate::render::state_json(&st, true).to_string();
     let page =
         crate::ui::alerts::render(&st.config.current(), &st.alerts.lock().unwrap()).into_string();
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
@@ -633,7 +633,7 @@ channels = ["tg", "missing"]
         html.contains("failing") && html.contains("misconfigured"),
         "{html}"
     );
-    let api = crate::render::state_json(&st).to_string();
+    let api = crate::render::state_json(&st, true).to_string();
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
     for text in [&html, &api, &file] {
         assert!(!text.contains("TOPSECRET"));

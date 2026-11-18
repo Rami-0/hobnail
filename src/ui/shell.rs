@@ -259,7 +259,7 @@ pub fn layout(ctx: &Ctx, nav: Nav, doc_title: &str, heading: Markup, main: Marku
                             (account(ctx))
                         }
                         main #main tabindex="-1" {
-                            @if let Some(e) = &loaded.error {
+                            @if let Some(e) = loaded.error.as_ref().filter(|_| ctx.user.is_some()) {
                                 div.banner.bad role="alert" {
                                     (ic("alert"))
                                     div {

@@ -276,7 +276,7 @@ async fn dispatch(
             host,
             session.expect("viewer gate").hash.clone(),
         ),
-        "/api/state" => json(&crate::render::state_json(state)),
+        "/api/state" => json(&crate::render::state_json(state, admin)),
         "/api/login" | "/api/logout" => crate::auth::route(state, req, session).await,
         "/static/app.css" => asset(APP_CSS, CSS),
         "/static/app.js" => asset(APP_JS, JS),
@@ -319,7 +319,7 @@ async fn dispatch(
         _ => {
             // The legacy renderer uses the presence of a session to expose
             // administrative details. Reuse its redacted rendering for Viewers.
-            if !admin && !path.ends_with("/logs") {
+            if !admin {
                 req.headers_mut().remove(hyper::header::COOKIE);
             }
             crate::ui::routes::route(state, &req, &host).await
