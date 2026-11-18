@@ -125,7 +125,7 @@ export function App() {
       page = <ContainerPage key={route.ctr} />;
       break;
     default:
-      page = <NotFound path={route.path} />;
+      page = <NotFound path={pathname} />;
   }
   return (
     <Shell title={titleOf(route)}>

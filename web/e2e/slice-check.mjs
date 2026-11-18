@@ -324,7 +324,7 @@ async function containerPage(size) {
   await step('both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg', () => until(chartsReady, 10000));
   await sleep(500);
   await shot("container");
-  check(!(await ev(`!!document.querySelector('a[data-testid="edit"]')`)), 'signed out: no a[data-testid="edit"]');
+  check(await ev(`!!document.querySelector('a[data-testid="edit"]')`), 'owner: a[data-testid="edit"] is available');
 
   const links = await ev(`[...document.querySelectorAll('[data-testid="range"] a')].map((a) => ({ t: a.textContent.trim(), h: a.getAttribute("href"), cur: a.getAttribute("aria-current") }))`);
   check(links.length >= 3 && links.every((l) => /[?&](range|from)=/.test(l.h || "")), `range picker: ${links.map((l) => l.t).join(" ")}`, links);
@@ -478,6 +478,7 @@ for (const size of SIZES) for (const [si, scheme] of SCHEMES.entries()) {
   inp.touch = size.w < 500;
   try {
     await tab.send("Network.clearBrowserCookies");
+    if (!(await setBrowserCookie(me))) throw new Error("could not set the owner session cookie");
     await tab.send("Emulation.setDeviceMetricsOverride", { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: inp.touch });
     await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: inp.touch ? 5 : 0 });
     await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });

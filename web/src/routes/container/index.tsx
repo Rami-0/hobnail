@@ -73,7 +73,9 @@ export default function ContainerPage() {
   const win = parseWindow(loc.query);
   const q = apiQuery(win);
   const session = useSession();
-  const signed = !!session.session?.user;
+  const role = session.session?.user?.role;
+  const signed = role !== undefined;
+  const canEdit = role === "admin" || role === "owner";
   const live = useContainers();
   const now = useNow();
   const host = viewerHost(window.location.hostname);
@@ -185,7 +187,7 @@ export default function ContainerPage() {
   const loading = load.kind === "ok" && load.key !== key;
   // `?edit=override` first, the rest of the query (the range) kept.
   const editHref = `?${new URLSearchParams([["edit", "override"], ...[...loc.search].filter(([k]) => k !== "edit")]).toString()}`;
-  const editOpen = loc.search.get("edit") === "override" && signed;
+  const editOpen = loc.search.get("edit") === "override" && canEdit;
   const note = historyNote(s.cpu[0]?.[0] ?? null, range, now);
   const health = row.health && row.health !== "none" ? row.health : null;
   const stateWord = health && row.state === "running" ? "running" : row.label;
@@ -224,7 +226,7 @@ export default function ContainerPage() {
               Open
             </a>
           )}
-          {signed && (
+          {canEdit && (
             <a className="btn ghost" href={editHref} data-testid="edit" title="Display name, group, icon, link">
               <PencilIcon aria-hidden="true" />
               Edit

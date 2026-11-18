@@ -7,6 +7,7 @@ use super::{Db, MAX_SESSIONS, SLIDE_MIN_SECS};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(test, ts(rename_all = "lowercase"))]
 pub enum Role {
     Viewer,
     Admin,
