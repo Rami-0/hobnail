@@ -113,6 +113,19 @@ try {
       await wait('Array.from(document.querySelectorAll("[role=option]")).some((e) => e.textContent.includes("Logs: svc002"))', "palette finds container logs action");
       await inp.key("k", { modifiers: 2 });
       await wait(`!${exists(palette)}`, "Ctrl+K toggles it closed");
+      await inp.key("k", { modifiers: 4 });
+      await wait(exists(palette), "Meta+K opens the palette");
+      await inp.clear(palette);
+      for (const key of ["ArrowDown", "ArrowUp", "End", "Home", "PageDown", "PageUp"]) {
+        await inp.key(key);
+        await wait(`!!document.querySelector(${q(palette)})?.getAttribute('aria-activedescendant')`, `palette ${key} selects a result`);
+      }
+      await inp.key("Escape");
+      for (const [key,route] of [["o","overview"],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
+        await tab.ev('document.activeElement?.blur()');
+        await inp.key('g'); await inp.key(key);
+        await wait(`location.pathname === ${q('/app/'+route)}`, `g ${key} opens ${route}`);
+      }
       await inp.key("?");
       await wait(exists('[data-testid="shortcuts"]'), "opens the shortcut sheet");
       await inp.key("Escape");
