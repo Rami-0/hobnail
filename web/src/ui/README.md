@@ -30,6 +30,7 @@ once; the global layer declaration and CSP meta tag remain in place.
 | Toaster | SDK ToastRegion, Toast, Title, Action and Close; keeps the app's dialog queue |
 | TabNav | Platform links: URL navigation uses aria-current, not role=tab |
 | Note / Banner / EmptyState | Platform status and content markup |
+| ServiceIcon | Platform image / letter avatar; opt-in same-origin icon endpoint |
 | Sparkline / HealthStrip / Meter | Platform SVG and meter markup |
 
 No SDK component has been kept on a platform fallback due to a release defect.

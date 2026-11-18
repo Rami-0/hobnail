@@ -8,7 +8,7 @@ import type { BoardItem } from "../../api/gen/BoardItem.ts";
 import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
 import { useBootstrap, useContainers, onConfigChange, watchBoards } from "../../live/index.ts";
 import { useRoute, containerHref } from "../../app/router.ts";
-import { avatar, iconSource } from "../../boards/document.ts";
+import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState, Note } from "../../ui/Note.tsx";
 import { NotFound } from "../NotFound.tsx";
@@ -16,11 +16,6 @@ import "./board.css";
 
 const Editor = lazy(() => import("./Editor.tsx"));
 
-export function BoardIcon({ name, title, enabled }: { name?: string | null; title: string; enabled: boolean }) {
-  const src = iconSource(name, enabled);
-  const [failed, setFailed] = useState<string | null>(null);
-  return src && failed !== src ? <img className="board-avatar" src={src} alt="" onError={() => setFailed(src)} /> : <span className="board-avatar" aria-hidden="true">{avatar(title)}</span>;
-}
 export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedItem }) {
   const b = useBootstrap();
   const live = useContainers();
@@ -33,7 +28,7 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : integration?.admin?.icon;
   const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : integration?.base_url;
   return <div className="board-tile" data-testid="board-tile" data-missing={targetMissing || undefined}>
-    <div className="board-tile-head"><BoardIcon name={icon} title={title} enabled={b?.remote_icons ?? false} />
+    <div className="board-tile-head"><ServiceIcon className="board-avatar" name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <h3>{href ? <a href={href}>{title}</a> : title}</h3></div>
     {targetMissing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
       p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
@@ -46,6 +41,8 @@ export default function BoardPage() {
   const { route } = useRoute();
   const id = route.name === "board" ? route.id : "";
   const b = useBootstrap();
+  const live = useContainers();
+  const containerNames = live.data?.groups.flatMap((group) => group.containers.map((container) => container.name)).join("\0");
   const admin = b?.role === "admin" || b?.role === "owner";
   const [editing, setEditing] = useState<BoardDocument | null>(null);
   const [draft, setDraft] = useState<BoardDraft | null>(null);
@@ -61,7 +58,11 @@ export default function BoardPage() {
   }, [id]);
   // load updates state only after the asynchronous server response.
   // eslint-disable-next-line react/set-state-in-effect
-  useEffect(() => { void load(); return onConfigChange(() => { if (!editing) void load(); }); }, [load, editing]);
+  useEffect(() => { void load(); }, [load]);
+  // A changed container-name set can resolve a replacement compose target.
+  // eslint-disable-next-line react/set-state-in-effect
+  useEffect(() => { if (containerNames !== undefined && !editing) void load(); }, [load, containerNames, editing]);
+  useEffect(() => onConfigChange(() => { if (!editing) void load(); }), [load, editing]);
   useEffect(() => watchBoards((event) => { if (event.id === id) { if (editing) setChanged(event.version > editing.version); else void load(); } }), [id, load, editing]);
   useEffect(() => {
     if (!admin) return;
@@ -75,7 +76,7 @@ export default function BoardPage() {
   if (!view) return <div className="page">{error || "Loading board…"}</div>;
   if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board">
-    <header className="board-heading"><div><p className="muted">Board</p><h1>{view.board.name}</h1></div>
+    <header className="board-heading"><div><p className="muted">Board</p><div className="board-title"><ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} /><h1>{view.board.name}</h1></div></div>
       {admin && <Button data-testid="board-edit" onClick={() => { setEditing(view.document); setChanged(false); }}>Edit board</Button>}</header>
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="primary" onClick={() => { if (draft) setEditing(draft.document); setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {error && <Note kind="bad">{error}</Note>}

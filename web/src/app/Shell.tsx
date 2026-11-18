@@ -22,7 +22,7 @@ import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
 import { interceptedPath } from "./paths.ts";
-import { local, readRail, settingsHref, writeRail } from "./prefs.ts";
+import { local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
 const Shortcuts = lazy(() => import("./Shortcuts.tsx").then((m) => ({ default: m.Shortcuts })));
@@ -60,7 +60,7 @@ const GO_HREF: Record<GoPage, () => string> = {
   logs: () => "/logs",
   history: () => "/history",
   alerts: () => "/alerts",
-  settings: () => settingsHref(local()),
+  settings: () => "/app/settings/boards",
 };
 
 const visible = (el: Element) => el instanceof HTMLElement && el.offsetParent !== null && !el.closest("[hidden]");

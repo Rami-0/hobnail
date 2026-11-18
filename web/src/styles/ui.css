@@ -251,3 +251,5 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--accent)}
 
 .sdk-select-list{padding:6px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);color:var(--text);max-height:min(360px,70dvh);overflow:auto;min-width:var(--anchor-width);box-shadow:var(--shadow-2)}
 .sdk-select-list [data-highlighted]{background:var(--hover)}
+
+.service-icon{display:inline-grid;place-items:center;flex:none;width:36px;height:36px;object-fit:contain;border-radius:var(--r);background:var(--field);color:var(--text-2);font-weight:600}.nav-item>.service-icon{width:20px;height:20px;font-size:var(--fs-xs)}

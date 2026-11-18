@@ -30,6 +30,7 @@ import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMem
 
 import { useSession } from "../api/session.ts";
 import { useBootstrap, useContainers, useStrips } from "../live/index.ts";
+import { ServiceIcon } from "../ui/ServiceIcon.tsx";
 import { HealthStrip } from "../ui/Sparkline.tsx";
 import { CHEVRON_RIGHT_ICON, LOGS_ICON } from "./glyphs.tsx";
 import { LiveIndicator } from "./Live.tsx";
@@ -403,7 +404,7 @@ export function Sidebar({
           current={r.name === "containers" || r.name === "container"}
         />
         {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
-          icon={<LayoutGridIcon aria-hidden="true" />} current={r.name === "board" && r.id === board.id} />)}
+          icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
         <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />
         <div className="nav-sep label" aria-hidden="true">
           Current interface

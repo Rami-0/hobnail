@@ -33,10 +33,11 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const pendingDraft = useRef<Promise<boolean>>(Promise.resolve(true));
   const latest = useRef(doc);
   const leaving = useRef(false);
+  const operation = useRef(false);
   const root = useRef<HTMLDivElement>(null);
   const path = `/api/v1/boards/${view.board.id}`;
   const modified = dirty(base, doc);
-  const change = (action: Action, message: string) => { setDoc((previous) => reduceDocument(previous, action)); setAnnouncement(message); setDraftState("Draft pending"); };
+  const change = (action: Action, message: string) => { if (operation.current) return; setDoc((previous) => reduceDocument(previous, action)); setAnnouncement(message); setDraftState("Draft pending"); };
   const focusItem = (section: number, item: number) => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-section="${section}"][data-item="${item}"]` )?.querySelector<HTMLButtonElement>(".drag-handle")?.focus());
   const saveDraft = (document: BoardDocument) => {
     pendingDraft.current = pendingDraft.current.then(async () => {
@@ -75,15 +76,15 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   }, [modified]);
   const settle = async () => { if (timer.current) clearTimeout(timer.current); timer.current = null; await pendingDraft.current; };
   const cancel = async () => {
-    if (busy) return; setBusy(true); await settle();
+    if (operation.current) return; operation.current = true; setBusy(true); await settle();
     const result = await api.request("DELETE", `${path}/draft`);
-    if (result.kind === "ok") { leaving.current = true; onCancel(); } else { setError(result.message); setBusy(false); }
+    if (result.kind === "ok") { leaving.current = true; onCancel(); } else { setError(result.message); operation.current = false; setBusy(false); }
   };
   const save = async () => {
-    if (busy || conflict) return; setBusy(true); setError(""); await settle();
+    if (operation.current || conflict) return; operation.current = true; setBusy(true); setError(""); await settle();
     const result = await api.request<BoardView>("PUT", path, { body: latest.current });
     if (result.kind === "ok") { leaving.current = true; onSave(result.data); }
-    else { if (result.kind === "stale") setConflict(true); setError(result.message); setBusy(false); }
+    else { if (result.kind === "stale") setConflict(true); setError(result.message); operation.current = false; setBusy(false); }
   };
   const move = (s: number, i: number, target: number, position: number) => {
     change({ type: "move", section: s, item: i, toSection: target, to: position }, `Item moved to section ${target + 1}, position ${position + 1}`); focusItem(target, position);
@@ -123,11 +124,12 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     <header className="board-heading"><div><h1>Edit {view.board.name}</h1><p className="muted" role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p></div><div className="settings-actions"><Button busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button><Button variant="primary" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></div></header>
     <p className="muted">Drag Move onto an item or section; drag Resize to change size. On a focused item: Alt + arrows moves; Shift + arrows resizes at this screen width.</p>
     {(changed || conflict) && <Note kind="warn" testId="board-conflict">Another session saved this board. Your changes are kept here.
-      <Button data-testid="board-rebase" onClick={async () => { await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); return; }
-        const next = rebase(base, doc, result.data.document); setBase(result.data.document); setDoc(next); setConflict(false); onRebase(); setError(""); setAnnouncement("Changes rebased. Review them and choose Save.");
+      <Button data-testid="board-rebase" disabled={busy} onClick={async () => { if (operation.current) return; operation.current = true; setBusy(true); await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }
+        const next = rebase(base, doc, result.data.document); setBase(result.data.document); setDoc(next); setConflict(false); onRebase(); setError(""); setAnnouncement("Changes rebased. Review them and choose Save."); operation.current = false; setBusy(false);
       }}>Reload and keep my changes</Button><Button onClick={() => { void cancel(); }}>Discard mine</Button>
     </Note>}
     {error && <Note kind="bad">{error}</Note>}<output className="sr" aria-live="polite">{announcement}</output>
+    <fieldset className="editor-fields" disabled={busy}><legend className="sr">Board layout</legend>
     {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section">
       <div className="editor-section-head"><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
         <div className="settings-actions"><Button aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => change({ type: "delete-section", section: s }, "Section removed")}>Delete section</Button></div>
@@ -140,7 +142,7 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
         {item.payload.kind === "container" && <div className="editor-custom">{(["title", "icon", "link"] as const).map((field) => <Field key={field} id={`custom-${s}-${i}-${field}`} label={`Custom ${field}`}><TextInput value={item.payload.kind === "container" ? item.payload[field] ?? "" : ""} onChange={(e) => { if (item.payload.kind === "container") change({ type: "payload", section: s, item: i, payload: { ...item.payload, [field]: e.target.value || null } }, `Custom ${field} updated`); }} /></Field>)}</div>}
       </div>)}</div><Button data-testid="board-add-item" onClick={() => { void openPicker(s); }}>Add item</Button>
     </section>)}
-    <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button>
+    <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
     <Dialog open={picker !== null} title="Add item" onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
       <div className="suggestions">{suggestions.filter((suggestion) => suggestion.title.toLowerCase().includes(query.toLowerCase()) && !doc.sections.some((section) => section.items.some((item) => JSON.stringify(item.payload) === JSON.stringify(suggestion.payload)))).map((suggestion) => <Button data-testid="board-suggestion" key={JSON.stringify(suggestion.payload)} onClick={() => { if (picker !== null) change({ type: "add", section: picker, payload: suggestion.payload }, "Item added"); setPicker(null); }}>{suggestion.title}</Button>)}</div>
       <h3>Add a link</h3><form data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); if (picker === null) return; const data = new FormData(e.currentTarget); change({ type: "add", section: picker, payload: { kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null } }, "Link added"); setPicker(null); }}>

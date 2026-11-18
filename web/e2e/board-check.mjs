@@ -13,7 +13,7 @@ await tab.send("Runtime.addBinding", { name: "__hbCsp" });
 await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: CSP_LISTENER });
 tab.on("Page.javascriptDialogOpening", () => { void tab.send("Page.handleJavaScriptDialog", { accept: true }); });
 rec.allow(({ method, status, url }) => method === "PUT" && status === 409 && /\/api\/v1\/boards\//.test(url) ? "intentional concurrent edit" : false);
-let checks = 0, failed = 0, boardId, integrationId, owner;
+let checks = 0, failed = 0, boardId, hiddenBoardId, integrationId, owner;
 const check = (ok, message) => { checks++; if (!ok) failed++; console.log(`${ok ? "ok" : "FAIL"} ${message}`); if (!ok) throw new Error(message); };
 const wait = async (expression, label = expression) => check(await tab.until(expression, 10000), label);
 const go = async (route, ready) => { await tab.send("Page.navigate", { url: base + route }); await wait(ready); };
@@ -83,6 +83,7 @@ try {
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:2"); await inp.click('button[form="integration-form"][type="submit"]'); await wait('document.querySelector("#integration-secret-err")?.textContent.includes("again")', "origin change requires entering credential again");
   const denied = await api("PUT", `/integrations/${integrationId}`, { name: "M2 HTTP connection", kind: "http", base_url: "http://127.0.0.1:2", enabled: true }); check(denied.status === 400 && denied.data.error.field === "secret", "server enforces origin binding on secret field");
   await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays verdict class and message");
+  hiddenBoardId = (await api("POST", "/boards", { name: "Outside Viewer scope" })).data.id;
   const invite = await api("POST", "/invites", { role: "viewer", scopes: { boards: [boardId], integrations: [] } }); check(invite.status === 201, "create scoped Viewer invite");
   const accepted = await fetch(base + "/api/v1/invites/accept", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ token: invite.data.token, username: `viewer-${Date.now()}`, password: PW }) });
   const viewer = { cookie: accepted.headers.get("set-cookie").split(";")[0], csrf: (await accepted.json()).csrf };
@@ -90,11 +91,16 @@ try {
   await go(`/app/boards/${boardId}`, visible("board")); check(await tab.ev(`!${visible("board-edit")}`), "Viewer sees no board edit controls");
   check((await api("PUT", `/boards/${boardId}`, (await api("GET", `/boards/${boardId}`)).data.document, viewer)).status === 403, "Viewer writes return 403");
   check((await api("GET", "/integrations", undefined, viewer)).data.length === 0, "Viewer integration scope filters results");
+  check((await api("GET", "/boards", undefined, viewer)).data.every((board) => board.id === boardId), "Viewer board navigation is scope-filtered");
+  rec.allow(({ method, status, url }) => method === "GET" && status === 404 && new URL(url).pathname === `/api/v1/boards/${hiddenBoardId}` ? "intentional out-of-scope board" : false);
+  await go(`/app/boards/${hiddenBoardId}`, 'document.querySelector("main h1")?.textContent === "No such page"');
+  check(await tab.ev(`!${visible("board-edit")}`), "out-of-scope board renders not found without edit controls");
   await Promise.all(responseTasks); await sleep(250);
   check(rec.csp.length === 0, `zero CSP violations (${rec.csp.length})`); check(rec.console.length === 0, `zero console errors (${rec.console.length})`); check(rec.exceptions.length === 0, `zero uncaught exceptions (${rec.exceptions.length})`); check(rec.failed.length === 0, `zero unexpected HTTP/network failures (${rec.failed.length})`);
 } catch (error) { failed++; console.error(error.stack); await tab.shot(path.join(OUT, "failure.png")); }
 finally {
   if (integrationId) await api("DELETE", `/integrations/${integrationId}`).catch(() => {});
+  if (hiddenBoardId) await api("DELETE", `/boards/${hiddenBoardId}`).catch(() => {});
   if (boardId) await api("DELETE", `/boards/${boardId}`).catch(() => {});
   fs.writeFileSync(path.join(OUT, "result.json"), JSON.stringify({ checks, failed, recorder: rec }, null, 2));
   await tab.close(); browser.quit();
