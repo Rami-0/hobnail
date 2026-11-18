@@ -28,7 +28,7 @@ function Chip({
   max?: number;
 }) {
   return (
-    <a className={lv ? `chip ${lv}` : "chip"} href="/host" title={tip}>
+    <a className={lv ? `chip ${lv}` : "chip"} href="/app/host" title={tip}>
       <span className="chip-l">{label}</span>
       <b className="num">{value}</b>
       {lv && <span className="sr"> (high)</span>}
