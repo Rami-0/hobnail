@@ -2,13 +2,19 @@
 // that opens a list of actions under it. Opening focuses the first item;
 // Up/Down/Home/End move; Esc closes and returns focus to the button; Tab, a
 // click outside or choosing an item closes it.
+import { useEffect, useRef } from "react";
 import { Menu as SdkMenu, MenuContent, MenuItem as SdkMenuItem, MenuTrigger } from "@ui-sdk/react/menu";
 
 import type { MenuProps } from "./Menu.tsx";
 
 export default function MenuImpl({ label, trigger, items, header, testId, triggerClassName, align = "end" }: MenuProps) {
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, []);
   return (
-    <div className="menu-wrap">
+    <div ref={root} className="menu-wrap">
       <SdkMenu defaultOpen>
         <MenuTrigger type="button" className={triggerClassName ?? "icon-btn"}
           aria-label={label} title={label} data-testid={testId}>

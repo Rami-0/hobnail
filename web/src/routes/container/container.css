@@ -88,7 +88,7 @@
  .cd .tbl.cd-stack td{height:auto;padding:1px 0;border:0;white-space:normal;text-align:left}
  .cd-stack td[data-l]::before{content:attr(data-l) " ";display:inline-block;min-width:84px;color:var(--text-3);font:var(--fs-micro) var(--font)}
 }
-@media (pointer:coarse),(max-width:640px){.cd-stack td>a.mono{display:inline-flex;align-items:center;min-height:44px}.cd-labels>summary{display:flex;align-items:center;min-height:44px;padding-block:0}}
+@media (pointer:coarse),(max-width:640px){.cd-stack td>a.mono{display:inline-flex;align-items:center;min-height:44px}}
 
 /* the Edit dialog's form */
 .ov-form{display:grid;gap:12px}
