@@ -44,8 +44,8 @@ pub struct BuildInfoView {
     pub content: String,
 }
 
-pub fn session(state: &AppState, headers: &HeaderMap) -> Session {
-    let (user, csrf) = crate::auth::request_session(state, headers).map_or((None, None), |s| {
+fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Session {
+    let (user, csrf) = principal.map_or((None, None), |s| {
         (
             Some(SessionUser {
                 name: s.account.name.clone(),
@@ -71,5 +71,10 @@ pub fn session(state: &AppState, headers: &HeaderMap) -> Session {
 }
 
 pub fn get(state: &AppState, headers: &HeaderMap) -> Response<Body> {
-    super::json(StatusCode::OK, &session(state, headers))
+    let principal = crate::auth::request_session(state, headers);
+    let mut response = super::json(StatusCode::OK, &session(state, principal.as_ref()));
+    if let Some(principal) = principal {
+        crate::auth::refresh_cookie(state, &principal, &mut response);
+    }
+    response
 }

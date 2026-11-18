@@ -174,7 +174,7 @@ pub struct Peer(pub SocketAddr);
 /// - `/api/settings/*`                      → `settings::route`
 /// - every other page (`/`, `/containers`…) → `ui::routes::route`
 ///
-async fn route(state: Arc<AppState>, mut req: Request<Incoming>) -> Response<Body> {
+async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     let host = request_host(&req);
     let path = req.uri().path().to_string();
     // DNS-rebinding guard: refuse requests whose Host header names a domain we
@@ -232,106 +232,117 @@ async fn route(state: Arc<AppState>, mut req: Request<Incoming>) -> Response<Bod
         Ok(session) => session,
         Err(denied) => return denied.response(v1, page),
     };
-    if let Some(lookup) = lookup {
-        return crate::api::route(&state, req, lookup, session).await;
-    }
-    if path.starts_with("/api/settings/") {
-        return crate::settings::route(&state, req, session.expect("settings gate").account).await;
-    }
-    if !read {
-        return match path.as_str() {
-            "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
-            _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
-        };
-    }
-    let admin = session
-        .as_ref()
-        .is_some_and(|s| s.account.role >= crate::db::accounts::Role::Admin);
-    let mut response =
-        match path.as_str() {
-            "/healthz" => text(StatusCode::OK, "ok\n"),
-            "/favicon.ico" => crate::ui::pwa::route(&state, "/icon.svg").expect("favicon asset"),
-            "/login" => {
-                let mut response = full(StatusCode::SEE_OTHER, "");
-                set(&mut response, hyper::header::LOCATION, "/app/login");
-                set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
-                response
-            }
-            "/api/stream" => sse(
-                state,
-                host,
-                session.as_ref().expect("viewer gate").hash.clone(),
-            ),
-            "/api/state" => json(&crate::render::state_json(&state)),
-            "/api/login" | "/api/logout" => crate::auth::route(&state, req).await,
-            "/static/app.css" => asset(req.uri().query(), APP_CSS, CSS, APP_CSS_V),
-            "/static/app.js" => asset(req.uri().query(), APP_JS, JS, APP_JS_V),
-            "/static/logs.css" => asset(req.uri().query(), LOGS_CSS, CSS, LOGS_CSS_V),
-            "/static/logs.js" => asset(req.uri().query(), LOGS_JS, JS, LOGS_JS_V),
-            "/static/settings.css" => asset(req.uri().query(), SETTINGS_CSS, CSS, SETTINGS_CSS_V),
-            "/static/settings.js" => asset(req.uri().query(), SETTINGS_JS, JS, SETTINGS_JS_V),
-            "/custom.css" => {
-                let css = std::fs::read_to_string(state.env.data_dir.join("custom.css"))
-                    .unwrap_or_default();
-                let mut r = full(StatusCode::OK, css);
-                set(&mut r, CONTENT_TYPE, "text/css; charset=utf-8");
-                set(&mut r, CACHE_CONTROL, "no-cache");
-                r
-            }
-            p if p.starts_with("/icons/di/") => {
-                let letter = req
-                    .uri()
-                    .query()
-                    .and_then(|q| q.strip_prefix("l="))
-                    .and_then(|l| l.chars().next());
-                crate::ui::icons::dashboard_icon(&state, &p[10..], letter).await
-            }
-            p if p.starts_with("/icons/") => crate::ui::icon_response(&state, &p[7..]),
-            p if p.starts_with("/api/logs/") => {
-                crate::logs::route(&state, &req, &session.as_ref().expect("viewer gate").hash).await
-            }
-            p if p.starts_with("/api/containers/") => {
-                let visible =
-                    p.strip_prefix("/api/containers/")
-                        .and_then(|rest| rest.rsplit_once('/'))
-                        .and_then(|(name, _)| crate::db::api::percent_decode(name))
-                        .is_some_and(|name| {
-                            let cfg = state.config.current();
-                            cfg.docker.enabled
-                                && state.snapshot().containers.iter().any(|c| {
-                                    c.name == name && !crate::ui::view::is_excluded(&cfg, c)
-                                })
-                        });
-                if visible {
-                    crate::ui::pages::container::api(&state, &req).await
-                } else {
-                    crate::db::api::json_error(StatusCode::NOT_FOUND, "no such container")
-                }
-            }
-            p if crate::ui::pwa::route(&state, p).is_some() => {
-                crate::ui::pwa::route(&state, p).unwrap()
-            }
-            p if p.starts_with("/api/history/") || p == "/api/events" => {
-                crate::db::api::route(&state, &req, admin).await
-            }
-            // The React client (docs/plans/react-port.md): its JSON API, the
-            // embedded build under /assets/ and the app document under /app.
-            p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
-                crate::http::assets::route(&req)
-            }
-            _ => {
-                // The legacy renderer uses the presence of a session to expose
-                // administrative details. Reuse its redacted rendering for Viewers.
-                if !admin && !matches!(path.as_str(), "/logs") && !path.starts_with("/logs/") {
-                    req.headers_mut().remove(hyper::header::COOKIE);
-                }
-                crate::ui::routes::route(&state, &req, &host).await
-            }
-        };
-    if session.is_some() {
+    let mut response = dispatch(&state, req, &path, host, read, lookup, session.as_ref()).await;
+    if let Some(session) = session {
+        crate::auth::refresh_cookie(&state, &session, &mut response);
         set(&mut response, CACHE_CONTROL, "no-store");
     }
     response
+}
+
+async fn dispatch(
+    state: &Arc<AppState>,
+    mut req: Request<Incoming>,
+    path: &str,
+    host: String,
+    read: bool,
+    lookup: Option<crate::api::access::Lookup>,
+    session: Option<&crate::auth::Session>,
+) -> Response<Body> {
+    if let Some(lookup) = lookup {
+        return crate::api::route(state, req, lookup, session.cloned()).await;
+    }
+    if path.starts_with("/api/settings/") {
+        return crate::settings::route(state, req, session.expect("settings gate").account.clone())
+            .await;
+    }
+    if !read {
+        return match path {
+            "/api/login" | "/api/logout" => crate::auth::route(state, req).await,
+            _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
+        };
+    }
+    let admin = session.is_some_and(|s| s.account.role >= crate::db::accounts::Role::Admin);
+    match path {
+        "/healthz" => text(StatusCode::OK, "ok\n"),
+        "/favicon.ico" => crate::ui::pwa::route(state, "/icon.svg").expect("favicon asset"),
+        "/login" => {
+            let mut response = full(StatusCode::SEE_OTHER, "");
+            set(&mut response, hyper::header::LOCATION, "/app/login");
+            set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
+            response
+        }
+        "/api/stream" => sse(
+            state.clone(),
+            host,
+            session.expect("viewer gate").hash.clone(),
+        ),
+        "/api/state" => json(&crate::render::state_json(state)),
+        "/api/login" | "/api/logout" => crate::auth::route(state, req).await,
+        "/static/app.css" => asset(req.uri().query(), APP_CSS, CSS, APP_CSS_V),
+        "/static/app.js" => asset(req.uri().query(), APP_JS, JS, APP_JS_V),
+        "/static/logs.css" => asset(req.uri().query(), LOGS_CSS, CSS, LOGS_CSS_V),
+        "/static/logs.js" => asset(req.uri().query(), LOGS_JS, JS, LOGS_JS_V),
+        "/static/settings.css" => asset(req.uri().query(), SETTINGS_CSS, CSS, SETTINGS_CSS_V),
+        "/static/settings.js" => asset(req.uri().query(), SETTINGS_JS, JS, SETTINGS_JS_V),
+        "/custom.css" => {
+            let css =
+                std::fs::read_to_string(state.env.data_dir.join("custom.css")).unwrap_or_default();
+            let mut r = full(StatusCode::OK, css);
+            set(&mut r, CONTENT_TYPE, "text/css; charset=utf-8");
+            set(&mut r, CACHE_CONTROL, "no-cache");
+            r
+        }
+        p if p.starts_with("/icons/di/") => {
+            let letter = req
+                .uri()
+                .query()
+                .and_then(|q| q.strip_prefix("l="))
+                .and_then(|l| l.chars().next());
+            crate::ui::icons::dashboard_icon(state, &p[10..], letter).await
+        }
+        p if p.starts_with("/icons/") => crate::ui::icon_response(state, &p[7..]),
+        p if p.starts_with("/api/logs/") => {
+            crate::logs::route(state, &req, &session.expect("viewer gate").hash).await
+        }
+        p if p.starts_with("/api/containers/") => {
+            let visible = p
+                .strip_prefix("/api/containers/")
+                .and_then(|rest| rest.rsplit_once('/'))
+                .and_then(|(name, _)| crate::db::api::percent_decode(name))
+                .is_some_and(|name| {
+                    let cfg = state.config.current();
+                    cfg.docker.enabled
+                        && state
+                            .snapshot()
+                            .containers
+                            .iter()
+                            .any(|c| c.name == name && !crate::ui::view::is_excluded(&cfg, c))
+                });
+            if visible {
+                crate::ui::pages::container::api(state, &req).await
+            } else {
+                crate::db::api::json_error(StatusCode::NOT_FOUND, "no such container")
+            }
+        }
+        p if crate::ui::pwa::route(state, p).is_some() => crate::ui::pwa::route(state, p).unwrap(),
+        p if p.starts_with("/api/history/") || p == "/api/events" => {
+            crate::db::api::route(state, &req, admin).await
+        }
+        // The React client (docs/plans/react-port.md): its JSON API, the
+        // embedded build under /assets/ and the app document under /app.
+        p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
+            crate::http::assets::route(&req)
+        }
+        _ => {
+            // The legacy renderer uses the presence of a session to expose
+            // administrative details. Reuse its redacted rendering for Viewers.
+            if !admin && !matches!(path, "/logs") && !path.starts_with("/logs/") {
+                req.headers_mut().remove(hyper::header::COOKIE);
+            }
+            crate::ui::routes::route(state, &req, &host).await
+        }
+    }
 }
 
 pub fn full(status: StatusCode, body: impl Into<Bytes>) -> Response<Body> {

@@ -402,6 +402,7 @@ fn valid_name(name: &str) -> bool {
 // Sessions, CSRF, Origin
 
 /// A valid session: the cookie token and its stored hash.
+#[derive(Clone)]
 pub(crate) struct Session {
     token: String,
     pub hash: String,
@@ -433,11 +434,11 @@ fn cookie_token(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// The request's session if it is valid; slides its expiry.
+/// The request's session if it is valid.
 fn session_of(db: &Db, headers: &HeaderMap, now: i64) -> Option<Session> {
     let token = cookie_token(headers)?;
     let hash = sha256_hex(token.as_bytes());
-    let account = db.account_session(&hash, now, now + SESSION_TTL_SECS)?;
+    let account = db.account_session(&hash, now)?;
     Some(Session {
         token,
         hash,
@@ -461,8 +462,25 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     std::hint::black_box(d) == 0
 }
 
-fn session_cookie(token: &str) -> String {
-    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_SECS}")
+pub(crate) fn refresh_cookie(state: &AppState, session: &Session, response: &mut Response<Body>) {
+    if response.headers().contains_key(SET_COOKIE) {
+        return;
+    }
+    let now = now_s();
+    if let Some(expires) = state
+        .db
+        .slide_session(&session.hash, now, now + SESSION_TTL_SECS)
+    {
+        set(
+            response,
+            SET_COOKIE,
+            &session_cookie(&session.token, expires - now),
+        );
+    }
+}
+
+fn session_cookie(token: &str, max_age: i64) -> String {
+    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}")
 }
 
 /// `host[:port]` of an `http(s)://` Origin or Referer value.
@@ -810,7 +828,11 @@ pub(crate) async fn credential_route(
             &serde_json::json!({"ok": true, "csrf": csrf_for(&token)}),
         )
     };
-    set(&mut response, SET_COOKIE, &session_cookie(&token));
+    set(
+        &mut response,
+        SET_COOKIE,
+        &session_cookie(&token, SESSION_TTL_SECS),
+    );
     response
 }
 
@@ -1050,14 +1072,10 @@ mod tests {
             authenticate(&state, other, CredentialAction::Login, credentials("ADMIN")).unwrap();
         let hash = sha256_hex(token.as_bytes());
         assert_eq!(
-            state
-                .db
-                .account_session(&hash, now_s(), now_s())
-                .unwrap()
-                .name,
+            state.db.account_session(&hash, now_s()).unwrap().name,
             "admin"
         );
-        assert!(state.db.account_session(&token, now_s(), now_s()).is_none());
+        assert!(state.db.account_session(&token, now_s()).is_none());
     }
 
     #[test]
@@ -1148,7 +1166,7 @@ mod tests {
 
     #[test]
     fn cookie_format() {
-        let c = session_cookie(&"aa".repeat(32));
+        let c = session_cookie(&"aa".repeat(32), SESSION_TTL_SECS);
         assert!(c.starts_with("rh_session="));
         for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"] {
             assert!(c.contains(part), "{c}");

@@ -2263,3 +2263,29 @@ async fn viewer_cannot_read_administrative_details() {
         }
     }
 }
+
+#[tokio::test]
+async fn session_renewal_sets_a_cookie_once_per_slide() {
+    let st = state();
+    let addr = start(st.clone()).await;
+    for (index, path) in ["/api/v1/session", "/api/v1/bootstrap", "/api/state"]
+        .into_iter()
+        .enumerate()
+    {
+        let token = format!("{index:064x}");
+        let hash = crate::auth::sha256_hex(token.as_bytes());
+        let now = crate::auth::now_s();
+        let ttl = crate::auth::SESSION_TTL_SECS;
+        assert!(st.db.create_session(&hash, now - 7200, now + ttl - 7200));
+        let cookie = format!("rh_session={token}");
+        let h = [("Cookie", cookie.as_str())];
+        let first = req(addr, "GET", path, &h, "").await;
+        assert_eq!(first.status, 200, "{path}");
+        let renewed = header(&first.head, "set-cookie").expect("renewed cookie");
+        assert!(renewed.starts_with(&cookie));
+        assert!(renewed.ends_with(&format!("Max-Age={ttl}")));
+        let second = req(addr, "GET", path, &h, "").await;
+        assert_eq!(second.status, 200, "{path}");
+        assert!(header(&second.head, "set-cookie").is_none());
+    }
+}

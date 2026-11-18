@@ -74,7 +74,7 @@ async fn call(st: &Arc<AppState>, method: Method, path: &str, body: Option<J>) -
         let token = "ab".repeat(32);
         let now = crate::auth::now_s();
         let hash = crate::auth::sha256_hex(token.as_bytes());
-        if st.db.account_session(&hash, now, now).is_none() {
+        if st.db.account_session(&hash, now).is_none() {
             assert!(st.db.create_session(&hash, now, now + 60));
         }
         headers.insert(

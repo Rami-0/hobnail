@@ -254,7 +254,6 @@ pub const REVISIONS_KEEP: i64 = 200;
 const MAX_SESSIONS: i64 = 20;
 /// A sliding session expiry is only written when it moves by at least this
 /// much, so a busy page does not turn every request into a write.
-const SLIDE_MIN_SECS: i64 = 60;
 /// The event cap is enforced on insert every this many events (and hourly).
 const CAP_EVERY: u32 = 1000;
 const MAX_TEXT: usize = 2 * 1024 * 1024;

@@ -2,7 +2,10 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::{Db, MAX_SESSIONS, SLIDE_MIN_SECS};
+use super::{Db, MAX_SESSIONS};
+
+const SESSION_MAX_AGE_SECS: i64 = 30 * 86_400;
+const SLIDE_MIN_SECS: i64 = 3_600;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -337,33 +340,45 @@ impl Db {
             i.conn.query_row(
                 "SELECT EXISTS (
                 SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id
-                WHERE token_hash = ?1 AND expires > ?2 AND disabled = 0
+                WHERE token_hash = ?1 AND expires > ?2 AND created > ?3 AND disabled = 0
             )",
-                params![hash, now],
+                params![hash, now, now - SESSION_MAX_AGE_SECS],
                 |row| row.get(0),
             )
         })
     }
 
-    pub fn account_session(&self, hash: &str, now: i64, expires: i64) -> Option<Account> {
+    pub fn account_session(&self, hash: &str, now: i64) -> Option<Account> {
         self.with(None, |i| {
             let query = format!(
-                "SELECT {ACCOUNT}, s.expires FROM users
-                 JOIN (SELECT user_id, expires FROM sessions WHERE token_hash = ?1 AND expires > ?2) s
+                "SELECT {ACCOUNT} FROM users
+                 JOIN (SELECT user_id FROM sessions
+                       WHERE token_hash = ?1 AND expires > ?2 AND created > ?3) s
                  ON users.id = s.user_id WHERE disabled = 0"
             );
-            let Some((account, previous)) = i.conn.query_row(&query, params![hash, now], |r| {
-                Ok((Account::read(&i.conn, r)?, r.get::<_, i64>(7)?))
-            }).optional()? else {
-                return Ok(None);
-            };
-            if expires >= previous + SLIDE_MIN_SECS {
-                i.conn.execute(
-                    "UPDATE sessions SET expires = ?1 WHERE token_hash = ?2 AND expires < ?1",
-                    params![expires, hash],
-                )?;
-            }
-            Ok(Some(account))
+            i.conn
+                .query_row(
+                    &query,
+                    params![hash, now, now - SESSION_MAX_AGE_SECS],
+                    |row| Account::read(&i.conn, row),
+                )
+                .optional()
+        })
+    }
+
+    pub fn slide_session(&self, hash: &str, now: i64, expires: i64) -> Option<i64> {
+        self.with(None, |i| {
+            i.conn
+                .query_row(
+                    "UPDATE sessions SET expires = min(?1, created + ?2)
+                 WHERE token_hash = ?3 AND expires > ?4
+                   AND expires <= ?1 - ?5 AND expires < created + ?2
+                   AND created > ?4 - ?2
+                 RETURNING expires",
+                    params![expires, SESSION_MAX_AGE_SECS, hash, now, SLIDE_MIN_SECS],
+                    |row| row.get(0),
+                )
+                .optional()
         })
     }
 
@@ -380,8 +395,8 @@ impl Db {
             let changed = tx.execute(
                 "UPDATE users SET password_hash = ?2, updated = ?3
                  WHERE id = ?1 AND password_hash = ?4 AND disabled = 0
-                   AND EXISTS (SELECT 1 FROM sessions WHERE user_id = ?1 AND token_hash = ?5 AND expires > ?3)",
-                params![id, new, now, old, keep],
+                   AND EXISTS (SELECT 1 FROM sessions WHERE user_id = ?1 AND token_hash = ?5 AND expires > ?3 AND created > ?6)",
+                params![id, new, now, old, keep, now - SESSION_MAX_AGE_SECS],
             )?;
             if changed == 0 {
                 return Ok(Err(AccountError::Conflict));
