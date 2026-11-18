@@ -289,7 +289,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       switch (act.kind) {
         case "go":
           if (act.page === "settings" && b?.role === "viewer") return;
-          if (b?.scoped && act.page !== "containers" && !(act.page === "settings" && b.role === "admin")) return;
+          if (b?.scoped && act.page !== "containers" && act.page !== "logs" && !(act.page === "settings" && b.role === "admin")) return;
           e.preventDefault();
           navigate(GO_HREF[act.page]());
           return;
@@ -318,7 +318,6 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           moveKeyRow(act.dir);
           return;
         case "logs": {
-          if (b?.scoped) return;
           const u = logsTarget(current);
           if (u) {
             e.preventDefault();
@@ -427,13 +426,13 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <BoxIcon aria-hidden="true" />
           <span>Containers</span>
         </a>
-        {b && !b.scoped && <>
-        <a className="bb-i" href="/app/logs">
+        <a className="bb-i" href="/app/logs" aria-current={["logs", "container_logs", "stack_logs"].includes(r) ? "page" : undefined}>
           <ScrollTextIcon aria-hidden="true" />
           <span>
             Logs
           </span>
         </a>
+        {b && !b.scoped && <>
         <a className="bb-i" href="/app/alerts" aria-current={r === "alerts" ? "page" : undefined}>
           <BellIcon aria-hidden="true" />
           <span>

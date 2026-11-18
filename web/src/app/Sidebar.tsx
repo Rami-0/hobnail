@@ -133,7 +133,6 @@ const StackItem = memo(function StackItem({
   active,
   folded,
   filtering,
-  scoped,
   strip,
   onFold,
 }: {
@@ -172,8 +171,8 @@ const StackItem = memo(function StackItem({
         >
           {stack.running}/{stack.total}
         </span>
-        {!scoped && stack.project && (
-          <a className="ia logs" href={stackLogsUrl(stack.name)} title="Logs of the whole stack (current interface)" aria-label={`Logs of the stack ${stack.title}`}>
+        {stack.project && (
+          <a className="ia logs" href={stackLogsUrl(stack.name)} title="Logs of the whole stack" aria-label={`Logs of the stack ${stack.title}`}>
             {LOGS_ICON}
           </a>
         )}
@@ -189,7 +188,7 @@ const StackItem = memo(function StackItem({
               <span className="nm">{c.title}</span>
               {!c.running && <span className="sr"> ({c.label})</span>}
             </a>
-            {!scoped && <a className="ia logs" href={logsHref(c.name)} title="Logs" aria-label={`Logs of ${c.title}`}>
+            {<a className="ia logs" href={logsHref(c.name)} title="Logs" aria-label={`Logs of ${c.title}`}>
               {LOGS_ICON}
             </a>}
           </li>
@@ -367,7 +366,7 @@ export function Sidebar({
 }: SidebarProps) {
   const b = useBootstrap();
   const s = useSession();
-  const active = r.name === "container" ? r.ctr : null;
+  const active = r.name === "container" || r.name === "container_logs" ? r.ctr : null;
   const firing = useAlertCount();
   const build = s.session?.build;
   const railLabel = wide ? (rail ? "Expand sidebar" : "Collapse sidebar") : open ? "Close sidebar" : "Open sidebar";
@@ -406,10 +405,10 @@ export function Sidebar({
         {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
           icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
         {b && b.role !== "viewer" && <NavLink href="/app/settings/boards" label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        <NavLink href="/app/logs" label="Logs" current={["logs", "container_logs", "stack_logs"].includes(r.name)} icon={<ScrollTextIcon aria-hidden="true" />} />
         {b && !b.scoped && <>
         <NavLink href="/app/overview" label="Overview" current={r.name === "overview"} icon={<LayoutGridIcon aria-hidden="true" />} />
         <NavLink href="/app/host" label="Host" current={r.name === "host"} icon={<ServerIcon aria-hidden="true" />} />
-        <NavLink href="/app/logs" label="Logs" icon={<ScrollTextIcon aria-hidden="true" />} />
         <NavLink href="/app/history" label="History" current={r.name === "history"} icon={<HistoryIcon aria-hidden="true" />} />
         <NavLink
           href="/app/alerts"

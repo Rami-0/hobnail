@@ -70,7 +70,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
       const href = containerHref(row.name);
       const url = rowLink(row, window.location.hostname);
       const children: PaletteItem[] = [];
-      if (!scoped) children.push({ kind: "Logs", name: `Logs: ${row.title}`, href: logsHref(row.name) });
+      children.push({ kind: "Logs", name: `Logs: ${row.title}`, href: logsHref(row.name) });
       if (url) children.push({ kind: "Open", name: "Open service ↗", href: url, detail: row.title });
       if (edit) children.push({ kind: "Action", name: `Edit ${row.title}`, href: `${href}?edit=override` });
       return { kind: "Container", name: row.title, detail: row.stack, keywords: row.name, href, children };

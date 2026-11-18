@@ -97,3 +97,17 @@ export function moveRow(cur: number, dir: 1 | -1, n: number): number {
 export function modName(platform: string): string {
   return /Mac|iPhone|iPad/.test(platform) ? "⌘" : "Ctrl";
 }
+
+/** Page-local log bindings, also rendered in the shortcuts sheet. */
+export const LOG_KEYS: ReadonlyArray<{ keys: string[]; description: string }> = [
+  { keys: ["↵"], description: "Logs list: open the first match" },
+  { keys: ["/"], description: "Logs: focus search" },
+  { keys: ["↵"], description: "Log search: older match" },
+  { keys: ["Shift", "↵"], description: "Log search: newer match" },
+  { keys: ["Esc"], description: "Log search: clear" },
+  { keys: ["End"], description: "Logs: jump to latest" },
+  { keys: ["↵"], description: "Log pane: select a line and focus Copy" },
+  { keys: ["↑"], description: "Log actions: previous line" },
+  { keys: ["↓"], description: "Log actions: next line" },
+  { keys: ["Esc"], description: "Log actions: return to pane" },
+];

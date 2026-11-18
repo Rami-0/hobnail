@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { useBootstrap } from "../live/index.ts";
 import { Dialog } from "../ui/Dialog.tsx";
 import { pageFilter } from "./page-filter.ts";
-import { modName } from "./keys.ts";
+import { LOG_KEYS, modName } from "./keys.ts";
 
 function Row({ k, children }: { k: string[]; children: ReactNode }) {
   return (
@@ -48,20 +48,11 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["j"]}>Next row that opens something</Row>
         <Row k={["k"]}>Previous row</Row>
         <Row k={["↵"]}>Open the row</Row>
-        {!scoped && <Row k={["l"]}>Logs of the focused or open container</Row>}
+        {<Row k={["l"]}>Logs of the focused or open container</Row>}
         <Row k={["/"]}>
           {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands"}
         </Row>
-        <Row k={["/"]}>Logs: focus search</Row>
-        <Row k={["↵"]}>Log search: older match</Row>
-        <Row k={["Shift", "↵"]}>Log search: newer match</Row>
-        <Row k={["Esc"]}>Log search: clear</Row>
-        <Row k={["End"]}>Logs: jump to latest</Row>
-        <Row k={["↵"]}>Log pane: select a line and focus Copy</Row>
-        <Row k={["↑"]}>Log actions: previous line</Row>
-        <Row k={["↓"]}>Log actions: next line</Row>
-        <Row k={["Esc"]}>Log actions: return to the pane</Row>
-        <Row k={["Tab"]}>Log actions: move between Copy and Link</Row>
+        {LOG_KEYS.map((binding) => <Row key={binding.description} k={binding.keys}>{binding.description}</Row>)}
         <Row k={["Alt", "↑ / ↓"]}>Board edit: move an item within its section</Row>
         <Row k={["Alt", "← / →"]}>Board edit: move an item between sections</Row>
         <Row k={["Shift", "arrows"]}>Board edit: resize width or rows on a focused Move or Resize control</Row>
