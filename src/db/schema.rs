@@ -83,6 +83,8 @@ CREATE INDEX events_kind_ts ON events (kind, ts, subject);
 ",
     // v7: accounts and database-backed dashboard configuration.
     "
+INSERT INTO kv (key, value) SELECT 'auth.onboarding_locked', '1'
+  FROM kv WHERE key = 'auth.password';
 DELETE FROM kv WHERE key = 'auth.password';
 DROP TABLE sessions;
 CREATE TABLE users (
@@ -258,6 +260,10 @@ mod tests {
             0
         );
         assert_eq!(count("SELECT COUNT(*) FROM boards"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM kv WHERE key = 'auth.onboarding_locked'"),
+            1
+        );
         conn.execute(
             "INSERT INTO users (name, password_hash, role, created, updated)
                       VALUES ('alice', 'hash', 'owner', 1, 1)",

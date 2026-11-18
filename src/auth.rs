@@ -617,6 +617,7 @@ pub(crate) enum CredentialAction {
 
 #[derive(Debug)]
 enum Attempt {
+    OnboardingLocked,
     Limited(u64),
     Wrong,
     Conflict,
@@ -743,6 +744,13 @@ pub(crate) async fn credential_route(
                 "invalid username or password",
             )
         }
+        Err(Attempt::OnboardingLocked) => {
+            return error(
+                StatusCode::FORBIDDEN,
+                "onboarding_locked",
+                "Run hobnail set-password on the host to create the owner account.",
+            );
+        }
         Err(Attempt::Conflict) => {
             let message = if action == CredentialAction::Onboard {
                 "owner already exists"
@@ -822,6 +830,9 @@ fn authenticate(
     if action == CredentialAction::Onboard && db.owner_exists() {
         return Err(Attempt::Conflict);
     }
+    if action == CredentialAction::Onboard && db.onboarding_locked() {
+        return Err(Attempt::OnboardingLocked);
+    }
     lock().check(ip, now_ms()).map_err(Attempt::Limited)?;
     let Credentials {
         username,
@@ -878,6 +889,7 @@ fn authenticate(
             db.record_event(now_s(), "auth.login", "info", &username, "");
             Ok(token)
         }
+        Err(AccountError::OnboardingLocked) => Err(Attempt::OnboardingLocked),
         Err(AccountError::Conflict) => Err(Attempt::Conflict),
         Err(AccountError::Invalid) => {
             lock().failure(ip, now_ms());

@@ -94,7 +94,7 @@ impl From<AccountError> for ApiError {
                 Self::new(StatusCode::CONFLICT, "conflict", "account changed")
             }
             AccountError::Missing => Self::not_found(),
-            AccountError::Protected => Self::new(
+            AccountError::Protected | AccountError::OnboardingLocked => Self::new(
                 StatusCode::FORBIDDEN,
                 "protected_owner",
                 "owner account is protected",

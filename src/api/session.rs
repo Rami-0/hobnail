@@ -20,6 +20,7 @@ pub struct Session {
     /// The `X-RH-CSRF` token for writes; null when not signed in.
     pub csrf: Option<String>,
     pub owner_exists: bool,
+    pub onboarding_locked: bool,
     pub build: BuildInfoView,
     pub api: u32,
 }
@@ -58,6 +59,7 @@ pub fn session(state: &AppState, headers: &HeaderMap) -> Session {
         user,
         csrf,
         owner_exists: state.db.owner_exists(),
+        onboarding_locked: state.db.onboarding_locked(),
         build: BuildInfoView {
             version: b.version.to_string(),
             sha: b.sha.to_string(),

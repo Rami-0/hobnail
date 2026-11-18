@@ -10,6 +10,9 @@ export function Login({ token }: { token?: string }) {
   const { session } = useSession();
   const loc = useRoute();
   const next = safeNext(loc.search.get("next"));
+  if (session?.onboarding_locked) {
+    return <main className="login"><p>Run <code>hobnail set-password</code> on the host to create the owner account, then reload this page.</p></main>;
+  }
   const mode = token !== undefined ? "invite" : session?.owner_exists === false ? "onboarding" : "login";
   return <Credentials key={mode + (token ?? "")} mode={mode} token={token} next={next} />;
 }

@@ -125,6 +125,7 @@ pub struct SessionInfo {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountError {
+    OnboardingLocked,
     Conflict,
     Missing,
     Protected,
@@ -227,7 +228,19 @@ fn active_invite(conn: &Connection, hash: &str, now: i64) -> rusqlite::Result<Op
     .optional()
 }
 
+fn onboarding_locked(conn: &Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM kv WHERE key = 'auth.onboarding_locked')",
+        [],
+        |row| row.get(0),
+    )
+}
+
 impl Db {
+    pub fn onboarding_locked(&self) -> bool {
+        self.with(false, |i| onboarding_locked(&i.conn))
+    }
+
     pub fn owner_exists(&self) -> bool {
         self.with(false, |i| Ok(owner_id(&i.conn)?.is_some()))
     }
@@ -246,6 +259,9 @@ impl Db {
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
             if owner_id(&tx)?.is_some() {
                 return Ok(Err(AccountError::Conflict));
+            }
+            if onboarding_locked(&tx)? {
+                return Ok(Err(AccountError::OnboardingLocked));
             }
             let id = insert_user(&tx, name, hash, Role::Owner, now)?;
             insert_session(&tx, id, session, now, expires)?;
@@ -275,6 +291,7 @@ impl Db {
             } else {
                 insert_user(&tx, name.unwrap_or("admin"), hash, Role::Owner, now)?;
             }
+            tx.execute("DELETE FROM kv WHERE key = 'auth.onboarding_locked'", [])?;
             tx.commit()?;
             Ok(Ok(()))
         })

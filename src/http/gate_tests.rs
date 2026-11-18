@@ -2164,3 +2164,27 @@ async fn password_change_preserves_only_the_callers_session() {
         assert!(get_session(addr, &[("Cookie", &revoked)]).await["user"].is_null());
     }
 }
+
+#[tokio::test]
+async fn locked_onboarding_requires_console_recovery() {
+    let st = state();
+    assert!(st.db.kv_set("auth.onboarding_locked", "1"));
+    let addr = start(st.clone()).await;
+    assert_eq!(get_session(addr, &[]).await["onboarding_locked"], true);
+    let origin = format!("http://{addr}");
+    let response = req(
+        addr,
+        "POST",
+        "/api/v1/onboarding/owner",
+        &[("Origin", &origin), ("Content-Type", "application/json")],
+        r#"{"username":"alice","password":"correct horse battery"}"#,
+    )
+    .await;
+    assert_api_error(&response, 403, "onboarding_locked", "locked onboarding");
+    assert!(response.body.contains("hobnail set-password"));
+    assert!(!st.db.owner_exists());
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let session = get_session(addr, &[]).await;
+    assert_eq!(session["onboarding_locked"], false);
+    assert_eq!(session["owner_exists"], true);
+}
