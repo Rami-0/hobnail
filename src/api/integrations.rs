@@ -54,7 +54,7 @@ pub struct IntegrationView {
     pub id: String,
     pub name: String,
     kind: IntegrationKind,
-    base_url: String,
+    origin: String,
     has_secret: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -64,6 +64,7 @@ pub struct IntegrationView {
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationDetails {
+    base_url: String,
     icon: Option<String>,
     enabled: bool,
     secret_origin: Option<String>,
@@ -108,7 +109,7 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
     let origin: String = row.get(3)?;
     let config: String = row.get(4)?;
     let config = serde_json::from_str::<Config>(&config).unwrap_or(Config {
-        base_url: origin,
+        base_url: origin.clone(),
         icon: None,
         enabled: true,
     });
@@ -121,9 +122,10 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
         id: row.get(0)?,
         name: row.get(1)?,
         kind,
-        base_url: config.base_url,
+        origin,
         has_secret: secret_origin.is_some(),
         admin: admin.then_some(IntegrationDetails {
+            base_url: config.base_url,
             icon: config.icon,
             enabled: config.enabled,
             secret_origin,
@@ -233,7 +235,7 @@ fn target(
             },
         )
         .optional()?;
-    Ok((view.base_url, credential))
+    Ok((view.admin.expect("admin details").base_url, credential))
 }
 
 async fn test_connection(

@@ -2,4 +2,4 @@
 import type { IntegrationDetails } from "./IntegrationDetails.ts";
 import type { IntegrationKind } from "./IntegrationKind.ts";
 
-export type IntegrationView = { id: string, name: string, kind: IntegrationKind, base_url: string, has_secret: boolean, admin?: IntegrationDetails, };
+export type IntegrationView = { id: string, name: string, kind: IntegrationKind, origin: string, has_secret: boolean, admin?: IntegrationDetails, };

@@ -26,14 +26,14 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   const integration = resolved?.integration;
   const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? p.widget_id : integration?.name ?? "Integration";
   const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : integration?.admin?.icon;
-  const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : integration?.base_url;
+  const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : (integration?.admin?.base_url ?? integration?.origin);
   return <div className="board-tile" data-testid="board-tile" data-missing={targetMissing || undefined}>
     <div className="board-tile-head"><ServiceIcon className="board-avatar" name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <h3>{href ? <a href={href}>{title}</a> : title}</h3></div>
     {targetMissing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
       p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
       p.kind === "link" ? <p className="muted">Saved link · {p.url}</p> :
-      p.kind === "integration" ? <><p className="muted">{integration?.base_url}</p><p>{integration?.admin?.enabled === false ? "Disabled" : "No connection test recorded"}</p></> :
+      p.kind === "integration" ? <><p className="muted">{(integration?.admin?.base_url ?? integration?.origin)}</p><p>{integration?.admin?.enabled === false ? "Disabled" : "No connection test recorded"}</p></> :
       <p className="muted">Configured widget · live data is unavailable in this client.</p>}
   </div>;
 }

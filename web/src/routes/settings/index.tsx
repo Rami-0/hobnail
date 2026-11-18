@@ -94,13 +94,13 @@ function Integrations({ admin }: { admin: boolean }) {
   // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => { void load(); return onConfigChange(() => { void load(); }); }, [load]);
   const close = () => { setEditing(null); setSecret(""); setFields({}); };
-  const edit = (item: IntegrationView | "new") => { setEditing(item); setUrl(item === "new" ? "" : item.base_url); setSecret(""); setEnabled(item === "new" ? true : item.admin?.enabled ?? true); setFields({}); };
+  const edit = (item: IntegrationView | "new") => { setEditing(item); setUrl(item === "new" ? "" : (item.admin?.base_url ?? item.origin)); setSecret(""); setEnabled(item === "new" ? true : item.admin?.enabled ?? true); setFields({}); };
   const bound = editing && editing !== "new" ? editing.admin?.secret_origin : null;
   const changed = needsSecret(bound, url);
   return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{admin && <Button variant="primary" data-testid="integration-create" onClick={() => edit("new")}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
     {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
-    <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{item.base_url}</p>{item.admin?.enabled === false && <p>Disabled</p>}
+    <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{(item.admin?.base_url ?? item.origin)}</p>{item.admin?.enabled === false && <p>Disabled</p>}
       {verdicts[item.id] && <Note kind={verdicts[item.id]?.ok ? "ok" : "warn"} testId="integration-verdict">{verdicts[item.id]?.class}: {verdicts[item.id]?.message}{verdicts[item.id]?.class === "tls" && " Only public certificate authorities are trusted."}</Note>}</div>
       {admin && <div className="settings-actions"><Button onClick={() => edit(item)}>Edit</Button><Button busy={busy} data-testid="integration-test" onClick={async () => {
         setBusy(true); const result = await api.post<IntegrationVerdict>(`/api/v1/integrations/${item.id}/test`);
@@ -111,7 +111,7 @@ function Integrations({ admin }: { admin: boolean }) {
       {editing && <form id="integration-form" onSubmit={async (e) => {
         e.preventDefault(); if (busy) return; setFields({});
         if (changed && !secret) { setFields({ secret: "Enter the credential again for the new origin, or clear the saved credential first." }); return; }
-        const connectionChanged = editing === "new" || url !== editing.base_url || !!secret || enabled !== (editing.admin?.enabled ?? true);
+        const connectionChanged = editing === "new" || url !== (editing.admin?.base_url ?? editing.origin) || !!secret || enabled !== (editing.admin?.enabled ?? true);
         const data = new FormData(e.currentTarget); setBusy(true);
         const result = await api.request<IntegrationView>(editing === "new" ? "POST" : "PUT", `/api/v1/integrations${editing === "new" ? "" : `/${editing.id}`}`, { body: {
           name: String(data.get("name")), kind: "http", base_url: url, enabled, icon: String(data.get("icon")) || null, ...(secret ? { secret } : {}),
