@@ -12,7 +12,26 @@ const PW: &str = "correct horse battery";
 
 /// Every write route (method, path). Bodies are valid-ish JSON; what matters
 /// is that the gate answers before the handler.
+const PUBLIC_WRITES: &[(&str, &str)] = &[
+    ("POST", "/api/login"),
+    ("POST", "/api/v1/onboarding/owner"),
+    ("POST", "/api/v1/invites/accept"),
+];
+
 const WRITES: &[(&str, &str)] = &[
+    ("POST", "/api/login"),
+    ("POST", "/api/v1/onboarding/owner"),
+    ("POST", "/api/v1/invites/accept"),
+    ("POST", "/api/v1/invites"),
+    ("DELETE", "/api/v1/invites/sample-1"),
+    ("PATCH", "/api/v1/users/sample-1/role"),
+    ("PATCH", "/api/v1/users/sample-1/disabled"),
+    ("PUT", "/api/v1/users/sample-1/scopes"),
+    ("POST", "/api/v1/users/sample-1/sign-out"),
+    ("DELETE", "/api/v1/users/sample-1"),
+    ("POST", "/api/v1/account/password"),
+    ("DELETE", "/api/v1/account/sessions/sample-1"),
+    ("DELETE", "/api/v1/account/sessions"),
     ("POST", "/api/logout"),
     ("POST", "/api/settings/general"),
     ("POST", "/api/settings/docker"),
@@ -134,7 +153,7 @@ async fn login(addr: std::net::SocketAddr) -> (String, String) {
         "POST",
         "/api/login",
         &[("Content-Type", "application/json"), ("Origin", &origin)],
-        &format!("{{\"password\":\"{PW}\"}}"),
+        &format!("{{\"username\":\"admin\",\"password\":\"{PW}\"}}"),
     )
     .await;
     assert_eq!(r.status, 200, "login: {}\n{}", r.head, r.body);
@@ -155,7 +174,7 @@ async fn login(addr: std::net::SocketAddr) -> (String, String) {
 async fn nothing_is_writable_before_a_password_is_set() {
     let st = state();
     let addr = start(st).await;
-    for (m, p) in WRITES {
+    for (m, p) in WRITES.iter().filter(|pair| !PUBLIC_WRITES.contains(pair)) {
         let r = req(addr, m, p, &[("Content-Type", "application/json")], "{}").await;
         assert!(
             r.status == 403 || r.status == 401,
@@ -174,7 +193,7 @@ async fn every_write_needs_session_csrf_and_same_origin() {
     let origin = format!("http://{addr}");
     let json = ("Content-Type", "application/json");
 
-    for (m, p) in WRITES {
+    for (m, p) in WRITES.iter().filter(|pair| !PUBLIC_WRITES.contains(pair)) {
         // No session.
         let r = req(
             addr,
@@ -312,7 +331,7 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
     let addr = start(st).await;
-    let body = format!("{{\"password\":\"{PW}\"}}");
+    let body = format!("{{\"username\":\"admin\",\"password\":\"{PW}\"}}");
     let r = req(
         addr,
         "POST",
@@ -328,7 +347,7 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
     // Form login with a tab-smuggled next goes home, not off-site.
     let origin = format!("http://{addr}");
     let form = format!(
-        "password={}&next=%2F%09%2Fevil.example",
+        "username=admin&password={}&next=%2F%09%2Fevil.example",
         PW.replace(' ', "+")
     );
     let r = req(
@@ -348,11 +367,11 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("location:"))
         .unwrap();
-    assert_eq!(loc[9..].trim(), "/", "{loc}");
+    assert_eq!(loc[9..].trim(), "/app", "{loc}");
 }
 
 #[tokio::test]
-async fn anonymous_events_hide_login_history() {
+async fn anonymous_events_and_pages_are_protected() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
     let addr = start(st.clone()).await;
@@ -363,11 +382,11 @@ async fn anonymous_events_hide_login_history() {
         "POST",
         "/api/login",
         &[("Content-Type", "application/json"), ("Origin", &origin)],
-        r#"{"password":"wrong password"}"#,
+        r#"{"username":"admin","password":"wrong password"}"#,
     )
     .await;
     let r = req(addr, "GET", "/api/events?limit=500", &[], "").await;
-    assert_eq!(r.status, 200);
+    assert_eq!(r.status, 401);
     assert!(
         !r.body.contains("auth."),
         "anonymous /api/events: {}",
@@ -375,10 +394,7 @@ async fn anonymous_events_hide_login_history() {
     );
     for page in ["/", "/history", "/alerts"] {
         let r = req(addr, "GET", page, &[], "").await;
-        assert!(
-            !r.body.contains("127.0.0.1") || !r.body.contains("login_failed"),
-            "{page}"
-        );
+        assert_eq!(r.status, 303, "{page}");
         assert!(
             !r.body.contains("auth.login_failed"),
             "{page} shows login history"
@@ -393,7 +409,7 @@ async fn anonymous_events_hide_login_history() {
 async fn a_plain_form_post_is_refused_and_leaks_nothing() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
-    let stored = st.db.kv_get("auth.password");
+    let stored = st.db.credential("admin").map(|(_, hash, _)| hash);
     let cfg = std::fs::read_to_string(st.config.path()).unwrap_or_default();
     let addr = start(st.clone()).await;
     let (cookie, _) = login(addr).await;
@@ -440,7 +456,7 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
         assert!(!r.body.contains("Sekrit"), "{path}");
     }
     assert_eq!(
-        st.db.kv_get("auth.password"),
+        st.db.credential("admin").map(|(_, hash, _)| hash),
         stored,
         "the password is unchanged"
     );
@@ -464,10 +480,10 @@ async fn settings_fragments_need_a_session() {
     .unwrap();
     let addr = start(st).await;
     let r = req(addr, "GET", "/settings/bookmarks?frag=list", &[], "").await;
-    assert_eq!(r.status, 401);
+    assert_eq!(r.status, 303);
     assert!(r.body.is_empty(), "{}", r.body);
     let r = req(addr, "GET", "/settings/bookmarks?edit=bookmark:0", &[], "").await;
-    assert_eq!(r.status, 200);
+    assert_eq!(r.status, 303);
     assert!(!r.body.contains("data-item") && !r.body.contains("value=\"Wiki\""));
     let (cookie, _) = login(addr).await;
     let r = req(
@@ -528,7 +544,7 @@ async fn channel_rule_widget_lists_need_a_session() {
         "/settings/widgets?frag=list",
     ] {
         let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 401, "{path}");
+        assert_eq!(r.status, 303, "{path}");
         assert!(r.body.is_empty(), "{path}: {}", r.body);
     }
     for path in [
@@ -537,7 +553,7 @@ async fn channel_rule_widget_lists_need_a_session() {
         "/settings/widgets?edit=widget:wmark",
     ] {
         let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(r.status, 303, "{path}");
         // The sign-in link echoes the visitor's own URL (`next=`): not data.
         let body: String = r
             .body
@@ -640,7 +656,7 @@ async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
         "/settings/config?frag=list",
     ] {
         let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 401, "{path}");
+        assert_eq!(r.status, 303, "{path}");
         assert!(r.body.is_empty(), "{path}: {}", r.body);
     }
     for path in [
@@ -654,7 +670,7 @@ async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
         "/settings/config",
     ] {
         let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 200, "{path}");
+        assert_eq!(r.status, 303, "{path}");
         let body: String = r
             .body
             .split("/login?next=")
@@ -779,11 +795,9 @@ async fn pages_rendered_with_a_session_are_no_store() {
     ];
     for path in pages {
         let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 200, "{path}");
-        assert_eq!(cache(&r.head), "no-cache", "{path} signed out: {}", r.head);
+        assert_eq!(r.status, 303, "{path}");
+        assert_eq!(cache(&r.head), "no-store", "{path} signed out: {}", r.head);
     }
-    let r = req(addr, "GET", "/settings/general", &[], "").await;
-    assert_eq!(cache(&r.head), "no-store", "settings signed out");
     let (cookie, _) = login(addr).await;
     for path in pages {
         let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
@@ -886,8 +900,7 @@ async fn api_v1_session_reports_the_session_and_never_a_token_without_one() {
     let v = get_session(addr, &[]).await;
     assert_eq!(v["user"], serde_json::Value::Null, "{v}");
     assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
-    assert_eq!(v["password_set"], false, "{v}");
-    assert_eq!(v["logs_require_login"], true, "{v}");
+    assert_eq!(v["owner_exists"], false, "{v}");
     assert_eq!(v["api"], 1, "{v}");
     let b = &v["build"];
     assert_eq!(b["version"], env!("CARGO_PKG_VERSION"), "{v}");
@@ -898,14 +911,18 @@ async fn api_v1_session_reports_the_session_and_never_a_token_without_one() {
     // Password set, still signed out.
     crate::auth::set_password_for_tests(&st.db, PW);
     let v = get_session(addr, &[]).await;
-    assert_eq!(v["password_set"], true, "{v}");
+    assert_eq!(v["owner_exists"], true, "{v}");
     assert_eq!(v["user"], serde_json::Value::Null, "{v}");
     assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
 
     // Signed in.
     let (cookie, csrf) = login(addr).await;
     let v = get_session(addr, &[("Cookie", &cookie)]).await;
-    assert_eq!(v["user"], "admin", "{v}");
+    assert_eq!(
+        v["user"],
+        serde_json::json!({"name": "admin", "role": "owner"}),
+        "{v}"
+    );
     assert_eq!(v["csrf"], csrf.as_str(), "{v}");
 
     // A forged cookie (well-formed, never issued).
@@ -949,15 +966,6 @@ async fn api_v1_session_reports_the_session_and_never_a_token_without_one() {
     let v = get_session(addr, &[("Cookie", &cookie)]).await;
     assert_eq!(v["user"], serde_json::Value::Null, "{v}");
     assert_eq!(v["csrf"], serde_json::Value::Null, "{v}");
-}
-
-/// `logs_require_login` follows `[logs] require_login`.
-#[tokio::test]
-async fn api_v1_session_reports_the_logs_gate() {
-    let st = crate::ui::testutil::state_with(vec![], "[logs]\nrequire_login = false\n");
-    let addr = start(st).await;
-    let v = get_session(addr, &[]).await;
-    assert_eq!(v["logs_require_login"], false, "{v}");
 }
 
 /// Unknown `/api/v1` paths are a 404 in the JSON error shape; a known path
@@ -1094,14 +1102,11 @@ async fn api_v1_access_table_walked_as_a_visitor() {
                 let resp = req_bounded(addr, m, &path, &h).await;
                 match r.access {
                     Access::Public => assert_ne!(resp.status, 401, "{m} {what}"),
-                    Access::Session | Access::LogsGate if m == "HEAD" => {
+                    _ if m == "HEAD" => {
                         assert_eq!(resp.status, 401, "{m} {what}");
                         assert!(resp.body.is_empty(), "{m} {what}: {}", resp.body);
                     }
-                    Access::Session => assert_api_error(&resp, 401, "sign_in_required", &what),
-                    Access::LogsGate => {
-                        assert_api_error(&resp, 401, "logs_sign_in_required", &what)
-                    }
+                    _ => assert_api_error(&resp, 401, "sign_in_required", &what),
                 }
             }
         }
@@ -1316,37 +1321,6 @@ fn json_of(r: &Resp, what: &str) -> serde_json::Value {
     serde_json::from_str(&r.body).unwrap_or_else(|e| panic!("{what}: {e}: {}", r.body))
 }
 
-fn assert_visitor_clean(body: &str, what: &str) {
-    assert!(
-        !body.contains(HIDDEN_PREFIX),
-        "{what} shows a hidden container: {body}"
-    );
-    assert!(
-        !body.contains(PROBE_SECRET),
-        "{what} shows probe output: {body}"
-    );
-    assert!(
-        !body.contains("SECRET-CMD"),
-        "{what} shows a command line: {body}"
-    );
-    assert!(
-        !body.contains("hunter2"),
-        "{what} shows an env value: {body}"
-    );
-    assert!(
-        !body.contains("auth."),
-        "{what} shows login history: {body}"
-    );
-    assert!(
-        !body.contains("192.0.2.7"),
-        "{what} shows a client IP: {body}"
-    );
-    assert!(
-        !body.contains(CONFIG_SECRET),
-        "{what} shows the config error: {body}"
-    );
-}
-
 /// Break the config file (the last good one stays in use, with an error).
 fn break_config(st: &AppState) {
     std::fs::write(
@@ -1359,84 +1333,39 @@ fn break_config(st: &AppState) {
     assert!(e.contains(CONFIG_SECRET), "{e}");
 }
 
-/// A visitor gets every phase 1 read without probe output, checks,
-/// `auth.*` events, the config error or any hidden container; the detail of
-/// a hidden container is a 404 like an unknown name.
 #[tokio::test]
-async fn api_v1_reads_keep_visitor_privacy() {
+async fn protected_views_still_hide_excluded_containers() {
     let st = privacy_state("privacy").await;
-    break_config(&st);
-    let addr = start(st.clone()).await;
-    let forged = format!("rh_session={}", "ab".repeat(32));
-    for cookie in [None, Some(forged.as_str())] {
-        let h: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
-        let r = req(addr, "GET", "/api/v1/bootstrap", &h, "").await;
-        let v = json_of(&r, "bootstrap");
-        assert_eq!(v["config_error"], serde_json::Value::Null, "{v}");
-        assert_visitor_clean(&r.body, "bootstrap");
-
-        let r = req(addr, "GET", "/api/v1/containers", &h, "").await;
-        let v = json_of(&r, "containers");
-        assert_visitor_clean(&r.body, "containers");
-        let names: Vec<&str> = v["groups"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .flat_map(|g| g["containers"].as_array().unwrap())
-            .map(|c| c["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(names, ["db", "web", "a.b-c_d"], "{v}");
-        let groups: Vec<&str> = v["groups"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|g| g["name"].as_str().unwrap())
-            .collect();
-        // "vault" only holds an excluded container: no group at all.
-        assert_eq!(groups, ["shop", "Standalone"], "{v}");
-
-        let r = req(addr, "GET", "/api/v1/containers/web", &h, "").await;
-        let v = json_of(&r, "detail web");
-        assert_visitor_clean(&r.body, "detail web");
-        let why = &v["why"];
-        assert_eq!(why["probe"], serde_json::Value::Null, "{v}");
-        assert_eq!(why["checks"], serde_json::json!([]), "{v}");
-        assert!(
-            why["title"]
-                .as_str()
-                .unwrap()
-                .starts_with("Health check failing"),
-            "{v}"
-        );
-        assert!(
-            v["events"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|e| e["kind"] == "container.start"),
-            "{v}"
-        );
-        assert!(
-            !v["series"]["markers"].as_array().unwrap().is_empty(),
-            "{v}"
-        );
-
-        for hidden in ["secret-ovr", "secret-lbl", "secret-exc", "nope"] {
-            let r = req(addr, "GET", &format!("/api/v1/containers/{hidden}"), &h, "").await;
-            assert_api_error(&r, 404, "not_found", hidden);
-            assert!(!r.body.contains(HIDDEN_PREFIX), "{}", r.body);
-        }
-
-        let r = req(addr, "GET", "/api/v1/strips", &h, "").await;
-        let v = json_of(&r, "strips");
-        assert_visitor_clean(&r.body, "strips");
-        let keys: Vec<&String> = v["containers"].as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["a.b-c_d", "db", "web"], "{v}");
-        let stacks: Vec<&String> = v["stacks"].as_object().unwrap().keys().collect();
-        assert_eq!(stacks, ["Standalone", "shop"], "{v}");
-        assert_eq!(v["buckets"], 96, "{v}");
-        assert_eq!(v["containers"]["web"].as_array().unwrap().len(), 96);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let headers = [("Cookie", cookie.as_str())];
+    let r = req(addr, "GET", "/api/v1/containers", &headers, "").await;
+    let v = json_of(&r, "containers");
+    let names: Vec<_> = v["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|g| g["containers"].as_array().unwrap())
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["db", "web", "a.b-c_d"]);
+    for hidden in ["secret-ovr", "secret-lbl", "secret-exc", "nope"] {
+        let r = req(
+            addr,
+            "GET",
+            &format!("/api/v1/containers/{hidden}"),
+            &headers,
+            "",
+        )
+        .await;
+        assert_api_error(&r, 404, "not_found", hidden);
+        assert!(!r.body.contains(HIDDEN_PREFIX));
     }
+    let r = req(addr, "GET", "/api/v1/strips", &headers, "").await;
+    let v = json_of(&r, "strips");
+    let keys: Vec<_> = v["containers"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["a.b-c_d", "db", "web"]);
+    assert_eq!(v["buckets"], 96);
 }
 
 /// Signed in: the same reads add the probe's first line, Docker's last
@@ -1497,9 +1426,11 @@ async fn api_v1_reads_with_a_session_add_probe_checks_and_config_error() {
 async fn api_v1_container_window_and_names() {
     let st = privacy_state("window").await;
     let addr = start(st.clone()).await;
+    let (cookie, _) = login(addr).await;
+    let h = [("Cookie", cookie.as_str())];
     let now = crate::util::unix_now() as i64;
     let get = |q: String| async move {
-        req(addr, "GET", &format!("/api/v1/containers/web{q}"), &[], "").await
+        req(addr, "GET", &format!("/api/v1/containers/web{q}"), &h, "").await
     };
 
     let v = json_of(&get(String::new()).await, "default");
@@ -1593,17 +1524,17 @@ async fn api_v1_container_window_and_names() {
         assert_eq!(v["error"]["field"], field, "{q}: {v}");
     }
     // Unknown name (with a bad window too): 404 first.
-    let r = req(addr, "GET", "/api/v1/containers/nope?range=2h", &[], "").await;
+    let r = req(addr, "GET", "/api/v1/containers/nope?range=2h", &h, "").await;
     assert_api_error(&r, 404, "not_found", "unknown");
 
     // Percent-encoded names.
     for p in ["a.b-c_d", "a%2Eb%2Dc_d", "%61.b-c_d"] {
-        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &[], "").await;
+        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &h, "").await;
         let v = json_of(&r, p);
         assert_eq!(v["row"]["name"], "a.b-c_d", "{p}");
     }
     for p in ["a%2Fb", "%2e%2e", "%zz", "web%00", "secret%2Dovr"] {
-        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &[], "").await;
+        let r = req(addr, "GET", &format!("/api/v1/containers/{p}"), &h, "").await;
         assert_api_error(&r, 404, "not_found", p);
     }
 }
@@ -1616,11 +1547,13 @@ struct Stream {
 }
 
 impl Stream {
-    async fn open(addr: std::net::SocketAddr, path: &str) -> (Stream, String) {
+    async fn open(addr: std::net::SocketAddr, path: &str, cookie: &str) -> (Stream, String) {
         let mut s = TcpStream::connect(addr).await.unwrap();
-        s.write_all(format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\n\r\n").as_bytes())
-            .await
-            .unwrap();
+        s.write_all(
+            format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nCookie: {cookie}\r\n\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
         let mut st = Stream { s, buf: Vec::new() };
         let head = st.until(b"\r\n\r\n").await;
         (st, head)
@@ -1707,9 +1640,14 @@ async fn viewers_reach(st: &AppState, n: usize, poke: bool) -> bool {
 async fn api_v1_stream_events_and_viewer_count() {
     let st = privacy_state("stream").await;
     let addr = start(st.clone()).await;
+    let (cookie, _) = login(addr).await;
     assert_eq!(st.viewers(), 0);
-    let (mut s, head) =
-        Stream::open(addr, "/api/v1/stream?topics=containers,stats,system,bogus").await;
+    let (mut s, head) = Stream::open(
+        addr,
+        "/api/v1/stream?topics=containers,stats,system,bogus",
+        &cookie,
+    )
+    .await;
     assert!(
         head.starts_with("HTTP/1.0 200") || head.starts_with("HTTP/1.1 200"),
         "{head}"
@@ -1798,7 +1736,8 @@ async fn api_v1_stream_events_and_viewer_count() {
 async fn api_v1_stream_topics_and_head() {
     let st = privacy_state("topics").await;
     let addr = start(st.clone()).await;
-    let r = req(addr, "HEAD", "/api/v1/stream", &[], "").await;
+    let (cookie, _) = login(addr).await;
+    let r = req(addr, "HEAD", "/api/v1/stream", &[("Cookie", &cookie)], "").await;
     assert_eq!(r.status, 200, "{}", r.head);
     assert_eq!(
         header(&r.head, "content-type").as_deref(),
@@ -1806,7 +1745,7 @@ async fn api_v1_stream_topics_and_head() {
     );
     assert_eq!(st.viewers(), 0);
 
-    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=system").await;
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=system", &cookie).await;
     assert_eq!(s.next().await.0, "hello");
     crate::live::refresh_container_stats(&st);
     let mut snap = (*st.snapshot()).clone();
@@ -1819,7 +1758,7 @@ async fn api_v1_stream_topics_and_head() {
     drop(s);
 
     // Only `containers`: a stats refresh sends nothing.
-    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=containers").await;
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=containers", &cookie).await;
     assert_eq!(s.next().await.0, "hello");
     crate::live::refresh_container_stats(&st);
     assert!(s.quiet(300).await, "stats not asked for");
