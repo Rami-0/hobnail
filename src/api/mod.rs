@@ -23,6 +23,7 @@ pub mod error;
 mod history;
 mod host;
 mod integrations;
+mod logs;
 mod overview;
 pub mod session;
 pub mod stream;
@@ -114,6 +115,7 @@ pub(crate) async fn route(
         | Handler::SessionsRevoke => {
             accounts::route(state, req, m, principal.expect("account gate")).await
         }
+        Handler::LogsPicker => logs::get(state, &principal.expect("viewer gate").account),
         Handler::Containers => {
             containers::list(
                 state,

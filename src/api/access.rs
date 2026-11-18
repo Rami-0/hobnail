@@ -256,6 +256,7 @@ pub enum Handler {
     DashboardIcon,
     Session,
     Bootstrap,
+    LogsPicker,
     Containers,
     Container,
     ContainerInspect,
@@ -302,6 +303,12 @@ pub struct Route {
 
 /// Every `/api/v1` route. `gate_tests` walks this table as a visitor.
 pub const ROUTES: &[Route] = &[
+    Route {
+        method: "GET",
+        pattern: "/api/v1/logs/picker",
+        access: Access::Viewer,
+        handler: Handler::LogsPicker,
+    },
     Route {
         method: "GET",
         pattern: "/api/v1/settings",

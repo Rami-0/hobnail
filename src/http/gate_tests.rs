@@ -2082,6 +2082,25 @@ async fn invite_roles_and_account_management() {
         let bootstrap = json_of(&r, "role in bootstrap");
         assert_eq!(bootstrap["role"], role);
         assert_eq!(bootstrap["scoped"], true);
+        let picker = req(addr, "GET", "/api/v1/logs/picker", &h, "").await;
+        assert_eq!(picker.status, 200);
+        assert_eq!(
+            json_of(&picker, "scoped logs picker")["groups"],
+            serde_json::json!([])
+        );
+        for (path, status) in [
+            ("/api/logs/levels?c=web", 404),
+            ("/api/logs/download?c=web", 400),
+            ("/api/logs/stream?c=web", 400),
+            ("/api/logs/status", 403),
+        ] {
+            assert_eq!(
+                req(addr, "GET", path, &h, "").await.status,
+                status,
+                "{path}"
+            );
+        }
+
         for resource in ["inspect", "metrics", "events"] {
             let path = format!("/api/v1/containers/no-grant/{resource}");
             assert_eq!(req(addr, "GET", &path, &h, "").await.status, 404, "{path}");
