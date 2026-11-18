@@ -13,6 +13,22 @@ export interface PaneStatus { state: string; count: number; matches: number; cur
 // One animation-frame flush and a visible window bound work independently of tail size.
 export class LogPane {
   private static panes = new Set<LogPane>();
+  // rAF callbacks share a browser task. A separate callback per pane adds
+  // four complete DOM/layout passes to that task on a split viewer.
+  private static queue = new Set<LogPane>();
+  private static renderFrame = 0;
+  private static drain(): void {
+    if (LogPane.renderFrame || !LogPane.queue.size) return;
+    LogPane.renderFrame = requestAnimationFrame(() => {
+      LogPane.renderFrame = 0;
+      const pane = LogPane.queue.values().next().value;
+      if (pane) {
+        LogPane.queue.delete(pane);
+        if (!pane.closed) pane.flush();
+      }
+      LogPane.drain();
+    });
+  }
   private static highlights = new Map<LogPane, Range[]>();
   private static paintHighlights(): void {
     const browser = globalThis as unknown as { Highlight?: new (...ranges: Range[]) => unknown; CSS?: { highlights?: Map<string, unknown> } };
@@ -49,7 +65,6 @@ export class LogPane {
   private older: EventSource | null = null;
   private pending: LogLine[] = [];
   private pendingOlder: LogLine[] = [];
-  private frame = 0;
   private retry = 0;
   private hiddenTimer = 0;
   private delay = 2000;
@@ -140,7 +155,7 @@ export class LogPane {
     LogPane.panes.delete(this); LogPane.highlights.delete(this); LogPane.paintHighlights();
     if (!LogPane.panes.size) { LogPane.match = null; LogPane.searchIdentity = ""; LogPane.initialMatchPending = false; cancelAnimationFrame(LogPane.searchFrame); LogPane.searchFrame = 0; }
     window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
-    this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); cancelAnimationFrame(this.frame);
+    this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); LogPane.queue.delete(this);
     this.observer.disconnect();
     window.removeEventListener("resize", this.resize);
     this.box.removeEventListener("touchstart", this.touch);
@@ -301,7 +316,11 @@ export class LogPane {
     const next = this.visible[i + direction];
     if (next) { this.selected = next; this.select(next, true); this.seek(next.id); this.signature = ""; this.schedule(); }
   }
-  private schedule(): void { if (!this.frame && !this.closed) this.frame = requestAnimationFrame(() => { this.frame = 0; this.flush(); }); }
+  private schedule(): void {
+    if (this.closed) return;
+    LogPane.queue.add(this);
+    LogPane.drain();
+  }
   private indexAt(y: number): number {
     let lo = 0, hi = this.offsets.length;
     while (lo < hi) { const mid = (lo + hi) >>> 1; if ((this.offsets[mid] ?? 0) <= y) lo = mid + 1; else hi = mid; }
