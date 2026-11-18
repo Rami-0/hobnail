@@ -102,7 +102,7 @@ export function input(tab) {
     },
     // The centre of the first visible match (scrolled into view), or null.
     async box(sel, scroll = true) {
-      if (scroll) await tab.ev(`new Promise(resolve => { const e=document.querySelector(${q(sel)}); e?.scrollIntoView({block:"nearest",inline:"nearest"}); requestAnimationFrame(()=>requestAnimationFrame(resolve)); })`);
+      if (scroll) await tab.ev(`new Promise(resolve => { const e=document.querySelector(${q(sel)}); if(e) { const popup=e.closest('[role="dialog"],[role="listbox"],[role="menu"],.sdk-select-list'); e.scrollIntoView({block:popup?"nearest":"center",inline:"nearest"}); } requestAnimationFrame(()=>requestAnimationFrame(resolve)); })`);
       return tab.ev(`(() => { const e = document.querySelector(${q(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); if (!b.width || !b.height) return null; return { x: b.left + b.width / 2, y: b.top + b.height / 2, left: b.left, top: b.top, width: b.width, height: b.height }; })()`);
     },
     async click(sel) {
