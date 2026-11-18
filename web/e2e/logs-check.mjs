@@ -61,7 +61,7 @@ try {
       assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile log remains literal text");
       await tab.ev(`{const b=document.querySelector('[data-testid=log-body]'); b.scrollTop-=100;}`);
       await wait('!!document.querySelector("[data-testid=log-latest]")', "scroll up stops following");
-      if (width === 390) await inp.click('.log-filters');
+      if (width === 390) { await inp.click('.log-filters'); await sleep(500); }
       const anchor = await tab.ev(`(() => { const b=document.querySelector('[data-testid=log-body]'), br=b.getBoundingClientRect(); const r=[...b.querySelectorAll('[data-log-id]')].find(r=>r.getBoundingClientRect().bottom > br.top+1); return {id:r.dataset.logId, offset:r.getBoundingClientRect().top-br.top}; })()`);
       for (const label of ['Wrap','Time','Wrap','Time']) {
         await tab.ev(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${q(label)}).click()`);
@@ -80,6 +80,7 @@ try {
       measurements.searchMatchMs = await tab.ev('Number(document.querySelector("[data-testid=log-body]").dataset.searchMs)');
       await inp.key("Enter"); await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
+      await sleep(250);
       await tab.ev(`document.querySelector('[data-testid=log-body] details summary')?.click()`);
       assert.ok(await tab.ev(`!!document.querySelector('[data-testid=log-body] details[open] pre')`), "JSON folds and opens");
       const download = await tab.ev('document.querySelector("a[download]").getAttribute("href")');
