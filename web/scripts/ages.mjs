@@ -21,9 +21,12 @@ for (const { name, version } of seen.values()) {
   const meta = await r.json();
   const t = meta.time?.[version];
   const days = t ? (now - Date.parse(t)) / 86_400_000 : NaN;
-  const ok = days >= MIN_DAYS;
+  // D2's owner override applies only to these reviewed SDK releases.
+  const sdkException = ["@ui-sdk/react", "@ui-sdk/core"].includes(name)
+    && version === "0.1.0-beta.10";
+  const ok = days >= MIN_DAYS || sdkException;
   if (!ok) bad++;
-  rows.push(`${ok ? "ok " : "NEW"} ${days.toFixed(1).padStart(7)} d  ${name}@${version}  ${t ?? "no publish time"}`);
+  rows.push(`${sdkException ? "SDK" : ok ? "ok " : "NEW"} ${days.toFixed(1).padStart(7)} d  ${name}@${version}  ${t ?? "no publish time"}`);
 }
 rows.sort();
 console.log(rows.join("\n"));

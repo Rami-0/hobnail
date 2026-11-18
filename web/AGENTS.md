@@ -56,7 +56,7 @@ the JSON API. Same origin, no Node in production.
 - **Dependencies: release-age policy** (owner decision D3). `web/.npmrc` sets
   `min-release-age=7` and `ignore-scripts=true`; versions are exact and
   `package-lock.json` is committed. No new dependency without the lead, and
-  no exception to the age rule: if it blocks an install, stop and ask.
+  the sole age exception is the owner-authorized @ui-sdk/* install (D2).
   Check the locked set with `scripts/web.sh node scripts/ages.mjs`.
 
 ## Live data (src/live)
@@ -142,12 +142,13 @@ clicking `signout`.
 
 ## UI SDK reading instructions (decision §1, rules 1–8)
 
-UI SDK (`@ui-sdk/react`, `@ui-sdk/core`) is **not installed yet**: on
-2026-11-17 every published version was younger than 7 days, and the
-release-age rule allows no exception. The project-local skill is pending
-with it: `npx skills@latest add vercel-labs/ui --skill ui-sdk` is run when
-the SDK is installed, not before (it would install a package outside the
-age gate). When it is installed:
+UI SDK (`@ui-sdk/react`, `@ui-sdk/core`) is pinned to **0.1.0-beta.10**
+under D2's owner override. Published 2026-11-18 at 09:45:28.252 UTC
+(React) and 09:47:47.539 UTC (core), tagged `latest` and `beta`, Apache-2.0.
+Neither has install lifecycle scripts; no transitive packages were added.
+The project-local skill was skipped: `skills@latest` is 1.9.0, published
+2026-11-16 10:30:48.447 UTC, younger than seven days.
+Before using the installed SDK:
 
 1. Read the repository instructions and this file. Before using UI SDK,
    follow its installed skill if available and read
