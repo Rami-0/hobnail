@@ -628,7 +628,6 @@ function sameRow(a: RowProps, b: RowProps): boolean {
 }
 
 const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: RowProps) {
-  const scoped = useBootstrap()?.scoped;
   const ref = useRef<HTMLTableRowElement>(null);
   const { seen: near, visible } = useNear(ref);
   const href = containerHref(r.name);
@@ -698,7 +697,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
       </td>
       <td className="c-act">
         <div className="ra">
-          {!scoped && <a className="btn sm" href={logsHref(r.name)} title="Logs (l)" aria-label={`Logs of ${r.title}`} data-testid="logs">
+          {<a className="btn sm" href={logsHref(r.name)} title="Logs (l)" aria-label={`Logs of ${r.title}`} data-testid="logs">
             {LOGS_ICON}
             Logs
           </a>}

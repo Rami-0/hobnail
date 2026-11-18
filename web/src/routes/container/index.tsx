@@ -185,7 +185,7 @@ export default function ContainerPage() {
   const s = detail.series;
   const range = s.range;
   const visibleTabs = tabs(row.name, loc.query).filter((item) =>
-    (item.id !== "processes" || canEdit) && (item.id !== "logs" || !bootstrap?.scoped));
+    (item.id !== "processes" || canEdit));
   const tab = visibleTabs.find((item) => item.id !== "logs" && item.id === loc.search.get("tab"))?.id ?? "overview";
   const charts = tab === "overview" || tab === "metrics";
   const zoomed = win.kind === "zoom";
@@ -246,7 +246,7 @@ export default function ContainerPage() {
           <span>Docker is not reachable ({dockerError}). Showing the last known state.</span>
         </output>
       )}
-      {detail.why && <WhyNote why={detail.why} name={row.name} admin={canEdit} scoped={!!bootstrap?.scoped} />}
+      {detail.why && <WhyNote why={detail.why} name={row.name} admin={canEdit} />}
       <TabNav label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
@@ -357,7 +357,7 @@ export default function ContainerPage() {
                   <span className="when"><RelativeTime at={e.at} /></span>
                   <span className={`pill ${levelClass(e.level)}`}>{eventLabel(e.kind)}</span>
                   {e.message && <span className="muted detail">{e.message}</span>}
-                  {!bootstrap?.scoped && e.kind.startsWith("container.") && (
+                  {e.kind.startsWith("container.") && (
                     <a className="ia logs" href={logsAt(row.name, e.at)} title="Logs at that moment" aria-label={`Logs of ${row.name} at that moment`}>
                       <ScrollTextIcon aria-hidden="true" />
                     </a>
@@ -488,7 +488,7 @@ export default function ContainerPage() {
  * that moment; signed in, the probe's first line and the last checks
  * (folded on a phone); signed out, a sign-in link and no probe output.
  */
-function WhyNote({ why, name, admin, scoped }: { why: Why; name: string; admin: boolean; scoped: boolean }) {
+function WhyNote({ why, name, admin }: { why: Why; name: string; admin: boolean }) {
   const phone = typeof window !== "undefined" && window.matchMedia?.("(max-width: 640px)").matches;
   return (
     // A status region of blocks (an <output> holds phrasing only).
@@ -511,7 +511,7 @@ function WhyNote({ why, name, admin, scoped }: { why: Why; name: string; admin: 
             </>
           ) : null}
           {why.detail && <> · {why.detail}</>}{" "}
-          {!scoped && <a className="cd-why-logs" href={logsAt(name, why.logs_at)}>
+          {<a className="cd-why-logs" href={logsAt(name, why.logs_at)}>
             {why.logs_at !== null ? `Logs around ${localTime(why.logs_at)}` : "Logs"}
           </a>}
         </p>
