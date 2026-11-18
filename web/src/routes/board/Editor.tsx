@@ -35,6 +35,7 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const leaving = useRef(false);
   const operation = useRef(false);
   const root = useRef<HTMLDivElement>(null);
+  useEffect(() => { root.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, []);
   const path = `/api/v1/boards/${view.board.id}`;
   const modified = dirty(base, doc);
   const change = (action: Action, message: string) => { if (operation.current) return; setDoc((previous) => reduceDocument(previous, action)); setAnnouncement(message); setDraftState("Draft pending"); };
