@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ApiResult } from "../../api/client.ts";
 import { api } from "../../api/session.ts";
 import { onConfigChange } from "../../live/index.ts";
@@ -23,9 +23,11 @@ export function saved(result: Save) {
 export function useSettings<T>(path: string) {
   const [data, setData] = useState<T>();
   const [failure, setFailure] = useState<Failure>();
+  const latest = useRef(0);
   const load = useCallback(async (signal?: AbortSignal) => {
+    const request = ++latest.current;
     const result = await api.get<T>(endpoint(path), { signal });
-    if (!signal?.aborted) {
+    if (!signal?.aborted && request === latest.current) {
       if (result.kind === "ok") {
         setData(result.data);
         setFailure(undefined);
@@ -63,7 +65,7 @@ export type Control = {
   required?: boolean;
   default?: unknown;
   max?: number;
-  format?: "url" | "link" | "number" | "list" | "map" | "json" | "text" | "switch" | "code";
+  format?: "url" | "link" | "duration" | "number" | "list" | "map" | "json" | "text" | "switch" | "code";
   options?: readonly string[];
   show?: (values: Values) => boolean;
   locked?: (base: Values) => boolean;
@@ -110,6 +112,10 @@ export function collectFields(fields: Control[], input: Values) {
     if (custom) errors[key] = custom;
     values[key] = text;
     if (format === "list") values[key] = text.split(",").map((entry) => entry.trim()).filter(Boolean);
+    if (format === "duration") {
+      if (/^\d+$/.test(text)) values[key] = Number(text);
+      else if (!/^(?:(?:\d+(?:\.\d*)?|\.\d+)(?:ms|[smhd]))+$/.test(text)) errors[key] = "Enter a duration such as 30s or 5m.";
+    }
     if (format === "number") {
       if (!Number.isFinite(Number(text))) errors[key] = "Enter a number.";
       else values[key] = Number(text);

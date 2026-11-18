@@ -23,6 +23,7 @@ type Props = Snapshot & {
   reorder?: boolean;
   row?: (entry: Entry) => ReactNode;
   extra?: (entry: Entry) => ReactNode;
+  renderDetails?: (item: Values) => ReactNode;
   preview?: (item: Values, entry?: Entry) => Promise<string>;
   body?: (changes: Values, input: Values) => Values;
   create?: (input: Values) => Values;
@@ -178,7 +179,11 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
       focus(renamed && typeof renamed === "string" ? renamed : base.entry?.id ?? latest?.entries.at(-1)?.id);
     } else {
       setFailure(result);
-      if (result.kind === "invalid") setErrors(fieldErrors(result));
+      if (result.kind === "invalid") {
+        const field = fields.some((control) => control.key === result.field) ? result.field : undefined;
+        setErrors(fieldErrors({ ...result, field }));
+        if (!field) setFailure({ ...result, field });
+      }
     }
     setBusy(false);
   }
@@ -215,6 +220,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
     </>}>
     <form id={formId} className="settings-form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <Controls fields={fields} input={input} base={base.entry?.item ?? {}} errors={errors} onChange={(values) => { setInput(values); setRename(false); }} />
+      {props.renderDetails?.(input)}
       {rename && base.entry && <Note kind="warn">The rename also updates these rules: {props.renameRules?.(base.entry.id).join(", ")}</Note>}
       {errors.form && failure?.kind !== "invalid" && <Note kind="bad">{errors.form}</Note>}
       <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); }); }} rebase={() => { void rebase(); }} />

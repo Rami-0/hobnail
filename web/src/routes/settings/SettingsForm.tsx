@@ -46,7 +46,9 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     } else {
       setFailure(response);
       if (response.kind === "invalid") {
-        const mapped = fieldErrors(response);
+        const field = fields.find((control) => control.key === response.field)?.key;
+        if (!field) setFailure({ ...response, field });
+        const mapped = fieldErrors({ ...response, field });
         setErrors(mapped);
       }
     }

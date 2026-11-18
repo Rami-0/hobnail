@@ -7,6 +7,7 @@ import { Field, TextInput } from "../../ui/Field.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { EditDialog } from "../container/EditDialog.tsx";
 import { Collection, type Entry } from "./Collection.tsx";
+import { globMatches } from "./glob.ts";
 import type { Values } from "./forms.ts";
 import { endpoint, FailureNote, saved, useSettings, type Control, type Failure, type Save } from "./shared.tsx";
 
@@ -14,6 +15,10 @@ type Known = { name: string; project: string | null; image: string; state: strin
 type Data = { hash: string; docker: { exclude: string[]; standalone_group: string }; groups: Values[]; overrides: Record<string, Values> | null; known: Known[] };
 const patterns = (data: Data): Entry[] => data.docker.exclude.map((pattern, id) => ({ id, item: { pattern } }));
 const groups = (data: Data): Entry[] => data.groups.map((item) => ({ id: String(item.name), item }));
+function PatternMatches({ pattern, names }: { pattern: string; names: string[] }) {
+  const count = pattern ? names.filter((name) => globMatches(pattern, name)).length : 0;
+  return <p role="status">{count} matching {count === 1 ? "container" : "containers"}</p>;
+}
 const patternFields: Control[] = [{ key: "pattern", label: "Pattern", required: true, max: 256, hint: "A container name or glob." }];
 const groupFields: Control[] = [
   { key: "name", label: "Name", required: true, max: 80 },
@@ -58,11 +63,12 @@ export default function Containers() {
     } else setError(result);
     setBusy(false);
   }
+  const names = rows.map((row) => row.name);
   return <>
     <FailureNote failure={failure} retry={() => { void load(); }} />
     {data && <>
       <Collection kind="pattern" title="Hidden containers" path="docker" fields={patternFields} entries={patterns(data)}
-        hash={data.hash} refresh={refresh(patterns)} />
+        hash={data.hash} refresh={refresh(patterns)} renderDetails={(input) => <PatternMatches pattern={String(input.pattern ?? "")} names={names} />} />
       <Collection kind="group" title="Groups" path="groups" fields={groupFields} entries={groups(data)}
         hash={data.hash} reorder body={(patch, input) => ({ name: input.name, ...patch })} refresh={refresh(groups)} />
       <section className="settings-section" data-testid="settings-containers">

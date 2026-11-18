@@ -28,7 +28,7 @@ const channelFields: Control[] = [
     hint: key === "url" ? "Stored as plain text. Use a variable or file for credentials. Leave blank to keep an existing URL." : undefined,
   })),
   { key: "chat_id", label: "Chat ID", show: (input) => input.type === "telegram", locked: (input) => !!input.chat_id_env },
-  { key: "timeout", label: "Timeout", placeholder: "10s" },
+  { key: "timeout", format: "duration", label: "Timeout", placeholder: "10s" },
 ];
 
 function channelBody(patch: Values, input: Values) {
@@ -57,7 +57,7 @@ const ruleFields: Control[] = [
   { key: "exclude", label: "Except", format: "list", show: ofType("container", "log_match") },
   { key: "on", label: "Fire on", format: "list", show: ofType("container"), hint: "stopped, exit_nonzero, unhealthy, restarting" },
   { key: "restarts", label: "Restarts", format: "number", show: ofType("container") },
-  { key: "window", label: "Window", show: ofType("container", "log_match") },
+  { key: "window", format: "duration", label: "Window", show: ofType("container", "log_match") },
   { key: "pattern", label: "Pattern", required: true, show: ofType("log_match") },
   { key: "stack", label: "Compose stack", show: ofType("log_match") },
   { key: "count", label: "Matching lines", format: "number", show: ofType("log_match") },
@@ -65,8 +65,8 @@ const ruleFields: Control[] = [
   { key: "expect_status", label: "Expected status", format: "number", show: ofType("http") },
   { key: "contains", label: "Body contains", show: ofType("http") },
   { key: "failures", label: "Failures in a row", format: "number", show: ofType("http") },
-  { key: "timeout", label: "Timeout", show: ofType("http") },
-  { key: "interval", label: "Check every", show: ofType("http", "host") },
+  { key: "timeout", format: "duration", label: "Timeout", show: ofType("http") },
+  { key: "interval", format: "duration", label: "Check every", show: ofType("http", "host") },
   { key: "metric", label: "Metric", options: ["disk", "memory", "cpu", "temp"], default: "disk", show: ofType("host") },
   { key: "disk", label: "Disk label or glob", show: (input) => input.type === "host" && input.metric === "disk" },
   { key: "widget", label: "Widget ID", required: true, show: ofType("widget") },
@@ -77,8 +77,8 @@ const ruleFields: Control[] = [
   { key: "not_equals", label: "Does not equal", show: ofType("widget") },
   { key: "on_error", label: "Fire when the widget fails", format: "switch", show: ofType("widget") },
   { key: "channels", label: "Channels", format: "list", hint: "Separate channel names with commas." },
-  { key: "for", label: "For" },
-  { key: "cooldown", label: "Cooldown" },
+  { key: "for", format: "duration", label: "For" },
+  { key: "cooldown", format: "duration", label: "Cooldown" },
   { key: "message", label: "Message" },
   { key: "recovery", label: "Recovery message" },
 ];

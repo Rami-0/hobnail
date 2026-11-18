@@ -6,3 +6,5 @@
 .settings-section pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .settings-wide{max-width:none}
 .settings-path{overflow-wrap:anywhere}
+.settings-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (max-width:699px){.settings-section .btn,.settings-form .btn{min-height:var(--ctl-h)}}

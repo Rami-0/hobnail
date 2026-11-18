@@ -252,3 +252,6 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--accent)}
 .sdk-select-list [data-highlighted]{background:var(--hover)}
 
 .service-icon{display:inline-grid;place-items:center;flex:none;width:36px;height:36px;object-fit:contain;border-radius:var(--r);background:var(--field);color:var(--text-2);font-weight:600}.nav-item>.service-icon{width:20px;height:20px;font-size:var(--fs-xs)}
+
+/* Keep pending notifications out of the active modal's focus and reading order. */
+body:has(.dlg[data-open]) .toasts{visibility:hidden}

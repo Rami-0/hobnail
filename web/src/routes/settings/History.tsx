@@ -9,7 +9,7 @@ import type { Values } from "./forms.ts";
 import { SettingsForm } from "./SettingsForm.tsx";
 import { endpoint, FailureNote, saved, useSettings, type Control, type Failure, type Save } from "./shared.tsx";
 
-const fields: Control[] = [{ key: "sample_interval", label: "Sample interval", placeholder: "15s", hint: "5 seconds to 5 minutes. For example, 30s." }];
+const fields: Control[] = [{ key: "sample_interval", format: "duration", label: "Sample interval", placeholder: "15s", hint: "5 seconds to 5 minutes. For example, 30s." }];
 
 export default function HistorySettings() {
   const { data, load, failure } = useSettings<{ hash: string; history: Values | null; db: {
