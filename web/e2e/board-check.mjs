@@ -110,6 +110,7 @@ try {
   await tab.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await go("/app/settings/integrations", visible("integration-create")); await inp.click('[data-testid="integration-create"]'); await wait(visible("integration-form"));
   await fill('#integration-form input[name="name"]', "M2 HTTP connection"); await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:1"); await fill('#integration-form input[name="secret"]', SECRET);
+  await wait('document.querySelector("#integration-form")?.textContent.includes("sends the credential unencrypted")', "HTTP credential warning is shown before save");
   await inp.click('button[form="integration-form"][type="submit"]'); await wait(`!${visible("integration-form")}`, "integration saves");
   const integrations = await api("GET", "/integrations"); integrationId = integrations.data.find((item) => item.name === "M2 HTTP connection").id;
   check(!integrations.text.includes(SECRET), "credential never appears in integration list response");
