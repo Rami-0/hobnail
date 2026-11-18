@@ -11,7 +11,7 @@
 // goes into it and back to the opener; a closed drawer is out of the tab
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS, as before.
-import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon } from "lucide-react";
+import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
@@ -25,6 +25,7 @@ import { interceptedPath } from "./paths.ts";
 import { local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
+const Palette = lazy(() => import("./Palette.tsx"));
 const Shortcuts = lazy(() => import("./Shortcuts.tsx").then((m) => ({ default: m.Shortcuts })));
 const Toaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
 import { Brand, Sidebar } from "./Sidebar.tsx";
@@ -122,6 +123,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const phone = useMedia(PHONE);
   const [rail, setRail] = useState(() => document.documentElement.dataset.side === "rail");
   const [open, setOpenState] = useState(false);
+  const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
   const sideRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
@@ -276,8 +278,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       const a = document.activeElement;
       const typing =
         a instanceof HTMLElement && isTyping(a.tagName, a instanceof HTMLInputElement ? a.type : "", a.isContentEditable);
-      const blocked = !!document.querySelector('[role="dialog"][data-open]') || document.documentElement.classList.contains("side-open");
+      const blocked = !!document.querySelector('[role="dialog"][data-open]:not([data-testid="palette"])') || document.documentElement.classList.contains("side-open");
       const r = keyAction(e, keyState.current, Date.now(), typing, blocked);
+      if (palette && r.action?.kind !== "palette") return;
       keyState.current = r.state;
       const act = r.action;
       if (!act) return;
@@ -286,6 +289,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           if (b?.scoped && act.page !== "containers" && !(act.page === "settings" && b.role === "admin")) return;
           e.preventDefault();
           navigate(GO_HREF[act.page]());
+          return;
+        case "palette":
+          e.preventDefault();
+          setPalette((shown) => !shown);
           return;
         case "help":
           e.preventDefault();
@@ -297,6 +304,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             e.preventDefault();
             f.focus();
             f.select();
+          } else {
+            e.preventDefault();
+            setPalette(true);
           }
           return;
         }
@@ -323,7 +333,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("focusin", onFocus);
     };
-  }, [b?.scoped, b?.role, current, setOpen]);
+  }, [b?.scoped, b?.role, current, palette, setOpen]);
 
   // ---- banners ----
   const dockerError = b?.features.docker ? (ctrs.data?.docker_error ?? b.docker_error) : null;
@@ -363,6 +373,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             </span>
             <div className="top-title">{title}</div>
             {b && !b.scoped && <Vitals />}
+            <Button className="icon-btn" data-testid="palette-open" aria-label="Search and commands" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+              <SearchIcon aria-hidden="true" />
+            </Button>
             <ThemeButton />
             <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
               <RefreshCwIcon aria-hidden="true" />
@@ -438,6 +451,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>More</span>
         </button>
       </nav>
+      {palette && <Suspense fallback={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></Suspense>}
       {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}
       <StalePill />
       <Suspense fallback={null}><Toaster /></Suspense>

@@ -4,7 +4,7 @@ import { api, useSession } from "../api/session.ts";
 import { Menu } from "../ui/Menu.tsx";
 import { toast } from "../ui/toast.ts";
 
-async function signOut(): Promise<void> {
+export async function signOut(): Promise<void> {
   const r = await api.post("/api/logout");
   if (r.kind !== "ok" && r.kind !== "sign_in") {
     toast(`Sign-out failed: ${r.message}`, { kind: "bad" });

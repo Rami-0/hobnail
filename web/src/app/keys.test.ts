@@ -61,3 +61,10 @@ test("⌘ on a Mac", () => {
   assert.equal(modName("Linux x86_64"), "Ctrl");
   assert.equal(modName("Win32"), "Ctrl");
 });
+
+test("the palette chord toggles even in its search field", () => {
+  assert.deepEqual(keyAction(k("K", { metaKey: true }), { gAt: 5 }, 100, true, false), {
+    action: { kind: "palette" }, state: { gAt: 0 },
+  });
+  assert.equal(keyAction(k("k", { ctrlKey: true }), { gAt: 0 }, 100, false, true).action, null);
+});

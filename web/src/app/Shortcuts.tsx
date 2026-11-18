@@ -38,16 +38,21 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         {!scoped && <>
         <Row k={["g", "h"]}>Host{OLD}</Row>
         <Row k={["g", "l"]}>Logs{OLD}</Row>
-        <Row k={["g", "y"]}>History{OLD}</Row>
+        <Row k={["g", "y"]}>History</Row>
         <Row k={["g", "a"]}>Alerts{OLD}</Row>
         </>}
         {(!scoped || boot.role === "admin") && <Row k={["g", "s"]}>Settings</Row>}
+        <Row k={[mod, "K"]}>Search and commands</Row>
+        <Row k={["↑ / ↓"]}>Move through palette results</Row>
+        <Row k={["Home / End"]}>First or last palette result</Row>
+        <Row k={["Page Up / Down"]}>Move eight results in the palette</Row>
+        <Row k={["↵"]}>Run the selected palette result</Row>
         <Row k={["j"]}>Next row that opens something</Row>
         <Row k={["k"]}>Previous row</Row>
         <Row k={["↵"]}>Open the row</Row>
         {!scoped && <Row k={["l"]}>Logs of the focused or open container{OLD}</Row>}
         <Row k={["/"]}>
-          {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "This page's filter (this page has none)"}
+          {f ? `This page's filter: “${f.placeholder || f.getAttribute("aria-label") || "Filter"}”` : "Search and commands"}
         </Row>
         <Row k={["Alt", "↑ / ↓"]}>Board edit: move an item within its section</Row>
         <Row k={["Alt", "← / →"]}>Board edit: move an item between sections</Row>

@@ -229,3 +229,5 @@ same-session conflicts use the original document for a three-way rebase.
 | `[data-testid="history"]` | History page |
 | `[data-testid="chart-cpu"] .ch-canvas` | CPU plot drag target |
 | `#ev-<id>` | Timeline row opened by a chart marker |
+| `[data-testid="palette-open"]` | Open the command palette |
+| `[data-testid="palette"] [role="combobox"]` | Palette query and active option |

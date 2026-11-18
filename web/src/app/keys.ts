@@ -3,13 +3,13 @@
 // field and with Ctrl, ⌘ or Alt held; `g` then a letter within 1.2 s jumps
 // to a page.
 //
-// Ported in this slice: g o/c/h/l/y/a/s, j, k, l, /, ?. Ctrl/⌘ K (the
-// command palette) is not: the palette is not in the client yet.
+// The command palette also toggles while its own input has focus.
 
 export type KeyAction =
   | { kind: "go"; page: GoPage }
   | { kind: "slash" }
   | { kind: "help" }
+  | { kind: "palette" }
   | { kind: "row"; dir: 1 | -1 }
   | { kind: "logs" };
 
@@ -52,6 +52,9 @@ export function keyAction(
   typing: boolean,
   blocked: boolean,
 ): { action: KeyAction | null; state: KeyState } {
+  if (!blocked && !e.altKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    return { action: { kind: "palette" }, state: { gAt: 0 } };
+  }
   if (typing || blocked || e.ctrlKey || e.metaKey || e.altKey) return { action: null, state: { gAt: 0 } };
   const k = e.key;
   if (st.gAt && now - st.gAt < G_WINDOW_MS && GO[k]) return { action: { kind: "go", page: GO[k] }, state: { gAt: 0 } };

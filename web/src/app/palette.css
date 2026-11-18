@@ -1,0 +1,4 @@
+.palette-input { width: 100%; }
+.palette-results { list-style: none; padding: 0; margin: .5rem 0 0; max-height: 55vh; overflow: auto; }
+.palette-results .btn { width: 100%; min-height: var(--ctl-h); display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; padding: .5rem; overflow-wrap: anywhere; cursor: pointer; }
+.palette-results .btn[aria-selected=true] { background: var(--surface-2); outline: 1px solid currentColor; outline-offset: -1px; }
