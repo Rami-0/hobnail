@@ -6,7 +6,12 @@ import { input, launch, q, sleep } from './cdp.mjs';
 import { sweepFixture } from './sweep-fixture.mjs';
 import { MEASURE } from './hit-targets.mjs';
 const base = new URL(process.argv[2] || 'http://127.0.0.1:3396');
-const fixture = await sweepFixture(base), browser = await launch(), results = [];
+assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
+assert.match(base.port, /^339[5-9]$/);
+const onboarding = process.env.ONBOARDING_ONLY === '1';
+if (onboarding) assert.equal((await fetch(new URL('/api/v1/session',base)).then(r=>r.json())).owner_exists,false,'onboarding audit needs a fresh instance');
+const fixture = onboarding ? { routes: [['/app','form[data-testid="onboarding"]']], board: {id:''}, installCookie: async()=>{}, cleanup: async()=>{} } : await sweepFixture(base);
+const browser = await launch(), results = [];
 const failures = [];
 try {
   for (const width of [1440,390]) {
@@ -59,9 +64,11 @@ try {
           await audit(route+' edit'); await inp.click('[data-testid="board-cancel"]');
         }
       }
-      await tab.send('Network.clearBrowserCookies');
-      await tab.send('Page.navigate',{url:new URL('/app/login',base).href});
-      assert.ok(await tab.until(`!!document.querySelector('[data-testid="login"]')`));await audit('/app/login');
+      if (!onboarding) {
+        await tab.send('Network.clearBrowserCookies');
+        await tab.send('Page.navigate',{url:new URL('/app/login',base).href});
+        assert.ok(await tab.until(`!!document.querySelector('[data-testid="login"]')`));await audit('/app/login');
+      }
     } catch(error) {failures.push(`${width}: ${error.stack}`);}
     finally {await tab.shot(path.join(process.env.OUT,`${width}-last.png`));await tab.close();}
   }
