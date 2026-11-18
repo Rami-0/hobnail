@@ -220,6 +220,12 @@ try {
         await load('/app/containers/svc149/logs','[data-testid="log-pane"]'); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "not found"', "not-found pane");
         await load('/app/containers/svc148/logs','[data-testid="log-pane"]'); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "error"', "error pane");
       }
+      await load('/app/containers/svc001/logs', '[data-testid="log-body"] [data-log-id]');
+      await tab.ev(`window.dispatchEvent(new PageTransitionEvent('pagehide'))`); await sleep(1800);
+      assert.equal((await fetch(new URL('/api/logs/status',base),{headers}).then(r=>r.json())).viewer_streams,0,"pagehide closes the upstream stream");
+      const previousSources=await tab.ev('logSources.length');
+      await tab.ev(`window.dispatchEvent(new PageTransitionEvent('pageshow'))`);
+      await wait(`logSources.length>${previousSources} && document.querySelector('[data-testid=log-pane]').dataset.state==='live'`, "pageshow resumes the log stream");
       await load('/app/containers/svc004/logs','[data-testid="log-pane"]'); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "ended"', "stopped container ended");
       await load('/app/containers/svc001/logs','[data-testid="log-body"] [data-log-id]');
       rec.allow(({url,status})=>url.includes('/api/v1/logs/picker')&&status===401 ? 'deliberate session removal' : false);
