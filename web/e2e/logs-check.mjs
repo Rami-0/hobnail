@@ -57,7 +57,7 @@ try {
       if (width === 390) await tab.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       console.log(label, "picker");
       await load("/app/logs", '[data-testid="logs-picker-row"]'); await tab.shot(path.join(out, `${label}-list.png`));
-      await inp.click('[data-testid="filter"]'); await inp.type("svc001");
+      await inp.key("/"); await wait('document.activeElement === document.querySelector("[data-testid=filter]")', "slash focuses picker filter"); await inp.type("svc001");
       await wait('document.querySelectorAll("[data-testid=logs-picker-row]").length === 1', "picker filter");
       assert.ok((await tab.ev("location.search")).includes("q=svc001"));
       await inp.key("Enter"); await wait('!!document.querySelector("[data-testid=log-body] [data-log-id]")', "Enter opens first match");
@@ -128,9 +128,12 @@ try {
       await setDate('logs-from',fromDate); await setDate('logs-to',toDate); await clickText("Apply"); await wait('document.querySelector(".log-custom").textContent.includes("later")', "backward range validation");
       await setDate('logs-to',new Date().toISOString().slice(0,16)); await clickText("Apply"); await wait('new URL(location.href).searchParams.has("until")', "apply custom window"); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "ended"', "closed window ended");
       await choose("Range", ""); await wait('document.querySelector("[data-testid=log-pane]").dataset.state === "live"', "return to live");
-      await sleep(400);
-      await tab.ev(`document.querySelector('[data-testid=log-body] details summary')?.click()`);
+      await wait('document.querySelector("[data-testid=log-body]").dataset.searchLines === "5000"', "live tail is fully loaded");
+      await setQuery("JSON request"); await wait('!!document.querySelector(".log-current details summary")', "seek a JSON row");
+      await sleep(200);
+      await tab.ev(`document.querySelector('.log-current details summary')?.click()`);
       assert.ok(await tab.ev(`!!document.querySelector('[data-testid=log-body] details[open] pre')`), "JSON folds and opens");
+      await setQuery("");
       console.log(label, "clipboard and reconnect");
       await tab.send("Browser.grantPermissions", {origin:base.origin, permissions:["clipboardReadWrite","clipboardSanitizedWrite"]});
       const expectedCopy = await tab.ev(`(()=>{const r=document.querySelector('.log-row:not(:has(details))'); r.click(); return r.querySelector('.log-text').textContent;})()`);
