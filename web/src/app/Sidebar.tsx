@@ -418,7 +418,7 @@ export function Sidebar({
         <NavLink href="/" label="Overview" old icon={<LayoutGridIcon aria-hidden="true" />} />
         <NavLink href="/host" label="Host" old icon={<ServerIcon aria-hidden="true" />} />
         <NavLink href="/logs" label="Logs" old icon={<ScrollTextIcon aria-hidden="true" />} />
-        <NavLink href="/history" label="History" old icon={<HistoryIcon aria-hidden="true" />} />
+        <NavLink href="/app/history" label="History" current={r.name === "history"} icon={<HistoryIcon aria-hidden="true" />} />
         <NavLink
           href="/alerts"
           label="Alerts"

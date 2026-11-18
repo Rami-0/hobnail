@@ -58,7 +58,7 @@ const GO_HREF: Record<GoPage, () => string> = {
   containers: () => appHref("/containers"),
   host: () => "/host",
   logs: () => "/logs",
-  history: () => "/history",
+  history: () => "/app/history",
   alerts: () => "/alerts",
   settings: () => "/app/settings/boards",
 };

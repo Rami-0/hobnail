@@ -9,6 +9,7 @@ export type Route =
   | { name: "login" }
   | { name: "invite"; token: string }
   | { name: "containers" }
+  | { name: "history" }
   | { name: "board"; id: string }
   | { name: "settings"; tab: "boards" | "integrations" }
   /** One container's page; `ctr` is the decoded container name. */
@@ -43,6 +44,8 @@ export function matchRoute(pathname: string): Route {
       return { name: "home" };
     case "/login":
       return { name: "login" };
+    case "/history":
+      return { name: "history" };
     case "/containers":
       return { name: "containers" };
   }

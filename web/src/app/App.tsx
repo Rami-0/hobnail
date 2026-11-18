@@ -13,6 +13,7 @@ import { Button } from "../ui/Button.tsx";
 import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
+const HistoryPage = lazy(() => import("../routes/history/index.tsx"));
 const SettingsPage = lazy(() => import("../routes/settings/index.tsx"));
 const BoardPage = lazy(() => import("../routes/board/index.tsx"));
 const loadContainers = () => import("../routes/containers/index.tsx");
@@ -29,6 +30,7 @@ function titleOf(r: Route): string {
   switch (r.name) {
     case "home":
       return "Home";
+    case "history": return "History";
     case "board": return "Board";
     case "settings": return "Settings";
     case "login":
@@ -121,6 +123,9 @@ export function App() {
   switch (route.name) {
     case "home":
       page = <Home />;
+      break;
+    case "history":
+      page = <HistoryPage />;
       break;
     case "settings":
       page = <SettingsPage key={route.tab} />;

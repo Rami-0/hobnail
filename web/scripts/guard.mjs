@@ -6,7 +6,7 @@
 //   only src/main.tsx may import @ui-sdk/core/web.css);
 // - recharts imported outside src/charts/;
 // - src/charts/ reached other than by a lazy `import("…/charts/…")` from
-//   src/routes/container/ (the charts chunk is never on the first route;
+//   a chart-bearing route (the charts chunk is never on the first route;
 //   `import type` is fine, it is erased).
 // Comments are not exempt: rewording a comment is cheaper than an
 // allow-list that hides a real use.
@@ -87,12 +87,12 @@ for (const file of files(src)) {
     for (const m of text.matchAll(STATIC)) {
       if (!inCharts(file, m[1])) continue;
       const line = text.slice(0, m.index).split("\n").length;
-      problems.push(`${rel}:${line}: "${m[1]}" is the charts chunk: load it with a lazy import() from src/routes/container/`);
+      problems.push(`${rel}:${line}: "${m[1]}" is the charts chunk: load it with a lazy import() from a chart-bearing route`);
     }
     for (const m of text.matchAll(DYNAMIC)) {
-      if (!inCharts(file, m[1]) || rel.startsWith("src/routes/container/")) continue;
+      if (!inCharts(file, m[1]) || /^src\/routes\/(container|history|overview|host)\//.test(rel)) continue;
       const line = text.slice(0, m.index).split("\n").length;
-      problems.push(`${rel}:${line}: the charts chunk is loaded only from src/routes/container/`);
+      problems.push(`${rel}:${line}: the charts chunk is loaded only from a chart-bearing route`);
     }
   }
 }

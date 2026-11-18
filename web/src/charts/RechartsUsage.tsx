@@ -30,6 +30,7 @@ import {
   type TooltipContentProps,
 } from "recharts";
 
+import type { HistoryMetric } from "../api/gen/HistoryMetric.ts";
 import type { SeriesSet } from "../api/gen/SeriesSet.ts";
 import { bytes, pct } from "../format/index.ts";
 import { chartMarkers, chartRows, lonePoints, tickLabel, ticks, yTop, zoomTo, type ChartRow, type Marker } from "./series.ts";
@@ -43,10 +44,17 @@ export interface UsageChartsProps {
   onMarker: (id: number, at: number) => void;
   /** History is recording at all (else the empty charts say so). */
   recording?: boolean;
+  metrics?: HistoryMetric[];
 }
 
 type Kind = "cpu" | "mem";
-type Layer = "avg" | "max";
+type Layer = "avg" | "max" | "cmp";
+type Unit = "pct" | "bytes" | "rate" | "scalar" | "temp";
+const HISTORY: Record<string, [string, Unit]> = {
+  cpu: ["CPU", "pct"], load1: ["Load (1 min)", "scalar"], mem: ["Memory", "bytes"],
+  swap: ["Swap", "bytes"], disk: ["Disk used", "pct"], temp: ["Temperature", "temp"],
+  net_rx: ["Network in", "rate"], net_tx: ["Network out", "rate"],
+};
 
 /** The old UI's key: layers switched off on every chart ("avg", "max", "cmp"). */
 const OFF_KEY = "hb.chartOff";
@@ -65,14 +73,21 @@ function axisTrim(v: number): string {
   return String(Math.round(v * 100) / 100);
 }
 
-const fmt = (k: Kind, v: number) => (k === "cpu" ? pct(v) : bytes(v));
-const axis = (k: Kind, v: number) => (v === 0 ? "0" : k === "cpu" ? `${axisTrim(v)}%` : bytes(v));
+function format(unit: Unit, v: number): string {
+  switch (unit) {
+    case "pct": return pct(v);
+    case "bytes": return bytes(v);
+    case "rate": return `${bytes(v)}/s`;
+    case "temp": return `${axisTrim(v)} °C`;
+    case "scalar": return axisTrim(v);
+  }
+}
 
 // Intl's date formatting is slow the first time (locale data): warm it in a
 // task of its own, before the first chart asks for tick labels.
 window.setTimeout(() => tickLabel(Math.floor(Date.now() / 1000), 3600), 0);
 
-export default function UsageCharts({ series, onZoom, onMarker, recording = true }: UsageChartsProps) {
+export default function UsageCharts({ series, onZoom, onMarker, recording = true, metrics }: UsageChartsProps) {
   const rows = useMemo(() => chartRows(series), [series]);
   const markers = useMemo(() => chartMarkers(series.markers, series.from, series.to), [series]);
   const xt = useMemo(() => ticks(series.from, series.to), [series.from, series.to]);
@@ -100,11 +115,19 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   // second in the next task (a first Recharts render is the costly part).
   const [stage, setStage] = useState(0);
   useEffect(() => {
-    if (stage >= 2) return;
+    if (stage >= (metrics?.length ?? 2)) return;
     const t = window.setTimeout(() => startTransition(() => setStage((n) => n + 1)), 0);
     return () => window.clearTimeout(t);
-  }, [stage]);
+  }, [stage, metrics?.length]);
   const common = { rows, series, markers, xt, off, toggle, onZoom, onMarker, recording };
+  if (metrics) return <div className="charts two">
+    {metrics.map((metric, i) => {
+      const [title, unit] = HISTORY[metric.key] ?? [metric.key, "scalar"];
+      return i < stage
+        ? <HistoryChart key={metric.key} metric={metric} title={title} unit={unit} {...common} />
+        : <div key={metric.key} className="chart ch-wait" aria-busy="true" />;
+    })}
+  </div>;
   return (
     <div className="charts two">
       {stage >= 1 ? <OneChart kind="cpu" title="CPU" {...common} /> : <div className="chart ch-wait" aria-busy="true" />}
@@ -113,9 +136,20 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   );
 }
 
+function HistoryChart({ metric, ...props }: Omit<OneProps, "kind"> & { metric: HistoryMetric }) {
+  const rows = useMemo(() => chartRows({
+    step: metric.step, cpu: metric.points, cpu_max: metric.max, mem: metric.yesterday ?? [], mem_max: null,
+  }), [metric]);
+  return <OneChart {...props} kind="cpu" rows={rows} testKey={metric.key} compare={metric.yesterday !== null} sync="history" />;
+}
+
 interface OneProps {
   kind: Kind;
   title: string;
+  unit?: Unit;
+  testKey?: string;
+  compare?: boolean;
+  sync?: string;
   rows: ChartRow[];
   series: SeriesSet;
   markers: Marker[];
@@ -132,12 +166,14 @@ interface Plot {
   width: number;
 }
 
-function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom, onMarker, recording }: OneProps) {
+function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom, onMarker, recording, unit = kind === "cpu" ? "pct" : "bytes", testKey = kind, compare = false, sync = "ctr-usage" }: OneProps) {
   const bandKey = kind === "cpu" ? "cpuBand" : "memBand";
   const hasBand = rows.some((r) => r[bandKey] !== null);
   const showAvg = !off.includes("avg");
   const showMax = hasBand && !off.includes("max");
-  const top = useMemo(() => yTop(rows, kind, showMax), [rows, kind, showMax]);
+  const showCompare = compare && !off.includes("cmp");
+  const top = useMemo(() => Math.max(yTop(rows, kind, showMax), showCompare ? yTop(rows, "mem", false) : 0), [rows, kind, showMax, showCompare]);
+  const bottom = unit === "temp" ? Math.min(0, ...rows.map((row) => row[kind] ?? 0), ...rows.map((row) => showCompare ? row.mem ?? 0 : 0)) : 0;
   const lone = useMemo(() => lonePoints(rows, kind), [rows, kind]);
   const values = rows.flatMap((r) => (r[kind] === null ? [] : [r[kind] as number]));
   const last = values.length ? (values[values.length - 1] as number) : null;
@@ -214,13 +250,13 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
   const summary =
     values.length === 0
       ? `${title}: no data in this window`
-      : `${title}: last ${fmt(kind, last ?? 0)}, highest ${fmt(kind, Math.max(...values))}, lowest ${fmt(kind, Math.min(...values))}`;
+      : `${title}: last ${format(unit, last ?? 0)}, highest ${format(unit, Math.max(...values))}, lowest ${format(unit, Math.min(...values))}`;
 
   return (
-    <figure className={`chart ch-${kind}`} data-testid={`chart-${kind}`} aria-label={summary}>
+    <figure className={`chart ch-${kind}`} data-testid={`chart-${testKey}`} aria-label={summary}>
       <figcaption className="ch-h">
         <span className="ch-t">{title}</span>
-        <span className="ch-v num">{last === null ? "—" : fmt(kind, last)}</span>
+        <span className="ch-v num">{last === null ? "—" : format(unit, last)}</span>
         <fieldset className="ch-lg">
           <legend className="sr">{`${title} layers`}</legend>
           <button type="button" className="lg avg" aria-pressed={showAvg} onClick={() => toggle("avg")}>
@@ -231,9 +267,10 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
               Max
             </button>
           )}
+          {compare && <button type="button" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</button>}
         </fieldset>
       </figcaption>
-      {values.length === 0 ? (
+      {values.length === 0 && !rows.some((r) => showCompare && r.mem !== null) ? (
         <p className="ch-empty muted">
           {recording ? "No data in this window." : "History is off: nothing is recorded, so there is nothing to draw."}
         </p>
@@ -241,7 +278,8 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
         <div className="ch-canvas" ref={wrap} onPointerDown={onPointerDown}>
           <ComposedChart
             data={rows}
-            syncId="ctr-usage"
+            syncId={sync}
+            syncMethod={sync === "history" ? "value" : "index"}
             responsive
             width="100%"
             height={180}
@@ -262,10 +300,10 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
               niceTicks="none"
             />
             <YAxis
-              domain={[0, top]}
+              domain={[bottom, top]}
               allowDataOverflow
-              ticks={[0, top / 2, top]}
-              tickFormatter={(v: number) => axis(kind, v)}
+              ticks={[bottom, (top + bottom) / 2, top]}
+              tickFormatter={(v: number) => v === 0 ? "0" : format(unit, v)}
               interval={0}
               niceTicks="none"
               width={56}
@@ -275,7 +313,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
             <Tooltip
               isAnimationActive={false}
               cursor={{ className: "ch-cursor" }}
-              content={<Tip kind={kind} span={span} markers={markers} />}
+              content={<Tip kind={kind} unit={unit} compare={showCompare} span={span} markers={markers} />}
             />
             {showMax && (
               <Area
@@ -303,6 +341,7 @@ function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom,
                 name={title}
               />
             )}
+            {showCompare && <Line dataKey="mem" stroke="currentColor" strokeOpacity={0.55} strokeDasharray="4 3" name="Yesterday" dot={false} isAnimationActive={false} />}
             {showAvg &&
               lone.map((i) => {
                 const r = rows[i] as ChartRow;
@@ -349,7 +388,7 @@ function PlotProbe({ onPlot }: { onPlot: (p: Plot) => void }) {
 }
 
 /** The tooltip body; Recharts passes the hover state (active, label, payload) into the element. */
-function Tip({ kind, span, markers, ...p }: Partial<TooltipContentProps> & { kind: Kind; span: number; markers: Marker[] }) {
+function Tip({ kind, unit, compare, span, markers, ...p }: Partial<TooltipContentProps> & { kind: Kind; unit: Unit; compare: boolean; span: number; markers: Marker[] }) {
   if (!p.active || p.label === undefined) return null;
   const t = Number(p.label);
   // The hovered row itself (a hidden layer has no payload entry of its own).
@@ -366,8 +405,9 @@ function Tip({ kind, span, markers, ...p }: Partial<TooltipContentProps> & { kin
   return (
     <div className="ch-tip">
       <span className="ch-tip-t">{when}</span>
-      <span className="ch-tip-v">{typeof v === "number" ? fmt(kind, v) : "no data"}</span>
-      {typeof max === "number" && <span className="ch-tip-m">max {fmt(kind, max)}</span>}
+      <span className="ch-tip-v">{typeof v === "number" ? format(unit, v) : "no data"}</span>
+      {typeof max === "number" && <span className="ch-tip-m">max {format(unit, max)}</span>}
+      {compare && typeof row?.mem === "number" && <span className="ch-tip-m">yesterday {format(unit, row.mem)}</span>}
       {mk && <span className="ch-tip-mk">{mk.label}</span>}
     </div>
   );

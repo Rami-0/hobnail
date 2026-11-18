@@ -22,7 +22,7 @@ the JSON API. Same origin, no Node in production.
 | `src/api/session.ts` | `GET /api/v1/session` store, `useSession()`, the `api` client |
 | `src/api/gen/` | TypeScript types generated from Rust by ts-rs; never edit by hand (`RH_UPDATE_TYPES=1 scripts/cargo.sh test` rewrites them) |
 | `src/ui/` | the wrapper folder for interactive primitives (see below) |
-| `src/charts/` | the only place that may import `recharts`; reached only by a lazy `import()` from `src/routes/container/` |
+| `src/charts/` | the only place that may import `recharts`; reached only by a lazy `import()` from a chart-bearing route |
 | `src/styles/` | `global.css` (imported once by main.tsx) imports `tokens.css` (tokens and themes), `ui.css` (the primitives of `src/ui/`) and `shell.css` (sidebar, top bar, bottom bar) |
 | `scripts/guard.mjs` | source guard run by `npm run check` |
 
@@ -223,3 +223,9 @@ When resuming a stale draft, the API supplies its document but no historical
 base document. Recovery therefore preserves server additions and asks the
 user to review the merge; old removals may need to be applied again. Ordinary
 same-session conflicts use the original document for a three-way rebase.
+
+| Selector | Meaning |
+|---|---|
+| `[data-testid="history"]` | History page |
+| `[data-testid="chart-cpu"] .ch-canvas` | CPU plot drag target |
+| `#ev-<id>` | Timeline row opened by a chart marker |

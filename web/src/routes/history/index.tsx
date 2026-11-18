@@ -1,0 +1,93 @@
+import { lazy, Suspense, useEffect, useState } from "react";
+import type { HistoryView } from "../../api/gen/HistoryView.ts";
+import { api } from "../../api/session.ts";
+import { containerHref } from "../../app/paths.ts";
+import { navigate, useRoute } from "../../app/router.ts";
+import { useBootstrap, useContainers } from "../../live/index.ts";
+import { Button } from "../../ui/Button.tsx";
+import { RelativeTime } from "../../ui/RelativeTime.tsx";
+import { historyWindow, RANGES, windowSteps } from "./window.ts";
+import "./history.css";
+
+const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
+
+export default function History() {
+  const { search, setSearch, hash } = useRoute();
+  const { query, level, zoomed, range } = historyWindow(search);
+  const bootstrap = useBootstrap();
+  const sessionScoped = bootstrap?.scoped;
+  const { data: containers } = useContainers();
+  const [data, setData] = useState<HistoryView>();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (sessionScoped !== false) return;
+    const controller = new AbortController();
+    void api.get<HistoryView>(`/api/v1/history?${query}`, { signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") {
+        setData(result.data);
+        setError("");
+      } else setError(result.message);
+    });
+    return () => controller.abort();
+  }, [query, sessionScoped]);
+
+  const selected = hash.startsWith("#ev-") ? Number(hash.slice(4)) : null;
+  const extra = data?.markers.find((e) => e.id === selected && !data.events.some((row) => row.id === e.id));
+  useEffect(() => {
+    if (selected === null || !data) return;
+    document.getElementById(`ev-${selected}`)?.scrollIntoView({ block: "nearest" });
+  }, [selected, data]);
+  if (sessionScoped) return <p className="page">History is unavailable with board-scoped access.</p>;
+
+  const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
+  const steps = data ? windowSteps(data.from, data.to, data.now) : null;
+  return <div className="page" data-testid="history">
+    <h1>History</h1>
+    <div className="toolbar history-controls">
+      {RANGES.map((r) => <Button key={r} aria-pressed={!zoomed && r === range} onClick={() => setSearch({ range: r, from: null, to: null, before: null })}>{r}</Button>)}
+      {steps && (["earlier", "in", "out", "later"] as const).map((key, index) => <Button key={key} disabled={!steps[key]} onClick={() => { if (steps[key]) setSearch(steps[key]); }}>{["Earlier", "Zoom in", "Zoom out", "Later"][index]}</Button>)}
+      <Button disabled={!!data && data.to - data.from > 86400} aria-pressed={search.get("cmp") === "1"} onClick={() => setSearch({ cmp: search.get("cmp") === "1" ? null : "1" })}>Compare with yesterday</Button>
+      {zoomed && <Button onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button>}
+    </div>
+    {error && <p role="alert">{error}</p>}
+    {!data ? !error && <p role="status">Loading history…</p> : <>
+      <Suspense fallback={<p role="status">Loading charts…</p>}>
+        <Charts
+          series={{ from: data.from, to: data.to, range, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
+          metrics={data.metrics}
+          recording={data.recording}
+          onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
+          onMarker={(id) => navigate(`/app/history?${query}#ev-${id}`)}
+        />
+      </Suspense>
+      <section className="panel history-block">
+        <h2>Container starts per day</h2>
+        {Object.keys(data.starts_per_day).length === 0 ? <p>No container starts recorded in the last seven days.</p> :
+          <ul>{Object.entries(data.starts_per_day).map(([name, days]) => <li key={name}>
+            {names.has(name) ? <a href={containerHref(name)}>{name}</a> : name}
+            {" "}<span aria-label="Starts per day, newest first">{days.join(" · ")}</span>
+          </li>)}</ul>}
+      </section>
+      <section className="panel history-block" aria-label="Incident timeline">
+        <h2>Incident timeline</h2>
+        <div className="toolbar history-controls">
+          {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
+        </div>
+        {data.events.length === 0 && !extra && <p>No matching events in this window.</p>}
+        <ul className="history-events">
+          {[...(extra ? [extra] : []), ...data.events].map((event) => <li key={event.id} id={`ev-${event.id}`} data-selected={event.id === selected || undefined}>
+            <RelativeTime at={event.at} /> <strong>{event.kind}</strong>{" "}
+            {names.has(event.subject) ? <>
+              <a href={containerHref(event.subject)}>{event.subject}</a>{" "}
+              <a href={`/app/logs/${encodeURIComponent(event.subject)}#t=${event.at}`}>Logs</a>
+            </> : event.subject}
+            {event.message && <div className="muted">{event.message}</div>}
+          </li>)}
+        </ul>
+        {search.has("before") && <Button onClick={() => setSearch({ before: null })}>Back to newest</Button>}
+        {data.older !== null && <Button onClick={() => setSearch({ before: String(data.older) })}>Older events</Button>}
+      </section>
+    </>}
+  </div>;
+}
