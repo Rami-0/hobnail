@@ -44,7 +44,7 @@ if (!/^https?:\/\//.test(base)) { console.error("usage: node web/e2e/perf-check.
 if (new URL(base).port === "3200") { console.error("refusing port 3200: that is the live instance"); process.exit(2); }
 const OUT = process.env.OUT || fs.mkdtempSync(path.join(os.tmpdir(), "perf-check-"));
 fs.mkdirSync(OUT, { recursive: true });
-const TARGETS = (process.env.TARGETS || "app chart old old-ctr").split(/[\s,]+/).filter(Boolean);
+const TARGETS = (process.env.TARGETS || "app chart overview history host board logs settings").split(/[\s,]+/).filter(Boolean);
 const PROFILES = (process.env.PROFILES || "phone desktop").split(/[\s,]+/).filter(Boolean);
 const UPDATES = Number(process.env.UPDATES || 3);
 const MIN_ROWS = Number(process.env.MIN_ROWS || 1);
@@ -54,6 +54,8 @@ const TRACE = process.env.TRACE !== "0";
 const LOAD_BUDGET = 200, LIVE_BUDGET = 50, LIVE_WINDOW = 1000, SETTLE = 2000;
 const enc = encodeURIComponent(NAME);
 let sessionCookie = process.env.HB_COOKIE;
+let csrf;
+let boardId;
 if (!sessionCookie && process.env.HB_PASSWORD) {
   const origin = new URL(base).origin;
   const session = await fetch(`${base}/api/v1/session`).then((r) => r.json());
@@ -62,10 +64,29 @@ if (!sessionCookie && process.env.HB_PASSWORD) {
     body: JSON.stringify({ username: "admin", password: process.env.HB_PASSWORD }),
   });
   if (!response.ok) throw new Error(`Performance sign-in failed: ${response.status}`);
+  csrf = (await response.json()).csrf;
   sessionCookie = response.headers.get("set-cookie")?.split(";")[0];
 }
 
+if (TARGETS.includes("board")) {
+  if (!sessionCookie) throw new Error("Board performance fixtures require authentication");
+  const headers = { Cookie: sessionCookie, Origin: new URL(base).origin, "Content-Type": "application/json", "X-RH-CSRF": csrf ?? (await fetch(`${base}/api/v1/session`, { headers: { Cookie: sessionCookie } }).then(r => r.json())).csrf };
+  const created = await fetch(`${base}/api/v1/boards`, { method: "POST", headers, body: JSON.stringify({ name: "Performance 40 items" }) }).then(r => r.json());
+  boardId = created.id;
+  const document = (await fetch(`${base}/api/v1/boards/${boardId}`, { headers }).then(r => r.json())).document;
+  document.sections = [{ title: "Services", position: 0, items: Array.from({ length: 40 }, (_, position) => ({
+    position, spans: { mobile: 1, tablet: 3, desktop: 3, rows: 1 }, payload: { kind: "link", title: `Service ${position + 1}`, url: `https://example.com/${position}` },
+  })) }];
+  const saved = await fetch(`${base}/api/v1/boards/${boardId}`, { method: "PUT", headers, body: JSON.stringify(document) });
+  if (!saved.ok) throw new Error(`Board fixture: ${saved.status} ${await saved.text()}`);
+}
 const T = {
+  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: [], interaction: '.overview-strips summary', fails: true },
+  history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: [], interaction: '.history-controls button', fails: true },
+  host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: [], interaction: '[data-testid="host-disclosure"] summary', fails: true },
+  board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: [], interaction: '[data-testid="board-edit"]', fails: true },
+  logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: [], filter: '[data-testid="filter"]', fails: true },
+  settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: [], filter: 'input[name="greeting"]', fails: true },
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
     rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]', fails: true },
   chart: { path: `/app/containers/${enc}`, ready: `!!document.querySelector('figure[data-testid="chart-cpu"] svg') && !!document.querySelector('figure[data-testid="chart-mem"] svg')`,
@@ -156,7 +177,7 @@ async function run(target, profile) {
 
     // live updates
     let live = [];
-    if (ready) {
+    if (ready && t.live.length) {
       const want = `(() => { const l = (window.__hb?.live || []).filter((x) => ${q(t.live)}.includes(x.n) && x.at > (window.__hb.loadEndAt || 0)); if (!l.length) return 0; let n = 1; for (let i = 1; i < l.length; i++) if (l[i].at - l[i - 1].at > 500) n++; return n; })()`;
       const got = await tab.until(`${want} >= ${UPDATES}`, LIVE_MS, 250);
       await sleep(LIVE_WINDOW + 200);
@@ -170,9 +191,9 @@ async function run(target, profile) {
       const fb = await inp.box(t.filter);
       if (fb) { await inp.clickAt(fb.x, fb.y); await inp.type("svc1", 150); await sleep(800); }
       else res.notes.push(`no visible filter ${t.filter}`);
-      const hb = await inp.box(t.header, false);
+      const hb = t.header ? await inp.box(t.header, false) : null;
       if (hb) { await inp.clickAt(hb.x, hb.y); await sleep(800); if (await inp.box(t.header, false)) { const b2 = await inp.box(t.header, false); await inp.clickAt(b2.x, b2.y); await sleep(800); } }
-      else res.notes.push(`no visible sortable header ${t.header}`);
+      else if (t.header && profile !== "phone") res.notes.push(`no visible sortable header ${t.header}`);
     } else if (ready && t.chart) {
       const cb = await inp.box(t.chart);
       if (cb) {
@@ -180,6 +201,8 @@ async function run(target, profile) {
         await sleep(300);
         await inp.clickAt(cb.x, cb.y); await sleep(800);
       } else res.notes.push(`no visible chart ${t.chart}`);
+    } else if (ready && t.interaction) {
+      await inp.click(t.interaction); await sleep(800);
     }
     await tab.ev(`performance.mark("hb-int-end")`).catch(() => {});
     await tab.shot(path.join(OUT, `${target}-${profile}-after-interaction.png`));
@@ -277,10 +300,16 @@ async function run(target, profile) {
   res.violations = [];
   if (t.fails) {
     if (!res.ok) res.violations.push(`${label}: ${res.notes.join("; ")}`);
-    if (target === "app" && profile === "phone") {
-      const max = res.trace ? res.trace.load.max_ms : Math.max(0, ...(res.longtask_observer?.load || []));
-      if (max > LOAD_BUDGET) res.violations.push(`${label}: a load task took ${max} ms (> ${LOAD_BUDGET} ms at 4x)`);
+    if (profile === "phone") {
+      const traceMax = res.trace?.load.max_ms ?? 0;
+      const observerMax = Math.max(0, ...(res.longtask_observer?.load || []));
+      if (traceMax > LOAD_BUDGET) res.violations.push(`${label}: trace load task ${traceMax} ms (> ${LOAD_BUDGET})`);
+      if (observerMax > LOAD_BUDGET) res.violations.push(`${label}: observer load task ${observerMax} ms (> ${LOAD_BUDGET})`);
     }
+    const lcpBudget = profile === "phone" ? 1200 : 400;
+    if (res.lcp_ms > lcpBudget) res.violations.push(`${label}: LCP ${res.lcp_ms} ms (> ${lcpBudget})`);
+    if (res.cls > .1) res.violations.push(`${label}: CLS ${res.cls} (> 0.1)`);
+    if (res.inp_ms > 200) res.violations.push(`${label}: INP ${res.inp_ms} ms (> 200)`);
     const liveMax = res.trace ? res.trace.live.map((l) => l.max_ms) : (res.longtask_observer?.live || []).map((l) => Math.max(0, ...l));
     liveMax.forEach((m, i) => { if (m > LIVE_BUDGET) res.violations.push(`${label}: live update ${i + 1}: a task took ${m} ms (> ${LIVE_BUDGET} ms)`); });
     if (target === "app" && res.ok && (res.live_updates ?? 0) < UPDATES) res.violations.push(`${label}: only ${res.live_updates} live update(s), wanted ${UPDATES}`);
@@ -295,6 +324,7 @@ killer.unref();
 const results = [];
 for (const target of TARGETS) for (const profile of PROFILES) results.push(await run(target, profile));
 browser.quit();
+if (boardId) await fetch(`${base}/api/v1/boards/${boardId}`, { method: "DELETE", headers: { Cookie: sessionCookie, Origin: new URL(base).origin, "X-RH-CSRF": csrf } });
 
 const head = "| target | profile | ready ms | rows | FCP | LCP | CLS | DOM el. | load: max task / >50 / busy ms | longtask obs. (load) | live: max task per update (ms) | interaction: INP / max task | notes |";
 const md = [head, "|" + "---|".repeat(13)];
