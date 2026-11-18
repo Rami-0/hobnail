@@ -7,14 +7,14 @@ import { collectFields, Controls, endpoint, FailureNote, initialFields, saved, t
 
 type Snapshot = { hash: string; values: Values };
 
-export function SettingsForm({ title, path, fields, snapshot, reload, encode, actions, wide }: {
+export function SettingsForm({ title, path, fields, snapshot, reload, encode, renderActions, wide }: {
   title: string;
   path: string;
   fields: Control[];
   snapshot: Snapshot;
   reload: () => Promise<Snapshot | undefined>;
   encode?: (values: Values) => Values;
-  actions?: (input: Values, busy: boolean) => ReactNode;
+  renderActions?: (input: Values, busy: boolean) => ReactNode;
   wide?: boolean;
 }) {
   const [draft, setDraft] = useState<{ base: Snapshot; input: Values }>();
@@ -66,7 +66,7 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, ac
       <div className="settings-actions">
         <Button type="submit" variant="primary" disabled={!dirty} busy={busy}>Save</Button>
         {dirty && <Button disabled={busy} onClick={() => { setDraft(undefined); setFailure(undefined); setErrors({}); }}>Discard changes</Button>}
-        {actions?.(input, busy)}
+        {renderActions?.(input, busy)}
       </div>
     </form>
   </section>;

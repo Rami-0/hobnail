@@ -19,6 +19,7 @@ import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
 
 const Users = lazy(() => import("./Users.tsx"));
+const Config = lazy(() => import("./Config.tsx"));
 const Security = lazy(() => import("./Security.tsx"));
 const History = lazy(() => import("./History.tsx"));
 const Appearance = lazy(() => import("./Appearance.tsx"));
@@ -48,6 +49,7 @@ export default function SettingsPage() {
     {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
     {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
     {allowed && tab === "users" && <Suspense fallback={<p role="status">Loading users…</p>}><Users /></Suspense>}
+    {allowed && tab === "config" && <Suspense fallback={<p role="status">Loading config…</p>}><Config /></Suspense>}
     {allowed && tab === "security" && <Suspense fallback={<p role="status">Loading settings…</p>}><Security /></Suspense>}
     {allowed && tab === "history" && <Suspense fallback={<p role="status">Loading settings…</p>}><History /></Suspense>}
     {allowed && tab === "appearance" && <Suspense fallback={<p role="status">Loading settings…</p>}><Appearance /></Suspense>}
