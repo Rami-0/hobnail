@@ -133,7 +133,11 @@ try {
       measurements.search5000Ms = await tab.ev('performance.now()-searchStarted');
       measurements.searchMatchMs = await tab.ev('Number(document.querySelector("[data-testid=log-body]").dataset.searchMs)');
       await wait('CSS.highlights.has("rh-log-search")', "visible search text is highlighted without replacing nodes");
-      await inp.key("Enter"); await inp.key("Escape");
+      await wait('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[0])>1', "new search selects its newest result");
+      const newestMatch=await tab.ev('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[0])');
+      await inp.key("Enter"); await wait(`Number(document.querySelector('[data-testid=log-matches]').textContent.split('/')[0])===${newestMatch-1}`, "Enter selects the older match");
+      await inp.key("Enter",{modifiers:8}); await wait(`Number(document.querySelector('[data-testid=log-matches]').textContent.split('/')[0])===${newestMatch}`, "Shift Enter selects the newer match");
+      await inp.key("Escape");
       assert.ok(await tab.ev('!new URL(location.href).searchParams.has("search")'), "Escape clears URL search");
       await setQuery("ansi red"); await wait('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[1])>0', "case-insensitive matches");
       await choose("Show", "0");
@@ -166,6 +170,14 @@ try {
       const expectedCopy = await tab.ev(`(()=>{const r=document.querySelector('.log-row:not(:has(details))'); r.click(); return r.querySelector('.log-text').textContent;})()`);
       await clickText("Copy line"); assert.equal(await tab.ev('navigator.clipboard.readText()'), expectedCopy, "copy plain line text");
       await clickText("Copy link"); const copiedLink = await tab.ev('navigator.clipboard.readText()'); assert.match(copiedLink, /#t=\d/);
+      await tab.ev('document.querySelector("[data-testid=log-body]").focus()'); await inp.key("Enter");
+      await wait('document.activeElement?.textContent==="Copy line"', "pane Enter focuses Copy");
+      const keyboardLine=await tab.ev('document.querySelector(".log-selected").dataset.logId');
+      await inp.key("ArrowUp"); await wait(`document.querySelector('.log-selected')?.dataset.logId!==${q(keyboardLine)}`, "line actions move to the previous line");
+      await inp.key("ArrowDown"); await wait(`document.querySelector('.log-selected')?.dataset.logId===${q(keyboardLine)}`, "line actions move to the next line");
+      await inp.key("Escape"); await wait('document.activeElement===document.querySelector("[data-testid=log-body]")&&!document.querySelector(".log-actions")', "line action Escape returns to the pane");
+      await inp.key("End"); await wait('!document.querySelector("[data-testid=log-latest]")', "End resumes following");
+      await inp.key("/"); await wait('document.activeElement===document.querySelector("[data-testid=filter]")', "viewer slash focuses search");
       await clickText("Pause"); await wait('document.querySelector("[data-testid=log-pane]").textContent.includes("waiting")', "pause keeps incoming text queued", 6000);
       const receivedCursor = await tab.ev('logSources.filter(s=>s.readyState===1).at(-1).receivedT');
       const beforeReconnect = Date.now(), requestCount = logRequests.length;
