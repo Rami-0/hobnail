@@ -1497,13 +1497,10 @@ async fn api_v1_container_window_and_names() {
         "{s}"
     );
     assert!(s["to"].as_i64().unwrap() >= now, "{s}");
-    // One hour once clamped: the 1 h preset serves it.
-    assert_eq!(s["range"], "1h", "{s}");
-    assert_eq!(
-        s["to"].as_i64().unwrap() - s["from"].as_i64().unwrap(),
-        3600,
-        "{s}"
-    );
+    // The server may cross the next second while handling the request.
+    assert_eq!(s["from"], now - 3600, "{s}");
+    let span = s["to"].as_i64().unwrap() - s["from"].as_i64().unwrap();
+    assert_eq!(s["range"], if span <= 3600 { "1h" } else { "6h" }, "{s}");
     // More than 30 days: from clamped to 30 days back.
     let v = json_of(
         &get(format!("?from={}&to={now}", now - 90 * 86_400)).await,
