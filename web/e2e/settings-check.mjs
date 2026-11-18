@@ -138,6 +138,17 @@ try {
       await wait(`!${text(".settings-row", name)}`, "delete updates the collection");
       await button("body", "Undo");
       await wait(text(".settings-row", name), "Undo restores the bookmark");
+      await inp.click(`button[aria-label=${q("Edit " + name)}]`);
+      await wait(present(editor), "bookmark edit opens");
+      await fill(editor + ' input[name="description"]', "Edited in the browser");
+      await button(editor, "Save");
+      await wait(`!${present(editor)}`, "bookmark edit saves");
+      const marks = ok(await call("/api/settings/bookmarks", "GET", undefined, owner), "read bookmarks for ordering");
+      ok(await call("/api/settings/bookmarks", "POST", { base_hash: marks.hash, action: "add", item: { name: `Order target ${label}`, url: "https://example.com/order" } }, owner), "seed reorder target");
+      await go("/app/settings/bookmarks", text(".settings-row", `Order target ${label}`));
+      const beforeOrder = await tab.ev(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].map(e=>e.textContent)`);
+      await inp.click(`button[aria-label=${q("Move " + name + " down")}]`);
+      await wait(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].findIndex(e=>e.textContent===${q(name)}) === ${beforeOrder.indexOf(name)+1}`, "bookmark moves down");
       await go("/app/overview?add=widget", present(editor));
       await inp.key("Escape");
       await go("/app/alerts?add=channel", present(editor));
@@ -146,6 +157,10 @@ try {
 
       if (scheme === "dark") {
         await go("/app/settings/general", present('input[name="greeting"]'));
+        await fill('input[name="search_url"]', "https://example.com/search");
+        await button(".settings-form", "Save");
+        await wait(`document.querySelector('input[name="search_url"]').getAttribute('aria-invalid')==='true'`, "General rejects a search URL without its query placeholder");
+        await fill('input[name="search_url"]', "https://example.com/search?q={q}");
         const greeting = `Hello from ${label}`;
         await fill('input[name="greeting"]', greeting);
         const before = ok(await call("/api/settings/general", "GET", undefined, owner), "read current page settings");
@@ -185,6 +200,8 @@ try {
         await wait(text(".settings-row", widget), "custom API widget is saved");
 
         await go("/app/settings/appearance", present('textarea[name="css"]'));
+        await fill('textarea[name="css"]', "body{\n}}");
+        await wait(text('[data-testid="css-syntax"]', "line 2: a } without"), "CSS syntax warning gives the offending line");
         await fill('textarea[name="css"]', width === 1440 ? ":root{--border-2:#123456}" : ":root{--border-2:#345678}");
         await wait(text('[role="alert"]', "--ctl-border"), "CSS warns about a retired token");
         await button(".settings-form", "Save");
@@ -199,11 +216,24 @@ try {
         await wait(present(dialog + " pre"), "revision text is shown");
         await inp.key("Escape");
 
+        await button(".settings-row", "Restore…");
+        await wait(text(dialog, "Replace the current config"), "restore opens a revision confirmation");
+        await button(dialog, "Restore revision");
+        await wait(`!${present(dialog)}`, "revision restore completes");
         await go("/app/settings/history", present('a[download]'));
         assert.equal((await call("/api/settings/history/export", "GET", undefined, owner)).status, 200);
         await button(".settings-section", "Clear history…");
         await wait(`document.querySelector(${q(dialog + " .dlg-ft button")}).disabled`, "history clear requires a typed phrase");
-        await inp.key("Escape");
+        await fill('#clear-history-phrase', "clear history");
+        await button(dialog, "Clear history");
+        await wait(`!${present(dialog)} && ${text('[data-testid="toast"]', "History cleared")}`, "typed phrase actually clears history");
+        await go("/app/settings/security", present('[data-testid="account-sessions"]'));
+        await credentials("/api/login", { username: "admin", password });
+        await go("/app/settings/security", present('[data-testid="account-sessions"] .settings-row'));
+        const sessionsBefore = await tab.ev(`document.querySelectorAll('[data-testid="account-sessions"] .settings-row').length`);
+        await button('[data-testid="account-sessions"]', "Sign out session");
+        await button(dialog, "Sign out");
+        await wait(`document.querySelectorAll('[data-testid="account-sessions"] .settings-row').length===${sessionsBefore-1}`, "Security revokes one other session");
       }
 
       if (width === 1440 && scheme === "dark") {
