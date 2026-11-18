@@ -214,10 +214,8 @@ server draft endpoint. Never put credentials in drafts, URLs or storage.
 
 `web/e2e/board-check.mjs` runs with `scripts/e2e.sh` against throwaway ports
 3395–3399, like app-check and slice-check. It writes screenshots and recorder
-data to OUT. Saved link metadata never counts as health evidence. Widgets
-currently show their configured identity and an explicit unavailable-data
-message: the existing backend widget renderer returns HTML, not a structured
-React data contract, and injecting that HTML is prohibited.
+data to OUT. Saved link metadata never counts as health evidence. Widget tiles render
+the structured widget read model and subscribe to its live updates.
 
 When resuming a stale draft, the API supplies its document but no historical
 base document. Recovery therefore preserves server additions and asks the
@@ -231,3 +229,13 @@ same-session conflicts use the original document for a three-way rebase.
 | `#ev-<id>` | Timeline row opened by a chart marker |
 | `[data-testid="palette-open"]` | Open the command palette |
 | `[data-testid="palette"] [role="combobox"]` | Palette query and active option |
+| `[data-testid="overview"]` | Overview page |
+| `[data-testid="alerts"]` | Alerts read page |
+| `[data-testid="host-sample"][data-sampled-at]` | Timestamp of the current Host sample |
+| `[data-testid="host-disclosure"]` | A Host facts disclosure |
+| `[data-testid="container-inspect"]`, `[data-testid="reveal-env"]` | Inspect and the Admin environment toggle |
+| `[data-testid="container-processes"]`, `[data-testid="container-events"]` | Container Processes and Events |
+
+The Vite PostCSS pass trims rules scoped exclusively to unused SDK primitives
+from the pinned stylesheet. Update its primitive list when introducing a new
+SDK wrapper. Global SDK variables and shared styles remain in the import.

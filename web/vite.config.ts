@@ -12,6 +12,7 @@
 // without any dev-only allowance (plan 4.4).
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "postcss";
 
 // No @types/node in this project: declare the one global the config reads.
 declare const process: { env: Record<string, string | undefined> };
@@ -31,6 +32,25 @@ const PROXIED = [
   "/healthz",
 ];
 
+// Keep the pinned SDK stylesheet import and its global tokens. Rules scoped
+// exclusively to unused primitives can be omitted from the shipped layer.
+const sdkComponents = new Set(["button", "dialog", "field", "input", "label", "menu", "select", "switch", "toast", "listbox"]);
+
+const sdkStyles: Plugin = {
+  postcssPlugin: "hobnail-sdk-styles",
+  Once(root) {
+    const file = root.source?.input.file ?? "";
+    if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
+    root.walkRules((rule) => {
+      if (rule.parent?.type === "rule") return;
+      const slots = [...rule.selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
+      if (slots.length && slots.every((slot) => !sdkComponents.has((slot[1] ?? slot[2] ?? "").split("-")[0] ?? ""))) {
+        rule.remove();
+      }
+    });
+  },
+};
+
 export default defineConfig(({ command }) => {
   let proxy: Record<string, { target: string; changeOrigin: false; ws: boolean }> | undefined;
   if (command === "serve") {
@@ -47,6 +67,7 @@ export default defineConfig(({ command }) => {
   return {
     base: "/",
     plugins: [react()],
+    css: { postcss: { plugins: [sdkStyles] } },
     build: {
       outDir: "dist",
       assetsDir: "assets",
