@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import type { AlertsView } from "../../api/gen/AlertsView.ts";
@@ -9,16 +10,23 @@ import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import "../history/history.css";
 
 
+const Notifications = lazy(() => import("../settings/Notifications.tsx"));
+
 export default function Alerts() {
   const boot = useBootstrap();
   const { query, search, setSearch } = useRoute();
+  const admin = boot && !boot.scoped && (boot.role === "admin" || boot.role === "owner");
+  const filters = new URLSearchParams(query);
+  filters.delete("add");
+  filters.delete("edit");
   const now = useNow();
   const { data: containers } = useContainers();
-  const { data, error } = useRead<AlertsView>(boot?.scoped === false ? `/api/v1/alerts${query}` : null, "alerts");
+  const { data, error } = useRead<AlertsView>(boot?.scoped === false ? `/api/v1/alerts?${filters}` : null, "alerts");
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   if (boot?.scoped) return <p className="page">Alerts are unavailable with board-scoped access.</p>;
   return <div className="page" data-testid="alerts">
     <h1>Alerts</h1>
+    {admin && (search.has("add") || search.has("edit")) && <Suspense fallback={<p role="status">Loading editor…</p>}><Notifications editorOnly /></Suspense>}
     {error && <p role="alert">{error}</p>}
     {!data ? !error && <p role="status">Loading alerts…</p> : <>
       <section className="panel history-block" aria-label="Firing now">
@@ -32,17 +40,21 @@ export default function Alerts() {
       </section>
       <section className="panel history-block">
         <h2>Rules</h2>
+        {admin && <Button onClick={() => setSearch({ add: "rule", edit: null })}>Add rule</Button>}
         {data.rules.length ? <ul className="history-events">{data.rules.map((rule) => <li key={rule.name}>
           <strong>{rule.name}</strong> · {rule.kind} · {rule.summary}{!!rule.channels.length && <> · {rule.channels.join(", ")}</>}
+          {admin && <Button className="sm" aria-label={`Edit ${rule.name}`} onClick={() => setSearch({ add: null, edit: `rule:${rule.name}` })}>Edit</Button>}
         </li>)}</ul> : <p>No alert rules configured.</p>}
       </section>
       <section className="panel history-block">
         <h2>Notification channels</h2>
+        {admin && <Button onClick={() => setSearch({ add: "channel", edit: null })}>Add channel</Button>}
         {data.channels.length ? <ul className="history-events">{data.channels.map((channel) => <li key={channel.name}>
           <strong>{channel.name}</strong> · {channel.kind} · {channel.status}
           {channel.last_success !== null && <> · Last sent <RelativeTime at={channel.last_success} /></>}
           {channel.last_failure !== null && <> · Last failure <RelativeTime at={channel.last_failure} /></>}
           {channel.pending > 0 && <> · {channel.pending} pending</>}
+          {admin && <Button className="sm" aria-label={`Edit ${channel.name}`} onClick={() => setSearch({ add: null, edit: `channel:${channel.name}` })}>Edit</Button>}
         </li>)}</ul> : <p>No channels configured.</p>}
       </section>
       <section className="panel history-block">

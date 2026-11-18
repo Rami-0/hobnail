@@ -10,6 +10,7 @@ import { SignInPrompt } from "../../ui/SignInPrompt.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { toast } from "../../ui/toast.ts";
 import type { Values } from "./forms.ts";
+import "./settings.css";
 
 export const endpoint = (path: string) => "/api/settings/" + path;
 export type Failure = Exclude<ApiResult<never>, { kind: "ok" }>;

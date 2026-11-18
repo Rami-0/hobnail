@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useId, type ReactNode } from "react";
 import { api, getSession, refreshSession } from "../../api/session.ts";
 import { useRoute } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
@@ -125,6 +125,7 @@ export function Collection(props: Props) {
 
 function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; close: () => void; focus: (id?: Entry["id"]) => void }) {
   const { fields, hash, kind, path, refresh } = props;
+  const formId = useId();
   const [base, setBase] = useState(() => ({ entry, hash, values: initialFields(fields, entry?.item ?? {}) }));
   const [input, setInput] = useState(base.values);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -206,9 +207,9 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
           setBusy(false);
         }
       }}>Fetch now</Button>}
-      <Button type="submit" variant="primary" form="settings-edit" busy={busy} disabled={base.entry?.locked}>{rename ? "Rename and update rules" : "Save"}</Button>
+      <Button type="submit" variant="primary" form={formId} busy={busy} disabled={base.entry?.locked}>{rename ? "Rename and update rules" : "Save"}</Button>
     </>}>
-    <form id="settings-edit" className="settings-form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
+    <form id={formId} className="settings-form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <Controls fields={fields} input={input} base={base.entry?.item ?? {}} errors={errors} onChange={(values) => { setInput(values); setRename(false); }} />
       {rename && base.entry && <Note kind="warn">The rename also updates these rules: {props.renameRules?.(base.entry.id).join(", ")}</Note>}
       {errors.form && failure?.kind !== "invalid" && <Note kind="bad">{errors.form}</Note>}

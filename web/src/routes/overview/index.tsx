@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import type { OverviewView } from "../../api/gen/OverviewView.ts";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { BookmarkView } from "../../api/gen/BookmarkView.ts";
-import { containerHref, navigate } from "../../app/router.ts";
+import { containerHref, navigate, useRoute } from "../../app/router.ts";
 import { local } from "../../app/prefs.ts";
 import { useBootstrap, useContainers, useNow, useStatsMap, useStrips, useSystem } from "../../live/index.ts";
 import { useRead } from "../../live/read.ts";
@@ -16,6 +16,8 @@ import { treemap } from "./treemap.ts";
 import "../history/history.css";
 import "./overview.css";
 
+const EditBookmarks = lazy(() => import("../settings/Bookmarks.tsx"));
+const EditWidgets = lazy(() => import("../settings/Widgets.tsx"));
 const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const SEEN = "rh-seen";
 
@@ -31,6 +33,7 @@ function readSeen(): number {
 export default function Overview() {
   const boot = useBootstrap();
   const allowed = boot?.scoped === false;
+  const { search } = useRoute();
   const admin = allowed && boot.role !== "viewer";
   const now = useNow();
   const [seen] = useState(readSeen);
@@ -135,7 +138,7 @@ export default function Overview() {
       </div>
     </section>}
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
-      {admin && <a href="/app/settings/widgets?add=widget">Add widget</a>}
+      {admin && <a href="/app/overview?add=widget">Add widget</a>}
       <div className="overview-widget-grid">{widgets?.map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
         <h3>{w.link ? <a href={w.link}>{w.title}</a> : w.title}</h3><WidgetContent widget={w} />
       </article>)}</div>
@@ -148,8 +151,12 @@ export default function Overview() {
         </> : e.subject}
       </li>)}</ul>
     </section>
+    {admin && <Suspense fallback={<p role="status">Loading editor…</p>}>
+      {search.get("add") === "bookmark" && <EditBookmarks editorOnly />}
+      {search.get("add") === "widget" && <EditWidgets editorOnly />}
+    </Suspense>}
     {(admin || !!bookmarks?.length) && <section className="panel history-block"><h2>Bookmarks</h2>
-      {admin && <a href="/app/settings/bookmarks?add=bookmark">Add bookmark</a>}
+      {admin && <a href="/app/overview?add=bookmark">Add bookmark</a>}
       <ul className="history-events">{bookmarks?.map((b) => <li key={`${b.name}:${b.url}`}>
         <a href={b.url} target="_blank" rel="noopener noreferrer">{b.name}</a>{b.description && <> · {b.description}</>}
       </li>)}</ul>
