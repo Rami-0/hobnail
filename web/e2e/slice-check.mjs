@@ -514,7 +514,8 @@ for (const size of SIZES) for (const [si, scheme] of SCHEMES.entries()) {
   rec.reset();
   inp.touch = size.w < 500;
   try {
-    await tab.send("Network.clearBrowserCookies");
+    // Replace the owner cookie atomically: clearing it while the previous
+    // document is still live creates an unintended authentication gap.
     if (!(await setBrowserCookie(me))) throw new Error("could not set the owner session cookie");
     await tab.send("Emulation.setDeviceMetricsOverride", { width: size.w, height: size.h, deviceScaleFactor: 1, mobile: inp.touch });
     await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: inp.touch ? 5 : 0 });
