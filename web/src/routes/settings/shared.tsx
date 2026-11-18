@@ -202,7 +202,18 @@ export function Controls({ fields, input, base, errors, onChange }: {
         options={options.map((option) => ({ value: option, label: option || "Default" }))} />
         : format === "code"
           ? <Textarea name={key} className="settings-code mono" rows={14}
-              wrap="soft" spellCheck={false} value={value} onChange={(event) => change(event.target.value)} disabled={disabled} />
+              wrap="soft" spellCheck={false} value={value} onChange={(event) => change(event.target.value)} disabled={disabled}
+              onFocus={(event) => { event.currentTarget.dataset.indent = "1"; }}
+              onKeyDown={(event) => {
+                const editor = event.currentTarget;
+                if (event.key === "Escape") editor.dataset.indent = "0";
+                if (event.key === "Tab" && editor.dataset.indent === "1" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                  event.preventDefault(); editor.setRangeText("  ", editor.selectionStart, editor.selectionEnd, "end"); change(editor.value);
+                }
+                if (key === "text" && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+                  event.preventDefault(); editor.form?.requestSubmit();
+                }
+              }} />
           : <TextInput name={key} value={value} placeholder={field.placeholder} required={field.required}
               inputMode={format === "number" ? "decimal" : format === "url" ? "url" : undefined}
               onChange={(event) => change(event.target.value)} disabled={disabled} />}
