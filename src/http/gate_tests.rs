@@ -1764,3 +1764,390 @@ async fn api_v1_stream_topics_and_head() {
     drop(s);
     assert!(viewers_reach(&st, 0, true).await);
 }
+
+#[tokio::test]
+async fn all_legacy_reads_require_sign_in_except_public_assets() {
+    let st = crate::ui::testutil::state_with(vec![], "[logs]\nrequire_login = false\n");
+    let addr = start(st).await;
+    let protected = [
+        "/api/login",
+        "/api/logout",
+        "/api/state",
+        "/api/stream",
+        "/api/history/system",
+        "/api/history/container/web",
+        "/api/events",
+        "/api/palette",
+        "/api/logs/stream",
+        "/api/logs/download",
+        "/api/logs/levels",
+        "/api/logs/status",
+        "/api/containers/web/env",
+        "/api/containers/web/top",
+        "/api/containers/web/health",
+        "/alarm.json",
+        "/custom.css",
+        "/static/app.css",
+        "/static/app.js",
+        "/static/logs.css",
+        "/static/logs.js",
+        "/static/settings.css",
+        "/static/settings.js",
+        "/icons/di/nginx",
+        "/icons/web",
+    ];
+    let pages = [
+        "/",
+        "/containers",
+        "/containers/",
+        "/containers?frag=table",
+        "/containers/web",
+        "/containers/web/logs",
+        "/history",
+        "/alerts",
+        "/login",
+        "/host",
+        "/logs",
+        "/more",
+        "/settings",
+        "/settings/",
+        "/missing-page",
+    ];
+    let public = [
+        "/healthz",
+        "/app",
+        "/app/login",
+        "/app/invite/example",
+        "/assets/missing.js",
+        "/manifest.webmanifest",
+        "/favicon.ico",
+        "/icon.svg",
+        "/icon-192.png",
+        "/icon-512.png",
+        "/apple-touch-icon.png",
+    ];
+    let settings = SETTINGS_READS.iter().map(|s| format!("/api/settings/{s}"));
+    for method in ["GET", "HEAD"] {
+        for path in protected.into_iter().chain(
+            settings
+                .clone()
+                .collect::<Vec<_>>()
+                .iter()
+                .map(String::as_str),
+        ) {
+            let r = req_bounded(addr, method, path, &[]).await;
+            assert_eq!(r.status, 401, "{method} {path}");
+            assert_eq!(
+                r.body,
+                if method == "HEAD" {
+                    ""
+                } else {
+                    "sign in required\n"
+                },
+                "{path}"
+            );
+        }
+        for path in pages {
+            let r = req_bounded(addr, method, path, &[]).await;
+            assert_eq!(r.status, 303, "{method} {path}");
+            assert_eq!(
+                header(&r.head, "location").as_deref(),
+                Some("/app/login"),
+                "{path}"
+            );
+        }
+        for (_, slug, _) in crate::ui::routes::SETTINGS {
+            let path = format!("/settings/{slug}");
+            assert_eq!(
+                req_bounded(addr, method, &path, &[]).await.status,
+                303,
+                "{path}"
+            );
+        }
+        for path in public {
+            let r = req_bounded(addr, method, path, &[]).await;
+            assert!(
+                !matches!(r.status, 303 | 401 | 403),
+                "{method} {path}: {}",
+                r.status
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn public_credential_writes_require_same_origin_and_known_host() {
+    let addr = start(state()).await;
+    for &(method, path) in PUBLIC_WRITES {
+        assert!(WRITES.contains(&(method, path)));
+        let r = req(
+            addr,
+            method,
+            path,
+            &[
+                ("Origin", "https://foreign.example"),
+                ("Content-Type", "application/json"),
+            ],
+            "{}",
+        )
+        .await;
+        assert_eq!(r.status, 403, "{path}");
+        assert_eq!(r.body, "cross-origin write refused\n", "{path}");
+        let mut connection = TcpStream::connect(addr).await.unwrap();
+        connection.write_all(format!(
+            "{method} {path} HTTP/1.1\r\nHost: rebind.example\r\nOrigin: http://rebind.example\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        ).as_bytes()).await.unwrap();
+        let mut response = String::new();
+        connection.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 421"), "{path}: {response}");
+    }
+}
+
+fn credentials_of(response: &Resp) -> (String, String) {
+    let cookie = header(&response.head, "set-cookie").unwrap();
+    let csrf = json_of(response, "signed in")["csrf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    (cookie.split(';').next().unwrap().to_owned(), csrf)
+}
+
+#[tokio::test]
+async fn concurrent_owner_onboarding_issues_one_session() {
+    let st = state();
+    let addr = start(st.clone()).await;
+    let origin = format!("http://{addr}");
+    let headers = [
+        ("Origin", origin.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let path = "/api/v1/onboarding/owner";
+    let short = req(
+        addr,
+        "POST",
+        path,
+        &headers,
+        r#"{"username":"admin","password":"short"}"#,
+    )
+    .await;
+    assert_api_error(&short, 400, "bad_request", "password policy");
+    let oversized = req(addr, "POST", path, &headers, &"x".repeat(4097)).await;
+    assert_api_error(&oversized, 413, "body_too_large", "body limit");
+    let a = r#"{"username":"alice","password":"correct horse battery"}"#;
+    let b = r#"{"username":"bob","password":"correct horse battery"}"#;
+    let (a, b) = tokio::join!(
+        req(addr, "POST", path, &headers, a),
+        req(addr, "POST", path, &headers, b)
+    );
+    let (first, second) = if a.status == 201 { (a, b) } else { (b, a) };
+    assert_eq!(first.status, 201, "{}", first.body);
+    assert_api_error(&second, 409, "conflict", "second owner attempt");
+    assert_eq!(st.db.accounts().unwrap().len(), 1);
+    assert_eq!(st.db.session_count(crate::auth::now_s()), 1);
+    let (cookie, csrf) = credentials_of(&first);
+    let session = get_session(addr, &[("Cookie", &cookie)]).await;
+    assert_eq!(session["owner_exists"], true);
+    assert_eq!(session["user"]["role"], "owner");
+    assert_eq!(session["csrf"], csrf);
+    let r = req(
+        addr,
+        "POST",
+        path,
+        &headers,
+        r#"{"username":"third","password":"correct horse battery"}"#,
+    )
+    .await;
+    assert_api_error(&r, 409, "conflict", "owner already exists");
+}
+
+#[tokio::test]
+async fn invite_roles_and_account_management() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st.clone()).await;
+    let owner = login(addr).await;
+    let origin = format!("http://{addr}");
+    let origin_headers = [
+        ("Origin", origin.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let owner_headers = [
+        origin_headers[0],
+        origin_headers[1],
+        ("Cookie", owner.0.as_str()),
+        ("X-RH-CSRF", owner.1.as_str()),
+    ];
+
+    for role in ["viewer", "admin"] {
+        let scope = "a".repeat(32);
+        let data =
+            serde_json::json!({"role": role, "scopes": {"boards": [scope], "integrations": [] }});
+        let r = req(
+            addr,
+            "POST",
+            "/api/v1/invites",
+            &owner_headers,
+            &data.to_string(),
+        )
+        .await;
+        assert_eq!(r.status, 201, "{}", r.body);
+        let v = json_of(&r, "created invite");
+        let token = v["token"].as_str().unwrap();
+        let r = req(addr, "GET", "/api/v1/invites", &owner_headers, "").await;
+        assert!(!r.body.contains(token));
+        let validate = format!("/api/v1/invites/validate?token={token}");
+        let r = req(addr, "GET", &validate, &[], "").await;
+        assert_eq!(
+            json_of(&r, "invite validation"),
+            serde_json::json!({
+                "valid": true, "role": role, "expires": v["invite"]["expires"]
+            })
+        );
+        let account = serde_json::json!({"username":role, "password":PW, "token":token});
+        let r = req(
+            addr,
+            "POST",
+            "/api/v1/invites/accept",
+            &origin_headers,
+            &account.to_string(),
+        )
+        .await;
+        assert_eq!(r.status, 201, "{}", r.body);
+        let (cookie, csrf) = credentials_of(&r);
+        let h = [
+            origin_headers[0],
+            origin_headers[1],
+            ("Cookie", cookie.as_str()),
+            ("X-RH-CSRF", csrf.as_str()),
+        ];
+        let r = req(addr, "GET", &validate, &[], "").await;
+        assert_eq!(
+            json_of(&r, "used invite"),
+            serde_json::json!({"valid": false, "role": null, "expires": null})
+        );
+        let r = req(addr, "GET", "/api/v1/bootstrap", &h, "").await;
+        assert_eq!(json_of(&r, "role in bootstrap")["role"], role);
+        let r = req(
+            addr,
+            "POST",
+            "/api/settings/config/validate",
+            &h,
+            r#"{"text":"[page]"}"#,
+        )
+        .await;
+        assert_eq!(
+            r.status,
+            if role == "admin" { 200 } else { 403 },
+            "{role}: {}",
+            r.body
+        );
+        let r = req(addr, "GET", "/api/v1/users", &h, "").await;
+        assert_api_error(&r, 403, "forbidden", role);
+        let r = req(
+            addr,
+            "PATCH",
+            "/api/v1/users/1/disabled",
+            &h,
+            r#"{"disabled":true}"#,
+        )
+        .await;
+        assert_api_error(&r, 403, "forbidden", role);
+
+        let account = st
+            .db
+            .accounts()
+            .unwrap()
+            .into_iter()
+            .find(|u| u.name == role)
+            .unwrap();
+        assert!(account.can_see_board(&scope));
+        assert!(!account.can_see_board("other"));
+        let base = format!("/api/v1/users/{}", account.id);
+        let r = req(
+            addr,
+            "PATCH",
+            &format!("{base}/disabled"),
+            &owner_headers,
+            r#"{"disabled":true}"#,
+        )
+        .await;
+        assert_eq!(r.status, 200, "{}", r.body);
+        assert!(get_session(addr, &h).await["user"].is_null());
+        let r = req(
+            addr,
+            "PATCH",
+            &format!("{base}/disabled"),
+            &owner_headers,
+            r#"{"disabled":false}"#,
+        )
+        .await;
+        assert_eq!(r.status, 200, "{}", r.body);
+        assert!(get_session(addr, &h).await["user"].is_null());
+        let r = req(
+            addr,
+            "PUT",
+            &format!("{base}/scopes"),
+            &owner_headers,
+            r#"{"scopes":null}"#,
+        )
+        .await;
+        assert_eq!(r.status, 200, "{}", r.body);
+        let r = req(addr, "DELETE", &base, &owner_headers, "").await;
+        assert_eq!(r.status, 200, "{}", r.body);
+    }
+    for (method, path, body) in [
+        ("PATCH", "/api/v1/users/1/role", r#"{"role":"viewer"}"#),
+        ("PATCH", "/api/v1/users/1/disabled", r#"{"disabled":true}"#),
+        ("DELETE", "/api/v1/users/1", ""),
+    ] {
+        let r = req(addr, method, path, &owner_headers, body).await;
+        assert_api_error(&r, 403, "protected_owner", path);
+    }
+}
+
+#[tokio::test]
+async fn password_change_preserves_only_the_callers_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, csrf) = login(addr).await;
+    let (other, _) = login(addr).await;
+    let (third, _) = login(addr).await;
+    let origin = format!("http://{addr}");
+    let h = [
+        ("Origin", origin.as_str()),
+        ("Cookie", cookie.as_str()),
+        ("X-RH-CSRF", csrf.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let r = req(addr, "GET", "/api/v1/account/sessions", &h, "").await;
+    let sessions = json_of(&r, "other sessions");
+    assert_eq!(sessions.as_array().unwrap().len(), 2);
+    let id = sessions[0]["id"].as_str().unwrap();
+    let r = req(
+        addr,
+        "DELETE",
+        &format!("/api/v1/account/sessions/{id}"),
+        &h,
+        "",
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_ne!(
+        get_session(addr, &[("Cookie", &other)]).await["user"].is_null(),
+        get_session(addr, &[("Cookie", &third)]).await["user"].is_null()
+    );
+    let r = req(
+        addr,
+        "POST",
+        "/api/v1/account/password",
+        &h,
+        &serde_json::json!({"current": PW, "new":"new password"}).to_string(),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(get_session(addr, &h).await["csrf"], csrf);
+    for revoked in [other, third] {
+        assert!(get_session(addr, &[("Cookie", &revoked)]).await["user"].is_null());
+    }
+}

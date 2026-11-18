@@ -551,3 +551,71 @@ impl Db {
         self.sign_in(id, &stored, hash, now, expires).is_ok()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invites_expire_and_can_be_consumed_or_revoked_only_once() {
+        let db = Db::open_in_memory().unwrap();
+        db.recover_owner(None, "hash", 1).unwrap();
+        for (hash, now) in [("expired", 9), ("revoked", 2), ("usable", 2)] {
+            let invite = db.create_invite(hash, Role::Admin, None, 1, 9).unwrap();
+            if hash == "revoked" {
+                db.revoke_invite(&invite.id, now).unwrap();
+                assert_eq!(
+                    db.revoke_invite(&invite.id, now),
+                    Err(AccountError::Missing)
+                );
+            }
+            let active = hash == "usable";
+            assert_eq!(db.validate_invite(hash, now).is_some(), active);
+            let result = db.accept_invite(hash, "guest", "passhash", "session", now, 10);
+            assert_eq!(
+                result,
+                if active {
+                    Ok(())
+                } else {
+                    Err(AccountError::Invalid)
+                }
+            );
+            assert_eq!(
+                db.accept_invite(hash, "another", "passhash", "another-session", now, 10),
+                Err(AccountError::Invalid)
+            );
+        }
+    }
+
+    #[test]
+    fn password_reset_disable_and_deletion_revoke_only_the_target_sessions() {
+        let db = Db::open_in_memory().unwrap();
+        db.create_owner("owner", "owner-hash", "owner-session", 1, 10)
+            .unwrap();
+        db.create_invite("invite", Role::Viewer, None, 1, 10)
+            .unwrap();
+        db.accept_invite("invite", "guest", "guest-hash", "guest-session", 1, 10)
+            .unwrap();
+        let (guest, _, _) = db.credential("guest").unwrap();
+        db.recover_owner(None, "new-owner-hash", 2).unwrap();
+        assert!(!db.session_is_valid("owner-session", 2));
+        assert!(db.session_is_valid("guest-session", 2));
+        assert_eq!(
+            db.sign_in(1, "owner-hash", "stale", 2, 10),
+            Err(AccountError::Invalid)
+        );
+        db.change_account(guest, AccountChange::Disabled(true), 2)
+            .unwrap();
+        assert!(!db.session_is_valid("guest-session", 2));
+        assert_eq!(
+            db.sign_in(guest, "guest-hash", "disabled", 2, 10),
+            Err(AccountError::Invalid)
+        );
+        db.change_account(guest, AccountChange::Disabled(false), 2)
+            .unwrap();
+        db.sign_in(guest, "guest-hash", "new-guest-session", 2, 10)
+            .unwrap();
+        db.change_account(guest, AccountChange::Delete, 3).unwrap();
+        assert!(!db.session_is_valid("new-guest-session", 3));
+    }
+}
