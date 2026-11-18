@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { cssSyntax } from "./cssSyntax.ts";
 import { api } from "../../api/session.ts";
 import { applyDefaultTheme, isTheme, readTheme, THEME_KEY, THEME_LABEL, THEMES } from "../../app/theme.ts";
 import { local } from "../../app/prefs.ts";
@@ -37,6 +38,7 @@ function CssDetails({ source, cap, dirty }: { source: string; cap: number; dirty
   const clean = source.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "");
   const sets = (name: string) => new RegExp(`(^|[^\\w-])${name}\\s*:`).test(clean);
   return <>
+    <p role="status" aria-live="polite" data-testid="css-syntax">{cssSyntax(source) ? `Check the CSS: ${cssSyntax(source)}` : ""}</p>
     <Switch checked={preview} onChange={setPreview} label="Live preview on this page" />
     <p className="muted">{new TextEncoder().encode(source).length.toLocaleString()} / {cap.toLocaleString()} bytes</p>
     {Object.entries(retired).filter(([old]) => sets(old)).map(([old, next]) =>
