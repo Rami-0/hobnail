@@ -237,7 +237,14 @@ export class LogPane {
     }
   };
   private click = (e: MouseEvent) => {
-    if ((e.target as Element).closest("summary,a,button,pre")) return;
+    const summary = (e.target as Element).closest("summary");
+    if (summary) {
+      const details = summary.closest("details"), row = summary.closest<HTMLElement>("[data-log-id]");
+      if (details && row) { const id = Number(row.dataset.logId); if (details.open) this.openedJson.delete(id); else this.openedJson.add(id); }
+      requestAnimationFrame(() => { this.measure(); this.schedule(); });
+      return;
+    }
+    if ((e.target as Element).closest("a,button,pre")) return;
     const el = (e.target as Element).closest<HTMLElement>("[data-log-id]");
     const row = el && this.visible.find((r) => r.id === Number(el.dataset.logId));
     if (row) { this.pinned = true; this.selected = row; this.select(row, false); this.signature = ""; this.schedule(); }
