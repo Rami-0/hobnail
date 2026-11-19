@@ -77,10 +77,10 @@ All four are under the SIL Open Font License.
 
 | File | Size | Used for |
 |---|---|---|
-| `static/brand/hobnail.svg` | vector | `/icon.svg`: favicon, sidebar tile, offline page |
-| `static/brand/icon-1024.png` | 1024 px | App icon master |
-| `static/pwa/icon-512.png`, `icon-192.png` | 512 / 192 px | Web app manifest (`any maskable`) |
-| `static/pwa/apple-touch-icon.png` | 180 px | iOS home screen |
+| `src/http/pwa/hobnail.svg` | vector | `/icon.svg`: favicon and app identity |
+| `docs/brand/icon-1024.png` | 1024 px | App icon master |
+| `src/http/pwa/icon-512.png`, `icon-192.png` | 512 / 192 px | Web app manifest (`any maskable`) |
+| `src/http/pwa/apple-touch-icon.png` | 180 px | iOS home screen |
 | `docs/brand/social-preview.png` | 1280×640 | The wordmark banner: README header, GitHub social preview |
 | `docs/brand/banner-pulse.png` | 2560×1280 | README: what it does |
 | `docs/brand/banner-plate.png` | 2560×1280 | README: anatomy of the nail |
