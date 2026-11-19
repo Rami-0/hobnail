@@ -293,15 +293,14 @@ pub fn resolve(c: &ChannelConfig) -> Result<Target, String> {
         ChannelKind::Webhook => {
             let url = match &c.url {
                 Some(u) => u.clone(),
-                None => {
-                    let u = secret(c.url_env.as_deref(), c.url_file.as_deref())?;
-                    url_secrets(&u, &mut secrets);
-                    u
-                }
+                None => secret(c.url_env.as_deref(), c.url_file.as_deref())?,
             };
+            url_secrets(&url, &mut secrets);
             for (k, v) in &c.headers {
+                secrets.push(v.clone());
                 headers.push((k.clone(), v.clone()));
             }
+            secrets.extend(c.body.iter().cloned());
             for (k, var) in &c.headers_env {
                 let v = secret(Some(var), None)?;
                 if hyper::header::HeaderValue::from_str(&v).is_err() {
@@ -394,7 +393,8 @@ pub async fn send(t: &Target, vars: &Vars, policy: &HttpPolicy) -> Result<(), St
 }
 
 async fn send_inner(t: &Target, vars: &Vars, policy: &HttpPolicy) -> Result<(), String> {
-    let mut req = Request::post_json(t.url.clone(), payload(t, vars)).timeout(t.timeout);
+    let payload = payload(t, vars);
+    let mut req = Request::post_json(t.url.clone(), payload.clone()).timeout(t.timeout);
     for (k, v) in &t.headers {
         req.headers.retain(|(h, _)| !h.eq_ignore_ascii_case(k));
         req = req.header(k.clone(), v.clone());
@@ -412,7 +412,18 @@ async fn send_inner(t: &Target, vars: &Vars, policy: &HttpPolicy) -> Result<(), 
         return Err(format!("HTTP {}: {desc}", resp.status));
     }
     if !resp.is_success() {
-        return Err(format!("HTTP {}: {}", resp.status, excerpt(&resp.text())));
+        let mut text = resp.text();
+        if let Some(body) = std::str::from_utf8(&payload)
+            .ok()
+            .filter(|body| !body.is_empty())
+        {
+            text = text.replace(body, "<redacted>");
+        }
+        return Err(format!(
+            "HTTP {}: {}",
+            resp.status,
+            excerpt(&t.scrub(&text))
+        ));
     }
     Ok(())
 }
@@ -450,6 +461,25 @@ mod tests {
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
+    }
+
+    #[test]
+    fn inline_webhook_values_are_scrubbed_from_diagnostics() {
+        let target = resolve(&chan(
+            r#"
+type = "webhook"
+url = "https://example.test/hook-secret"
+headers = { Authorization = "header-secret" }
+body = '{"message":"body-secret"}'
+"#,
+        ))
+        .unwrap();
+        assert_eq!(
+            target.scrub(
+                r#"https://example.test/hook-secret header-secret {"message":"body-secret"}"#
+            ),
+            "<redacted> <redacted> <redacted>"
+        );
     }
 
     #[test]
