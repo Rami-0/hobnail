@@ -76,6 +76,7 @@ now_us() { local t=${EPOCHREALTIME/./}; echo $((10#$t)); }
 cat > "$TMP/bin/client.py" <<'PY'
 # One process, N clients: each has a stream thread and a poller thread.
 import gzip, http.client, json, os, re, secrets, socket, sys, threading, time
+from urllib.parse import urljoin
 host, port, clients, duration, outdir = sys.argv[1:]
 port, n, dur = int(port), int(clients), float(duration)
 HDR = {"Accept-Encoding": "gzip", "User-Agent": "hobnail-bench"}
@@ -123,7 +124,22 @@ def discover():
     page = "/app"
     pat = r'''["'(](/assets/[^"')\s?#]+)'''
     st, body = get(page)
-    assets = [page] + sorted(set(re.findall(pat, body.decode("utf-8", "replace"))))
+    # Follow the built graph, including dynamic-import preload maps. Reading
+    # index.html alone omits lazy routes and charts from the asset workload.
+    assets = set(re.findall(pat, body.decode("utf-8", "replace")))
+    pending = list(assets)
+    references = re.compile(r"[\"'(]((?:\./|/assets/|assets/)[A-Za-z0-9_.-]+\.(?:js|css))[\"')]")
+    while pending:
+        asset = pending.pop()
+        status, source = get(asset)
+        if status != 200:
+            raise RuntimeError(f"asset discovery {asset} returned {status}")
+        for reference in references.findall(source.decode("utf-8", "replace")):
+            path = urljoin(asset if reference.startswith(".") else "/", reference)
+            if path.startswith("/assets/") and path not in assets:
+                assets.add(path)
+                pending.append(path)
+    assets = [page] + sorted(assets)
     return {"stream": stream, "state": state, "history": hist, "assets": assets, "page_status": st}
 
 authenticate()
