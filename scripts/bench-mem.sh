@@ -128,7 +128,7 @@ def discover():
     # index.html alone omits lazy routes and charts from the asset workload.
     assets = set(re.findall(pat, body.decode("utf-8", "replace")))
     pending = list(assets)
-    references = re.compile(r"[\"'(]((?:\./|/assets/|assets/)[A-Za-z0-9_.-]+\.(?:js|css))[\"')]")
+    references = re.compile(r"[`\"'(]((?:\./|/assets/|assets/)[A-Za-z0-9_.-]+\.(?:js|css))[`\"')]")
     while pending:
         asset = pending.pop()
         status, source = get(asset)
