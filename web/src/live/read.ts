@@ -3,7 +3,8 @@ import { api } from "../api/session.ts";
 import { onConfigChange, watchReadTopic, type ReadTopic } from "./runtime.ts";
 
 export function useRead<T>(path: string | null, topic?: ReadTopic, pollMs?: number) {
-  const [result, setResult] = useState<{ path: string; data: T | null; error: string }>();
+  const [result, setResult] = useState<{ path: string | null; data: T | null; error: string }>({ path, data: null, error: "" });
+  if (result.path !== path) setResult({ path, data: null, error: "" });
   useEffect(() => {
     if (!path) return;
     const lifetime = new AbortController();
@@ -14,7 +15,7 @@ export function useRead<T>(path: string | null, topic?: ReadTopic, pollMs?: numb
         if (lifetime.signal.aborted || revision !== current) return;
         if (res.kind === "ok") setResult({ path, data: res.data, error: "" });
         else setResult((previous) => ({
-          path, data: previous?.path === path ? previous.data : null, error: res.message,
+          path, data: previous.path === path ? previous.data : null, error: res.message,
         }));
       });
     };
@@ -28,7 +29,7 @@ export function useRead<T>(path: string | null, topic?: ReadTopic, pollMs?: numb
     }) : null;
     return () => { lifetime.abort(); config(); live?.(); window.clearInterval(timer); window.clearTimeout(pending); };
   }, [path, topic, pollMs]);
-  if (!result || result.path !== path) return { data: null, error: "", stale: false };
+  if (result.path !== path) return { data: null, error: "", stale: false };
   const stale = result.data !== null && !!result.error;
   return { data: result.data, error: stale ? `${result.error} Showing the last loaded data.` : result.error, stale };
 }

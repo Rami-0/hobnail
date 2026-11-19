@@ -52,7 +52,7 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     };
   }, [dirty]);
   function discardAndLeave() {
-    if (!destination) return;
+    if (!destination || busy) return;
     leaving.current = true;
     setDraft(undefined);
     setErrors({});
@@ -115,6 +115,6 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     </form>
     <Dialog open={destination !== undefined} testId="settings-leave" title="Discard unsaved changes?"
       onClose={() => setDestination(undefined)}
-      footer={<><Button onClick={() => setDestination(undefined)}>Keep editing</Button><Button onClick={discardAndLeave}>Discard and leave</Button></>} />
+      footer={<><Button onClick={() => setDestination(undefined)}>Keep editing</Button><Button disabled={busy} onClick={discardAndLeave}>Discard and leave</Button></>} />
   </section>;
 }
