@@ -198,6 +198,7 @@ try {
 
         await fill('input[name="greeting"]', "Retry preserved input");
         await tab.send("Network.clearBrowserCookies");
+        const allowExpired = rec.allow(({ method, url, status }) => new URL(url).pathname === "/api/settings/general" && method === "POST" && status === 401 ? "intentional expired session" : false);
         await button(".settings-form", "Save");
         await wait(`document.querySelector('.settings-form a[target="_blank"][href^="/app/login"]')?.textContent.includes("Sign in")`, "401 offers sign-in in a new tab");
         await button(".settings-form", "Retry");
@@ -205,6 +206,7 @@ try {
         await cookie(await credentials("/api/login", { username: "admin", password }));
         await button(".settings-form", "Retry");
         await wait(`!document.querySelector('.settings-form a[target="_blank"][href^="/app/login"]')`, "same-account retry clears sign-in prompt");
+        allowExpired();
         const retried = ok(await call("/api/settings/general", "GET", undefined, owner), "read retried settings");
         assert.equal(retried.page.greeting, "Retry preserved input");
 

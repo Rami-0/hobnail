@@ -27,6 +27,7 @@
 // waits out the 1 s back-off, and never retries a wrong password.
 // Exits 1 on any CSP violation, console error, exception, unexpected failed
 // request or failed step; 2 on bad usage. Refuses port 3200 (the live instance).
+import { blockLivePort, rejectLiveUrl } from "./cdp.mjs";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,6 +75,7 @@ setTimeout(() => { console.log("FAIL the run timed out"); quit(1); }, 300000).un
 
 // ---- what the page does, recorded per pass ----
 let id = 0; const pending = new Map();
+
 let pass = null; // { label, csp: [], console: [], exceptions: [], failed: [], allowed: [], notes: [], docHeaders, mime: [] }
 const reqs = new Map(); // requestId -> { url, method, type }
 let allowNext401 = false; // set right before the one wrong-password submit
@@ -81,6 +83,7 @@ const short = (u) => (u.startsWith(ORIGIN) ? u.slice(ORIGIN.length) : u);
 ws.addEventListener("message", (m) => {
   const d = JSON.parse(m.data);
   if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); return; }
+  if (d.method === "Network.requestWillBeSent") rejectLiveUrl(d.params.request.url);
   if (!pass) return;
   const p = d.params;
   switch (d.method) {
@@ -118,6 +121,9 @@ ws.addEventListener("message", (m) => {
       if (r.status >= 400) {
         if (allowNext401 && r.status === 401 && q.method === "POST" && new URL(r.url).pathname === "/api/login") {
           allowNext401 = false; pass.allowedUrls.add(r.url); pass.allowed.push(what + " (the wrong password)");
+        } else if (r.status === 401 && q.method === "GET" && new URL(r.url).origin === ORIGIN &&
+          ["/api/v1/bootstrap", "/api/v1/containers"].includes(new URL(r.url).pathname) && pass.label === "signed out") {
+          pass.allowedUrls.add(r.url); pass.allowed.push(what + " (signed-out direct-entry read)");
         } else if (ALLOW && ALLOW.test(r.url)) { pass.allowedUrls.add(r.url); pass.allowed.push(what + " (ALLOW)"); }
         else pass.failed.push(what);
       }
@@ -145,7 +151,7 @@ const ev = async (expression) => {
 const until = async (expr, ms = 8000) => { for (let i = 0; i < ms / 50; i++) { if (await ev(expr).catch(() => false)) return true; await sleep(50); } return false; };
 const q = (sel) => JSON.stringify(sel);
 
-await send("Page.enable"); await send("Runtime.enable"); await send("Network.enable"); await send("Log.enable");
+await send("Page.enable"); await send("Runtime.enable"); await blockLivePort(send); await send("Log.enable");
 await send("Runtime.addBinding", { name: "__hbCsp" });
 await send("Page.addScriptToEvaluateOnNewDocument", { source: `
   document.addEventListener("securitypolicyviolation", (e) => {

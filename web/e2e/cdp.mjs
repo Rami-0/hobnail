@@ -14,6 +14,18 @@ import path from "node:path";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const q = (s) => JSON.stringify(s);
 
+export function rejectLiveUrl(url) {
+  if (new URL(url).port !== "3200") return;
+  console.error(`E2E attempted to contact the live port: ${new URL(url).origin}`);
+  process.exit(2);
+}
+
+export async function blockLivePort(send) {
+  await send("Network.enable");
+  const blocked = await send("Network.setBlockedURLs", { urls: ["*://*:3200/*"] });
+  if (blocked.error) throw new Error(blocked.error.message);
+}
+
 export async function launch({ width = 1440, height = 900, extra = [] } = {}) {
   const CH = process.env.CH || `${os.homedir()}/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell`;
   const port = 9300 + Math.floor(Math.random() * 600);
@@ -86,16 +98,8 @@ async function connect(t, http) {
     },
     async close() { try { ws.close(); } catch {} try { await fetch(`${http}/json/close/${t.id}`); } catch {} },
   };
-  // Block before transmission and fail even if the page handles the error.
-  tab.on("Network.requestWillBeSent", ({ request }) => {
-    if (new URL(request.url).port === "3200") {
-      console.error(`E2E attempted to contact the live instance: ${request.url}`);
-      process.exit(2);
-    }
-  });
-  await tab.send("Network.enable");
-  const blocked = await tab.send("Network.setBlockedURLs", { urls: ["*://*:3200/*"] });
-  if (blocked.error) throw new Error(blocked.error.message);
+  tab.on("Network.requestWillBeSent", ({ request }) => rejectLiveUrl(request.url));
+  await blockLivePort(tab.send);
   return tab;
 }
 
