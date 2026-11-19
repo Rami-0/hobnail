@@ -19,9 +19,14 @@ import { Shell } from "./Shell.tsx";
 const opened = matchRoute(window.location.pathname).name;
 function pageChunk(loader: () => Promise<{ default: ComponentType }>, ...routes: Route["name"][]) {
   const initial = routes.includes(opened) ? loader() : null;
-  // The lazy boundary reports import failures if this route is rendered.
-  void initial?.catch(() => {});
-  return lazy(() => initial ?? loader());
+  // A direct entry can finish before the session. Render the resolved page
+  // immediately rather than suspending on its already-settled promise.
+  let Loaded: ComponentType | undefined;
+  void initial?.then((module) => { Loaded = module.default; }, () => {});
+  const LazyPage = lazy(() => initial ?? loader());
+  return function RouteChunk() {
+    return Loaded ? <Loaded /> : <LazyPage />;
+  };
 }
 
 const LogsPage = pageChunk(() => import("../routes/logs/index.tsx"), "logs", "container_logs", "stack_logs");
