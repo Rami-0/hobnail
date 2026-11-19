@@ -37,10 +37,10 @@ export default function History() {
     <div className="toolbar hist-bar">
       <nav className="seg" aria-label="Range">
         {RANGES.map((r) => {
-          const query = new URLSearchParams(search);
-          query.set("range", r);
-          for (const key of ["from", "to", "before"]) query.delete(key);
-          return <a key={r} href={"/app/history?" + query.toString()} aria-current={!zoomed && r === range ? "true" : undefined}>{r}</a>;
+          const rangeQuery = new URLSearchParams(search);
+          rangeQuery.set("range", r);
+          for (const key of ["from", "to", "before"]) rangeQuery.delete(key);
+          return <a key={r} href={"/app/history?" + rangeQuery.toString()} aria-current={!zoomed && r === range ? "true" : undefined}>{r}</a>;
         })}
       </nav>
       {steps && <nav className="zoom-nav" aria-label="Move or zoom the window">
