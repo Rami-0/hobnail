@@ -390,6 +390,14 @@ mod tests {
                     "{head}"
                 );
                 assert_eq!(body, ix.gz.unwrap_or(ix.raw));
+                let (root_status, root_head, root_body) = send(req("GET", "/app")).await;
+                assert_eq!(root_status, status);
+                assert_eq!(root_body, body);
+                assert!(root_head.contains("cache-control: no-cache"));
+                assert!(root_head.contains(&format!(
+                    "content-security-policy: {}",
+                    CSP.to_ascii_lowercase()
+                )));
                 let (hs, hh, hb) = send(req("HEAD", "/app")).await;
                 assert_eq!(hs, 200);
                 assert!(hb.is_empty(), "HEAD has no body");
@@ -398,7 +406,14 @@ mod tests {
                 if let Some(a) = ASSETS.iter().find(|a| a.immutable) {
                     let (s, h, b) = send(req("GET", &format!("/{}", a.path))).await;
                     assert_eq!(s, 200);
-                    assert!(h.contains("immutable"), "{h}");
+                    assert!(
+                        h.contains("cache-control: public, max-age=31536000, immutable"),
+                        "{h}"
+                    );
+                    assert!(h.contains("vary: accept-encoding"), "{h}");
+                    if a.gz.is_some() {
+                        assert!(h.contains("content-encoding: gzip"), "{h}");
+                    }
                     assert_eq!(b, a.gz.unwrap_or(a.raw));
                 }
             }
@@ -407,6 +422,7 @@ mod tests {
                 assert_eq!(body, b"client not built\n");
             }
         }
+        assert_eq!(send(req("GET", "/assets/missing-deadbeef.js")).await.0, 404);
         let (s, _, b) = send(req("GET", "/assets/../Cargo.toml")).await;
         assert_eq!(s, 404);
         assert_eq!(b, b"not found\n");

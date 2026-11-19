@@ -93,6 +93,10 @@ mod tests {
         assert_eq!(v["name"], "Hobnail · my \"box\" <x>");
         assert_eq!(v["short_name"], "Hobnail");
         assert_eq!(v["display"], "standalone");
+        assert_eq!(v["start_url"], "/app");
+        for shortcut in v["shortcuts"].as_array().unwrap() {
+            assert!(shortcut["url"].as_str().unwrap().starts_with("/app/"));
+        }
         assert_eq!(v["icons"].as_array().unwrap().len(), 3);
         assert!(m.chars().count() < 2000);
     }

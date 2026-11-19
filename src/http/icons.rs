@@ -166,6 +166,41 @@ fn svg_response(body: Vec<u8>, cache: &str) -> Response<Body> {
     r
 }
 
+fn is_safe_name(n: &str) -> bool {
+    !n.is_empty()
+        && n.len() < 100
+        && !n.starts_with('.')
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// `GET /icons/<name>`: serve from `data/icons/`.
+pub fn icon_response(state: &AppState, name: &str) -> Response<Body> {
+    if !is_safe_name(name) {
+        return text(StatusCode::BAD_REQUEST, "bad icon name\n");
+    }
+    let ctype = if name.ends_with(".svg") {
+        "image/svg+xml"
+    } else if name.ends_with(".png") {
+        "image/png"
+    } else {
+        return text(StatusCode::NOT_FOUND, "not found\n");
+    };
+    match std::fs::read(state.env.data_dir.join("icons").join(name)) {
+        Ok(b) => {
+            let mut r = full(StatusCode::OK, b);
+            set(&mut r, hyper::header::CONTENT_TYPE, ctype);
+            set(
+                &mut r,
+                hyper::header::CACHE_CONTROL,
+                "public, max-age=86400",
+            );
+            r
+        }
+        Err(_) => text(StatusCode::NOT_FOUND, "not found\n"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,40 +235,5 @@ mod tests {
             Some("beszel")
         );
         assert_eq!(auto_icon("webshop-platform:dev", true), None);
-    }
-}
-
-fn is_safe_name(n: &str) -> bool {
-    !n.is_empty()
-        && n.len() < 100
-        && !n.starts_with('.')
-        && n.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-}
-
-/// `GET /icons/<name>`: serve from `data/icons/`.
-pub fn icon_response(state: &AppState, name: &str) -> Response<Body> {
-    if !is_safe_name(name) {
-        return text(StatusCode::BAD_REQUEST, "bad icon name\n");
-    }
-    let ctype = if name.ends_with(".svg") {
-        "image/svg+xml"
-    } else if name.ends_with(".png") {
-        "image/png"
-    } else {
-        return text(StatusCode::NOT_FOUND, "not found\n");
-    };
-    match std::fs::read(state.env.data_dir.join("icons").join(name)) {
-        Ok(b) => {
-            let mut r = full(StatusCode::OK, b);
-            set(&mut r, hyper::header::CONTENT_TYPE, ctype);
-            set(
-                &mut r,
-                hyper::header::CACHE_CONTROL,
-                "public, max-age=86400",
-            );
-            r
-        }
-        Err(_) => text(StatusCode::NOT_FOUND, "not found\n"),
     }
 }
