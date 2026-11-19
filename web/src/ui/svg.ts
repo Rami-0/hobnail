@@ -85,13 +85,13 @@ export function humanDuration(secs: number): string {
   return `${s}s`;
 }
 
-/** "24 h", "7 d" (ui::view::strip::window_label). */
+/** "24 h", "7 d" (read_model::strip::window_label). */
 export function windowLabel(secs: number): string {
   if (secs % 86400 === 0 && secs >= 2 * 86400) return `${secs / 86400} d`;
   return `${Math.floor((secs + 1800) / 3600)} h`;
 }
 
-/** "running 98% of the last 24 h · 2 problems · 1 restart" (ui::view::strip::summary). */
+/** "running 98% of the last 24 h · 2 problems · 1 restart" (read_model::strip::summary). */
 export function stripSummary(codes: readonly number[], step: number): string {
   const n = Math.max(1, codes.length);
   const win = windowLabel(codes.length * step);

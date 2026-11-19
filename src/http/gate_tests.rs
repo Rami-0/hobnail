@@ -71,7 +71,7 @@ const WRITES: &[(&str, &str)] = &[
     ("PATCH", "/api/settings/config"),
     ("POST", "/"),
     ("POST", "/containers"),
-    // Where the Settings forms point (`method="post"`): refused like any write.
+    // Retired Settings form destinations are refused like any write.
     ("POST", "/settings/security"),
     ("POST", "/settings/bookmarks"),
     ("POST", "/api/events"),
@@ -2273,7 +2273,7 @@ async fn session_distinguishes_unavailable_database_from_fresh_installation() {
     assert!(session["user"].is_null());
 }
 
-/// JSON equivalents of the classic Settings fragment, edit and cache checks.
+/// Settings JSON read, edit and cache checks.
 #[tokio::test]
 async fn settings_json_values_and_hashes_require_an_admin_session() {
     let st = state();

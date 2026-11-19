@@ -19,7 +19,7 @@ why: Why | null,
  */
 restarts_7d: number,
 /**
- * The 12 newest events of this container (no `auth.*` for a visitor).
+ * The 12 newest events of this container (`auth.*` requires Admin).
  */
 events: Array<EventRow>,
 /**

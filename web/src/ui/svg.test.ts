@@ -38,7 +38,7 @@ test("strip: runs merge equal buckets; classes per code", () => {
   assert.deepEqual([0, 1, 2, 3, 4, 9].map(stripClass), ["u", "f", "o", "w", "b", "u"]);
 });
 
-test("strip summary: the words of ui::view::strip::summary", () => {
+test("strip summary: the words of read_model::strip::summary", () => {
   const day = Array.from({ length: 96 }, () => 2);
   assert.equal(stripSummary(day, 900), "running 100% of the last 24 h");
   day[10] = 4;

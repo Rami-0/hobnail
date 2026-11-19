@@ -103,7 +103,7 @@ export function newerView(cur: ContainersView | null, next: ContainersView): Con
   return next;
 }
 
-/** Status words that count as a problem (ui::view::problem_count). */
+/** Status words that count as a problem. */
 const PROBLEM = new Set(["unhealthy", "restarting", "dead"]);
 
 export function problemCount(view: ContainersView | null): number {

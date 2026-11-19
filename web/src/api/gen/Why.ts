@@ -2,8 +2,7 @@
 import type { WhyCheck } from "./WhyCheck.ts";
 
 /**
- * "Why is this red?" (`ui::pages::container::why_red`). Today's page shows
- * it in red whatever the cause, so `severity` is `bad`.
+ * Diagnostic reasons for a problem, displayed with `bad` severity.
  */
 export type Why = { severity: "bad" | "warn",
 /**

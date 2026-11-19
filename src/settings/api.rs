@@ -247,8 +247,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     })
 }
 
-/// A refused password change on the field it is about (422), in plain
-/// words; anything else (no password set, too many attempts) stays a 400.
+/// Apply one collection action with revision and undo metadata.
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
     store::edit_with_undo(
@@ -691,8 +690,7 @@ fn css_path(state: &AppState) -> std::path::PathBuf {
     state.env.data_dir.join(CSS_FILE)
 }
 
-/// The saved custom.css and its hash (the `base_hash` of a save), for the
-/// Appearance page.
+/// Read the saved custom.css and the hash required when saving it.
 fn css_get(state: &AppState) -> Result<J, ApiError> {
     let css = match std::fs::read(css_path(state)) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),

@@ -69,7 +69,7 @@ test("the newer Docker read wins the start-up race", () => {
   assert.equal(newerView(fresh, tie), tie);
 });
 
-test("problem count: unhealthy, restarting, dead (ui::view::problem_count)", () => {
+test("problem count: unhealthy, restarting, dead", () => {
   const v = view(1, [
     [row("a", { label: "unhealthy" }), row("b", { label: "restarting" })],
     [row("c", { label: "dead" }), row("d", { label: "stopped" }), row("e", { label: "starting" })],

@@ -572,7 +572,7 @@ fn event_cap_and_filters() {
     assert_eq!(open_end.len(), 10);
     // The bounded query walks the rowid (no index on `ts`, and no new one
     // without a migration): SQLite's plan says so. A History window is
-    // therefore still read with the paged loop (`ui::pages::history::scan`).
+    // therefore still read with the paged loop in `api::history`.
     let plan: Vec<String> = db.with(Vec::new(), |i| {
         let mut st = i.conn.prepare(
             "EXPLAIN QUERY PLAN SELECT id FROM events WHERE ts >= 1 AND ts <= 2 ORDER BY id DESC LIMIT 5",

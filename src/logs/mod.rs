@@ -102,7 +102,7 @@ pub fn tailable(state: &AppState) -> std::collections::HashSet<String> {
         .collect()
 }
 
-/// A logs link that opens the viewer at a moment (`#t=` in unix ms).
+/// Resolve visible container names from a stack or explicit selections, up to `max`.
 fn targets(
     state: &AppState,
     q: &[(String, String)],

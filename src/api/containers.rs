@@ -1,15 +1,13 @@
 //! `GET /api/v1/containers` (the list) and `GET /api/v1/containers/<name>`
-//! (one container's Overview), both Public and `no-store`.
+//! (one container's Overview), both Viewer-gated and `no-store`.
 //!
-//! The JSON says what today's pages say: the list is `ui::view::build_groups`
-//! (hidden, excluded and, with `show_stopped = false`, stopped containers
-//! appear nowhere), the detail is `ui::pages::container` (why_red, rules,
-//! labels, events for the viewer). Port choice is the client's: rows carry
-//! the raw bindings and `link`, the configured URL template with `{host}`
-//! left for the viewer's host.
+//! The list uses `read_model::build_groups`: hidden, excluded and, with
+//! `show_stopped = false`, stopped containers appear nowhere. The detail
+//! adds diagnostics, rules, labels and events for the viewer. Port choice
+//! is the client's: rows carry the raw bindings and the configured `link`
+//! URL template with `{host}` left for the viewer's host.
 //!
-//! Session-only data (health-check probe output, Docker's last checks) is
-//! left out for a visitor, never null-filled with a secret.
+//! Probe output and Docker's last checks require an Admin account.
 
 use std::collections::HashMap;
 
@@ -125,7 +123,7 @@ pub struct ContainerDetail {
     pub why: Option<Why>,
     /// `container.start` events in the last 7 days.
     pub restarts_7d: u32,
-    /// The 12 newest events of this container (no `auth.*` for a visitor).
+    /// The 12 newest events of this container (`auth.*` requires Admin).
     pub events: Vec<EventRow>,
     /// Labels minus Compose and image bookkeeping (`com.docker.compose.*`,
     /// `org.opencontainers.image.*`, `com.docker.desktop.*`).
@@ -136,8 +134,7 @@ pub struct ContainerDetail {
     pub now: i64,
 }
 
-/// "Why is this red?" (`ui::pages::container::why_red`). Today's page shows
-/// it in red whatever the cause, so `severity` is `bad`.
+/// Diagnostic reasons for a problem, displayed with `bad` severity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Why {
