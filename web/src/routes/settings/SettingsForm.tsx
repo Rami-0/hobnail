@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, refreshEditingSession } from "../../api/session.ts";
+import { navigate } from "../../app/router.ts";
+import { Dialog } from "../../ui/Dialog.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { changedFields, conflictingFields, fieldErrors, rebaseFields, type Values } from "./forms.ts";
@@ -28,6 +30,38 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
   const input = draft?.input ?? base.values;
   const changed = changedFields(base.values, input);
   const dirty = Object.keys(changed).length > 0;
+  const [destination, setDestination] = useState<string>();
+  const leaving = useRef(false);
+  useEffect(() => {
+    if (!dirty) return;
+    const navigation = (event: Event) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      setDestination((event as CustomEvent<string>).detail);
+    };
+    const unload = (event: BeforeUnloadEvent) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("rh:navigate", navigation);
+    window.addEventListener("beforeunload", unload);
+    return () => {
+      window.removeEventListener("rh:navigate", navigation);
+      window.removeEventListener("beforeunload", unload);
+    };
+  }, [dirty]);
+  function discardAndLeave() {
+    if (!destination) return;
+    leaving.current = true;
+    setDraft(undefined);
+    setErrors({});
+    setFailure(undefined);
+    setDestination(undefined);
+    const external = new URL(destination).origin !== window.location.origin;
+    navigate(destination);
+    if (!external) leaving.current = false;
+  }
   async function save() {
     if (busy || !dirty) return;
     const result = collectFields(fields, input);
@@ -79,5 +113,8 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
         {renderActions?.(input, busy, (values) => setDraft({ base, input: values }))}
       </div>
     </form>
+    <Dialog open={destination !== undefined} testId="settings-leave" title="Discard unsaved changes?"
+      onClose={() => setDestination(undefined)}
+      footer={<><Button onClick={() => setDestination(undefined)}>Keep editing</Button><Button onClick={discardAndLeave}>Discard and leave</Button></>} />
   </section>;
 }

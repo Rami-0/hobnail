@@ -179,6 +179,10 @@ try {
         await fill('input[name="search_url"]', "https://example.com/search?q={q}");
         const greeting = `Hello from ${label}`;
         await fill('input[name="greeting"]', greeting);
+        await inp.click('[data-testid="settings-tabs"] a[href="/app/settings/history"]');
+        await wait(present('[data-testid="settings-leave"]'), "dirty form guards tab navigation");
+        await button('[data-testid="settings-leave"]', "Keep editing");
+        await wait(`!document.querySelector('[data-testid="settings-leave"][data-open]') && location.pathname === "/app/settings/general"`, "keeping edits retains the General form");
         const before = ok(await call("/api/settings/general", "GET", undefined, owner), "read current page settings");
         ok(await call("/api/settings/general", "POST", { base_hash: before.hash, values: { title: "Concurrent title" } }, owner), "save a concurrent change");
         await button(".settings-form", "Save");
