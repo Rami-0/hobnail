@@ -12,3 +12,7 @@ web/dist
 web/*.tsbuildinfo
 # Browser tests run outside the image build (scripts/e2e.sh).
 web/e2e
+
+# Rust API reference drift test input.
+!docs/
+!docs/api.md
