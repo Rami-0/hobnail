@@ -3,3 +3,10 @@
 .history-events { margin: 0; padding: 0; list-style: none; }
 .history-events li { padding: .6rem 0; border-block-start: 1px solid var(--line); }
 .history-events li[data-selected] { outline: 2px solid currentColor; }
+
+@media (pointer: coarse), (max-width: 699px) {
+  .history-events li > a:not(.ia) {
+    min-inline-size: calc(var(--hit) + 4px);
+    padding-inline: .25rem;
+  }
+}
