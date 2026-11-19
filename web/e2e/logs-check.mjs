@@ -222,7 +222,6 @@ try {
       await setQuery("ERROR");
       await wait(`[...document.querySelectorAll('[data-testid=log-matches]')].length===4 && [...document.querySelectorAll('[data-testid=log-matches]')].every(e=>Number(e.textContent.split('/')[1])>0)`, "search across all panes");
       await wait('document.querySelectorAll(".log-current").length===1', "new search selects one newest match across panes");
-      await wait('document.querySelectorAll(".log-current").length===1', "a new search selects one newest match globally");
       await inp.key("Enter"); await wait('document.querySelectorAll(".log-current").length===1', "one global search selection");
       const firstMatch = await tab.ev('Number(document.querySelector(".log-current").dataset.timestamp)');
       await inp.key("Enter"); await sleep(200);

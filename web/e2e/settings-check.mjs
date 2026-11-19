@@ -196,6 +196,18 @@ try {
         assert.equal(saved.page.title, "Concurrent title");
         ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
 
+        await fill('input[name="greeting"]', "Retry preserved input");
+        await tab.send("Network.clearBrowserCookies");
+        await button(".settings-form", "Save");
+        await wait(`document.querySelector('.settings-form a[target="_blank"][href^="/app/login"]')?.textContent.includes("Sign in")`, "401 offers sign-in in a new tab");
+        await button(".settings-form", "Retry");
+        await wait(text(".settings-form", "Sign in as the same account"), "retry explains missing session");
+        await cookie(await credentials("/api/login", { username: "admin", password }));
+        await button(".settings-form", "Retry");
+        await wait(`!document.querySelector('.settings-form a[target="_blank"][href^="/app/login"]')`, "same-account retry clears sign-in prompt");
+        const retried = ok(await call("/api/settings/general", "GET", undefined, owner), "read retried settings");
+        assert.equal(retried.page.greeting, "Retry preserved input");
+
         await go("/app/settings/containers", present('[data-testid="settings-containers"]'));
         await selectContainer('svc001');
         await selectContainer('svc002');
@@ -255,7 +267,7 @@ try {
         await go("/app/settings/notifications", text('.settings-row', channel));
         await tab.ev(`Array.from(document.querySelectorAll('[data-testid="settings-channel-list"] .settings-row')).find(row=>row.querySelector('h3')?.textContent===${q(channel)}).setAttribute('data-channel-check','')`);
         await button('[data-channel-check]', "Send test");
-        await wait(text('[data-channel-check] [role="alert"]', ""), "refused notification test is shown as an error");
+        await wait(text('[data-channel-check] [role="alert"]', "connection refused"), "refused notification test is shown as an error");
         await inp.click(`button[aria-label=${q('Delete '+channel)}]`); await button(dialog,"Delete");
         await wait(text(dialog, "rule"), "a referenced channel cannot be deleted");
         await inp.key("Escape");

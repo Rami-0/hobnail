@@ -56,6 +56,7 @@ const enc = encodeURIComponent(NAME);
 let sessionCookie = process.env.HB_COOKIE;
 let csrf;
 let boardId;
+let boardHeaders;
 if (!sessionCookie && process.env.HB_PASSWORD) {
   const origin = new URL(base).origin;
   const session = await fetch(`${base}/api/v1/session`).then((r) => r.json());
@@ -70,7 +71,7 @@ if (!sessionCookie && process.env.HB_PASSWORD) {
 
 if (TARGETS.includes("board")) {
   if (!sessionCookie) throw new Error("Board performance fixtures require authentication");
-  const headers = { Cookie: sessionCookie, Origin: new URL(base).origin, "Content-Type": "application/json", "X-RH-CSRF": csrf ?? (await fetch(`${base}/api/v1/session`, { headers: { Cookie: sessionCookie } }).then(r => r.json())).csrf };
+  const headers = boardHeaders = { Cookie: sessionCookie, Origin: new URL(base).origin, "Content-Type": "application/json", "X-RH-CSRF": csrf ?? (await fetch(`${base}/api/v1/session`, { headers: { Cookie: sessionCookie } }).then(r => r.json())).csrf };
   const created = await fetch(`${base}/api/v1/boards`, { method: "POST", headers, body: JSON.stringify({ name: "Performance 40 items" }) }).then(r => r.json());
   boardId = created.id;
   const document = (await fetch(`${base}/api/v1/boards/${boardId}`, { headers }).then(r => r.json())).document;
@@ -81,11 +82,11 @@ if (TARGETS.includes("board")) {
   if (!saved.ok) throw new Error(`Board fixture: ${saved.status} ${await saved.text()}`);
 }
 const T = {
-  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: [], interaction: '.overview-strips summary', fails: true },
+  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-strips summary', fails: true },
   history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: [], interaction: '.history-controls button', fails: true },
-  host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: [], interaction: '[data-testid="host-disclosure"] summary', fails: true },
-  board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: [], interaction: '[data-testid="board-edit"]', fails: true },
-  logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: [], filter: '[data-testid="filter"]', fails: true },
+  host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary', fails: true },
+  board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]', fails: true },
+  logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: ["l"], filter: '[data-testid="filter"]', fails: true },
   settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: [], filter: 'input[name="greeting"]', fails: true },
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
     rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]', fails: true },
@@ -111,14 +112,14 @@ const probe = (t) => `(() => {
   obs("layout-shift", (e) => { if (!e.hadRecentInput) { H.cls += e.value; H.shifts++; } });
   obs("paint", (e) => { if (e.name === "first-contentful-paint") H.fcp = e.startTime; });
   obs("event", (e) => H.events.push({ name: e.name, id: e.interactionId || 0, start: e.startTime, dur: e.duration, delay: e.processingStart - e.startTime, proc: e.processingEnd - e.processingStart }), { durationThreshold: 16 });
-  const NAMES = ["hello", "stats", "containers", "system", "config", "resync", "frag", "reload"];
+  const NAMES = ["hello", "stats", "containers", "system", "host", "boards", "l", "config", "resync", "frag", "reload"];
   const ES = window.EventSource;
   if (ES) window.EventSource = class extends ES {
     constructor(...a) { super(...a); for (const n of NAMES) this.addEventListener(n, () => { performance.mark("hb-live:" + n); H.live.push({ n, at: performance.now() }); }); }
   };
   const ready = () => { try { return ${t.ready}; } catch { return false; } };
   const mo = new MutationObserver(() => { if (H.readyAt === null && ready()) { H.readyAt = performance.now(); H.rows = document.querySelectorAll(${q(t.rows)}).length; performance.mark("hb-ready"); mo.disconnect(); } });
-  mo.observe(document, { childList: true, subtree: true, attributes: false });
+  mo.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-search-lines", "aria-busy"] });
 })();`;
 
 async function readTrace(tab) {
@@ -175,6 +176,20 @@ async function run(target, profile) {
     const m0 = await tab.send("Performance.getMetrics");
     await tab.shot(path.join(OUT, `${target}-${profile}-loaded.png`));
 
+    // A read-only board has no periodic layout changes. Rename it through
+    // the actual API to measure the subscribed board's update.
+    let boardUpdates;
+    if (ready && target === "board") {
+      boardUpdates = (async () => {
+        for (let n = 0; n < UPDATES; n++) {
+          await sleep(1100);
+          const response = await fetch(`${base}/api/v1/boards/${boardId}`, {
+            method: "PATCH", headers: boardHeaders, body: JSON.stringify({ name: `Performance 40 items ${profile} ${n}` }),
+          });
+          if (!response.ok) res.notes.push(`Board live fixture: HTTP ${response.status}`);
+        }
+      })();
+    }
     // live updates
     let live = [];
     if (ready && t.live.length) {
@@ -187,6 +202,7 @@ async function run(target, profile) {
     // interaction
     await tab.ev(`performance.mark("hb-int-start")`).catch(() => {});
     const intStart = await tab.ev("performance.now()").catch(() => null);
+    await boardUpdates;
     if (ready && t.filter) {
       const fb = await inp.box(t.filter);
       if (fb) { await inp.clickAt(fb.x, fb.y); await inp.type("svc1", 150); await sleep(800); }
@@ -221,7 +237,7 @@ async function run(target, profile) {
     res.fcp_ms = r1(H?.fcp);
     const lcp = (H?.lcp || []).filter((e) => intStart == null || e.at < intStart).pop();
     res.lcp_ms = r1(lcp?.at); res.lcp_el = lcp?.el ?? null;
-    res.cls = H ? Math.round(H.cls * 10000) / 10000 : null;
+    res.cls = H && !H["no_layout-shift"] ? Math.round(H.cls * 10000) / 10000 : null;
     res.dom_elements = dom.elements ?? null;
     res.nodes_metric = metric(m1, "Nodes") ?? null;
     res.metrics_load = { TaskDuration: r1((metric(m0, "TaskDuration") || 0) * 1000), ScriptDuration: r1((metric(m0, "ScriptDuration") || 0) * 1000), LayoutDuration: r1((metric(m0, "LayoutDuration") || 0) * 1000), RecalcStyleDuration: r1((metric(m0, "RecalcStyleDuration") || 0) * 1000), JSHeapUsedSize: metric(m0, "JSHeapUsedSize") };
@@ -300,6 +316,7 @@ async function run(target, profile) {
   res.violations = [];
   if (t.fails) {
     if (!res.ok) res.violations.push(`${label}: ${res.notes.join("; ")}`);
+    // Plan §4.9 sets the load-task budget at 4× CPU. Report desktop tasks without enforcing it.
     if (profile === "phone") {
       const traceMax = res.trace?.load.max_ms ?? 0;
       const observerMax = Math.max(0, ...(res.longtask_observer?.load || []));
@@ -307,12 +324,15 @@ async function run(target, profile) {
       if (observerMax > LOAD_BUDGET) res.violations.push(`${label}: observer load task ${observerMax} ms (> ${LOAD_BUDGET})`);
     }
     const lcpBudget = profile === "phone" ? 1200 : 400;
-    if (res.lcp_ms > lcpBudget) res.violations.push(`${label}: LCP ${res.lcp_ms} ms (> ${lcpBudget})`);
-    if (res.cls > .1) res.violations.push(`${label}: CLS ${res.cls} (> 0.1)`);
-    if (res.inp_ms > 200) res.violations.push(`${label}: INP ${res.inp_ms} ms (> 200)`);
+    if (res.lcp_ms === null) res.violations.push(`${label}: missing LCP measurement`);
+    else if (res.lcp_ms > lcpBudget) res.violations.push(`${label}: LCP ${res.lcp_ms} ms (> ${lcpBudget})`);
+    if (res.cls === null) res.violations.push(`${label}: missing CLS measurement`);
+    else if (res.cls > .1) res.violations.push(`${label}: CLS ${res.cls} (> 0.1)`);
+    if (res.inp_ms === null) res.violations.push(`${label}: missing INP measurement`);
+    else if (res.inp_ms > 200) res.violations.push(`${label}: INP ${res.inp_ms} ms (> 200)`);
     const liveMax = res.trace ? res.trace.live.map((l) => l.max_ms) : (res.longtask_observer?.live || []).map((l) => Math.max(0, ...l));
     liveMax.forEach((m, i) => { if (m > LIVE_BUDGET) res.violations.push(`${label}: live update ${i + 1}: a task took ${m} ms (> ${LIVE_BUDGET} ms)`); });
-    if (target === "app" && res.ok && (res.live_updates ?? 0) < UPDATES) res.violations.push(`${label}: only ${res.live_updates} live update(s), wanted ${UPDATES}`);
+    if (t.live.length && res.ok && (res.live_updates ?? 0) < UPDATES) res.violations.push(`${label}: only ${res.live_updates} live update(s), wanted ${UPDATES}`);
   }
   console.log(`${res.violations.length ? "FAIL" : "ok  "} ${label}: ready ${res.ready_ms ?? "-"} ms, rows ${res.rows_at_ready ?? "-"}, LCP ${res.lcp_ms ?? "-"} ms, CLS ${res.cls ?? "-"}, load max task ${res.trace?.load.max_ms ?? "-"} ms, live max ${res.trace ? JSON.stringify(res.trace.live.map((l) => l.max_ms)) : "-"} ms, INP ${res.inp_ms ?? "-"} ms${res.notes.length ? "\n       " + res.notes.join("\n       ") : ""}`);
   return res;
