@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type KeyboardEvent } from "react";
+import { startTransition, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type KeyboardEvent } from "react";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardView } from "../../api/gen/BoardView.ts";
 import type { BoardSuggestion } from "../../api/gen/BoardSuggestion.ts";
@@ -35,7 +35,15 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const leaving = useRef(false);
   const operation = useRef(false);
   const root = useRef<HTMLDivElement>(null);
-  useEffect(() => { root.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, []);
+  useEffect(() => { root.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }, []);
+  const [toolCount, setToolCount] = useState(6);
+  const itemCount = doc.sections.reduce((count, section) => count + section.items.length, 0);
+  useEffect(() => {
+    if (toolCount >= itemCount) return;
+    const frame = requestAnimationFrame(() => startTransition(() => setToolCount(toolCount + 6)));
+    return () => cancelAnimationFrame(frame);
+  }, [itemCount, toolCount]);
+  let itemIndex = 0;
   const path = `/api/v1/boards/${view.board.id}`;
   const modified = dirty(base, doc);
   const change = (action: Action, message: string) => { if (operation.current) return; setDoc((previous) => reduceDocument(previous, action)); setAnnouncement(message); setDraftState("Draft pending"); };
@@ -142,14 +150,18 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section">
       <div className="editor-section-head"><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
         <div className="settings-actions"><Button aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => { change({ type: "delete-section", section: s }, "Section removed"); focusItem(Math.min(s, doc.sections.length - 2), 0); }}>Delete section</Button></div>
-      </div><div className="board-grid">{section.items.map((item, i) => <div key={item.id ?? `item-${i}`} className="board-cell editor-cell" data-section={s} data-item={i}
+      </div><div className="board-grid">{section.items.map((item, i) => {
+        const showTools = itemIndex++ < toolCount;
+        return <div key={item.id ?? `item-${i}`} className="board-cell editor-cell" data-section={s} data-item={i}
         style={{ "--mobile": item.spans.mobile, "--tablet": item.spans.tablet, "--desktop": item.spans.desktop, "--rows": item.spans.rows } as CSSProperties}>
         <Tile item={item} resolved={view.resolved.find((r) => r.id === item.id)} />
+        {showTools && <>
         <div className="editor-tools"><Button className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => drag(e, s, i, false)} aria-label="Move item">Move</Button><Button className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => drag(e, s, i, true)} aria-label="Resize item">Resize</Button><Button onClick={() => { change({ type: "delete", section: s, item: i }, "Item removed"); focusItem(s, Math.max(0, i - 1)); }}>Remove</Button></div>
-        <Select label="Move to section" value={String(s)} options={doc.sections.map((entry, index) => ({ value: String(index), label: entry.title }))} onChange={(value) => move(s, i, Number(value), doc.sections[Number(value)]?.items.length ?? 0)} />
+        {doc.sections.length > 1 && <Select label="Move to section" value={String(s)} options={doc.sections.map((entry, index) => ({ value: String(index), label: entry.title }))} onChange={(value) => move(s, i, Number(value), doc.sections[Number(value)]?.items.length ?? 0)} />}
         <div className="editor-spans">{(["mobile", "tablet", "desktop", "rows"] as const).map((dimension) => <Field key={dimension} id={`span-${s}-${i}-${dimension}`} label={dimension}><TextInput type="number" min={1} max={dimension === "mobile" ? 4 : dimension === "tablet" ? 8 : 12} value={item.spans[dimension]} onChange={(e) => change({ type: "resize", section: s, item: i, spans: { ...item.spans, [dimension]: Number(e.target.value) } }, `${dimension} resized`)} /></Field>)}</div>
         {item.payload.kind === "container" && <div className="editor-custom">{(["title", "icon", "link"] as const).map((field) => <Field key={field} id={`custom-${s}-${i}-${field}`} label={`Custom ${field}`}><TextInput value={item.payload.kind === "container" ? item.payload[field] ?? "" : ""} onChange={(e) => { if (item.payload.kind === "container") change({ type: "payload", section: s, item: i, payload: { ...item.payload, [field]: e.target.value || null } }, `Custom ${field} updated`); }} /></Field>)}</div>}
-      </div>)}</div><Button data-testid="board-add-item" onClick={() => { void openPicker(s); }}>Add item</Button>
+        </>}
+      </div>; })}</div><Button data-testid="board-add-item" onClick={() => { void openPicker(s); }}>Add item</Button>
     </section>)}
     <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
     <Dialog open={picker !== null} title="Add item" onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
