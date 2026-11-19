@@ -25,6 +25,7 @@ import { interceptedPath, logsHref } from "./paths.ts";
 import { settingsHref, local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
+import { openDialogs, subscribeDialogs } from "../ui/layers.ts";
 import { getToasts, subscribeToasts } from "../ui/toast.ts";
 
 const Palette = lazy(() => import("./Palette.tsx"));
@@ -35,7 +36,9 @@ function hasToasts() {
 
 function ShellToasts() {
   const visible = useSyncExternalStore(subscribeToasts, hasToasts, hasToasts);
-  return <Suspense fallback={null}>{visible ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</Suspense>;
+  // Dialog saves can release a toast in the same commit that closes the modal.
+  const dialogs = useSyncExternalStore(subscribeDialogs, openDialogs, openDialogs);
+  return <Suspense fallback={null}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</Suspense>;
 }
 
 const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
