@@ -1008,7 +1008,7 @@ async fn protected_views_still_hide_excluded_containers() {
         assert!(!r.body.contains(HIDDEN_PREFIX));
     }
     for hidden in ["secret-ovr", "secret-lbl", "secret-exc"] {
-        for tab in ["inspect", "metrics", "events"] {
+        for tab in ["inspect", "metrics", "events", "env", "top"] {
             let path = format!("/api/v1/containers/{hidden}/{tab}");
             let response = req(addr, "GET", &path, &headers, "").await;
             assert_api_error(&response, 404, "not_found", &path);
