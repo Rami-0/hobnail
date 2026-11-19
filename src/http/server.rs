@@ -137,7 +137,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             || public_asset
             || legacy_read
             || path == "/healthz"
-            || path.starts_with("/api/settings/"))
+            || crate::settings::handles_read(&path))
     {
         return not_found(&path);
     }

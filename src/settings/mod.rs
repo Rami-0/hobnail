@@ -45,7 +45,41 @@ use crate::http::server::Body;
 
 use crate::state::AppState;
 
-/// Everything under `/api/settings/`, after the shared access check.
+/// Recognize settings reads before applying the Admin gate.
+pub(crate) fn handles_read(path: &str) -> bool {
+    let Some(segs) = segments(path) else {
+        return false;
+    };
+    let segs: Vec<_> = segs.iter().map(String::as_str).collect();
+    matches!(
+        segs.as_slice(),
+        ["general"
+            | "containers"
+            | "bookmarks"
+            | "widgets"
+            | "notifications"
+            | "appearance"
+            | "history"
+            | "config"
+            | "revisions"
+            | "security"]
+            | ["revision", _]
+            | ["revision", _, "diff"]
+            | ["history", "export"]
+    )
+}
+
+fn segments(path: &str) -> Option<Vec<String>> {
+    Some(
+        path.strip_prefix("/api/settings/")?
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(percent_decode)
+            .collect(),
+    )
+}
+
+/// Dispatch a settings request after the shared access check.
 pub(crate) async fn route(
     state: &Arc<AppState>,
     req: Request<hyper::body::Incoming>,
@@ -78,13 +112,7 @@ pub(crate) async fn route(
             }
         }
     };
-    let path = parts.uri.path();
-    let rest = path.strip_prefix("/api/settings").unwrap_or(path);
-    let segs: Vec<String> = rest
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(percent_decode)
-        .collect();
+    let segs = segments(parts.uri.path()).expect("settings path");
     api::handle(
         state,
         api::Call {

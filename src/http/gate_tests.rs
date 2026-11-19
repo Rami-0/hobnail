@@ -66,8 +66,6 @@ const WRITES: &[(&str, &str)] = &[
     ("POST", "/api/settings/config"),
     ("POST", "/api/settings/config/validate"),
     ("POST", "/api/settings/revision/1/restore"),
-    ("POST", "/api/settings/security/password"),
-    ("POST", "/api/settings/security/sign-out-others"),
     ("PUT", "/api/settings/general"),
     ("DELETE", "/api/settings/bookmarks"),
     ("PATCH", "/api/settings/config"),
@@ -91,8 +89,6 @@ const WRITES: &[(&str, &str)] = &[
 
 /// Every settings read (GET) endpoint.
 const SETTINGS_READS: &[&str] = &[
-    "meta",
-    "env",
     "config",
     "revisions",
     "revision/1",
@@ -396,11 +392,11 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
     let origin = format!("http://{addr}");
     let form = "current=correct+horse+battery&new=Sekrit-New-Value-1&repeat=Sekrit-New-Value-1";
     for path in [
-        "/settings/security",
-        "/api/settings/security/password",
-        "/settings/bookmarks",
-        "/settings/notifications",
-        "/settings/widgets",
+        "/api/settings/general",
+        "/api/settings/config",
+        "/api/settings/bookmarks",
+        "/api/settings/alerts",
+        "/api/settings/widgets",
     ] {
         let r = req(
             addr,
@@ -1524,6 +1520,9 @@ async fn retired_routes_are_gone_with_or_without_a_session() {
             "/api/palette",
             "/api/containers/web/top",
             "/api/missing",
+            "/api/settings/meta",
+            "/api/settings/env",
+            "/api/settings/missing",
         ] {
             let r = req_bounded(addr, "GET", path, headers).await;
             assert_eq!(r.status, 404, "{path}: {}", r.body);
@@ -1972,7 +1971,6 @@ async fn viewer_cannot_read_administrative_details() {
     let h = [("Cookie", cookie.as_str())];
     for path in [
         "/api/settings/config",
-        "/api/settings/env",
         "/api/settings/revisions",
         "/api/settings/history/export",
         "/api/settings/security",
@@ -2219,7 +2217,6 @@ sample_interval = "45s"
             "notifications",
             &["RH_GATE_MARKER", "channel-marker", "rule-marker"],
         ),
-        ("env", &["RH_GATE_MARKER"]),
         (
             "containers",
             &["exclude-marker", "group-marker", "Override marker"],
@@ -2228,7 +2225,6 @@ sample_interval = "45s"
         ("history", &["45s"]),
         ("config", &["raw-marker"]),
         ("appearance", &["css-marker"]),
-        ("meta", &[]),
         ("revisions", &[]),
         ("security", &[]),
     ] {

@@ -751,13 +751,6 @@ pub struct CssReq {
     pub css: String,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PasswordReq {
-    pub current: String,
-    pub new: String,
-}
-
 // ------------------------------------------------------------ helpers
 
 pub fn parse_doc(cur: &Current) -> Result<DocumentMut, ApiError> {

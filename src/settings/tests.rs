@@ -1077,34 +1077,6 @@ fn plain_words_and_the_key_at_a_column() {
     assert_eq!(ops::key_before("= 1", 3), None);
 }
 
-/// Change password: a wrong current password or a short new one is a 422
-/// on that field; the password itself is never echoed.
-#[tokio::test]
-async fn password_errors_land_on_their_field() {
-    let (_dir, st) = state_with(Some(FIXTURE));
-    assert!(st.db.is_enabled(), "this test needs the history database");
-    crate::auth::set_password_for_tests(&st.db, "old password 1");
-    let (s, b) = post(
-        &st,
-        "security/password",
-        json!({"current": "not it at all", "new": "new password 1"}),
-    )
-    .await;
-    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
-    assert_eq!(b["field"], "current");
-    assert_eq!(b["error"], "The current password is wrong.");
-    assert!(!b.to_string().contains("not it at all"));
-    let (s, b) = post(
-        &st,
-        "security/password",
-        json!({"current": "old password 1", "new": "short"}),
-    )
-    .await;
-    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
-    assert_eq!(b["field"], "new");
-    assert!(!b.to_string().contains("short\""), "{b}");
-}
-
 #[tokio::test]
 async fn stale_hash_is_refused() {
     let (dir, st) = state_with(Some(FIXTURE));
@@ -1292,10 +1264,6 @@ async fn gets_show_env_names_never_values() {
         .find(|c| c["id"] == "tg")
         .unwrap();
     assert_eq!(tg["secrets"][0]["set"], false);
-    let (_, e) = get(&st, "env").await;
-    assert!(!e.to_string().contains("super-secret-value"));
-    assert_eq!(e["vars"].as_array().unwrap().len(), 2);
-
     let (s, w) = get(&st, "widgets").await;
     assert_eq!(s, StatusCode::OK, "{w}");
     let procs = w["widgets"]
@@ -1331,7 +1299,6 @@ async fn gets_return_hash_and_values() {
         "notifications",
         "history",
         "config",
-        "meta",
     ] {
         let (s, b) = get(&st, path).await;
         assert_eq!(s, StatusCode::OK, "{path}: {b}");
@@ -2607,7 +2574,7 @@ fn switches_off_then_on_give_back_the_file() {
 async fn settings_hide_inline_channel_values_and_undo_preserves_them() {
     let config = "[channels.hook]\ntype = \"webhook\"\nurl = \"https://example.com/SECRET-URL\"\nbody = '{\"message\":\"SECRET-BODY\"}'\nheaders = { Authorization = \"SECRET-HEADER\" }\n";
     let (dir, st) = state_with(Some(config));
-    for path in ["notifications", "config", "env", "meta"] {
+    for path in ["notifications", "config"] {
         let (status, data) = get(&st, path).await;
         assert_eq!(status, StatusCode::OK, "{path}: {data}");
         assert!(!data.to_string().contains("SECRET-"), "{path}: {data}");

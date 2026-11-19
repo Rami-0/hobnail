@@ -71,10 +71,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     let user = call.session.account.name.as_str();
     let json = Reply::Json;
     Ok(match (get, post, segs.as_slice()) {
-        // ---- overview
-        (true, _, ["meta"]) => json(meta(state, user)?),
-        (true, _, ["env"]) => json(env_vars(state)?),
-
         // ---- config file, revisions
         (true, _, ["config"]) => json(raw_get(state)?),
         (_, true, ["config"]) => {
@@ -241,40 +237,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
 
         // ---- security
         (true, _, ["security"]) => json(security_get(state)),
-        (_, true, ["security", "password"]) => {
-            let r: ops::PasswordReq = body(call)?;
-            if r.new.is_empty() || r.new.len() > 1024 {
-                return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
-            }
-            let state = state.clone();
-            let session = call.session.clone();
-            tokio::task::spawn_blocking(move || {
-                crate::auth::change_password_for(&state, &session, &r.current, &r.new)
-            })
-            .await
-            .map_err(|_| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "could not change password",
-                )
-            })?
-            .map_err(password_error)?;
-            json(json!({"ok": true}))
-        }
-        (_, true, ["security", "sign-out-others"]) => {
-            if state
-                .db
-                .sign_out_other_sessions(call.session.account.id, &call.session.hash, None)
-                .is_err()
-            {
-                return Err(ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "could not sign out sessions",
-                ));
-            }
-            json(json!({"ok": true}))
-        }
-
         (false, false, _) => {
             return Err(ApiError::new(
                 StatusCode::METHOD_NOT_ALLOWED,
@@ -287,25 +249,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
 
 /// A refused password change on the field it is about (422), in plain
 /// words; anything else (no password set, too many attempts) stays a 400.
-fn password_error(e: String) -> ApiError {
-    let field = if e.contains("current password") {
-        Some("current")
-    } else if e.starts_with("the password must") {
-        Some("new")
-    } else {
-        None
-    };
-    let mut c = e.chars();
-    let msg = c
-        .next()
-        .map(|f| f.to_uppercase().chain(c).collect::<String>() + ".")
-        .unwrap_or_default();
-    match field {
-        Some(f) => ApiError::invalid(&msg, Some(f), None),
-        None => ApiError::bad_request(msg),
-    }
-}
-
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
     store::edit_with_undo(
@@ -332,22 +275,6 @@ fn load(state: &AppState) -> Result<(Current, toml_edit::DocumentMut), ApiError>
 
 fn get_json(d: &toml_edit::DocumentMut, key: &str) -> J {
     d.get(key).map(doc::item_json).unwrap_or(J::Null)
-}
-
-fn meta(state: &AppState, user: &str) -> Result<J, ApiError> {
-    let cur = store::read_current(state)?;
-    let snap = state.config.snapshot();
-    Ok(json!({
-        "user": user,
-        "hash": cur.hash,
-        "path": state.config.path().display().to_string(),
-        "exists": cur.exists,
-        "bytes": cur.text.len(),
-        "load_error": snap.error,
-        "db_enabled": state.db.is_enabled(),
-        "password_set": crate::auth::password_is_set(state),
-        "limits": {"body_bytes": MAX_BODY, "css_bytes": MAX_CSS},
-    }))
 }
 
 const CHANNEL_PLAIN_FIELDS: &[&str] =
@@ -733,42 +660,6 @@ fn notifications_get(state: &AppState) -> Result<J, ApiError> {
         .map(|item| json!({"id": item.get("name"), "item": item}))
         .collect();
     Ok(json!({"hash": cur.hash, "channels": channels, "rules": rules}))
-}
-
-/// Env vars referenced by channels and widget headers: names and set/not set.
-fn env_vars(state: &AppState) -> Result<J, ApiError> {
-    let (cur, d) = load(state)?;
-    let mut vars: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    if let J::Object(m) = get_json(&d, "channels") {
-        for (name, item) in m {
-            for r in secret_refs(&item) {
-                if let (Some(n), Some(f)) = (r["name"].as_str(), r["field"].as_str()) {
-                    vars.entry(n.into())
-                        .or_default()
-                        .push(format!("channel {name}: {f}"));
-                }
-            }
-        }
-    }
-    for item in list_items(&d, "widgets") {
-        let id = item
-            .get("id")
-            .and_then(J::as_str)
-            .unwrap_or("?")
-            .to_string();
-        for r in secret_refs(&json!({"headers_env": item.get("headers_env")})) {
-            if let (Some(n), Some(f)) = (r["name"].as_str(), r["field"].as_str()) {
-                vars.entry(n.into())
-                    .or_default()
-                    .push(format!("widget {id}: {f}"));
-            }
-        }
-    }
-    let list: Vec<J> = vars
-        .into_iter()
-        .map(|(name, used_by)| json!({"name": name, "set": env_set(&name), "used_by": used_by}))
-        .collect();
-    Ok(json!({"hash": cur.hash, "vars": list}))
 }
 
 async fn channel_test(state: &AppState, name: &str) -> Result<J, ApiError> {
