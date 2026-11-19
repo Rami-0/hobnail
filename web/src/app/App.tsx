@@ -2,7 +2,7 @@
 // it is drawn with a known session; the browser checks wait for it).
 // The Containers and container pages are lazy chunks (their default
 // exports); the charts under the container page are a further lazy chunk.
-import { lazy, Suspense, useDeferredValue, useEffect } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, type ComponentType } from "react";
 
 import { useSession } from "../api/session.ts";
 import { Home } from "../routes/Home.tsx";
@@ -11,26 +11,29 @@ import { NotFound } from "../routes/NotFound.tsx";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
 import { SignInPrompt } from "../ui/SignInPrompt.tsx";
+import { matchRoute } from "./paths.ts";
 import { navigate, useRoute, type Route } from "./router.ts";
 import { Shell } from "./Shell.tsx";
 
-const LogsPage = lazy(() => import("../routes/logs/index.tsx"));
-const AlertsPage = lazy(() => import("../routes/alerts/index.tsx"));
-const OverviewPage = lazy(() => import("../routes/overview/index.tsx"));
-const HostPage = lazy(() => import("../routes/host/index.tsx"));
-const HistoryPage = lazy(() => import("../routes/history/index.tsx"));
-const AccountPage = lazy(() => import("../routes/account/index.tsx"));
-const SettingsPage = lazy(() => import("../routes/settings/index.tsx"));
-const BoardPage = lazy(() => import("../routes/board/index.tsx"));
-const loadContainers = () => import("../routes/containers/index.tsx");
-const loadContainer = () => import("../routes/container/index.tsx");
-// The page this document opened on is fetched at once (its script and
-// stylesheet arrive and apply in frames of their own, before the first render).
-const opened = window.location.pathname.replace(/\/+$/, "");
-const earlyList = opened === "/app/containers" ? loadContainers() : null;
-const earlyOne = /^\/app\/containers\/[^/]+$/.test(opened) ? loadContainer() : null;
-const ContainersPage = lazy(() => earlyList ?? loadContainers());
-const ContainerPage = lazy(() => earlyOne ?? loadContainer());
+// Start the direct-entry route while the session request is in flight.
+const opened = matchRoute(window.location.pathname).name;
+function pageChunk(loader: () => Promise<{ default: ComponentType }>, ...routes: Route["name"][]) {
+  const initial = routes.includes(opened) ? loader() : null;
+  // The lazy boundary reports import failures if this route is rendered.
+  void initial?.catch(() => {});
+  return lazy(() => initial ?? loader());
+}
+
+const LogsPage = pageChunk(() => import("../routes/logs/index.tsx"), "logs", "container_logs", "stack_logs");
+const AlertsPage = pageChunk(() => import("../routes/alerts/index.tsx"), "alerts");
+const OverviewPage = pageChunk(() => import("../routes/overview/index.tsx"), "overview");
+const HostPage = pageChunk(() => import("../routes/host/index.tsx"), "host");
+const HistoryPage = pageChunk(() => import("../routes/history/index.tsx"), "history");
+const AccountPage = pageChunk(() => import("../routes/account/index.tsx"), "account");
+const SettingsPage = pageChunk(() => import("../routes/settings/index.tsx"), "settings");
+const BoardPage = pageChunk(() => import("../routes/board/index.tsx"), "board");
+const ContainersPage = pageChunk(() => import("../routes/containers/index.tsx"), "containers");
+const ContainerPage = pageChunk(() => import("../routes/container/index.tsx"), "container");
 
 function titleOf(r: Route): string {
   switch (r.name) {

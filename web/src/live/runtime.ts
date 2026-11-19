@@ -343,14 +343,23 @@ export function wantBootstrap(): void {
 }
 
 let ctrWanted = false;
+function wantContainersData(): void {
+  if (ctrWanted) return;
+  ctrWanted = true;
+  void fetchContainers();
+}
+
+/** Fetch shell data before commit; stream subscriptions still follow mounted hooks. */
+export function prepareShellData(): void {
+  wantBootstrap();
+  wantContainersData();
+}
+
 export function wantContainers(): () => void {
   start();
   const a = stream.want("containers");
   const b = stream.want("stats");
-  if (!ctrWanted) {
-    ctrWanted = true;
-    void fetchContainers();
-  }
+  wantContainersData();
   return () => {
     a();
     b();
