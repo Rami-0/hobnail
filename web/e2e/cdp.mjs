@@ -86,6 +86,16 @@ async function connect(t, http) {
     },
     async close() { try { ws.close(); } catch {} try { await fetch(`${http}/json/close/${t.id}`); } catch {} },
   };
+  // Block before transmission and fail even if the page handles the error.
+  tab.on("Network.requestWillBeSent", ({ request }) => {
+    if (new URL(request.url).port === "3200") {
+      console.error(`E2E attempted to contact the live instance: ${request.url}`);
+      process.exit(2);
+    }
+  });
+  await tab.send("Network.enable");
+  const blocked = await tab.send("Network.setBlockedURLs", { urls: ["*://*:3200/*"] });
+  if (blocked.error) throw new Error(blocked.error.message);
   return tab;
 }
 

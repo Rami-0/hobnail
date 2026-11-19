@@ -227,7 +227,7 @@ try {
         await go("/app/settings/widgets?add=widget", present(editor));
         const widget = `browser-widget-${width}`;
         await fill(editor + ' input[name="id"]', widget);
-        await fill(editor + ' input[name="url"]', "http://127.0.0.1:3200/api/v1/session");
+        await fill(editor + ' input[name="url"]', "http://127.0.0.1:8081/fixture/session");
         await button(editor, "Add field");
         await wait(text(editor, "Path in the response"), "widget supports named fields");
         await fill(editor + ' .settings-pair input[id$="-label"]', "owner");
@@ -239,7 +239,7 @@ try {
         await wait(text(".settings-row", widget), "custom API widget is saved");
 
         const widgetsState = ok(await call("/api/settings/widgets", "GET", undefined, owner), "read widget order");
-        ok(await call("/api/settings/widgets", "POST", { base_hash: widgetsState.hash, action: "add", item: { id: `browser-order-${width}`, type: "custom-api", url: "http://127.0.0.1:3200/api/v1/session", fields: { owner: "owner_exists" }, template: "Order target" } }, owner), "seed widget order target");
+        ok(await call("/api/settings/widgets", "POST", { base_hash: widgetsState.hash, action: "add", item: { id: `browser-order-${width}`, type: "custom-api", url: "http://127.0.0.1:8081/fixture/session", fields: { owner: "owner_exists" }, template: "Order target" } }, owner), "seed widget order target");
         await go("/app/settings/widgets", text('.settings-row', `browser-order-${width}`));
         await inp.click(`button[aria-label=${q(`Move browser-order-${width} up`)}]`);
         await wait(`[...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(`browser-order-${width}`)}) < [...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(widget)})`, "widget order is saved");

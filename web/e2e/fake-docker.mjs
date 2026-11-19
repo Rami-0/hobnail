@@ -350,3 +350,13 @@ function stop() {
 }
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
+
+// Reachable only inside the fake instance's shared network namespace.
+http.createServer((req, res) => {
+  if (req.url === "/fixture/health") return res.end("ok");
+  if (req.url === "/fixture/session") {
+    res.setHeader("Content-Type", "application/json");
+    return res.end(JSON.stringify({ owner_exists: true }));
+  }
+  res.writeHead(404).end();
+}).listen(8081, "127.0.0.1");

@@ -52,7 +52,7 @@ url = "https://example.com/hook"
 [[widgets]]
 id = "pages-health"
 type = "custom-api"
-url = "http://127.0.0.1:3200/healthz"
+url = "http://127.0.0.1:8081/fixture/health"
 output = "text"
 template = "Health check: {{_text}}"
 refresh = "3s"

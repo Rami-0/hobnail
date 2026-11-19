@@ -23,6 +23,13 @@ check=$1; shift
 case $check in /*) echo "e2e: give the check relative to the repo, not $check" >&2; exit 2 ;; esac
 [ -f "$dir/$check" ] || { echo "e2e: no such file: $dir/$check" >&2; exit 2; }
 
+# Validate configured URL arguments before either Node or Chromium can read them.
+for url in "$@" "${EMPTY:-}"; do
+  case $url in
+    *://*:3200|*://*:3200[/?\#]*) echo "e2e: refusing live port 3200" >&2; exit 2 ;;
+  esac
+done
+
 IMG=hobnail-e2e:p0
 REV=2 # bump when the Dockerfile below changes: an older image is rebuilt
 have=$(docker image inspect -f '{{ index .Config.Labels "io.hobnail.e2e.rev" }}' "$IMG" 2>/dev/null || true)
