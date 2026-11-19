@@ -148,6 +148,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     /// Number of rows (for tests and the data page).
     pub fn log_count_rows(&self) -> u64 {
         self.with(0, |i| {

@@ -496,7 +496,7 @@ fn store(conn: &Connection, id: &str, doc: BoardDocument, now: i64) -> Result<()
 fn live_containers(state: &AppState, now: i64) -> Vec<(ContainerMatch, ContainerRow)> {
     let cfg = state.config.current();
     let snap = state.snapshot();
-    let stats = crate::ui::view::stats_with_history(state, &snap);
+    let stats = crate::read_model::stats_with_history(state, &snap);
     let targets: HashMap<_, _> = snap
         .containers
         .iter()

@@ -58,7 +58,7 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
                 })
             })
             .collect(),
-        error: error.map(crate::ui::widgets::plain_error),
+        error: error.map(crate::widgets::plain_error),
     }
 }
 

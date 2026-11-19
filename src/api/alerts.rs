@@ -58,18 +58,19 @@ pub(super) fn firing(state: &AppState) -> Vec<AlertIncident> {
             {
                 return None;
             }
-            let href =
-                match crate::ui::alerts::subject_href(&config, &incident.rule, &incident.subject) {
-                    Some((href, false)) => format!(
-                        "/app{}",
-                        if href.starts_with("/#") {
-                            href.replacen("/#", "/overview#", 1)
-                        } else {
-                            href
-                        }
-                    ),
-                    _ => "/app/alerts".to_string(),
-                };
+            let href = match rule.kind {
+                RuleKind::Container | RuleKind::LogMatch if !incident.subject.is_empty() => {
+                    format!(
+                        "/app/containers/{}",
+                        crate::http::query::url_encode(&incident.subject)
+                    )
+                }
+                RuleKind::Host if !incident.subject.is_empty() => "/app/host".into(),
+                RuleKind::Widget if !incident.subject.is_empty() => {
+                    format!("/app/overview#w-{}", incident.subject)
+                }
+                _ => "/app/alerts".into(),
+            };
             Some(AlertIncident {
                 rule: incident.rule.clone(),
                 subject: incident.subject.clone(),
@@ -85,7 +86,7 @@ pub(super) fn firing(state: &AppState) -> Vec<AlertIncident> {
 
 fn read(state: &AppState, query: &str) -> Result<AlertsView, ApiError> {
     use crate::alerts::Health;
-    use crate::ui::fmt::{parse_query, query_get};
+    use crate::http::query::{parse_query, query_get};
     let q = parse_query(query);
     let parse = |name| {
         query_get(&q, name)

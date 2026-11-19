@@ -6,13 +6,11 @@ use serde::Serialize;
 
 use super::containers::{event_row, internal, parse_window_with_default, EventRow};
 use super::error::ApiError;
+use super::history_window::restarts_per_day;
 use crate::db::{accounts::Role, Agg, EventFilter, Range, Series, SysMetric};
+use crate::http::query::{parse_query, query_get};
 use crate::http::server::Body;
 use crate::state::AppState;
-use crate::ui::{
-    fmt::{parse_query, query_get},
-    pages::history::restarts_per_day,
-};
 
 type Points = Vec<(i64, f64)>;
 

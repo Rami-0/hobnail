@@ -92,7 +92,7 @@ pub const DISABLED: &str = "disabled — set enabled = true";
 pub const MAX_STDOUT: usize = 256 * 1024;
 /// How much stderr is kept for the error message.
 const MAX_STDERR: usize = 4096;
-/// `_text` is cut to this length (it is shown and kept in /api/state).
+/// `_text` is cut to this length before presentation and rule evaluation.
 const MAX_TEXT_VALUE: usize = 8192;
 /// Raw JSON shown when a widget has no fields.
 const MAX_RAW_JSON: usize = 400;
@@ -192,7 +192,7 @@ pub struct StatusConfig {
     pub ok: Vec<Value>,
 }
 
-/// The display body shared by the two clients, with all values as text.
+/// The structured display body, with all values as text.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct WidgetBody {
@@ -204,8 +204,6 @@ pub struct WidgetBody {
 /// Result of one widget run.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct WidgetOutput {
-    /// Rendered (escaped) HTML body of the widget on success.
-    pub html: Option<String>,
     #[serde(skip)]
     pub display: WidgetBody,
     /// Extracted values by name, for alert rules (`widget` rules read these).
@@ -505,16 +503,6 @@ fn present(w: &WidgetConfig, c: &Compiled, data: Data, out: &mut WidgetOutput) {
         vec![]
     };
     let pre = raw.filter(|_| headline.is_none() && rows.is_empty());
-    let html = maud::html! {
-        @if let Some(h) = &headline { div.tile-value.w-value { (h) } }
-        @if !rows.is_empty() {
-            dl.w-rows {
-                @for (l, v) in &rows { div.w-row { dt { (l) } dd { (v) } } }
-            }
-        }
-        @if let Some(p) = &pre { pre.w-text { (p) } }
-    };
-    out.html = Some(html.into_string());
     out.display = WidgetBody {
         headline,
         rows,
@@ -817,4 +805,30 @@ async fn drain<R: AsyncRead + Unpin>(r: Option<R>, keep: usize) -> (Vec<u8>, boo
         }
     }
     (out, over)
+}
+
+/// A failed fetch in a few plain words; the raw message stays in "Details".
+pub fn plain_error(e: &str) -> String {
+    let l = e.to_ascii_lowercase();
+    if l.contains("timed out") || l.contains("timeout") {
+        "No answer in time".into()
+    } else if l.contains("refused") {
+        "Refused: nothing is listening there".into()
+    } else if l.contains("lookup")
+        || l.contains("resolve")
+        || l.contains("dns")
+        || l.contains("name or service")
+    {
+        "The name does not resolve".into()
+    } else if let Some(code) = e
+        .strip_prefix("HTTP ")
+        .and_then(|r| r.get(..3))
+        .filter(|c| c.bytes().all(|b| b.is_ascii_digit()))
+    {
+        format!("The service answered HTTP {code}")
+    } else if l.contains("certificate") || l.contains("tls") {
+        "The secure connection failed".into()
+    } else {
+        "Could not get an answer".into()
+    }
 }

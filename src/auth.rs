@@ -44,16 +44,8 @@ fn now_ms() -> u64 {
 // ---------------------------------------------------------------------------
 // Contract used by the UI and the router
 
-pub fn current_user(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    request_session(state, headers).map(|s| s.account.name)
-}
-
 pub fn password_is_set(state: &AppState) -> bool {
     state.db.owner_exists()
-}
-
-pub fn csrf_token(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    request_session(state, headers).map(|s| csrf_for(&s.token))
 }
 
 pub(crate) fn request_session(state: &AppState, headers: &HeaderMap) -> Option<Session> {
@@ -966,7 +958,7 @@ mod tests {
 
     #[test]
     fn login_rejects_unknown_accounts_and_throttles_failures() {
-        let state = crate::ui::testutil::state_with(vec![], "");
+        let state = crate::testutil::state_with(vec![], "");
         set_password_for_tests(&state.db, "correct horse");
         let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let credentials = |username: &str| Credentials {

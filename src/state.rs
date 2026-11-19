@@ -92,7 +92,6 @@ impl Env {
 pub struct AppState {
     pub build: BuildInfo,
     pub env: Env,
-    pub started_unix: u64,
     pub config: ConfigStore,
     pub(crate) settings_undo: Mutex<Option<crate::settings::store::Undo>>,
     /// Latest container list. The docker task publishes, everyone else reads
@@ -128,7 +127,6 @@ impl AppState {
         let db = Arc::new(crate::db::open_or_disabled(&crate::db::path_for(&env)));
         Arc::new(Self {
             build: BuildInfo::current(),
-            started_unix: crate::util::unix_now(),
             config,
             settings_undo: Mutex::new(None),
             containers,
@@ -165,7 +163,7 @@ impl AppState {
         self.changed("groups");
     }
 
-    /// Tell connected viewers that a fragment changed.
+    /// Notify live subscribers that data changed.
     pub fn changed(&self, id: &str) {
         let _ = self.events.send(Arc::from(id));
     }
@@ -186,10 +184,6 @@ impl AppState {
             self.wake.notify_one();
         }
         ViewerGuard(self.clone(), widgets)
-    }
-
-    pub fn uptime_secs(&self) -> u64 {
-        crate::util::unix_now().saturating_sub(self.started_unix)
     }
 }
 

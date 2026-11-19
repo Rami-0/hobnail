@@ -75,7 +75,7 @@ impl Principal {
         let excluded = snapshot
             .containers
             .iter()
-            .filter(|container| crate::ui::view::is_excluded(&config, container))
+            .filter(|container| crate::read_model::is_excluded(&config, container))
             .map(|container| container.name.clone())
             .collect();
         if !self.is_scoped() {

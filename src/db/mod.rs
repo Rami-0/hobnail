@@ -11,8 +11,6 @@
 //! bucket, downsampling), `maintain` (rollups, retention, vacuum), `sampler`
 //! (the 15 s task), `api` (JSON read API).
 
-#![allow(dead_code)] // parts of the API are only used by the UI/settings work
-
 pub(crate) mod accounts;
 pub mod api;
 pub mod ctrx;
@@ -191,12 +189,6 @@ pub struct EventFilter {
 }
 
 impl EventFilter {
-    /// Legacy page filter retained until the classic UI is removed.
-    pub fn for_viewer(mut self, signed_in: bool) -> Self {
-        self.hide_auth_events = !signed_in;
-        self
-    }
-
     /// Audit events may include account details and configuration changes.
     pub fn for_admin(mut self, admin: bool) -> Self {
         self.hide_audit_events = !admin;
@@ -267,6 +259,7 @@ pub(crate) const SYS_COLS: [&str; 8] = [
 ];
 
 impl SysMetric {
+    #[cfg(test)]
     pub const ALL: [SysMetric; 8] = [
         Self::Cpu,
         Self::Load1,
@@ -495,6 +488,7 @@ impl Db {
         Ok(db)
     }
 
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
         Self::init(conn, None)
@@ -824,6 +818,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     /// The newest event id with `ts <= t`, or `None` when every event is
     /// newer: one seek on `events_ts`, so a History window far in the past
     /// starts its scan at the window. Ids and timestamps both grow; among
@@ -916,6 +911,7 @@ impl Db {
         });
     }
 
+    #[cfg(test)]
     /// Number of sessions that have not expired.
     pub fn session_count(&self, now: i64) -> u64 {
         self.with(0, |i| {
@@ -929,10 +925,12 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn kv_get(&self, key: &str) -> Option<String> {
         self.with(None, |i| i.kv_get(key))
     }
 
+    #[cfg(test)]
     pub fn kv_set(&self, key: &str, value: &str) -> bool {
         self.with(false, |i| {
             Inner::kv_set(&i.conn, key, value)?;
@@ -940,6 +938,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn kv_delete(&self, key: &str) {
         self.with((), |i| {
             i.conn.execute("DELETE FROM kv WHERE key = ?1", [key])?;

@@ -1,4 +1,4 @@
-//! The `/host` page and its collectors (Wave 1 item 3, docs/V3-PLAN.md):
+//! Host collectors (Wave 1 item 3, docs/V3-PLAN.md):
 //! per-core CPU, PSI, memory detail, per-mount and per-device I/O, per
 //! interface, all hwmon sensors, top processes mapped to containers.
 //!
@@ -6,9 +6,8 @@
 //! - the history sampler calls [`on_tick`] every 15 s; it keeps its own
 //!   `Collector`, records the extra series and remembers the last result so
 //!   a fresh page view has rates at once;
-//! - the page (and its `?frag=live` poll every 3 s while the tab is visible)
-//!   uses a second `Collector` plus the process scan. The process scan walks
-//!   every pid, so it only ever runs for a viewer, never in the sampler.
+//! - the Host API uses a second `Collector` and can request a process scan.
+//!   The scan walks every pid and runs only for an active administrator.
 //!
 //! Results of the live reader are reused for 2 s, so many viewers do not
 //! multiply the work.
@@ -17,16 +16,12 @@ pub mod collect;
 pub mod parse;
 #[cfg(test)]
 mod tests;
-mod view;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use hyper::StatusCode;
-
 use crate::state::AppState;
-use crate::ui::shell::Ctx;
 use collect::{Collector, Host, ProcReport, ProcScan};
 
 /// Processes listed in the table.
@@ -48,33 +43,6 @@ static LAST_TICK: Mutex<Option<(String, Arc<Host>)>> = Mutex::new(None);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// `/host`, or with `?frag=live` only the live region (for the poll).
-pub fn page(ctx: &Ctx) -> (StatusCode, String) {
-    let q = crate::ui::fmt::parse_query(ctx.query);
-    let frag = crate::ui::fmt::query_get(&q, "frag") == Some("live");
-    let (host, procs) = live_sample(ctx.state, true);
-    let procs = procs.expect("the classic host page requests a process scan");
-    let names: std::collections::HashMap<String, String> = ctx
-        .state
-        .snapshot()
-        .containers
-        .iter()
-        .map(|c| (c.id.clone(), c.name.clone()))
-        .collect();
-    let logs = crate::logs::tailable(ctx.state);
-    let lv = view::LiveView {
-        h: &host,
-        p: &procs,
-        names: &names,
-        logs: &logs,
-        signed_in: ctx.user.is_some(),
-    };
-    if frag {
-        return (StatusCode::OK, view::live_region(&lv).into_string());
-    }
-    (StatusCode::OK, view::page(ctx, &lv, &q))
 }
 
 /// A current reading with rates, and the process table.

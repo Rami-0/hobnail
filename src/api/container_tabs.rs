@@ -13,9 +13,9 @@ use crate::db::{
     Agg, EventFilter,
 };
 use crate::docker;
+use crate::http::query::{parse_query, query_get};
 use crate::http::server::Body;
 use crate::state::AppState;
-use crate::ui::fmt::{parse_query, query_get};
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -115,7 +115,7 @@ fn run(
         .find(|c| c.name == name)
         .filter(|c| {
             config.docker.enabled
-                && !crate::ui::view::is_excluded(&config, c)
+                && !crate::read_model::is_excluded(&config, c)
                 && account.can_see_container(&visible, name)
         })
         .ok_or_else(ApiError::not_found)?;
@@ -216,7 +216,7 @@ fn run(
                 .and_then(|s| s.parse::<usize>().ok())
                 .filter(|n| *n < top.titles.len())
             {
-                crate::ui::pages::container::sort_rows(
+                crate::api::container_facts::sort_rows(
                     &mut top.processes,
                     column,
                     query_get(&q, "dir") != Some("asc"),

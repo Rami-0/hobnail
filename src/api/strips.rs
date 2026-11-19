@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::db::strips::Cell;
+use crate::read_model as view;
 use crate::state::AppState;
-use crate::ui::view;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]

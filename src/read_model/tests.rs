@@ -86,8 +86,8 @@ fn empty_config_groups_by_project() {
     assert_eq!(names(&gs), vec!["beszel", "Standalone", "webshop-dev"]);
     let sa = &gs[2];
     assert_eq!((sa.running, sa.stopped), (2, 1));
-    assert_eq!(sa.counts(), "2 running · 1 stopped");
-    assert_eq!(gs[0].counts(), "1 running");
+    assert_eq!((sa.running, sa.stopped, sa.links), (2, 1, 0));
+    assert_eq!((gs[0].running, gs[0].stopped, gs[0].links), (1, 0, 0));
     // Display name falls back to the compose service, sorted by name.
     let titles: Vec<&str> = sa.cards.iter().map(|c| c.title.as_str()).collect();
     assert_eq!(titles, vec!["db", "job", "web"]);
@@ -266,7 +266,7 @@ fn hiding() {
     let gs = build(&cfg, cs);
     let titles: Vec<&str> = gs[0].cards.iter().map(|c| c.title.as_str()).collect();
     assert_eq!(titles, vec!["keep", "unhidden"]);
-    assert_eq!(gs[0].counts(), "2 running");
+    assert_eq!((gs[0].running, gs[0].stopped, gs[0].links), (2, 0, 0));
 }
 
 #[test]
@@ -321,17 +321,6 @@ fn plain_ports_say_their_protocol() {
     let v = port_views(&[port("0.0.0.0", 5432, 5432), u], "homelab");
     assert_eq!((v[0].url.as_deref(), v[0].proto.as_str()), (None, "tcp"));
     assert_eq!((v[1].url.as_deref(), v[1].proto.as_str()), (None, "udp"));
-    let mut c = ctr("db", None);
-    c.ports = vec![port("0.0.0.0", 5432, 5432)];
-    let st = crate::ui::testutil::state_with(vec![c], "");
-    let h = hyper::HeaderMap::new();
-    let ctx = crate::ui::shell::Ctx::new(&st, "h", "/containers", "", &h);
-    let html = crate::ui::pages::render(&ctx).1;
-    assert!(
-        html.contains(r#"<span class="port plain" title="5432 → 5432/tcp on 0.0.0.0 (not a web address)">5432 <small>tcp</small></span>"#),
-        "{}",
-        &html[html.rfind("c-ports").unwrap_or(0)..][..600]
-    );
 }
 
 #[test]
@@ -520,7 +509,7 @@ fn bookmarks() {
         ]
     );
     let b = &gs[0];
-    assert_eq!(b.counts(), "1 running · 1 link");
+    assert_eq!((b.running, b.stopped, b.links), (1, 0, 1));
     assert_eq!(b.cards.last().unwrap().title, "Beszel docs");
     let gh = card(&gs, "GitHub");
     assert_eq!(gh.sub.as_deref(), Some("github.com"));
@@ -530,7 +519,7 @@ fn bookmarks() {
         card(&gs, "Router").url.as_deref(),
         Some("http://100.64.0.10:81")
     );
-    assert_eq!(gs[4].counts(), "1 link");
+    assert_eq!((gs[4].running, gs[4].stopped, gs[4].links), (0, 0, 1));
 
     // Listed in cfg.groups: placed by config order.
     cfg.groups = vec![GroupConfig {

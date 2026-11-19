@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 STACK=${STACK:-/opt/stacks/hobnail}
 sha=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
-git diff --quiet HEAD -- src static web build.rs Cargo.toml Cargo.lock Dockerfile 2>/dev/null || sha="$sha-dirty"
+git diff --quiet HEAD -- src web build.rs Cargo.toml Cargo.lock Dockerfile .dockerignore 2>/dev/null || sha="$sha-dirty"
 built=$(date -u +%Y-%m-%dT%H:%MZ)
 
 echo "==> building hobnail $sha"

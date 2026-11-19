@@ -357,7 +357,7 @@ mod tests {
     #[tokio::test]
     async fn real_socket_app_and_assets() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
+        let st = crate::testutil::state_with(crate::testutil::sample(), "");
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = l.local_addr().unwrap();
         tokio::spawn(crate::http::server::serve_listener(st, l));

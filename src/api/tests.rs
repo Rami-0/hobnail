@@ -13,7 +13,7 @@ use super::containers::{parse_window, started_from_status, view};
 use super::stream::{signature, stats_event, Topics};
 use crate::config::Config;
 use crate::model::{Container, PortMapping, Snapshot, StatsMap};
-use crate::ui::view::{binding_link, card_for, dot_for, link_template, port_views, status_label};
+use crate::read_model::{binding_link, card_for, dot_for, link_template, port_views, status_label};
 
 fn port(ip: &str, host_port: u16, container_port: u16, proto: &str) -> PortMapping {
     PortMapping {
@@ -104,7 +104,7 @@ fn cfg(toml: &str) -> Config {
 }
 
 fn fixtures() -> Value {
-    use crate::ui::fmt::{ago, pct};
+    use super::format_tests::{ago, pct};
     use crate::util::{human_bytes, human_duration};
 
     let bytes: Vec<Value> = [
@@ -182,7 +182,7 @@ fn fixtures() -> Value {
             "label": status_label(&c), "dot": dot_for(&c).class(),
             "row_exit_code": card.exit_code, "row_restarts": card.restarts,
             "attention": card.attention().map(|(s, r)| json!({
-                "severity": match s { crate::ui::view::Sev::Bad => "bad", crate::ui::view::Sev::Warn => "warn" },
+                "severity": match s { crate::read_model::Sev::Bad => "bad", crate::read_model::Sev::Warn => "warn" },
                 "reason": r,
             })),
         }));

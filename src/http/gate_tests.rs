@@ -156,7 +156,7 @@ async fn req(
 }
 
 fn state() -> Arc<AppState> {
-    let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
+    let st = crate::testutil::state_with(crate::testutil::sample(), "");
     assert!(st.db.is_enabled(), "test state needs a real database");
     st
 }
@@ -839,7 +839,7 @@ async fn fake_docker_inspect(tag: &str) -> String {
     let path = std::env::temp_dir().join(format!("rh-api-{tag}-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&path);
     let l = UnixListener::bind(&path).unwrap();
-    let web_id = crate::ui::testutil::ctr("web", None, "running").id;
+    let web_id = crate::testutil::ctr("web", None, "running").id;
     tokio::spawn(async move {
         loop {
             let Ok((mut s, _)) = l.accept().await else {
@@ -895,7 +895,7 @@ async fn fake_docker_inspect(tag: &str) -> String {
 /// `a.b-c_d` (a name that needs encoding care) and three hidden ones, with
 /// history and events for all of them (so a filter that fails shows).
 async fn privacy_state(tag: &str) -> Arc<AppState> {
-    use crate::ui::testutil::ctr;
+    use crate::testutil::ctr;
     let socket = fake_docker_inspect(tag).await;
     let mut web = ctr("web", Some("shop"), "running");
     web.health = Some("unhealthy".into());
@@ -1337,7 +1337,7 @@ async fn api_v1_stream_events_and_viewer_count() {
     // A container comes: `containers` with the whole view.
     let mut snap = (*st.snapshot()).clone();
     snap.containers
-        .push(crate::ui::testutil::ctr("new-one", Some("shop"), "running"));
+        .push(crate::testutil::ctr("new-one", Some("shop"), "running"));
     st.publish_containers(snap.clone());
     let (name, v) = s.next().await;
     assert_eq!(name, "containers", "{v}");
@@ -1406,7 +1406,7 @@ async fn api_v1_stream_topics_and_head() {
     crate::live::refresh_container_stats(&st);
     let mut snap = (*st.snapshot()).clone();
     snap.containers
-        .push(crate::ui::testutil::ctr("other", None, "running"));
+        .push(crate::testutil::ctr("other", None, "running"));
     st.publish_containers(snap);
     assert!(s.quiet(300).await, "no list events without the topics");
     crate::live::refresh_system(&st);
@@ -2135,7 +2135,7 @@ async fn viewer_cannot_read_administrative_details() {
 async fn session_renewal_sets_a_cookie_once_per_slide() {
     let st = state();
     let addr = start(st.clone()).await;
-    for (index, path) in ["/api/v1/session", "/api/v1/bootstrap", "/api/state"]
+    for (index, path) in ["/api/v1/session", "/api/v1/bootstrap", "/api/events"]
         .into_iter()
         .enumerate()
     {

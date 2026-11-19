@@ -4,12 +4,12 @@
 //! the pages and the sidebar only render it. No I/O, no clock.
 
 mod ports;
-mod strip;
 #[cfg(test)]
 mod tests;
 
-pub use ports::{binding_link, port_views, PortView};
-pub use strip::{health_strip, summary as strip_summary, window_label, StripStyle};
+#[cfg(test)]
+pub use ports::binding_link;
+pub use ports::{port_views, PortView};
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -38,27 +38,6 @@ pub struct GroupView {
     pub stopped: usize,
     pub links: usize,
     pub cards: Vec<CardView>,
-}
-
-impl GroupView {
-    /// "5 running · 1 stopped", "3 links".
-    pub fn counts(&self) -> String {
-        let mut parts = Vec::new();
-        if self.running + self.stopped > 0 {
-            parts.push(format!("{} running", self.running));
-        }
-        if self.stopped > 0 {
-            parts.push(format!("{} stopped", self.stopped));
-        }
-        if self.links > 0 {
-            parts.push(format!(
-                "{} link{}",
-                self.links,
-                if self.links == 1 { "" } else { "s" }
-            ));
-        }
-        parts.join(" · ")
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,7 +329,7 @@ fn container_card(
         .or_else(|| {
             cfg.icons
                 .auto
-                .then(|| crate::ui::icons::auto_icon(&c.image, cfg.icons.remote))
+                .then(|| crate::http::icons::auto_icon(&c.image, cfg.icons.remote))
                 .flatten()
         });
     let ports = port_views(&c.ports, host);
@@ -548,22 +527,12 @@ pub const STRIP_BUCKETS: usize = 96;
 pub const STRIP_STEP: i64 = 900;
 
 /// The 24 h strips for every container (one cached query; see
-/// `db::strips`). Pages call this once and pass the result down.
+/// `db::strips`). Shared across the JSON read endpoints.
 pub fn strips(
     state: &crate::state::AppState,
     now: i64,
 ) -> std::sync::Arc<crate::db::strips::Strips> {
     state.db.health_strips(now, STRIP_BUCKETS, STRIP_STEP)
-}
-
-/// Containers in a state that needs someone (unhealthy, restarting, dead):
-/// with the firing alerts, the number the tab title and favicon badge show.
-pub fn problem_count(groups: &[GroupView]) -> usize {
-    groups
-        .iter()
-        .flat_map(|g| g.cards.iter())
-        .filter(|c| c.container && matches!(c.label, "unhealthy" | "restarting" | "dead"))
-        .count()
 }
 
 /// A stack's strip: its containers merged (worst of, one running is ok).

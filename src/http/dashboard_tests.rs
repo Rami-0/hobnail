@@ -739,7 +739,7 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
 
 #[tokio::test]
 async fn stolen_admin_session_cannot_read_or_retarget_a_secret() {
-    let st = crate::ui::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
     crate::auth::set_password_for_tests(&st.db, PW);
     let owner = Client::owner(start(st).await).await;
     let admin = owner.guest("stolen-admin", "admin", Value::Null).await;
@@ -881,7 +881,7 @@ async fn integration_test_reports_public_root_failure() {
             .await
             .is_err());
     });
-    let st = crate::ui::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
     crate::auth::set_password_for_tests(&st.db, PW);
     let owner = Client::owner(start(st).await).await;
     let created = owner.json("POST","/api/v1/integrations",json!({
@@ -909,7 +909,7 @@ async fn integration_test_reports_public_root_failure() {
 
 #[tokio::test]
 async fn dashboard_icons_use_the_authenticated_existing_cache() {
-    let st = crate::ui::testutil::state_with(Vec::new(), "[icons]\nremote=true\n");
+    let st = crate::testutil::state_with(Vec::new(), "[icons]\nremote=true\n");
     crate::auth::set_password_for_tests(&st.db, PW);
     let dir = st.env.data_dir.join("icons/di");
     std::fs::create_dir_all(&dir).unwrap();

@@ -22,11 +22,12 @@ mod log;
 mod logs;
 mod mock;
 mod model;
-mod render;
+mod read_model;
 mod settings;
 mod state;
 mod system;
-mod ui;
+#[cfg(test)]
+mod testutil;
 mod util;
 mod widgets;
 

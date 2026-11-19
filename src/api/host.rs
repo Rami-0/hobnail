@@ -298,7 +298,7 @@ pub(super) fn live(state: &AppState, admin: bool, subscribed: bool) -> HostView 
             .containers
             .iter()
             .find(|c| c.id.starts_with(id) || id.starts_with(&c.id))
-            .filter(|c| !crate::ui::view::is_excluded(&config, c))
+            .filter(|c| !crate::read_model::is_excluded(&config, c))
             .map(|c| Some(c.name.clone())),
     };
     let report = processes.filter(|_| admin);

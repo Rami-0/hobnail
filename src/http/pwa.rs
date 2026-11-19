@@ -17,14 +17,13 @@ use hyper::{Response, StatusCode};
 use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
-const ICON_192: &[u8] = include_bytes!("../../static/pwa/icon-192.png");
-const ICON_512: &[u8] = include_bytes!("../../static/pwa/icon-512.png");
+const ICON_192: &[u8] = include_bytes!("pwa/icon-192.png");
+const ICON_512: &[u8] = include_bytes!("pwa/icon-512.png");
 /// 180 px, opaque: iOS ignores the manifest and wants exactly this.
-const ICON_APPLE: &[u8] = include_bytes!("../../static/pwa/apple-touch-icon.png");
+const ICON_APPLE: &[u8] = include_bytes!("pwa/apple-touch-icon.png");
 
-/// The logo tile as a standalone SVG; the sidebar inlines the same markup and
-/// recolours its `rect` and `path` from the theme.
-pub const ICON_SVG: &str = include_str!("../../static/brand/hobnail.svg");
+/// The logo tile as a standalone SVG.
+pub const ICON_SVG: &str = include_str!("pwa/hobnail.svg");
 
 /// Returns `None` for paths it does not own.
 pub fn route(state: &AppState, path: &str) -> Option<Response<Body>> {
@@ -38,23 +37,10 @@ pub fn route(state: &AppState, path: &str) -> Option<Response<Body>> {
                 .unwrap_or_else(|| state.env.hostname.clone());
             asset(manifest(&name).into_bytes(), "application/manifest+json")
         }
-        "/icon.svg" => asset(ICON_SVG.as_bytes().to_vec(), "image/svg+xml"),
+        "/favicon.ico" | "/icon.svg" => asset(ICON_SVG.as_bytes().to_vec(), "image/svg+xml"),
         "/icon-192.png" => asset(ICON_192.to_vec(), "image/png"),
         "/icon-512.png" => asset(ICON_512.to_vec(), "image/png"),
         "/apple-touch-icon.png" => asset(ICON_APPLE.to_vec(), "image/png"),
-        // The alarm badge of a hidden tab (its live stream is closed): one
-        // tiny poll a minute instead of a stream.
-        "/alarm.json" => {
-            let cfg = state.config.current();
-            let snap = state.snapshot();
-            let groups = crate::ui::view::build_groups(&cfg, &snap, &Default::default(), "");
-            let firing = state.alerts.lock().unwrap().incidents.len();
-            let n = crate::ui::view::problem_count(&groups).max(firing);
-            let mut r = full(StatusCode::OK, format!("{{\"problems\":{n}}}").into_bytes());
-            set(&mut r, hyper::header::CONTENT_TYPE, "application/json");
-            set(&mut r, hyper::header::CACHE_CONTROL, "no-store");
-            r
-        }
         _ => return None,
     })
 }
@@ -77,8 +63,8 @@ pub fn manifest(name: &str) -> String {
         "name": format!("Hobnail · {name}"),
         "short_name": "Hobnail",
         "description": "A tiny home for your homelab. Containers, host and history at a glance.",
-        "start_url": "/",
-        "scope": "/",
+        "start_url": "/app",
+        "scope": "/app",
         "display": "standalone",
         "background_color": "#1D1210",
         "theme_color": "#1D1210",
@@ -88,9 +74,9 @@ pub fn manifest(name: &str) -> String {
             { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
         ],
         "shortcuts": [
-            { "name": "Containers", "url": "/containers" },
-            { "name": "Logs", "url": "/logs" },
-            { "name": "Alerts", "url": "/alerts" }
+            { "name": "Containers", "url": "/app/containers" },
+            { "name": "Logs", "url": "/app/logs" },
+            { "name": "Alerts", "url": "/app/alerts" }
         ]
     })
     .to_string()

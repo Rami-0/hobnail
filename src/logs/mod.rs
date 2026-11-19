@@ -9,11 +9,9 @@
 //!   engine used by `log_match` alert rules (no `regex` crate).
 //! - `watch`: the background task for `log_match` rules and per-minute
 //!   level counts (`db::logcounts`).
-//! - `pages`: `/containers/<name>/logs`, `/stacks/<name>/logs`, `/logs?c=…`.
 //!
-//! The browser keeps the lines (a bounded ring, `[logs] ring`, default
-//! 5,000), renders ANSI colors and JSON, and does search, regex, filters and
-//! context lines itself (`static/logs.js`).
+//! The React client retains a bounded ring and renders ANSI colors,
+//! searches and filters in the browser.
 //!
 //! Log text is never written to the app's own log, the database or alert
 //! messages. Logs require a session. Tails are limited to visible containers.
@@ -22,7 +20,6 @@ pub mod client;
 pub mod frame;
 pub mod level;
 pub mod matcher;
-mod pages;
 pub mod tail;
 #[cfg(test)]
 mod tests;
@@ -33,13 +30,9 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-use crate::alerts::RuleConfig;
+use crate::http::query::{parse_query, query_get};
 use crate::http::server::{json, text, Body};
 use crate::state::AppState;
-use crate::ui::fmt::{parse_query, query_get, url_encode};
-use crate::ui::shell::Ctx;
-
-pub use pages::level_chart;
 
 /// `[logs]` in the config file.
 #[derive(Debug, Clone, Deserialize)]
@@ -82,42 +75,8 @@ impl LogsConfig {
     }
 }
 
-/// Link to a container's logs page.
-pub fn logs_url(name: &str) -> String {
-    format!("/containers/{}/logs", url_encode(name))
-}
-
-/// Link to a compose project's merged logs page.
-pub fn stack_logs_url(stack: &str) -> String {
-    format!("/stacks/{}/logs", url_encode(stack))
-}
-
-/// Link to the split view of up to four containers.
-pub fn split_url(names: &[&str]) -> String {
-    let list: Vec<String> = names.iter().take(4).map(|n| url_encode(n)).collect();
-    format!("/logs?c={}", list.join(","))
-}
-
-/// One line describing a `log_match` rule for the alerts page.
-pub fn rule_summary(r: &RuleConfig) -> String {
-    let who = match (&r.stack, &r.containers) {
-        (Some(s), Some(c)) if !c.is_empty() => format!("stack {s}, {}", c.join(", ")),
-        (Some(s), _) => format!("stack {s}"),
-        (None, Some(c)) => c.join(", "),
-        _ => "?".into(),
-    };
-    format!(
-        "/{}/ at least {}× in {} · {who}",
-        r.pattern.as_deref().unwrap_or(""),
-        r.count.unwrap_or(1),
-        crate::util::human_duration(r.window.map(|d| d.0.as_secs()).unwrap_or(300)),
-    )
-}
-
-/// The one rule for whose logs may be read: a valid name the owner has not
-/// hidden or excluded (`ui::view::is_excluded`).
 fn tailable_c(cfg: &crate::config::Config, c: &crate::model::Container) -> bool {
-    client::valid_name(&c.name) && !crate::ui::view::is_excluded(cfg, c)
+    client::valid_name(&c.name) && !crate::read_model::is_excluded(cfg, c)
 }
 
 /// A container whose logs may be read: it exists in the current snapshot and
@@ -146,12 +105,6 @@ pub fn tailable(state: &AppState) -> std::collections::HashSet<String> {
 }
 
 /// A logs link that opens the viewer at a moment (`#t=` in unix ms).
-pub fn logs_at(name: &str, ts_secs: i64) -> String {
-    format!("{}#t={}", logs_url(name), ts_secs.max(0) * 1000)
-}
-
-/// Containers named by `c=a,b` (at most `max`, only ones `may_tail` allows) or
-/// by `stack=x` (the compose project's containers, at most 24).
 fn targets(
     state: &AppState,
     q: &[(String, String)],
@@ -180,21 +133,6 @@ fn targets(
         }
     }
     out
-}
-
-/// Containers of a compose project, by name.
-pub fn stack_members(state: &AppState, stack: &str) -> Vec<String> {
-    let snap = state.snapshot();
-    let cfg = state.config.current();
-    let mut v: Vec<String> = snap
-        .containers
-        .iter()
-        .filter(|c| in_stack(&cfg, c, stack))
-        .map(|c| c.name.clone())
-        .collect();
-    v.sort();
-    v.truncate(24);
-    v
 }
 
 /// A container of compose project `stack` whose logs may be read.
@@ -337,21 +275,6 @@ pub async fn route(
         }
         _ => text(StatusCode::NOT_FOUND, "not found\n"),
     }
-}
-
-/// `/containers/<name>/logs`.
-pub fn container_page(ctx: &Ctx, name: &str) -> (StatusCode, String) {
-    pages::container(ctx, name)
-}
-
-/// `/stacks/<name>/logs`: merged, time-ordered logs of a compose project.
-pub fn stack_page(ctx: &Ctx, stack: &str) -> (StatusCode, String) {
-    pages::stack(ctx, stack)
-}
-
-/// `/logs?c=a,b,c`: split view of two to four containers.
-pub fn split_page(ctx: &Ctx) -> (StatusCode, String) {
-    pages::split(ctx)
 }
 
 /// Background task: bounded tails for `log_match` alert rules and per-minute

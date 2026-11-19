@@ -382,6 +382,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn session_is_valid(&self, hash: &str, now: i64) -> bool {
         self.with(false, |i| {
             i.conn.query_row(
@@ -481,6 +482,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn accounts(&self) -> Result<Vec<Account>> {
         self.with(Err(AccountError::Storage), |i| {
             Ok(Ok(read_accounts(&i.conn)?))

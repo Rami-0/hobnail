@@ -15,14 +15,14 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use super::container_facts as facts;
 use super::error::ApiError;
+use super::history_window::Window;
 use crate::db::{Agg, CtrMetric, Event, EventFilter, Range};
 use crate::docker::Inspect;
 use crate::model::{Container, Snapshot, StatsMap};
+use crate::read_model::{self as view, CardView, Sev};
 use crate::state::AppState;
-use crate::ui::pages::container as page;
-use crate::ui::pages::history::Window;
-use crate::ui::view::{self, CardView, Sev};
 
 /// Events in the detail's timeline (the Overview shows 12).
 const DETAIL_EVENTS: usize = 12;
@@ -370,7 +370,7 @@ pub fn started_from_status(status: &str, fetched_at: u64) -> Option<i64> {
 // ---------------------------------------------------------------- detail
 
 /// `?range=` or `?from=&to=` (unix seconds) → the chart window, as the
-/// History page reads it (`Window`): `to` clamped to now, `from` to the
+/// History reads it (`Window`): `to` clamped to now, `from` to the
 /// last 30 days, served from the smallest preset covering it. Bad input is
 /// a 400 naming the field.
 pub fn parse_window(query: &str, now: i64) -> Result<Window, ApiError> {
@@ -382,8 +382,8 @@ pub(super) fn parse_window_with_default(
     now: i64,
     default: Range,
 ) -> Result<Window, ApiError> {
-    let q = crate::ui::fmt::parse_query(query);
-    let get = |k| crate::ui::fmt::query_get(&q, k);
+    let q = crate::http::query::parse_query(query);
+    let get = |k| crate::http::query::query_get(&q, k);
     let preset = match get("range") {
         None => default,
         Some(r) => Range::parse(r).ok_or_else(|| {
@@ -451,13 +451,9 @@ pub fn detail(
     let mut row = row(&cfg, &card, c, snap.fetched_at);
 
     // One inspect, redacted for a visitor (no probe output then anyway).
-    let ins = inspect(&c.id).ok().map(|i| {
-        if signed {
-            i
-        } else {
-            page::redact_for_anonymous(i)
-        }
-    });
+    let ins = inspect(&c.id)
+        .ok()
+        .map(|i| if signed { i } else { facts::redact_inspect(i) });
     let started = ins
         .as_ref()
         .and_then(|i| crate::docker::parse_rfc3339(&i.state.started_at));
@@ -477,8 +473,8 @@ pub fn detail(
         .iter()
         .filter(|e| e.ts >= now - 600)
         .count() as u32;
-    let since = page::unhealthy_since(db, c, started);
-    let why = page::why_red(c, ins.as_ref(), starts_10m, since, now).map(|w| why(&w, signed));
+    let since = facts::unhealthy_since(db, c, started);
+    let why = facts::why_red(c, ins.as_ref(), starts_10m, since, now).map(|w| why(&w, signed));
 
     let restarts_7d = db
         .restart_counts(now - Range::D7.secs())
@@ -500,11 +496,11 @@ pub fn detail(
     let labels = c
         .labels
         .iter()
-        .filter(|(k, _)| !page::is_bookkeeping_label(k))
+        .filter(|(k, _)| !facts::is_bookkeeping_label(k))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     let status = state.alerts.lock().unwrap().clone();
-    let rules = page::matching_rules(&cfg.alerts, &c.name)
+    let rules = facts::matching_rules(&cfg.alerts, &c.name)
         .into_iter()
         .map(|r| {
             let firing = status
@@ -577,7 +573,7 @@ pub(super) fn event_row(e: &Event) -> EventRow {
 }
 
 /// The page's `Why` as JSON; probe output and checks only for a session.
-fn why(w: &page::Why, signed: bool) -> Why {
+fn why(w: &facts::Why, signed: bool) -> Why {
     let mut parts: Vec<String> = if w.text.is_empty() {
         Vec::new()
     } else {
@@ -594,7 +590,7 @@ fn why(w: &page::Why, signed: bool) -> Why {
                 .iter()
                 .find(|p| p.1 != 0)
                 .and_then(|p| p.2.trim().lines().next())
-                .map(|l| page::truncate(l.trim(), PROBE_LINE_MAX))
+                .map(|l| facts::truncate(l.trim(), PROBE_LINE_MAX))
                 .filter(|l| !l.is_empty());
             let checks = h
                 .probes
@@ -602,7 +598,7 @@ fn why(w: &page::Why, signed: bool) -> Why {
                 .map(|(at, code, out)| WhyCheck {
                     at: *at,
                     exit_code: *code,
-                    output: page::truncate(out.trim(), page::HEALTH_OUTPUT_MAX),
+                    output: facts::truncate(out.trim(), facts::HEALTH_OUTPUT_MAX),
                 })
                 .collect();
             (title, h.since.or(w.ts), probe, checks)

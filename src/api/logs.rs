@@ -37,7 +37,7 @@ fn picker(state: &AppState, principal: &Principal) -> LogsPicker {
     let snap = state.snapshot();
     let visible = principal.container_visibility(state);
     let tailable = crate::logs::tailable(state);
-    let groups = crate::ui::view::build_groups(&cfg, &snap, &Default::default(), "localhost")
+    let groups = crate::read_model::build_groups(&cfg, &snap, &Default::default(), "localhost")
         .into_iter()
         .filter_map(|g| {
             let containers: Vec<_> = g
@@ -92,7 +92,7 @@ pub(super) async fn get(state: &std::sync::Arc<AppState>, principal: Principal) 
 mod tests {
     use super::*;
     use crate::db::accounts::{Role, Scopes};
-    use crate::ui::testutil::{ctr, state_with};
+    use crate::testutil::{ctr, state_with};
 
     #[test]
     fn includes_stopped_but_never_hidden_excluded_or_invalid_names() {

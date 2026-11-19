@@ -16,70 +16,6 @@ use crate::state::AppState;
 
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
-/// Inlined into every page: tokens, themes and shell (`app.css`), then the
-/// component layer (`components.css`), then the page parts.
-pub const APP_CSS: &str = concat!(
-    include_str!("../../static/app.css"),
-    include_str!("../../static/components.css"),
-    include_str!("../../static/cards.css"),
-    include_str!("../../static/widgets.css"),
-    include_str!("../../static/alerts.css"),
-    include_str!("../../static/detail.css"),
-    include_str!("../../static/host.css"),
-);
-/// `/static/app.js`: the component layer (`ui.js`, `window.HB`) and the app
-/// script, one cached request.
-pub const APP_JS: &str = concat!(
-    include_str!("../../static/ui.js"),
-    include_str!("../../static/app.js"),
-);
-/// Loaded only by the settings pages (kept out of every other page).
-pub const SETTINGS_CSS: &str = include_str!("../../static/settings.css");
-pub const SETTINGS_JS: &str = include_str!("../../static/settings.js");
-/// Loaded only by the logs pages.
-pub const LOGS_CSS: &str = include_str!("../../static/logs.css");
-pub const LOGS_JS: &str = include_str!("../../static/logs.js");
-
-/// 64-bit FNV-1a of an asset's bytes, at compile time: the `?v=` of its URL.
-/// Keyed on the content, not the build id (`dev`, `nogit`, `<sha>-dirty` can
-/// stay the same while the files change).
-const fn fnv1a(s: &str) -> u64 {
-    let b = s.as_bytes();
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut i = 0;
-    while i < b.len() {
-        h ^= b[i] as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        i += 1;
-    }
-    h
-}
-const fn hex16(h: u64) -> [u8; 16] {
-    let d = b"0123456789abcdef";
-    let mut o = [0u8; 16];
-    let mut i = 0;
-    while i < 16 {
-        o[i] = d[((h >> (60 - 4 * i)) & 0xf) as usize];
-        i += 1;
-    }
-    o
-}
-macro_rules! version_of {
-    ($name:ident, $hex:ident, $src:expr) => {
-        const $hex: [u8; 16] = hex16(fnv1a($src));
-        pub const $name: &str = match std::str::from_utf8(&$hex) {
-            Ok(s) => s,
-            Err(_) => panic!("hex is ASCII"),
-        };
-    };
-}
-version_of!(APP_CSS_V, APP_CSS_HEX, APP_CSS);
-version_of!(APP_JS_V, APP_JS_HEX, APP_JS);
-version_of!(SETTINGS_CSS_V, SETTINGS_CSS_HEX, SETTINGS_CSS);
-version_of!(SETTINGS_JS_V, SETTINGS_JS_HEX, SETTINGS_JS);
-version_of!(LOGS_CSS_V, LOGS_CSS_HEX, LOGS_CSS);
-version_of!(LOGS_JS_V, LOGS_JS_HEX, LOGS_JS);
-
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
     let listener = TcpListener::bind(addr)
         .await
@@ -280,7 +216,6 @@ async fn dispatch(
     let admin = session.is_some_and(|s| s.account.role >= crate::db::accounts::Role::Admin);
     match path {
         "/healthz" => text(StatusCode::OK, "ok\n"),
-        "/favicon.ico" => crate::ui::pwa::route(state, "/icon.svg").expect("favicon asset"),
         "/custom.css" => {
             let css =
                 std::fs::read_to_string(state.env.data_dir.join("custom.css")).unwrap_or_default();
@@ -295,15 +230,14 @@ async fn dispatch(
                 .query()
                 .and_then(|q| q.strip_prefix("l="))
                 .and_then(|l| l.chars().next());
-            crate::ui::icons::dashboard_icon(state, &p[10..], letter).await
+            crate::http::icons::dashboard_icon(state, &p[10..], letter).await
         }
-        p if p.starts_with("/icons/") => crate::ui::icon_response(state, &p[7..]),
+        p if p.starts_with("/icons/") => crate::http::icons::icon_response(state, &p[7..]),
         p if p.starts_with("/api/logs/") => {
             let session = session.expect("viewer gate");
             let visible = session.account.container_visibility(state);
             crate::logs::route(state, &req, &session.hash, &visible).await
         }
-        p if crate::ui::pwa::route(state, p).is_some() => crate::ui::pwa::route(state, p).unwrap(),
         p if p.starts_with("/api/history/") || p == "/api/events" => {
             crate::db::api::route(state, &req, admin).await
         }
@@ -312,7 +246,7 @@ async fn dispatch(
         p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
             crate::http::assets::route(&req)
         }
-        _ => not_found(path),
+        p => super::pwa::route(state, p).unwrap_or_else(|| not_found(p)),
     }
 }
 
@@ -351,13 +285,6 @@ pub fn set(r: &mut Response<Body>, k: hyper::header::HeaderName, v: &str) {
 pub fn text(status: StatusCode, s: &'static str) -> Response<Body> {
     let mut r = full(status, s);
     set(&mut r, CONTENT_TYPE, "text/plain; charset=utf-8");
-    r
-}
-
-pub fn html(s: String) -> Response<Body> {
-    let mut r = full(StatusCode::OK, s);
-    set(&mut r, CONTENT_TYPE, "text/html; charset=utf-8");
-    set(&mut r, CACHE_CONTROL, "no-cache");
     r
 }
 

@@ -16,52 +16,12 @@
 //! letter avatar.
 
 use hyper::{Response, StatusCode};
-use maud::{html, Markup, PreEscaped};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::http::server::{full, set, text, Body};
 use crate::state::AppState;
-
-/// Built-in glyphs: 24×24, stroke = currentColor. Static strings we wrote,
-/// so they are safe to emit unescaped.
-const BUILTIN: &[(&str, &str)] = &[
-    (
-        "database",
-        r#"<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>"#,
-    ),
-    (
-        "mail",
-        r#"<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>"#,
-    ),
-    (
-        "globe",
-        r#"<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>"#,
-    ),
-    (
-        "terminal",
-        r#"<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>"#,
-    ),
-    ("chart", r#"<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>"#),
-    (
-        "box",
-        r#"<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>"#,
-    ),
-    (
-        "server",
-        r#"<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>"#,
-    ),
-    ("bookmark", r#"<path d="M6 3h12v18l-6-4-6 4z"/>"#),
-    (
-        "bot",
-        r#"<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9 17h6"/>"#,
-    ),
-    (
-        "storage",
-        r#"<path d="M4 7h16l-1.5 12h-13z"/><path d="M8 7V5h8v2"/>"#,
-    ),
-];
 
 /// Image substring → (dashboard-icons name, built-in fallback glyph).
 const AUTO: &[(&str, &str, &str)] = &[
@@ -105,43 +65,6 @@ pub fn auto_icon(image: &str, remote: bool) -> Option<String> {
     None
 }
 
-fn builtin(name: &str) -> Option<&'static str> {
-    BUILTIN.iter().find(|(n, _)| *n == name).map(|(_, p)| *p)
-}
-
-/// Markup for an icon name (see module docs); `label` feeds the avatar.
-pub fn render(name: Option<&str>, label: &str) -> Markup {
-    let Some(n) = name.map(str::trim).filter(|n| !n.is_empty()) else {
-        return super::letter_avatar(label);
-    };
-    if let Some(g) = n.strip_prefix("builtin:") {
-        if let Some(paths) = builtin(g) {
-            return html! {
-                span.icon.glyph aria-hidden="true" {
-                    svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-                        stroke-linecap="round" stroke-linejoin="round" { (PreEscaped(paths)) }
-                }
-            };
-        }
-        return super::letter_avatar(label);
-    }
-    if !super::is_safe_name(n) {
-        return super::letter_avatar(label);
-    }
-    if n.ends_with(".svg") || n.ends_with(".png") {
-        return html! { img.icon src={"/icons/" (n)} alt="" loading="lazy"; };
-    }
-    html! { img.icon src={"/icons/di/" (n) ".svg?l=" (avatar_letter(label))} alt="" loading="lazy"; }
-}
-
-fn avatar_letter(label: &str) -> char {
-    label
-        .chars()
-        .find(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .unwrap_or('?')
-}
-
 fn cached_path(data_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     data_dir
         .join("icons")
@@ -173,7 +96,7 @@ pub async fn dashboard_icon(state: &AppState, file: &str, letter: Option<char>) 
     let Some(name) = file.strip_suffix(".svg") else {
         return text(StatusCode::NOT_FOUND, "not found\n");
     };
-    if !super::is_safe_name(name) || name.contains('.') {
+    if !is_safe_name(name) || name.contains('.') {
         return text(StatusCode::BAD_REQUEST, "bad icon name\n");
     }
     let path = cached_path(&state.env.data_dir, name);
@@ -278,22 +201,39 @@ mod tests {
         );
         assert_eq!(auto_icon("webshop-platform:dev", true), None);
     }
+}
 
-    #[test]
-    fn render_kinds() {
-        assert!(render(Some("builtin:database"), "x")
-            .into_string()
-            .contains("<svg"));
-        assert!(render(Some("beszel"), "Beszel")
-            .into_string()
-            .contains("/icons/di/beszel.svg?l=B"));
-        assert!(render(Some("me.png"), "x")
-            .into_string()
-            .contains("/icons/me.png"));
-        assert!(render(Some("../etc"), "Zed")
-            .into_string()
-            .contains("avatar"));
-        assert!(render(None, "Zed").into_string().contains(">Z<"));
-        assert!(avatar_svg("a", 'Q').contains(">Q<"));
+fn is_safe_name(n: &str) -> bool {
+    !n.is_empty()
+        && n.len() < 100
+        && !n.starts_with('.')
+        && n.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// `GET /icons/<name>`: serve from `data/icons/`.
+pub fn icon_response(state: &AppState, name: &str) -> Response<Body> {
+    if !is_safe_name(name) {
+        return text(StatusCode::BAD_REQUEST, "bad icon name\n");
+    }
+    let ctype = if name.ends_with(".svg") {
+        "image/svg+xml"
+    } else if name.ends_with(".png") {
+        "image/png"
+    } else {
+        return text(StatusCode::NOT_FOUND, "not found\n");
+    };
+    match std::fs::read(state.env.data_dir.join("icons").join(name)) {
+        Ok(b) => {
+            let mut r = full(StatusCode::OK, b);
+            set(&mut r, hyper::header::CONTENT_TYPE, ctype);
+            set(
+                &mut r,
+                hyper::header::CACHE_CONTROL,
+                "public, max-age=86400",
+            );
+            r
+        }
+        Err(_) => text(StatusCode::NOT_FOUND, "not found\n"),
     }
 }

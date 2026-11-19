@@ -114,7 +114,7 @@ impl Topics {
     };
 
     pub(super) fn requested(query: &str) -> Topics {
-        let q = crate::ui::fmt::parse_query(query);
+        let q = crate::http::query::parse_query(query);
         let mut t = Topics {
             containers: false,
             stats: false,
@@ -183,7 +183,7 @@ pub fn stats_event(v: &ContainersView, at: i64) -> StatsEvent {
 /// two readings), or `None` before the first sample.
 pub fn system_view(state: &AppState) -> Option<SystemView> {
     let mut s = state.system.lock().unwrap().1.clone();
-    crate::ui::view::seed_cpu(state, &mut s, crate::util::unix_now() as i64);
+    crate::read_model::seed_cpu(state, &mut s, crate::util::unix_now() as i64);
     s.map(|s| SystemView {
         at: s.sampled_at,
         cpu_pct: s.cpu_percent,

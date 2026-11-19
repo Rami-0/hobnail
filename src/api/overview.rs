@@ -53,7 +53,7 @@ pub(super) struct OverviewView {
 }
 
 fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> OverviewView {
-    use crate::ui::pages::container::{probe_line, unhealthy_since};
+    use crate::api::container_facts::{probe_line, unhealthy_since};
     let now = crate::util::unix_now() as i64;
     let config = state.config.current();
     let snapshot = state.snapshot();
@@ -77,7 +77,10 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             Some(OverviewAttention {
                 name: row.name.clone(),
                 title: row.title.clone(),
-                href: format!("/app/containers/{}", crate::ui::fmt::url_encode(&row.name)),
+                href: format!(
+                    "/app/containers/{}",
+                    crate::http::query::url_encode(&row.name)
+                ),
                 container: true,
                 reason: if row.exit_code.is_some() {
                     "exit"
@@ -116,7 +119,7 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             }),
     );
     if attention.len() < 8 {
-        let strips = crate::ui::view::strips(state, now);
+        let strips = crate::read_model::strips(state, now);
         for row in rows
             .iter()
             .filter(|row| row.state == "running" && row.attention.is_none())
@@ -136,7 +139,10 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             attention.push(OverviewAttention {
                 name: row.name.clone(),
                 title: row.title.clone(),
-                href: format!("/app/containers/{}", crate::ui::fmt::url_encode(&row.name)),
+                href: format!(
+                    "/app/containers/{}",
+                    crate::http::query::url_encode(&row.name)
+                ),
                 container: true,
                 reason: "recovered".into(),
                 severity: "warn".into(),
@@ -154,7 +160,8 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
     }
     attention.sort_by_key(|row| row.severity != "bad");
     attention.truncate(8);
-    let mut remaining_probes = crate::ui::pages::overview::PROBES_MAX;
+    const PROBES_MAX: usize = 5;
+    let mut remaining_probes = PROBES_MAX;
     for row in attention.iter_mut().filter(|r| r.reason == "unhealthy") {
         let Some(container) = snapshot.containers.iter().find(|c| c.name == row.name) else {
             continue;
@@ -247,9 +254,9 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
 }
 
 pub(super) async fn get(state: &Arc<AppState>, query: &str, role: Role) -> Response<Body> {
-    let q = crate::ui::fmt::parse_query(query);
-    let since = crate::ui::fmt::query_get(&q, "since").and_then(|t| t.parse::<i64>().ok());
-    let probes = crate::ui::fmt::query_get(&q, "probes") == Some("1");
+    let q = crate::http::query::parse_query(query);
+    let since = crate::http::query::query_get(&q, "since").and_then(|t| t.parse::<i64>().ok());
+    let probes = crate::http::query::query_get(&q, "probes") == Some("1");
     let state = state.clone();
     match tokio::task::spawn_blocking(move || read(&state, role, since, probes)).await {
         Ok(data) => super::json(StatusCode::OK, &data),

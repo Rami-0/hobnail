@@ -492,8 +492,6 @@ channels = ["hook", "slack", "tg"]
         assert_eq!(s.incidents.len(), 1);
         assert_eq!(s.incidents[0].subject, "odoo");
         assert!(s.channels.values().all(|c| c.health == Health::Ok));
-        let html = crate::ui::alerts::render(&st.config.current(), &s).into_string();
-        assert!(html.contains("odoo") && html.contains("1 open"), "{html}");
     }
 
     // Still stopped, many times over: deduped.
@@ -552,15 +550,9 @@ channels = ["hook", "slack", "tg"]
     assert_eq!(mock.received().len(), 6);
 
     // Nothing secret anywhere we expose.
-    let api = crate::render::state_json(&st, true).to_string();
-    let page =
-        crate::ui::alerts::render(&st.config.current(), &st.alerts.lock().unwrap()).into_string();
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
     for s in ["E2E-TOKEN", "XXSECRETXX", "Bearer e2e"] {
-        assert!(
-            !api.contains(s) && !page.contains(s) && !file.contains(s),
-            "{s} leaked"
-        );
+        assert!(!file.contains(s), "{s} leaked");
     }
     task.abort();
     let _ = std::fs::remove_dir_all(&dir);
@@ -628,16 +620,8 @@ channels = ["tg", "missing"]
         .contains(&format!("RH_TEST_SURELY_UNSET_{pid}")));
     assert_eq!(s.pending, 2);
 
-    let html = crate::ui::alerts::render(&st.config.current(), &s).into_string();
-    assert!(
-        html.contains("failing") && html.contains("misconfigured"),
-        "{html}"
-    );
-    let api = crate::render::state_json(&st, true).to_string();
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
-    for text in [&html, &api, &file] {
-        assert!(!text.contains("TOPSECRET"));
-    }
+    assert!(!file.contains("TOPSECRET"));
     task.abort();
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -750,33 +734,4 @@ async fn notify_test_cli() {
     assert_eq!(cli_notify_test(&[]).await, 2);
     std::env::remove_var("RH_CONFIG");
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn panel_render() {
-    let empty = parse("").unwrap();
-    assert_eq!(
-        crate::ui::alerts::render(&empty, &Status::default()).into_string(),
-        r#"<section id="alerts"></section>"#
-    );
-    let cfg = parse("[channels.a]\ntype='webhook'\nurl='http://x/h'\n[[alerts]]\nname='down'\ntype='container'\nchannels=['a']").unwrap();
-    let mut c = core_in(&tmp_dir("panel"));
-    let html = crate::ui::alerts::render(&cfg, &c.status(&cfg)).into_string();
-    assert!(
-        html.contains("all clear") && html.contains("not used yet"),
-        "{html}"
-    );
-    let snap = Snapshot {
-        containers: vec![container("<odoo>", "exited", Some(1))],
-        fetched_at: 1,
-        error: None,
-    };
-    let cfg0 = parse("[[alerts]]\nname='down'\ntype='container'\nfor='0s'").unwrap();
-    evaluate(&mut c, &cfg0, &Probes::default(), &snap, "h", unix_now());
-    let html = crate::ui::alerts::render(&cfg0, &c.status(&cfg0)).into_string();
-    assert!(
-        html.contains("&lt;odoo&gt;") && html.contains("stopped (exit 1)"),
-        "{html}"
-    );
-    assert!(html.contains("1 open"));
 }

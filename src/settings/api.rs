@@ -175,7 +175,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             let out = crate::widgets::run(&w, &policy).await;
             json(json!({
                 "ok": out.error.is_none(),
-                "html": out.html,
                 "values": out.values,
                 "error": out.error,
                 "duration_ms": out.duration_ms,
@@ -803,14 +802,6 @@ fn css_path(state: &AppState) -> std::path::PathBuf {
 
 /// The saved custom.css and its hash (the `base_hash` of a save), for the
 /// Appearance page.
-pub fn css_current(state: &AppState) -> Result<(String, String), ApiError> {
-    let v = css_get(state)?;
-    Ok((
-        v["css"].as_str().unwrap_or("").to_string(),
-        v["hash"].as_str().unwrap_or("").to_string(),
-    ))
-}
-
 fn css_get(state: &AppState) -> Result<J, ApiError> {
     let css = match std::fs::read(css_path(state)) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),

@@ -10,17 +10,19 @@ use crate::auth::{CredentialAction, Session};
 use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
-pub mod access;
+pub(crate) mod access;
 mod accounts;
 mod alerts;
 mod boards;
 mod bookmarks;
 pub mod bootstrap;
+pub mod container_facts;
 mod container_tabs;
 pub mod containers;
 mod dashboard_settings;
 pub mod error;
 mod history;
+mod history_window;
 mod host;
 mod integrations;
 mod logs;
@@ -91,7 +93,7 @@ pub(crate) async fn route(
             if !state.config.current().icons.remote || validate_icon(Some(name)).is_err() {
                 return ApiError::not_found().response();
             }
-            crate::ui::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
+            crate::http::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
         }
         Handler::Onboard => {
             crate::auth::credential_route(state, req, CredentialAction::Onboard).await
@@ -275,3 +277,6 @@ fn valid_id(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+
+#[cfg(test)]
+mod format_tests;

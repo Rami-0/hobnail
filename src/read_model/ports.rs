@@ -61,6 +61,7 @@ fn pick_binding(bindings: &[(&str, u16)], host: &str) -> Option<(String, u16)> {
         .map(|&(ip, p)| (ip.to_string(), p))
 }
 
+#[cfg(test)]
 /// What one host binding means for a viewer on `host`: `Ok(url)`, or why
 /// there is no link (`Err("loopback only" | "not a web port")`).
 pub fn binding_link(p: &PortMapping, host: &str) -> Result<String, &'static str> {
