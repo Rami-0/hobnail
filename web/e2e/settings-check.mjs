@@ -136,6 +136,14 @@ try {
         await button(".settings-form", "Validate");
         await wait(text('[role="alert"]', "would send header secrets to a new destination"), "destination guard reason is visible");
       }
+      const leavePrompt = tab.once("Page.javascriptDialogOpening", 5000);
+      const reload = tab.send("Page.reload");
+      const warning = await leavePrompt;
+      assert.equal(warning?.type, "beforeunload", "raw edits guard browser reload");
+      await tab.send("Page.handleJavaScriptDialog", { accept: false });
+      await reload;
+      await wait(present(raw), "cancelled reload keeps the raw editor");
+      await button(".settings-form", "Discard changes");
       await go("/app/account", present('[data-testid="account-password"]'));
       await tab.shot(path.join(out, `${label}-account.png`));
       await go("/app/settings/bookmarks?add=bookmark", present(editor));
@@ -149,11 +157,20 @@ try {
       await fill(editor + ' input[name="url"]', "https://example.com/settings-check");
       await inp.click(editor + ' button[type="submit"]');
       await wait(`!${present(editor)} && ${text(".settings-row", name)}`, "save updates the collection");
+      const beforeDelete = ok(await call("/api/settings/bookmarks", "GET", undefined, owner), "read bookmark before deletion");
+      const neighbor = `Undo neighbor ${label}`;
+      ok(await call("/api/settings/bookmarks", "POST", {
+        base_hash: beforeDelete.hash, action: "add", item: { name: neighbor, url: "https://example.com/neighbor" },
+      }, owner), "put another bookmark after the one to delete");
+      await wait(text(".settings-row", neighbor), "trailing bookmark is visible");
       await inp.click(`button[aria-label=${q("Delete " + name)}]`);
       await button(dialog, "Delete");
       await wait(`!${text(".settings-row", name)}`, "delete updates the collection");
       await button("body", "Undo");
-      await wait(text(".settings-row", name), "Undo restores the bookmark");
+      await wait(`(() => {
+        const names = [...document.querySelectorAll('[data-testid="settings-bookmark-list"] h3')].map(e => e.textContent);
+        return names.indexOf(${q(name)}) >= 0 && names.indexOf(${q(name)}) + 1 === names.indexOf(${q(neighbor)});
+      })()`, "Undo restores the bookmark at its original position");
       await inp.click(`button[aria-label=${q("Edit " + name)}]`);
       await wait(present(editor), "bookmark edit opens");
       await fill(editor + ' input[name="description"]', "Edited in the browser");
@@ -333,6 +350,8 @@ try {
           await button(dialog, "Create invitation");
           const linkSelector = '[data-testid="invite-link"]';
           await wait(present(linkSelector), "show one-time invite link");
+          await inp.key("Escape");
+          await wait(present(linkSelector), "Escape retains the uncopied one-time link");
           const link = await tab.ev(`document.querySelector(${q(linkSelector)}).value`);
           const inviteRoute = new URL(link).pathname;
           await button(dialog, "Done");

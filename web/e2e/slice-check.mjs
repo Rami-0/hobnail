@@ -359,7 +359,15 @@ async function containerPage(size) {
   const ready = `!!document.querySelector('[data-testid="ctr-head"]')`;
   if (!(await step(`container page: [data-testid="ctr-head"] for ${CTR}`, () => go(`/app/containers/${enc}`, ready, 12000)))) { await shot("container-missing"); return; }
   check((await headText()).length > 0, "the head has text", await headText());
-  await step('both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg', () => until(chartsReady, 10000));
+  await step('both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg', async () => {
+    for (const name of ["cpu", "mem"]) {
+      const chart = `figure[data-testid="chart-${name}"]`;
+      if (!(await until(`!!document.querySelector(${q(chart)})`, 10000))) return false;
+      await inp.box(chart);
+      if (!(await until(`!!document.querySelector(${q(chart + " svg")})`, 10000))) return false;
+    }
+    return ev(chartsReady);
+  });
   await sleep(500);
   await shot("container");
   check(await ev(`!!document.querySelector('a[data-testid="edit"]')`), 'owner: a[data-testid="edit"] is available');

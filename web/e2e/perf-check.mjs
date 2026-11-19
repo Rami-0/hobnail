@@ -16,7 +16,7 @@
 //     worst interaction, plus the longest task in the interaction window.
 // Targets (TARGETS, default "app chart old old-ctr"):
 //   app     <base>/app/containers          ready: table[data-testid=containers] tr[data-testid=row]
-//   chart   <base>/app/containers/<name>   ready: svg in figure[data-testid=chart-cpu] and chart-mem
+//   chart   <base>/app/containers/<name>   ready: visible CPU plot and reserved memory figure
 //   old     <base>/containers              ready: #ctable tr.row (baseline)
 //   old-ctr <base>/containers/<name>       ready: figure.chart (baseline)
 // Profiles (PROFILES, default "phone desktop"): phone = 390x844, touch,
@@ -96,7 +96,7 @@ const T = {
   settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: ["config"], filter: 'input[name="greeting"]', fails: true },
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
     rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]', fails: true },
-  chart: { path: `/app/containers/${enc}`, ready: `!!document.querySelector('figure[data-testid="chart-cpu"] svg') && !!document.querySelector('figure[data-testid="chart-mem"] svg')`,
+  chart: { path: `/app/containers/${enc}`, ready: `!!document.querySelector('figure[data-testid="chart-cpu"] svg') && !!document.querySelector('figure[data-testid="chart-mem"]')`,
     rows: 'figure[data-testid^="chart-"]', live: ["stats"], chart: 'figure[data-testid="chart-cpu"]', fails: true },
   old: { path: "/containers", ready: `document.querySelectorAll('#ctable tr.row').length >= ${MIN_ROWS}`, rows: "#ctable tr.row", live: ["frag"], filter: "#cq", header: 'th[data-sort="name"] a' },
   "old-ctr": { path: `/containers/${enc}`, ready: `!!document.querySelector('figure.chart')`, rows: "figure.chart", live: ["frag"], chart: "figure.chart" },
@@ -248,6 +248,14 @@ async function run(target, profile) {
         await sleep(300);
         await inp.clickAt(cb.x, cb.y); await sleep(800);
       } else res.notes.push(`no visible chart ${t.chart}`);
+      if (target === "chart") {
+        const mem = 'figure[data-testid="chart-mem"]';
+        await inp.box(mem);
+        if (!(await tab.until(`!!document.querySelector(${q(mem + " svg")})`, READY_MS))) {
+          res.ok = false;
+          res.notes.push("Memory plot did not mount when revealed");
+        }
+      }
     } else if (ready && t.interaction) {
       await inp.click(t.interaction); await sleep(800);
     }
