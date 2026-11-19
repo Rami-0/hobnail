@@ -213,6 +213,7 @@ try {
         assert.equal(saved.page.title, "Concurrent title");
         ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
 
+        await wait(`document.querySelector('input[name="greeting"]').value === ${q(before.page?.greeting ?? "")}`, "restore refreshes the General form before testing retry");
         await fill('input[name="greeting"]', "Retry preserved input");
         await tab.send("Network.clearBrowserCookies");
         const allowExpired = rec.allow(({ method, url, status }) => new URL(url).pathname === "/api/settings/general" && method === "POST" && status === 401 ? "intentional expired session" : false);
@@ -423,6 +424,7 @@ try {
       assert.deepEqual([...rec.csp, ...rec.exceptions, ...rec.console, ...rec.failed], [], `${label} browser diagnostics`);
       console.log(`ok ${label}: Settings tabs, Account, Users and signed-in editing`);
     } catch (error) {
+      await tab.send("Page.handleJavaScriptDialog", { accept: false });
       failures.push(`${label}: ${error.stack}`);
       if (!(await tab.ev(present('[data-testid="invite-link"]')))) await tab.shot(path.join(out, `${label}-failure.png`));
     } finally {
