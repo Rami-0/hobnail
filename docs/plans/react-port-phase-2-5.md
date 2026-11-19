@@ -2,7 +2,7 @@
 
 Date: 2026-11-19. Spec: [react-port.md](react-port.md), especially §4.9;
 [locked decisions](react-port-decisions.md) override its recommendations.
-Nothing here was deployed or pushed; PR #3 was untouched.
+The measurement run used disposable instances. The [deployment handover](react-port-handover.md) records the later preview and verification.
 
 Marks: **[code]** verified in code/history; **[exp]** measured here;
 **[assume]** not verified. MiB = 2^20 B, MB = 10^6 B, KB = 10^3 B.
