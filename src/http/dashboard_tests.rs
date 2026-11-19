@@ -606,7 +606,7 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
         ("/api/palette", 404),
         ("/api/v1/stream?topics=system", 403),
         ("/api/stream", 404),
-        ("/", 403),
+        ("/", 404),
         ("/containers/web", 404),
     ] {
         assert_eq!(
