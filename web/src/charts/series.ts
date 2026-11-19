@@ -104,25 +104,28 @@ export function rowsForWidth(rows: ChartRow[], from: number, to: number, width: 
     Number(row.cpu !== null) + 2 * Number(row.mem !== null)
       + 4 * Number(row.cpuBand !== null) + 8 * Number(row.memBand !== null);
   for (let first = 0; first < rows.length;) {
-    const initial = rows[first]!;
+    const initial = rows[first];
+    if (!initial) break;
     const bin = bucket(initial);
     const present = mask(initial);
     let end = first + 1;
     let cpuMin = first, cpuMax = first, memMin = first, memMax = first;
     let cpuPeak = first, memPeak = first;
     while (end < rows.length) {
-      const row = rows[end]!;
+      const row = rows[end];
+      if (!row) break;
       if (bucket(row) !== bin || mask(row) !== present) break;
-      if (row.cpu !== null && row.cpu < rows[cpuMin]!.cpu!) cpuMin = end;
-      if (row.cpu !== null && row.cpu > rows[cpuMax]!.cpu!) cpuMax = end;
-      if (row.mem !== null && row.mem < rows[memMin]!.mem!) memMin = end;
-      if (row.mem !== null && row.mem > rows[memMax]!.mem!) memMax = end;
-      if (row.cpuBand && row.cpuBand[1] > rows[cpuPeak]!.cpuBand![1]) cpuPeak = end;
-      if (row.memBand && row.memBand[1] > rows[memPeak]!.memBand![1]) memPeak = end;
+      if (row.cpu !== null && row.cpu < (rows[cpuMin]?.cpu ?? Infinity)) cpuMin = end;
+      if (row.cpu !== null && row.cpu > (rows[cpuMax]?.cpu ?? -Infinity)) cpuMax = end;
+      if (row.mem !== null && row.mem < (rows[memMin]?.mem ?? Infinity)) memMin = end;
+      if (row.mem !== null && row.mem > (rows[memMax]?.mem ?? -Infinity)) memMax = end;
+      if (row.cpuBand && row.cpuBand[1] > (rows[cpuPeak]?.cpuBand?.[1] ?? -Infinity)) cpuPeak = end;
+      if (row.memBand && row.memBand[1] > (rows[memPeak]?.memBand?.[1] ?? -Infinity)) memPeak = end;
       end++;
     }
     for (const i of [...new Set([first, cpuMin, cpuMax, memMin, memMax, cpuPeak, memPeak, end - 1])].toSorted((a, b) => a - b)) {
-      result.push(rows[i]!);
+      const row = rows[i];
+      if (row) result.push(row);
     }
     first = end;
   }
