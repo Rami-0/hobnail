@@ -12,7 +12,7 @@ use crate::state::AppState;
 
 pub(crate) mod access;
 mod accounts;
-mod alerts;
+pub(crate) mod alerts;
 mod boards;
 mod bookmarks;
 pub mod bootstrap;

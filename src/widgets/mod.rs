@@ -832,3 +832,18 @@ pub fn plain_error(e: &str) -> String {
         "Could not get an answer".into()
     }
 }
+
+#[cfg(test)]
+mod plain_error_tests {
+    #[test]
+    fn describes_connection_failures() {
+        assert_eq!(
+            super::plain_error("connect 127.0.0.1:9: Connection refused (os error 111)"),
+            "Refused: nothing is listening there"
+        );
+        assert_eq!(
+            super::plain_error("timed out after 5000ms"),
+            "No answer in time"
+        );
+    }
+}

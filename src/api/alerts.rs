@@ -35,7 +35,7 @@ pub(super) struct AlertChannel {
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-pub(super) struct AlertsView {
+pub(crate) struct AlertsView {
     firing: Vec<AlertIncident>,
     rules: Vec<RuleRow>,
     channels: Vec<AlertChannel>,
@@ -84,7 +84,7 @@ pub(super) fn firing(state: &AppState) -> Vec<AlertIncident> {
         .collect()
 }
 
-fn read(state: &AppState, query: &str) -> Result<AlertsView, ApiError> {
+pub(crate) fn read(state: &AppState, query: &str) -> Result<AlertsView, ApiError> {
     use crate::alerts::Health;
     use crate::http::query::{parse_query, query_get};
     let q = parse_query(query);

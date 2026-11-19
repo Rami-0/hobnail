@@ -382,6 +382,64 @@ above = 90
     }
 
     #[test]
+    fn parses_inspect_fixture() {
+        let i = ins();
+        assert_eq!(i.name, "/web");
+        assert_eq!(i.restart_count, 3);
+        assert_eq!(i.state.pid, 4242);
+        assert_eq!(
+            crate::db::ctrx::net_source_of(&i),
+            crate::db::ctrx::NetSource::Pid(4242)
+        );
+        assert_eq!(i.config.env_keys(), ["PATH", "DB_PASSWORD", "EMPTY"]);
+        assert_eq!(i.config.env_pairs()[1], ("DB_PASSWORD", SECRET));
+        assert_eq!(i.config.env_pairs()[2], ("EMPTY", ""));
+        assert_eq!(i.host_config.memory, 536_870_912);
+        assert_eq!(
+            i.host_config.restart_policy.as_ref().unwrap().name,
+            "unless-stopped"
+        );
+        assert_eq!(i.mounts.len(), 2);
+        assert!(!i.mounts[0].rw);
+        let h = i.state.health.as_ref().unwrap();
+        assert_eq!(h.failing_streak, 4);
+        assert_eq!(h.log.as_ref().unwrap().len(), 3);
+        // Docker's zero time is "never".
+        assert_eq!(crate::docker::parse_rfc3339(&i.state.finished_at), None);
+        assert_eq!(crate::docker::parse_rfc3339("1970-01-02T00:00:00Z"), None);
+        assert_eq!(
+            crate::docker::parse_rfc3339("2026-11-14T10:00:00+01:00"),
+            Some(1_794_646_800)
+        );
+        assert_eq!(
+            crate::docker::parse_rfc3339("2026-11-14T09:00:00.999Z"),
+            Some(1_794_646_800)
+        );
+        assert!(crate::docker::parse_inspect(b"[1,2]").is_err());
+    }
+
+    #[test]
+    fn parses_and_sorts_top() {
+        let t = crate::docker::parse_top(
+            br#"{"Processes":[["7","root","0.5","0.1","2048","01:02","sh -c x"],["12","app","12.0","3.0","51200","1-02:03:04","/srv <app>"],["9","app","2.5","1.0","100","05:00","b"]],"Titles":["PID","USER","%CPU","%MEM","RSS","ELAPSED","COMMAND"]}"#,
+        )
+        .unwrap();
+        let mut rows = t.processes.clone();
+        sort_rows(&mut rows, 2, true);
+        assert_eq!(
+            rows.iter().map(|r| r[0].as_str()).collect::<Vec<_>>(),
+            ["12", "9", "7"]
+        );
+        sort_rows(&mut rows, 5, false);
+        assert_eq!(
+            rows.iter().map(|r| r[0].as_str()).collect::<Vec<_>>(),
+            ["7", "9", "12"]
+        );
+        sort_rows(&mut rows, 1, false);
+        assert_eq!(rows[0][1], "app");
+    }
+
+    #[test]
     fn viewer_inspect_hides_commands_health_and_env_values() {
         let r = redact_inspect(ins());
         let dump = format!("{r:?}");

@@ -550,6 +550,13 @@ channels = ["hook", "slack", "tg"]
     assert_eq!(mock.received().len(), 6);
 
     // Nothing secret anywhere we expose.
+    let model = serde_json::to_string(&crate::api::alerts::read(&st, "").unwrap()).unwrap();
+    for secret in ["E2E-TOKEN", "XXSECRETXX", "Bearer e2e", &addr.to_string()] {
+        assert!(
+            !model.contains(secret),
+            "{secret} leaked in alerts read model"
+        );
+    }
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
     for s in ["E2E-TOKEN", "XXSECRETXX", "Bearer e2e"] {
         assert!(!file.contains(s), "{s} leaked");
@@ -620,6 +627,18 @@ channels = ["tg", "missing"]
         .contains(&format!("RH_TEST_SURELY_UNSET_{pid}")));
     assert_eq!(s.pending, 2);
 
+    let model = serde_json::to_string(&crate::api::alerts::read(&st, "").unwrap()).unwrap();
+    for secret in [
+        "TOPSECRET",
+        &addr.to_string(),
+        &err,
+        m.error.as_deref().unwrap(),
+    ] {
+        assert!(
+            !model.contains(secret),
+            "{secret} leaked in alerts read model"
+        );
+    }
     let file = std::fs::read_to_string(dir.join(STATE_FILE)).unwrap();
     assert!(!file.contains("TOPSECRET"));
     task.abort();
