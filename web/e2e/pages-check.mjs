@@ -7,7 +7,7 @@ import { CSP_LISTENER, input, launch, q, recorder, sleep } from "./cdp.mjs";
 
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3396");
 assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
-assert.match(base.port, /^339[5-9]$/);
+assert.ok(/^339[5-9]$/.test(base.port) || (base.hostname === "127.0.0.1" && base.port === "3300"));
 const password = process.env.HB_PASSWORD;
 assert.ok(password, "set HB_PASSWORD");
 const out = process.env.OUT;
