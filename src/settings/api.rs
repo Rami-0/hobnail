@@ -79,9 +79,9 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         (true, _, ["config"]) => json(raw_get(state)?),
         (_, true, ["config"]) => {
             let r: ops::RawReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |_| {
+            json(store::edit(state, &r.base_hash, user, |current| {
                 Ok(store::Draft {
-                    text: r.text.clone(),
+                    text: restore_channel_fields(&current.text, &r.text),
                     note: "raw edit".into(),
                     kind: "config.saved",
                     fields: ops::RAW_FIELDS,
@@ -351,12 +351,91 @@ fn meta(state: &AppState, user: &str) -> Result<J, ApiError> {
     }))
 }
 
+const CHANNEL_PLAIN_FIELDS: &[&str] =
+    &["url", "headers", "body", "api_base", "token", "webhook_url"];
+const CHANNEL_VALUE_HIDDEN: &str = "<set on host>";
+
+fn channel_tables(doc: &mut toml_edit::DocumentMut) -> Option<&mut dyn toml_edit::TableLike> {
+    doc.get_mut("channels")
+        .and_then(toml_edit::Item::as_table_like_mut)
+}
+
+/// Keep the config editable while preventing inline channel credentials from
+/// entering the settings response. TOML that cannot be parsed cannot be redacted safely.
+fn redact_channel_fields(text: &str) -> Option<String> {
+    let mut doc = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let Some(channels) = channel_tables(&mut doc) else {
+        return Some(text.into());
+    };
+    let mut changed = false;
+    for (_, channel) in channels.iter_mut() {
+        if let Some(table) = channel.as_table_like_mut() {
+            for &key in CHANNEL_PLAIN_FIELDS {
+                if table.contains_key(key) {
+                    table.insert(key, toml_edit::value(CHANNEL_VALUE_HIDDEN));
+                    changed = true;
+                }
+            }
+        }
+    }
+    Some(if changed {
+        doc.to_string()
+    } else {
+        text.into()
+    })
+}
+
+fn restore_channel_fields(original: &str, edited: &str) -> String {
+    if !edited.contains(CHANNEL_VALUE_HIDDEN) {
+        return edited.into();
+    }
+    let (Ok(mut original), Ok(mut edited_doc)) = (
+        original.parse::<toml_edit::DocumentMut>(),
+        edited.parse::<toml_edit::DocumentMut>(),
+    ) else {
+        return edited.into();
+    };
+    let (Some(original), Some(channels)) = (
+        channel_tables(&mut original),
+        channel_tables(&mut edited_doc),
+    ) else {
+        return edited.into();
+    };
+    for (name, channel) in channels.iter_mut() {
+        let Some(saved) = original
+            .get(name.get())
+            .and_then(toml_edit::Item::as_table_like)
+        else {
+            continue;
+        };
+        let Some(table) = channel.as_table_like_mut() else {
+            continue;
+        };
+        for &key in CHANNEL_PLAIN_FIELDS {
+            if table.get(key).and_then(toml_edit::Item::as_str) == Some(CHANNEL_VALUE_HIDDEN) {
+                if let Some(value) = saved.get(key) {
+                    table.insert(key, value.clone());
+                }
+            }
+        }
+    }
+    edited_doc.to_string()
+}
+
 fn raw_get(state: &AppState) -> Result<J, ApiError> {
     let cur = store::read_current(state)?;
-    let check = validate_report(&cur.text, None, &store::secrets_dir(state));
+    let text = redact_channel_fields(&cur.text);
+    let check = if text.is_none() {
+        json!({"ok": false, "error": "Invalid TOML. Repair the config file on the host to recover its contents."})
+    } else if text.as_deref() == Some(&cur.text) {
+        validate_report(&cur.text, None, &store::secrets_dir(state))
+    } else {
+        let valid = store::validate(&cur.text, &[]).is_ok();
+        json!({"ok": valid, "error": (!valid).then_some("The config contains invalid values. Check the file on the host.")})
+    };
     Ok(json!({
         "hash": cur.hash,
-        "text": cur.text,
+        "text": text.unwrap_or_default(),
         "exists": cur.exists,
         "bytes": cur.text.len(),
         "path": state.config.path().display().to_string(),
@@ -382,7 +461,8 @@ fn validate_report(text: &str, old: Option<&str>, secrets_dir: &std::path::Path)
 
 fn validate_text(state: &AppState, text: &str) -> Result<J, ApiError> {
     let cur = store::read_current(state)?;
-    let mut v = validate_report(text, Some(&cur.text), &store::secrets_dir(state));
+    let restored = restore_channel_fields(&cur.text, text);
+    let mut v = validate_report(&restored, Some(&cur.text), &store::secrets_dir(state));
     v["hash"] = J::String(cur.hash);
     Ok(v)
 }
@@ -413,7 +493,7 @@ fn revision(state: &AppState, id: &str) -> Result<J, ApiError> {
         "id": id,
         "meta": meta,
         "hash": doc::sha256_hex(text.as_bytes()),
-        "text": text,
+        "text": redact_channel_fields(&text).unwrap_or_default(),
     }))
 }
 
@@ -424,7 +504,11 @@ fn revision_diff(state: &AppState, id: &str) -> Result<J, ApiError> {
         .revision_text(id)
         .ok_or_else(|| ApiError::not_found(format!("no revision #{id}")))?;
     let cur = store::read_current(state)?;
-    diff_json(&cur.text, &text, id)
+    let current = redact_channel_fields(&cur.text)
+        .ok_or_else(|| ApiError::bad_request("current TOML is invalid"))?;
+    let revision = redact_channel_fields(&text)
+        .ok_or_else(|| ApiError::bad_request("revision TOML is invalid"))?;
+    diff_json(&current, &revision, id)
 }
 
 /// Diff from the current file to revision `id` ("what restoring changes").
@@ -602,16 +686,24 @@ fn notifications_get(state: &AppState) -> Result<J, ApiError> {
     let status = state.alerts.lock().unwrap().channels.clone();
     let mut channels = Vec::new();
     if let J::Object(m) = get_json(&d, "channels") {
-        for (name, item) in m {
+        for (name, mut item) in m {
             let mut warnings = Vec::new();
             if item.get("url").is_some() {
                 warnings.push("url is stored in the config file as plain text; use url_env if it contains a token");
+            }
+            let mut secrets = secret_refs(&item);
+            if let Some(fields) = item.as_object_mut() {
+                for &key in CHANNEL_PLAIN_FIELDS {
+                    if fields.remove(key).is_some() {
+                        secrets.push(json!({"field": key, "kind": "plain", "set": true}));
+                    }
+                }
             }
             channels.push(json!({
                 "id": name,
                 "type": item.get("type"),
                 "item": item,
-                "secrets": secret_refs(&item),
+                "secrets": secrets,
                 "warnings": warnings,
                 "status": status.get(&name).and_then(|s| serde_json::to_value(s).ok()),
             }));

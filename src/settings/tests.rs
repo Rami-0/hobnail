@@ -2602,3 +2602,42 @@ fn switches_off_then_on_give_back_the_file() {
     let t = "[system]\nenabled = true\n";
     assert_eq!(sys(t, true), t);
 }
+
+#[tokio::test]
+async fn settings_hide_inline_channel_values_and_undo_preserves_them() {
+    let config = "[channels.hook]\ntype = \"webhook\"\nurl = \"https://example.com/SECRET-URL\"\nbody = \"SECRET-BODY\"\nheaders = { Authorization = \"SECRET-HEADER\" }\n";
+    let (dir, st) = state_with(Some(config));
+    for path in ["notifications", "config", "env", "meta"] {
+        let (status, data) = get(&st, path).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {data}");
+        assert!(!data.to_string().contains("SECRET-"), "{path}: {data}");
+    }
+    let (_, raw) = get(&st, "config").await;
+    let (status, saved) = post(&st, "config", json!({
+        "base_hash": raw["hash"], "text": format!("{}\n[page]\ntitle = \"New title\"\n", raw["text"].as_str().unwrap())
+    })).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let original = file(&dir);
+    let (status, removed) = post(
+        &st,
+        "channels",
+        json!({
+            "base_hash": saved["hash"], "action": "delete", "id": "hook"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    let token = removed["undo_token"].as_str().unwrap();
+    let (status, restored) = post(&st, "undo-delete", json!({"name": token})).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(file(&dir), original);
+    assert!(
+        original.contains("SECRET-URL")
+            && original.contains("SECRET-HEADER")
+            && original.contains("SECRET-BODY")
+    );
+    assert_eq!(
+        post(&st, "undo-delete", json!({"name": token})).await.0,
+        StatusCode::CONFLICT
+    );
+}

@@ -7,7 +7,7 @@ import { Collection, type Entry } from "./Collection.tsx";
 import type { Values } from "./forms.ts";
 import { endpoint, FailureNote, useSettings, type Control } from "./shared.tsx";
 
-type Channel = Entry & { secrets: { field: string; name?: string; path?: string; set?: boolean; exists?: boolean }[]; warnings: string[] };
+type Channel = Entry & { secrets: { field: string; kind: "plain" | "env" | "file"; name?: string; path?: string; set?: boolean; exists?: boolean }[]; warnings: string[] };
 type Data = { hash: string; channels: Channel[]; rules: Entry[] };
 const envName = (value: string) => /^[A-Z_][A-Z0-9_]*$/.test(value) ? undefined : "Enter an environment variable name.";
 const named = (value: string) => /^[\w-]{1,64}$/.test(value) ? undefined : "Use 1–64 letters, digits, hyphens or underscores.";
@@ -96,11 +96,12 @@ function ruleRow(entry: Entry) {
 
 function channels(data: Data): Entry[] {
   return data.channels.map((entry) => {
-    const { url, headers: _headers, body: _body, api_base: _apiBase, ...safe } = entry.item;
-    const source = sourceKeys.some((key) => key.endsWith("_file") && safe[key]) ? "file" : url ? "plain" : "env";
-    const boundDestination = entry.item.type === "telegram" && !!_apiBase
-      || entry.item.type === "webhook" && entry.secrets.some(({ field }) => field.startsWith("headers_"));
-    return { ...entry, original: { ...entry.item, name: entry.id }, item: { ...safe, name: entry.id, source, bound: boundDestination } };
+    const { item } = entry;
+    const plain = (key: string) => entry.secrets.some(({ field, kind }) => field === key && kind === "plain");
+    const source = sourceKeys.some((key) => key.endsWith("_file") && item[key]) ? "file" : plain("url") ? "plain" : "env";
+    const boundDestination = item.type === "telegram" && plain("api_base")
+      || item.type === "webhook" && entry.secrets.some(({ field }) => field.startsWith("headers_") || field === "headers");
+    return { ...entry, item: { ...item, name: entry.id, source, bound: boundDestination } };
   });
 }
 
@@ -112,7 +113,7 @@ function ChannelDetails({ channel }: { channel: Channel }) {
   return <>
     <p>{String(channel.item.type)}</p>
     {bound(channel.item) && <p>Secret references and their destination are set on the host.</p>}
-    {channel.secrets.map((secret) => <p key={secret.field}><code>{secret.name ?? secret.path}</code> · {secret.set || secret.exists ? "Available" : "Missing"}</p>)}
+    {channel.secrets.map((secret) => <p key={secret.field}><code>{secret.name ?? secret.path ?? secret.field}</code> · {secret.set || secret.exists ? "Available" : "Missing"}</p>)}
     {channel.warnings.map((warning) => <p key={warning}>{warning}</p>)}
   </>;
 }
