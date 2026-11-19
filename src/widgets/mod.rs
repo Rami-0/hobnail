@@ -71,7 +71,7 @@
 //! never breaks the page or the other widgets.
 
 mod path;
-mod template;
+pub(crate) mod template;
 
 #[cfg(test)]
 mod tests;
@@ -534,7 +534,7 @@ fn truthy(v: &Value) -> bool {
 }
 
 /// Cut to `max` chars (on a char boundary), marking the cut with "…".
-fn shorten(s: &str, max: usize) -> String {
+pub(crate) fn shorten(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
         Some((i, _)) => format!("{}…", &s[..i]),
         None => s.to_string(),
