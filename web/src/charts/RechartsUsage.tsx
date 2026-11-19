@@ -203,6 +203,23 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
     setLayout((l) => (l && l.x === p.x && l.width === p.width ? l : p));
   }, []);
   const wrap = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  const hasValues = values.length > 0 || rows.some((r) => showCompare && r.mem !== null);
+  useEffect(() => {
+    const canvas = wrap.current;
+    if (!canvas) return;
+    const size = new ResizeObserver(([entry]) => {
+      if (entry) setWidth(Math.floor(entry.contentRect.width));
+    });
+    // Keep the plot active once visited, including when the user tabs back.
+    const near = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      near.disconnect();
+      size.observe(canvas);
+    }, { rootMargin: "650px 0px" });
+    near.observe(canvas);
+    return () => { near.disconnect(); size.disconnect(); };
+  }, [hasValues]);
   const [sel, setSel] = useState<{ left: number; width: number } | null>(null);
   const drag = useRef<{ x0: number; id: number; cleanup: () => void } | null>(null);
 
@@ -287,18 +304,17 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
           {compare && <button type="button" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</button>}
         </fieldset>
       </figcaption>
-      {values.length === 0 && !rows.some((r) => showCompare && r.mem !== null) ? (
+      {!hasValues ? (
         <p className="ch-empty muted">
           {recording ? "No data in this window." : "History is off: nothing is recorded, so there is nothing to draw."}
         </p>
       ) : (
         <div className="ch-canvas" ref={wrap} onPointerDown={onPointerDown}>
-          <ComposedChart
+          {width > 0 && <ComposedChart
             data={rows}
             syncId={sync}
             syncMethod={sync === "history" ? "value" : "index"}
-            responsive
-            width="100%"
+            width={width}
             height={180}
             margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
           >
@@ -350,7 +366,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
             {showAvg && <LoneDots rows={rows} kind={kind} indices={lone} />}
             <MarkerLines markers={markers} />
             <PlotProbe onPlot={onPlot} />
-          </ComposedChart>
+          </ComposedChart>}
           {sel && <div className="ch-sel" style={{ left: sel.left, width: sel.width }} aria-hidden="true" />}
           {layout && (
             <div className="ch-marks" style={{ left: layout.x, width: layout.width }}>
