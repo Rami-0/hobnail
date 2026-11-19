@@ -43,10 +43,12 @@ const sdkStyles: Plugin = {
     if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
     root.walkRules((rule) => {
       if (rule.parent?.type === "rule") return;
-      const slots = [...rule.selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
-      if (slots.length && slots.every((slot) => !sdkComponents.has((slot[1] ?? slot[2] ?? "").split("-")[0] ?? ""))) {
-        rule.remove();
-      }
+      const selectors = rule.selectors.filter((selector) => {
+        const slots = [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
+        return slots.length === 0 || slots.some((slot) => sdkComponents.has((slot[1] ?? slot[2] ?? "").split("-")[0] ?? ""));
+      });
+      if (selectors.length === 0) rule.remove();
+      else if (selectors.length !== rule.selectors.length) rule.selectors = selectors;
     });
   },
 };
