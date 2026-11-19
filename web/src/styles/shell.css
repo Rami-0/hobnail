@@ -24,9 +24,6 @@
 .nav-item[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
 .nav-item[aria-current=page] svg{color:var(--accent)}
 .nav-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Pages of the current interface: a full page load, marked by the arrow
-   and in words for screen readers. */
-.nav-item .nav-old{width:12px;height:12px;color:var(--text-3)}
 .nav-sep{padding:10px 10px 4px}
 .nav-badge{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--bad);color:var(--on-bad);font-size:calc(11rem/14);font-weight:700;line-height:18px;text-align:center}
 .tree-wrap{display:flex;flex-direction:column;min-height:0;flex:1;border-top:1px solid var(--line);padding-top:10px}
@@ -89,7 +86,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
  :root[data-side=rail] .rail-only{display:flex}
  :root[data-side=rail] .nav-label,:root[data-side=rail] .nav-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
  :root[data-side=rail] [data-rtip]:is(:hover,:focus-visible)::after{content:attr(data-rtip);position:absolute;left:calc(100% + 10px);top:50%;translate:0 -50%;z-index:5;padding:3px 8px;border-radius:var(--r-xs);background:var(--text);color:var(--bg);font:500 var(--fs-xs)/1.4 var(--font);white-space:nowrap;pointer-events:none}
- :root[data-side=rail] .brand-name,:root[data-side=rail] .tree-wrap,:root[data-side=rail] .ver,:root[data-side=rail] .nav-old{display:none}
+ :root[data-side=rail] .brand-name,:root[data-side=rail] .tree-wrap,:root[data-side=rail] .ver{display:none}
  :root[data-side=rail] .side-head{flex-direction:column;justify-content:center;height:auto;padding:12px 0;gap:10px}
  :root[data-side=rail] .brand{flex:none}
  :root[data-side=rail] .nav-item{justify-content:center;padding:0}
@@ -102,7 +99,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
  :root:not(.side-open) .rail-only{display:flex}
  :root:not(.side-open) .nav-label,:root:not(.side-open) .nav-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
  :root:not(.side-open) [data-rtip]:is(:hover,:focus-visible)::after{content:attr(data-rtip);position:absolute;left:calc(100% + 10px);top:50%;translate:0 -50%;z-index:5;padding:3px 8px;border-radius:var(--r-xs);background:var(--text);color:var(--bg);font:500 var(--fs-xs)/1.4 var(--font);white-space:nowrap;pointer-events:none}
- :root:not(.side-open) .brand-name,:root:not(.side-open) .tree-wrap,:root:not(.side-open) .ver,:root:not(.side-open) .live-t,:root:not(.side-open) .nav-old{display:none}
+ :root:not(.side-open) .brand-name,:root:not(.side-open) .tree-wrap,:root:not(.side-open) .ver,:root:not(.side-open) .live-t{display:none}
  :root:not(.side-open) .side-head{flex-direction:column;justify-content:center;height:auto;padding:12px 0;gap:10px}
  :root:not(.side-open) .brand{flex:none}
  :root:not(.side-open) .nav-item{justify-content:center;padding:0}
@@ -147,13 +144,11 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .chip b{font:600 calc(13rem/14) var(--font);letter-spacing:-.01em;color:var(--text);text-align:right;white-space:nowrap}
 .chip.warn b{color:var(--warn-fg)}.chip.bad b{color:var(--bad-fg)}
 .chip .spark{grid-column:1/-1;width:100%;height:10px;align-self:end}
-@media (max-width:1250px){.vitals .chip:nth-child(4){display:none}}
 @media (max-width:899px){.vitals .chip:nth-child(3){display:none}}
 /* NAV-73: only in an installed app (no browser reload there) */
 .pwa-reload{display:none!important}
 @media (display-mode:standalone){.pwa-reload{display:inline-flex!important}}
 .acct{position:relative;display:flex;align-items:center;gap:var(--s-2);min-width:0}
-.acct-in{white-space:nowrap}
 .signed{position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
 main{padding:20px 24px 48px;min-width:0;outline:none}
 main>.banner{max-width:1480px;margin:0 auto 16px}
