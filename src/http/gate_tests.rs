@@ -385,13 +385,14 @@ async fn login_refuses_foreign_origin_and_form_credentials() {
 async fn a_plain_form_post_is_refused_and_leaks_nothing() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
-    let stored = st.db.credential("admin").map(|(_, hash, _)| hash);
+    let stored = st.db.credential("admin").expect("stored owner credential").1;
     let cfg = std::fs::read_to_string(st.config.path()).unwrap_or_default();
     let addr = start(st.clone()).await;
     let (cookie, _) = login(addr).await;
     let origin = format!("http://{addr}");
     let form = "current=correct+horse+battery&new=Sekrit-New-Value-1&repeat=Sekrit-New-Value-1";
     for path in [
+        "/api/v1/account/password",
         "/api/settings/general",
         "/api/settings/config",
         "/api/settings/bookmarks",
@@ -432,7 +433,7 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
         assert!(!r.body.contains("Sekrit"), "{path}");
     }
     assert_eq!(
-        st.db.credential("admin").map(|(_, hash, _)| hash),
+        st.db.credential("admin").expect("owner credential remains").1,
         stored,
         "the password is unchanged"
     );
