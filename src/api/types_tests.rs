@@ -48,6 +48,7 @@ fn render<T: TS + 'static>() -> (String, String) {
 /// Every exported type. Add new response types here.
 fn files() -> Vec<(String, String)> {
     vec![
+        render::<super::alarm::Alarm>(),
         render::<super::integrations::IntegrationKind>(),
         render::<super::integrations::IntegrationInput>(),
         render::<super::integrations::IntegrationSecretInput>(),

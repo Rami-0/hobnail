@@ -988,6 +988,23 @@ fn break_config(st: &AppState) {
 }
 
 #[tokio::test]
+async fn alarm_requires_a_viewer_and_counts_only_visible_problems() {
+    let st = privacy_state("alarm").await;
+    let mut snapshot = (*st.snapshot()).clone();
+    for c in &mut snapshot.containers {
+        c.state = "restarting".into();
+        c.health = None;
+    }
+    st.containers.send_replace(Arc::new(snapshot));
+    let addr = start(st).await;
+    let r = req(addr, "GET", "/api/v1/alarm", &[], "").await;
+    assert_api_error(&r, 401, "sign_in_required", "alarm visitor");
+    let (cookie, _) = login(addr).await;
+    let r = req(addr, "GET", "/api/v1/alarm", &[("Cookie", &cookie)], "").await;
+    assert_eq!(json_of(&r, "alarm"), serde_json::json!({"problems": 3}));
+}
+
+#[tokio::test]
 async fn protected_views_still_hide_excluded_containers() {
     let st = privacy_state("privacy").await;
     let addr = start(st).await;

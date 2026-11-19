@@ -587,6 +587,20 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
     assert_eq!(list["groups"].as_array().unwrap().len(), 1);
     assert_eq!(list["groups"][0]["containers"].as_array().unwrap().len(), 1);
     assert_eq!(list["groups"][0]["stopped"], 0);
+    // Both containers need attention, but this reader is granted only web.
+    let mut snapshot = (*st.snapshot()).clone();
+    for c in &mut snapshot.containers {
+        c.state = "restarting".into();
+    }
+    st.containers.send_replace(std::sync::Arc::new(snapshot));
+    assert_eq!(
+        owner.json("GET", "/api/v1/alarm", Value::Null, 200).await["problems"],
+        3
+    );
+    assert_eq!(
+        viewer.json("GET", "/api/v1/alarm", Value::Null, 200).await["problems"],
+        1
+    );
     let strips = viewer.json("GET", "/api/v1/strips", Value::Null, 200).await;
     assert_eq!(strips["containers"].as_object().unwrap().len(), 1);
     assert_eq!(strips["stacks"]["shop"], strips["containers"]["web"]);

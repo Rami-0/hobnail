@@ -1,3 +1,4 @@
+import type { Alarm } from "../api/gen/Alarm.ts";
 // The live layer of the running app: one LiveStream (stream.ts) wired to
 // the browser, the data stores the hooks read, and the fetches that fill
 // them. Nothing starts at import; the first hook that mounts calls
@@ -271,7 +272,7 @@ let hiddenAt = 0;
 let alarmT: number | null = null;
 
 async function pollAlarm(): Promise<void> {
-  const r = await api.get<{ problems: number }>("/alarm.json");
+  const r = await api.get<Alarm>("/api/v1/alarm");
   if (r.kind === "ok" && typeof r.data.problems === "number") hiddenProblems.set(r.data.problems);
 }
 

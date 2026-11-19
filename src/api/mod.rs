@@ -12,6 +12,7 @@ use crate::state::AppState;
 
 pub(crate) mod access;
 mod accounts;
+mod alarm;
 pub(crate) mod alerts;
 mod boards;
 mod bookmarks;
@@ -81,6 +82,7 @@ pub(crate) async fn route(
                 .await
                 .unwrap_or_else(ApiError::response)
         }
+        Handler::Alarm => alarm::get(state, &principal.expect("viewer gate").account),
         Handler::Session => session::get(state, req.headers()),
         Handler::Bootstrap => bootstrap::get(state, &principal.expect("viewer gate").account),
         Handler::DashboardSettings => {

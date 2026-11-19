@@ -257,6 +257,7 @@ pub enum Access {
 /// Which handler answers a matched route (dispatched in `api::route`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handler {
+    Alarm,
     Integrations,
     IntegrationCreate,
     Integration,
@@ -511,6 +512,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/containers/<name>/top",
         access: Access::Admin,
         handler: Handler::ContainerTop,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/alarm",
+        access: Access::Viewer,
+        handler: Handler::Alarm,
     },
     Route {
         method: "GET",
