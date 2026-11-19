@@ -126,3 +126,9 @@ comma-separated; the compose file sets `0.0.0.0:3200` inside the container),
 `RH_ALLOWED_HOSTS` (extra host names allowed in the `Host` header, globs,
 comma-separated; IPs, `localhost` and `RH_HOSTNAME` always work: this blocks
 DNS rebinding).
+
+## Not built yet
+
+The native systemd package, multi-architecture export target and installer
+described in the planning documents are not shipped by this Dockerfile. The
+container build above is the supported procedure verified in this milestone.
