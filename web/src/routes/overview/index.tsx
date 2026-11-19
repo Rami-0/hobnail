@@ -7,7 +7,7 @@ import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { BookmarkView } from "../../api/gen/BookmarkView.ts";
 import { containerHref, navigate, useRoute } from "../../app/router.ts";
 import { local } from "../../app/prefs.ts";
-import { useBootstrap, useContainers, useNow, useStatsMap, useStrips, useSystem } from "../../live/index.ts";
+import { useBootstrap, useContainers, useNow, useStatsMap, useStrips, useSystem, onConfigChange, watchReadTopic } from "../../live/index.ts";
 import { useRead } from "../../live/read.ts";
 import { bytes, duration, pct } from "../../format/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
@@ -39,7 +39,17 @@ export default function Overview() {
   const now = useNow();
   const [seen] = useState(readSeen);
   const { data: overview, error } = useRead<OverviewView>(allowed ? `/api/v1/overview?since=${seen}${admin ? "&probes=1" : ""}` : null, "alerts", 15000);
-  const { data: widgets } = useRead<WidgetView[]>(allowed ? "/api/v1/widgets" : null, "widget");
+  const { data: widgets } = useRead<WidgetView[]>(allowed ? "/api/v1/widgets" : null);
+  const [widgetUpdates, setWidgetUpdates] = useState<Record<string, WidgetView>>({});
+  useEffect(() => {
+    if (!allowed) return;
+    const reset = onConfigChange(() => setWidgetUpdates({}));
+    const stop = watchReadTopic("widget", (data) => {
+      const widget = data as WidgetView;
+      setWidgetUpdates((previous) => ({ ...previous, [widget.id]: widget }));
+    });
+    return () => { reset(); stop(); };
+  }, [allowed]);
   const { data: bookmarks } = useRead<BookmarkView[]>(allowed ? "/api/v1/bookmarks" : null);
   const { data: containers } = useContainers();
   const stats = useStatsMap(allowed && !!boot?.features.stats);
@@ -60,7 +70,7 @@ export default function Overview() {
     };
   }, [allowed, now]);
   if (boot?.scoped) return <p className="page">Overview is unavailable with board-scoped access.</p>;
-  if (!overview || !containers) return <p className="page" role={error ? "alert" : "status"}>{error ?? "Loading Overview…"}</p>;
+  if (!overview || !containers) return <p className="page" role={error ? "alert" : "status"}>{error || "Loading Overview…"}</p>;
   const bookmarkGroups = new Map<string, BookmarkView[]>();
   for (const bookmark of bookmarks ?? []) {
     const group = bookmark.group || "Bookmarks";
@@ -146,7 +156,7 @@ export default function Overview() {
     </section>}
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
       {admin && <a href="/app/overview?add=widget">Add widget</a>}
-      <div className="overview-widget-grid">{widgets?.map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
+      <div className="overview-widget-grid">{widgets?.map((widget) => widgetUpdates[widget.id] ?? widget).map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
         <h3>{w.link ? <a href={w.link}>{w.title}</a> : w.title}</h3><WidgetContent widget={w} />
       </article>)}</div>
     </section>}

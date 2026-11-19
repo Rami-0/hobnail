@@ -19,8 +19,12 @@ export function useRead<T>(path: string | null, topic?: ReadTopic, pollMs?: numb
     load();
     const timer = pollMs ? window.setInterval(() => { if (!document.hidden) load(); }, pollMs) : undefined;
     const config = onConfigChange(load);
-    const live = topic && path ? watchReadTopic(topic, load) : null;
-    return () => { lifetime.abort(); config(); live?.(); window.clearInterval(timer); };
+    let pending: number | undefined;
+    const live = topic ? watchReadTopic(topic, () => {
+      if (pending !== undefined) return;
+      pending = window.setTimeout(() => { pending = undefined; load(); }, 500);
+    }) : null;
+    return () => { lifetime.abort(); config(); live?.(); window.clearInterval(timer); window.clearTimeout(pending); };
   }, [path, topic, pollMs]);
   return result;
 }
