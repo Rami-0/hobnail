@@ -32,7 +32,7 @@
 // /app/containers on the phone profile (4x); a task > 50 ms in the second
 // after a live update on app or chart (any profile); app not ready or fewer
 // than UPDATES updates on app. The old pages are measured, never failed.
-// Read-only: GETs only, no sign-in. Refuses port 3200 (the live instance).
+// Authenticates and writes throwaway board and config fixtures for live updates.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -47,7 +47,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const TARGETS = (process.env.TARGETS || "app chart overview history host board logs settings").split(/[\s,]+/).filter(Boolean);
 const PROFILES = (process.env.PROFILES || "phone desktop").split(/[\s,]+/).filter(Boolean);
 const UPDATES = Number(process.env.UPDATES || 3);
-const MIN_ROWS = Number(process.env.MIN_ROWS || 1);
+const MIN_ROWS = Number(process.env.MIN_ROWS || 150);
 const READY_MS = Number(process.env.READY_MS || 30000);
 const LIVE_MS = Number(process.env.LIVE_MS || 45000);
 const TRACE = process.env.TRACE !== "0";
@@ -56,7 +56,9 @@ const enc = encodeURIComponent(NAME);
 let sessionCookie = process.env.HB_COOKIE;
 let csrf;
 let boardId;
-let boardHeaders;
+let fixtureHeaders;
+if (!/^339[5-9]$/.test(new URL(base).port)) throw new Error("performance fixtures require a throwaway instance");
+
 if (!sessionCookie && process.env.HB_PASSWORD) {
   const origin = new URL(base).origin;
   const session = await fetch(`${base}/api/v1/session`).then((r) => r.json());
@@ -69,9 +71,13 @@ if (!sessionCookie && process.env.HB_PASSWORD) {
   sessionCookie = response.headers.get("set-cookie")?.split(";")[0];
 }
 
+if (TARGETS.some((target) => ["board", "history", "settings"].includes(target))) {
+  if (!sessionCookie) throw new Error("Performance fixtures require authentication");
+  fixtureHeaders = { Cookie: sessionCookie, Origin: new URL(base).origin, "Content-Type": "application/json", "X-RH-CSRF": csrf ?? (await fetch(`${base}/api/v1/session`, { headers: { Cookie: sessionCookie } }).then(r => r.json())).csrf };
+}
+
 if (TARGETS.includes("board")) {
-  if (!sessionCookie) throw new Error("Board performance fixtures require authentication");
-  const headers = boardHeaders = { Cookie: sessionCookie, Origin: new URL(base).origin, "Content-Type": "application/json", "X-RH-CSRF": csrf ?? (await fetch(`${base}/api/v1/session`, { headers: { Cookie: sessionCookie } }).then(r => r.json())).csrf };
+  const headers = fixtureHeaders;
   const created = await fetch(`${base}/api/v1/boards`, { method: "POST", headers, body: JSON.stringify({ name: "Performance 40 items" }) }).then(r => r.json());
   boardId = created.id;
   const document = (await fetch(`${base}/api/v1/boards/${boardId}`, { headers }).then(r => r.json())).document;
@@ -83,11 +89,11 @@ if (TARGETS.includes("board")) {
 }
 const T = {
   overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-strips summary', fails: true },
-  history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: [], interaction: '.history-controls button', fails: true },
+  history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: ["config"], interaction: '.history-controls button', fails: true },
   host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary', fails: true },
   board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]', fails: true },
   logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: ["l"], filter: '[data-testid="filter"]', fails: true },
-  settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: [], filter: 'input[name="greeting"]', fails: true },
+  settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: ["config"], filter: 'input[name="greeting"]', fails: true },
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
     rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]', fails: true },
   chart: { path: `/app/containers/${enc}`, ready: `!!document.querySelector('figure[data-testid="chart-cpu"] svg') && !!document.querySelector('figure[data-testid="chart-mem"] svg')`,
@@ -118,7 +124,18 @@ const probe = (t) => `(() => {
     constructor(...a) { super(...a); for (const n of NAMES) this.addEventListener(n, () => { performance.mark("hb-live:" + n); H.live.push({ n, at: performance.now() }); }); }
   };
   const ready = () => { try { return ${t.ready}; } catch { return false; } };
-  const mo = new MutationObserver(() => { if (H.readyAt === null && ready()) { H.readyAt = performance.now(); H.rows = document.querySelectorAll(${q(t.rows)}).length; performance.mark("hb-ready"); mo.disconnect(); } });
+  const seen = new WeakSet();
+  const mo = new MutationObserver((records) => {
+    if (H.readyAt === null && ready()) {
+      H.readyAt = performance.now(); H.rows = document.querySelectorAll(${q(t.rows)}).length; performance.mark("hb-ready");
+    }
+    for (const record of records) for (const node of record.addedNodes) {
+      if (!(node instanceof Element)) continue;
+      const plot = node.matches(".recharts-wrapper") ? node : node.querySelector(".recharts-wrapper");
+      const figure = plot?.closest("figure[data-testid]");
+      if (figure && !seen.has(figure)) { seen.add(figure); performance.mark("hb-plot:" + figure.dataset.testid); }
+    }
+  });
   mo.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-search-lines", "aria-busy"] });
 })();`;
 
@@ -176,19 +193,29 @@ async function run(target, profile) {
     const m0 = await tab.send("Performance.getMetrics");
     await tab.shot(path.join(OUT, `${target}-${profile}-loaded.png`));
 
-    // A read-only board has no periodic layout changes. Rename it through
-    // the actual API to measure the subscribed board's update.
-    let boardUpdates;
-    if (ready && target === "board") {
-      boardUpdates = (async () => {
-        for (let n = 0; n < UPDATES; n++) {
-          await sleep(1100);
-          const response = await fetch(`${base}/api/v1/boards/${boardId}`, {
-            method: "PATCH", headers: boardHeaders, body: JSON.stringify({ name: `Performance 40 items ${profile} ${n}` }),
-          });
-          if (!response.ok) res.notes.push(`Board live fixture: HTTP ${response.status}`);
+    // Board and config changes are real writes on the throwaway instance.
+    let fixtureUpdates;
+    if (ready && ["board", "history", "settings"].includes(target)) {
+      fixtureUpdates = (async () => {
+        const update = async (route, method, body) => {
+          const res = await fetch(base + route, { method, headers: fixtureHeaders, body: JSON.stringify(body) });
+          if (!res.ok) throw new Error(`Live fixture ${route}: HTTP ${res.status}`);
+          return res.json();
+        };
+        if (target === "board") {
+          for (let n = 0; n < UPDATES; n++) {
+            await sleep(1600);
+            await update(`/api/v1/boards/${boardId}`, "PATCH", { name: `Performance 40 items ${profile} ${n}` });
+          }
+        } else {
+          let config = await update("/api/settings/general", "GET");
+          const original = config.page?.greeting ?? null;
+          for (let n = 0; n < UPDATES; n++) {
+            await sleep(1600);
+            config = await update("/api/settings/general", "POST", { base_hash: config.hash, values: { greeting: n === UPDATES - 1 ? original : `Performance update ${n}` } });
+          }
         }
-      })();
+      })().catch((error) => { res.notes.push(error.message); });
     }
     // live updates
     let live = [];
@@ -200,9 +227,9 @@ async function run(target, profile) {
     }
 
     // interaction
+    await fixtureUpdates;
     await tab.ev(`performance.mark("hb-int-start")`).catch(() => {});
     const intStart = await tab.ev("performance.now()").catch(() => null);
-    await boardUpdates;
     if (ready && t.filter) {
       const fb = await inp.box(t.filter);
       if (fb) { await inp.clickAt(fb.x, fb.y); await inp.type("svc1", 150); await sleep(800); }
@@ -235,6 +262,7 @@ async function run(target, profile) {
     res.rows_end = dom.rows ?? null;
     res.end_url = dom.path;
     res.fcp_ms = r1(H?.fcp);
+    res.requests = await tab.ev(`performance.getEntriesByType("resource").filter(e=>e.name.includes("/api/")).map(e=>({path:new URL(e.name).pathname + new URL(e.name).search,start:Math.round(e.startTime),end:Math.round(e.responseEnd),initiator:e.initiatorType}))`).catch(() => []);
     const lcp = (H?.lcp || []).filter((e) => intStart == null || e.at < intStart).pop();
     res.lcp_ms = r1(lcp?.at); res.lcp_el = lcp?.el ?? null;
     res.cls = H && !H["no_layout-shift"] ? Math.round(H.cls * 10000) / 10000 : null;
@@ -285,6 +313,10 @@ async function run(target, profile) {
           live: [],
           interaction: (() => { const w = within(intS, intE); return { max_ms: ms(Math.max(0, ...w.map((e) => e.dur))), over50: w.filter((e) => e.dur > 50000).length }; })(),
         };
+        res.trace.plot_mounts = marks.filter((e) => e.name.startsWith("hb-plot:")).map((mark) => ({
+          plot: mark.name.slice("hb-plot:".length), at_ms: ms(mark.ts - navStart),
+          task_ms: ms(Math.max(0, ...within(mark.ts, mark.ts + 1).map((task) => task.dur))),
+        }));
         // live updates: cluster the trace marks the same way
         const lm = marks.filter((e) => t.live.some((n) => e.name === "hb-live:" + n) && e.ts < intS).map((e) => e.ts).sort((a, b) => a - b);
         const lc = [];
