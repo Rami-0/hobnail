@@ -256,6 +256,10 @@ read models rather than rendering HTML templates.
 
 ## 9. Corrections after implementation
 
+Historical v2 implementation ledger: current security and client contracts
+are in sections 1, 6 and 7 and the feature pages. Old paths and behavior in
+this table are retained to explain earlier measurements.
+
 Historical v2 implementation ledger. Current security and client behavior are
 in sections 1, 6 and 7 and the feature guides; old asset references below are
 retained to explain earlier measurements.
