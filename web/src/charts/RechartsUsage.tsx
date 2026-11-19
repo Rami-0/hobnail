@@ -102,6 +102,25 @@ function format(unit: Unit, v: number): string {
 // task of its own, before the first chart asks for tick labels.
 window.setTimeout(() => tickLabel(Math.floor(Date.now() / 1000), 3600), 0);
 
+// Multiple plots can intersect in the same layout. Give each one its own
+// frame and task so synchronous Recharts mounting never batches plots.
+const plotMounts = new Set<() => void>();
+let mountFrame = 0;
+function schedulePlotMount() {
+  if (mountFrame || plotMounts.size === 0) return;
+  mountFrame = requestAnimationFrame(() => {
+    window.setTimeout(() => {
+      mountFrame = 0;
+      const next = plotMounts.values().next().value;
+      if (next) {
+        plotMounts.delete(next);
+        next();
+      }
+      schedulePlotMount();
+    }, 0);
+  });
+}
+
 export default function UsageCharts({ series, onZoom, onMarker, recording = true, metrics }: UsageChartsProps) {
   const rows = useMemo(() => chartRows(series), [series]);
   const markers = useMemo(() => chartMarkers(series.markers, series.from, series.to), [series]);
@@ -213,17 +232,27 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   useEffect(() => {
     const canvas = wrap.current;
     if (!hasValues || !canvas) return;
+    let measured = 0;
+    let mounted = false;
+    const mount = () => {
+      if (measured <= 0) return;
+      mounted = true;
+      startTransition(() => setWidth(measured));
+    };
     const size = new ResizeObserver(([entry]) => {
-      if (entry) startTransition(() => setWidth(Math.floor(entry.contentRect.width)));
+      if (!entry) return;
+      measured = Math.floor(entry.contentRect.width);
+      if (mounted) startTransition(() => setWidth(measured));
+      else { plotMounts.add(mount); schedulePlotMount(); }
     });
-    // Keep the plot active once visited, including when the user tabs back.
+    // The figure reserves space. Mount the SVG only when its canvas is visible.
     const near = new IntersectionObserver(([entry]) => {
       if (!entry?.isIntersecting) return;
       near.disconnect();
       size.observe(canvas);
-    }, { rootMargin: "650px 0px" });
+    });
     near.observe(canvas);
-    return () => { near.disconnect(); size.disconnect(); };
+    return () => { near.disconnect(); size.disconnect(); plotMounts.delete(mount); };
   }, [hasValues]);
   const [sel, setSel] = useState<{ left: number; width: number } | null>(null);
   const drag = useRef<{ x0: number; id: number; cleanup: () => void } | null>(null);

@@ -1,7 +1,7 @@
 import { ScrollTextIcon } from "lucide-react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, memo, useEffect, useState } from "react";
 import type { OverviewView } from "../../api/gen/OverviewView.ts";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { BookmarkView } from "../../api/gen/BookmarkView.ts";
@@ -30,6 +30,14 @@ function readSeen(): number {
     return 0;
   }
 }
+
+const HostCharts = memo(function HostCharts({ overview, recording }: { overview: OverviewView; recording: boolean }) {
+  return <Suspense fallback={<ChartPlaceholder count={4} />}><Charts
+    series={{ from: overview.now - 3600, to: overview.now, range: "1h", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: overview.markers }}
+    metrics={overview.hour} recording={recording}
+    onZoom={(from, to) => navigate(`/app/history?from=${from}&to=${to}`)}
+    onMarker={(id, at) => navigate(`/app/history?from=${at-1800}&to=${at+1800}#ev-${id}`)} /></Suspense>;
+});
 
 export default function Overview() {
   const boot = useBootstrap();
@@ -128,11 +136,7 @@ export default function Overview() {
         <span>CPU {pct(system.cpu_pct)}</span><span>Memory {bytes(system.mem_used)} / {bytes(system.mem_total)}</span>
         <span>Load {system.load[0].toFixed(2)}</span><span>Uptime {duration(system.uptime_secs)}</span>
       </div>}
-      {!!overview?.hour.length && <Suspense fallback={<ChartPlaceholder count={4} />}><Charts
-        series={{ from: overview.now - 3600, to: overview.now, range: "1h", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: overview.markers }}
-        metrics={overview.hour} recording={boot.features.history}
-        onZoom={(from, to) => navigate(`/app/history?from=${from}&to=${to}`)}
-        onMarker={(id, at) => navigate(`/app/history?from=${at-1800}&to=${at+1800}#ev-${id}`)} /></Suspense>}
+      {!!overview.hour.length && <HostCharts overview={overview} recording={boot.features.history} />}
     </section>}
     {boot?.features.stats && <section className="panel history-block">
       <h2>Top consumers</h2><div className="overview-consumers">
