@@ -664,3 +664,10 @@ async fn example_command_runs() {
     assert_eq!(o.error, None, "{o:?}");
     assert!(o.values["procs"].as_u64().unwrap() > 0);
 }
+
+#[test]
+fn widget_links_reject_network_path_references() {
+    assert!(safe_link("/local"));
+    assert!(!safe_link("//evil.example"));
+    assert!(!safe_link(r"/\evil.example"));
+}

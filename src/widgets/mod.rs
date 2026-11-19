@@ -375,7 +375,7 @@ pub fn safe_link(l: &str) -> bool {
     let lower = l.trim().to_ascii_lowercase();
     lower.starts_with("http://")
         || lower.starts_with("https://")
-        || (lower.starts_with('/') && !lower.starts_with("//"))
+        || (lower.starts_with('/') && !matches!(lower.as_bytes().get(1), Some(b'/' | b'\\')))
 }
 
 /// What a fetch produced before fields are extracted.

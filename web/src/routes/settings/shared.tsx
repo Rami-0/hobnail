@@ -135,6 +135,9 @@ export function collectFields(fields: Control[], input: Values) {
       continue;
     }
     if (field.max && [...text].length > field.max) errors[key] = `Use at most ${field.max} characters.`;
+    if (format === "link" && (text.startsWith("//") || text.startsWith("/\\"))) {
+      errors[key] = "Enter a local path or an HTTP or HTTPS URL.";
+    }
     if (format === "url" || (format === "link" && !text.startsWith("/"))) {
       try {
         const url = new URL(text);
