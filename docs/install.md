@@ -12,10 +12,15 @@ docker build -t hobnail:latest .
 docker compose -f deploy/compose.yaml up -d
 ```
 
-Open <http://127.0.0.1:3200>. With no configuration it lists every container on
-the host, grouped by Compose project, with host stats alongside. Then
-[set the password](features/login.md) so you can change settings from the
-browser.
+Open <http://127.0.0.1:3200/app> and set the owner username and password in
+the browser. No console step is required for a fresh instance. The first visitor
+claims it, so keep access restricted while setting up. New boards start empty;
+choose their contents in Settings → Boards and edit mode. Discovery is available
+on the Containers page, subject to account scopes.
+
+Use a fresh, writable data directory for a new installation or a throwaway test.
+Do not reuse a production database for experiments. Build-time Node/Rust tools
+are containerized; neither runs on the host or as a production sidecar.
 
 ## Where things live
 
@@ -24,7 +29,7 @@ Everything Hobnail stores is in the `data/` folder next to the compose file.
 | File | What it is |
 |---|---|
 | `config.toml` | Optional overrides and additions, hot-reloaded: [configuration.md](configuration.md) |
-| `hobnail.db` | History: [features/history.md](features/history.md) |
+| `hobnail.db` | Accounts, sessions, boards, integrations, settings, drafts and history: [features/history.md](features/history.md) |
 | `custom.css`, `icons/` | Theming and icons: [configuration.md](configuration.md#icons-and-theming) |
 | `secrets/`, `../secrets.env` | Tokens for notification channels: [features/notifications.md](features/notifications.md) |
 
@@ -42,7 +47,8 @@ scripts/cargo.sh test    # run cargo in the dev container (also: clippy, fmt, bu
 copies `deploy/compose.yaml` to the stack folder (`STACK`, default
 `/opt/stacks/hobnail`), runs `docker compose up -d`, waits for the healthcheck
 and curls every published address.
-Open pages notice the new build and reload themselves. The foot of the sidebar
+`deploy.sh` asks for confirmation; `DEPLOY_YES=1` is the explicit unattended
+opt-in. Open pages notice the new build and offer to reload. The foot of the sidebar
 shows the version and the build SHA (hover for the build time).
 
 Manual equivalent:
@@ -77,6 +83,23 @@ those lines can live outside git. Consider a socket proxy (e.g.
 `tecnativa/docker-socket-proxy` with only `CONTAINERS=1 EVENTS=1`) and point
 `RH_DOCKER_SOCKET` at it if you want to restrict the API further.
 
+## Upgrading from the old UI
+
+Stop before copying the data volume for backup, or use a consistent SQLite
+backup including any WAL state. Keep a pre-upgrade copy: the database migrates
+forward only. Version 7 adds named accounts, grants, invitations, sessions,
+boards, integrations, settings and drafts; version 8 adds board icons, ordering
+and sections. An old binary refuses a newer database. Rollback needs both the
+old image and its pre-upgrade data, not a downgrade of the migrated database.
+
+If the database had a legacy password, browser ownership claims are locked.
+Run `hobnail set-password [username]` on the host to recover the owner. Old
+sessions are discarded. Fresh databases use browser setup instead.
+
+The old UI exists on `rust-only`. Its URLs are gone; `/` returns 404 with a
+link to `/app`, without redirecting. There is no RH_UI=classic fallback or
+old-URL compatibility. The React application needs JavaScript.
+
 ## Command line
 
 CLI (inside the container: `docker exec hobnail /hobnail <cmd>`):
@@ -86,7 +109,7 @@ CLI (inside the container: `docker exec hobnail /hobnail <cmd>`):
 | `serve` | run the dashboard (default) |
 | `check-config [path]` | validate a config file, print errors with line/column |
 | `notify-test <channel>` | send a test message to a configured channel |
-| `set-password` | set or change the login password (TTY without echo, or stdin) |
+| `set-password [username]` | optional owner recovery (TTY without echo, or stdin); revoke sessions |
 | `mock-receiver [addr]` | local fake webhook/Slack/Telegram endpoint for testing |
 | `healthcheck` | used by the Docker healthcheck |
 | `version` | print version, git SHA and build time |
