@@ -1,4 +1,4 @@
-import { LockIcon } from "lucide-react";
+import { LockIcon, LogInIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import type { InviteValidation } from "../api/gen/InviteValidation.ts";
@@ -111,7 +111,7 @@ function Credentials({ mode, token, next }: {
           )}
           {message && <p className="form-msg" id="login-msg" role="alert" data-testid="login-error">{message}</p>}
           <div className="login-acts">
-            <Button type="submit" variant="primary" busy={busy} disabled={wait > 0 || invite?.valid === false}>
+            <Button type="submit" variant="primary" icon={<LogInIcon aria-hidden="true" />} busy={busy} disabled={wait > 0 || invite?.valid === false}>
               {creating ? title : "Sign in"}
             </Button>
             {mode === "invite" && <a className="btn ghost" data-testid="signin" href="/app/login">Sign in</a>}

@@ -16,15 +16,22 @@
 .form-msg{min-height:1.45em;font-size:var(--fs-xs);color:var(--bad-fg)}
 .form-msg:empty{min-height:0}
 .form-msg.ok{color:var(--ok-fg)}
-.login{display:grid;gap:var(--s-4);padding:var(--s-6)}
+.login{display:grid;gap:12px;padding:22px 24px;max-width:440px;margin:6vh auto 0;width:100%}
 .login-h{display:flex;align-items:center;gap:10px}
 .login-h svg{width:20px;height:20px;color:var(--accent-fg)}
-.login-h h1{font:650 var(--fs-h2)/var(--lh-tight) var(--font);letter-spacing:-.01em}
-.login form{display:grid;gap:var(--s-3)}
+.login-h h1{font-size:var(--fs-h2)}
+.login form{display:grid;gap:8px;margin-top:4px}
+.login label{font-size:var(--fs-xs);font-weight:600;color:var(--text-2)}
+.login .input{height:38px;padding:0 12px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--bg);font-size:var(--fs-body)}
+.login input:focus{border-color:var(--accent)}
+.login input[aria-invalid=true]{border-color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
+.login .btn{justify-self:start;height:36px}
+.panel.primary.login{padding:24px 26px}
 .login-acts{display:flex;align-items:center;gap:var(--s-2)}
-/* 16 px text in the password field on every device: no iOS zoom on focus. */
-.login .input{font-size:16px}
-@media (pointer:coarse),(max-width:699px){.login .input,.login .btn{height:44px}}
+@media (pointer:coarse),(max-width:699px){
+  .panel.login .input,.panel.login .btn{height:44px}
+  .panel.login .input{font-size:16px}
+}
 
 /* ---- booting and no-JavaScript ---- */
 .boot{display:grid;place-items:center;min-height:100vh;color:var(--text-3);font-size:var(--fs-sm)}
