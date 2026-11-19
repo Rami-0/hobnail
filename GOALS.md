@@ -73,8 +73,7 @@ How to hold ourselves to it:
   wins over the automatic result.
 - Opt-in and opt-out through container labels. Accept the existing
   `homepage.*` labels where practical, so migration is cheap.
-- Show live per-container CPU and memory, and link out to Dozzle for logs and
-  Beszel for history instead of re-implementing them.
+- Show live per-container CPU and memory, with logs and history inside the app.
 - Never write to Docker. No start, stop or remove in v1. Read the compose file
   as text for display only, if we add that.
 
@@ -88,7 +87,7 @@ CPU, memory, disk, network, temperature, host uptime.
 The model follows Glance: a set of built-in widget types, plus a few generic
 ones that let anyone build their own without writing Rust.
 
-Widget types, easiest first. We start with 1 and 2, and add the rest over time:
+Widget types: 1 and 2 are built. Items 3–6 are the clearly marked not-built-yet list:
 1. **Custom API widget (v1).** URL, optional headers, a path expression to pull
    fields out of the JSON response, and a small template that renders them. This
    covers most self-hosted APIs (Beszel, Mailpit, Odoo health, Tailscale) with
@@ -235,6 +234,9 @@ container, no hierarchy. v2 follows Dozzle's layout language instead.
 - Multi-host Docker aggregation in v1.
 
 ## Milestones
+
+The tables below retain the original Rust-UI roadmap. React port results and
+remaining acceptance misses are recorded separately in the linked M5 report.
 
 Each milestone ends with the measurements from section 1 recorded.
 
