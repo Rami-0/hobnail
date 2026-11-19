@@ -16,7 +16,7 @@ rss() { docker stats --no-stream --format '{{.MemUsage}}' $C | cut -d/ -f1 | mib
 cpu() { docker stats --no-stream --format '{{.CPUPerc}}' $C; }
 
 version=$(docker exec "$C" /hobnail version)
-sha=$(printf '%s\n' "$version" | sed -n 's/.*(\([^ ]*\) .*//p')
+sha=$(printf '%s\n' "$version" | sed -n 's/.*(\([^ ]*\) .*/\1/p')
 img=$(docker image inspect "$IMG" --format '{{.Size}}')
 disk=$(docker images "$IMG" --format '{{.Size}}' | head -1)
 
@@ -42,8 +42,9 @@ pl=(); for i in $(seq 10); do pl+=("$(curl -fs -o /dev/null -w '%{time_total}' "
 page=$(printf '%s\n' "${pl[@]}" | sort -n | sed -n 5p | awk '{printf "%.1f", $1*1000}')
 ttfb=$(curl -fs -o /dev/null -w '%{time_starttransfer}' "$app" | awk '{printf "%.1f", $1*1000}')
 document=$(curl -fs "$app")
-bytes=$(printf '%s' "$document" | wc -c)
-stylesheet=$(printf '%s\n' "$document" | sed -n 's/.*href="\(\/assets\/[^"]*\.css\)".*//p' | head -1)
+bytes=$(curl -fs "$app" | wc -c)
+stylesheet=$(printf '%s\n' "$document" | sed -n 's/.*href="\(\/assets\/[^"]*\.css\)".*/\1/p' | head -1)
+: "${stylesheet:?app document did not reference a hashed stylesheet}"
 assets=$(curl -fs --compressed -o /dev/null -w '%{time_total}' "$URL$stylesheet" | awk '{printf "%.1f", $1*1000}')
 
 # Sampler cost: CPU time of the app over 120 s with nobody viewing. With no
