@@ -1,0 +1,5 @@
+ok 1440-dark: Settings tabs, Account, Users and signed-in editing
+ok 1440-light: Settings tabs, Account, Users and signed-in editing
+ok 390-dark: Settings tabs, Account, Users and signed-in editing
+ok 390-light: Settings tabs, Account, Users and signed-in editing
+e2e: exit 0; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-settings

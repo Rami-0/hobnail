@@ -1,0 +1,234 @@
+ok   1440x900 dark: Containers: the table has rows
+ok   1440x900 dark: shell: nav[data-testid="sidebar"] is visible
+ok   1440x900 dark: shell: [data-testid="live-status"] reaches data-state="live"
+ok   1440x900 dark: the progressive table mounts every fixture row
+ok   1440x900 dark: "Showing N of M": M = the API's 150 containers, N = the 150 rows shown
+ok   1440x900 dark: the API lists svc001
+ok   1440x900 dark: filter "svc001": only matching rows, URL ?q=
+ok   1440x900 dark: "Showing" follows the filter (Showing 1 of 150 containers)
+ok   1440x900 dark: the filter survives a reload
+ok   1440x900 dark: clearing the filter brings every row back and drops ?q
+ok   1440x900 dark: state chips: all, running, stopped, problem
+       stopped: showing Showing 22 of 150 containers; the API has 22 not in state "running"
+ok   1440x900 dark: state chip stopped: URL ?state=stopped, pressed, the running container leaves
+ok   1440x900 dark: state chip all: every row is back
+ok   1440x900 dark: the name header toggles aria-sort, the order and ?dir=
+ok   1440x900 dark: another header (cpu) takes aria-sort (descending by default, no dir in the URL), the name header goes back to none
+ok   1440x900 dark: ?group=flat: no group headers
+ok   1440x900 dark: ?group=stack: a group header per stack (13)
+ok   1440x900 dark: the group header of stack01 toggles aria-expanded
+ok   1440x900 dark: the layout control (button[data-group="flat"]) switches to flat
+ok   1440x900 dark: the view ?q=svc&state=running&sort=cpu&dir=asc&group=flat is applied from the URL
+ok   1440x900 dark: and survives a reload
+ok   1440x900 dark: keyboard: "?" opens [data-testid="shortcuts"]
+ok   1440x900 dark: Escape closes it
+ok   1440x900 dark: container page: [data-testid="ctr-head"] for svc001
+ok   1440x900 dark: the head has text
+ok   1440x900 dark: both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg
+ok   1440x900 dark: owner: a[data-testid="edit"] is available
+ok   1440x900 dark: range picker: 1h 6h 24h 7d 30d
+ok   1440x900 dark: range 24h: URL ?range=24h, the link is current, charts still there
+ok   1440x900 dark: crosshair: hovering the CPU chart shows a cursor or tooltip on BOTH charts
+ok   1440x900 dark: mouse drag on the CPU chart goes to ?from=&to=
+ok   1440x900 dark: pen pointer drag writes the zoom bounds
+ok   1440x900 dark: signed in: the session cookie set in the browser
+ok   1440x900 dark: (d) a write with Origin http://evil.example: 403 cross-origin write refused, config unchanged
+ok   1440x900 dark: Edit: a[data-testid=edit] opens dialog[data-testid=edit-dialog] at ?edit=override
+ok   1440x900 dark: (a) save a display name: toast, the dialog closes, the head shows "slice-check-1440-a"
+ok   1440x900 dark: (b) the dialog open again
+ok   1440x900 dark: the config changed behind the dialog (an override of svc002)
+ok   1440x900 dark: 409: [data-testid="dialog-note"] offers "Reload and keep my input"
+ok   1440x900 dark: reload-keep, then Save: saved with the typed value, the other change kept
+ok   1440x900 dark: (c) the dialog open again
+ok   1440x900 dark: 401: "Sign in (new tab)" link and a Retry button
+ok   1440x900 dark: signed in again: the new cookie set in the browser
+ok   1440x900 dark: Retry saves
+ok   1440x900 dark: the config is back byte for byte after the edit flows
+ok   1440x900 dark: no CSP violation (0)
+ok   1440x900 dark: no uncaught exception (0)
+ok   1440x900 dark: no console error (0)
+ok   1440x900 dark: no unexpected failed request or HTTP >= 400 (0)
+       allowed: POST /api/settings/containers/override -> 409 (the expected 409)
+       allowed: log: Failed to load resource: the server responded with a status of 409 (Conflict) /api/settings/containers/override
+       allowed: POST /api/settings/containers/override -> 401 (the expected 401 (request sent while cookie deleted))
+       allowed: log: Failed to load resource: the server responded with a status of 401 (Unauthorized) /api/settings/containers/override
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+ok   1440x900 light: Containers: the table has rows
+ok   1440x900 light: shell: nav[data-testid="sidebar"] is visible
+ok   1440x900 light: shell: [data-testid="live-status"] reaches data-state="live"
+ok   1440x900 light: the progressive table mounts every fixture row
+ok   1440x900 light: "Showing N of M": M = the API's 150 containers, N = the 150 rows shown
+ok   1440x900 light: the API lists svc001
+ok   1440x900 light: filter "svc001": only matching rows, URL ?q=
+ok   1440x900 light: "Showing" follows the filter (Showing 1 of 150 containers)
+ok   1440x900 light: the filter survives a reload
+ok   1440x900 light: clearing the filter brings every row back and drops ?q
+ok   1440x900 light: state chips: all, running, stopped, problem
+       stopped: showing Showing 22 of 150 containers; the API has 22 not in state "running"
+ok   1440x900 light: state chip stopped: URL ?state=stopped, pressed, the running container leaves
+ok   1440x900 light: state chip all: every row is back
+ok   1440x900 light: the name header toggles aria-sort, the order and ?dir=
+ok   1440x900 light: another header (cpu) takes aria-sort (descending by default, no dir in the URL), the name header goes back to none
+ok   1440x900 light: ?group=flat: no group headers
+ok   1440x900 light: ?group=stack: a group header per stack (13)
+ok   1440x900 light: the group header of stack01 toggles aria-expanded
+ok   1440x900 light: the layout control (button[data-group="flat"]) switches to flat
+ok   1440x900 light: the view ?q=svc&state=running&sort=cpu&dir=asc&group=flat is applied from the URL
+ok   1440x900 light: and survives a reload
+ok   1440x900 light: keyboard: "?" opens [data-testid="shortcuts"]
+ok   1440x900 light: Escape closes it
+ok   1440x900 light: container page: [data-testid="ctr-head"] for svc001
+ok   1440x900 light: the head has text
+ok   1440x900 light: both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg
+ok   1440x900 light: owner: a[data-testid="edit"] is available
+ok   1440x900 light: range picker: 1h 6h 24h 7d 30d
+ok   1440x900 light: range 24h: URL ?range=24h, the link is current, charts still there
+ok   1440x900 light: crosshair: hovering the CPU chart shows a cursor or tooltip on BOTH charts
+ok   1440x900 light: mouse drag on the CPU chart goes to ?from=&to=
+ok   1440x900 light: pen pointer drag writes the zoom bounds
+ok   1440x900 light: no CSP violation (0)
+ok   1440x900 light: no uncaught exception (0)
+ok   1440x900 light: no console error (0)
+ok   1440x900 light: no unexpected failed request or HTTP >= 400 (0)
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+ok   390x844 dark: Containers: the table has rows
+ok   390x844 dark: shell: button[data-testid="drawer-open"] is visible
+ok   390x844 dark: shell: [data-testid="live-status"] reaches data-state="live"
+ok   390x844 dark: the progressive table mounts every fixture row
+ok   390x844 dark: "Showing N of M": M = the API's 150 containers, N = the 150 rows shown
+ok   390x844 dark: the API lists svc001
+ok   390x844 dark: filter "svc001": only matching rows, URL ?q=
+ok   390x844 dark: "Showing" follows the filter (Showing 1 of 150 containers)
+ok   390x844 dark: the filter survives a reload
+ok   390x844 dark: clearing the filter brings every row back and drops ?q
+ok   390x844 dark: state chips: all, running, stopped, problem
+       stopped: showing Showing 22 of 150 containers; the API has 22 not in state "running"
+ok   390x844 dark: state chip stopped: URL ?state=stopped, pressed, the running container leaves
+ok   390x844 dark: state chip all: every row is back
+ok   390x844 dark: phone: the sort control sorts by cpu and the direction button flips it (URL follows)
+ok   390x844 dark: ?group=flat: no group headers
+ok   390x844 dark: ?group=stack: a group header per stack (13)
+ok   390x844 dark: the group header of stack01 toggles aria-expanded
+ok   390x844 dark: the layout control (button[data-group="flat"]) switches to flat
+ok   390x844 dark: the view ?q=svc&state=running&sort=cpu&dir=asc&group=flat is applied from the URL
+ok   390x844 dark: and survives a reload
+ok   390x844 dark: keyboard: "?" opens [data-testid="shortcuts"]
+ok   390x844 dark: Escape closes it
+ok   390x844 dark: container page: [data-testid="ctr-head"] for svc001
+ok   390x844 dark: the head has text
+ok   390x844 dark: both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg
+ok   390x844 dark: owner: a[data-testid="edit"] is available
+ok   390x844 dark: range picker: 1h 6h 24h 7d 30d
+ok   390x844 dark: range 24h: URL ?range=24h, the link is current, charts still there
+ok   390x844 dark: touch drag on the CPU chart goes to ?from=&to=
+ok   390x844 dark: pen pointer drag writes the zoom bounds
+ok   390x844 dark: signed in: the session cookie set in the browser
+ok   390x844 dark: (d) a write with Origin http://evil.example: 403 cross-origin write refused, config unchanged
+ok   390x844 dark: Edit: a[data-testid=edit] opens dialog[data-testid=edit-dialog] at ?edit=override
+ok   390x844 dark: (a) save a display name: toast, the dialog closes, the head shows "slice-check-390-a"
+ok   390x844 dark: (b) the dialog open again
+ok   390x844 dark: the config changed behind the dialog (an override of svc002)
+ok   390x844 dark: 409: [data-testid="dialog-note"] offers "Reload and keep my input"
+ok   390x844 dark: reload-keep, then Save: saved with the typed value, the other change kept
+ok   390x844 dark: (c) the dialog open again
+ok   390x844 dark: 401: "Sign in (new tab)" link and a Retry button
+ok   390x844 dark: signed in again: the new cookie set in the browser
+ok   390x844 dark: Retry saves
+ok   390x844 dark: the config is back byte for byte after the edit flows
+ok   390x844 dark: no CSP violation (0)
+ok   390x844 dark: no uncaught exception (0)
+ok   390x844 dark: no console error (0)
+ok   390x844 dark: no unexpected failed request or HTTP >= 400 (0)
+       allowed: POST /api/settings/containers/override -> 409 (the expected 409)
+       allowed: log: Failed to load resource: the server responded with a status of 409 (Conflict) /api/settings/containers/override
+       allowed: POST /api/settings/containers/override -> 401 (the expected 401 (request sent while cookie deleted))
+       allowed: log: Failed to load resource: the server responded with a status of 401 (Unauthorized) /api/settings/containers/override
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,system,alerts: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /icon.svg: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+ok   390x844 light: Containers: the table has rows
+ok   390x844 light: shell: button[data-testid="drawer-open"] is visible
+ok   390x844 light: shell: [data-testid="live-status"] reaches data-state="live"
+ok   390x844 light: the progressive table mounts every fixture row
+ok   390x844 light: "Showing N of M": M = the API's 150 containers, N = the 150 rows shown
+ok   390x844 light: the API lists svc001
+ok   390x844 light: filter "svc001": only matching rows, URL ?q=
+ok   390x844 light: "Showing" follows the filter (Showing 1 of 150 containers)
+ok   390x844 light: the filter survives a reload
+ok   390x844 light: clearing the filter brings every row back and drops ?q
+ok   390x844 light: state chips: all, running, stopped, problem
+       stopped: showing Showing 22 of 150 containers; the API has 22 not in state "running"
+ok   390x844 light: state chip stopped: URL ?state=stopped, pressed, the running container leaves
+ok   390x844 light: state chip all: every row is back
+ok   390x844 light: phone: the sort control sorts by cpu and the direction button flips it (URL follows)
+ok   390x844 light: ?group=flat: no group headers
+ok   390x844 light: ?group=stack: a group header per stack (13)
+ok   390x844 light: the group header of stack01 toggles aria-expanded
+ok   390x844 light: the layout control (button[data-group="flat"]) switches to flat
+ok   390x844 light: the view ?q=svc&state=running&sort=cpu&dir=asc&group=flat is applied from the URL
+ok   390x844 light: and survives a reload
+ok   390x844 light: keyboard: "?" opens [data-testid="shortcuts"]
+ok   390x844 light: Escape closes it
+ok   390x844 light: container page: [data-testid="ctr-head"] for svc001
+ok   390x844 light: the head has text
+ok   390x844 light: both charts: figure[data-testid="chart-cpu"] and chart-mem with an svg
+ok   390x844 light: owner: a[data-testid="edit"] is available
+ok   390x844 light: range picker: 1h 6h 24h 7d 30d
+ok   390x844 light: range 24h: URL ?range=24h, the link is current, charts still there
+ok   390x844 light: touch drag on the CPU chart goes to ?from=&to=
+ok   390x844 light: pen pointer drag writes the zoom bounds
+ok   390x844 light: no CSP violation (0)
+ok   390x844 light: no uncaught exception (0)
+ok   390x844 light: no console error (0)
+ok   390x844 light: no unexpected failed request or HTTP >= 400 (0)
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+
+| pass | CSP | console errors | exceptions | failed requests |
+|---|---|---|---|---|
+| 1440x900 dark | 0 | 0 | 0 | 0 |
+| 1440x900 light | 0 | 0 | 0 | 0 |
+| 390x844 dark | 0 | 0 | 0 | 0 |
+| 390x844 light | 0 | 0 | 0 | 0 |
+
+screenshots: /out
+all checks passed
+config restored byte for byte
+e2e: exit 0; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-slice

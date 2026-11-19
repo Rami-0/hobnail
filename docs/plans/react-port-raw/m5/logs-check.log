@@ -1,0 +1,137 @@
+1440-dark picker
+1440-dark controls
+1440-dark ranges
+1440-dark clipboard and reconnect
+1440-dark stack and panes
+1440-light picker
+1440-light controls
+1440-light ranges
+1440-light clipboard and reconnect
+1440-light stack and panes
+390-dark picker
+390-dark controls
+390-dark ranges
+390-dark clipboard and reconnect
+390-dark stack and panes
+390-dark AssertionError [ERR_ASSERTION]: burst maximum 107 ms exceeds 100 ms {
+  width: 390,
+  scroll: 0,
+  documentWidth: 390,
+  toolbar: '<div class="log-toolbar"><div class="log-search"><input aria-invalid="false" data-testid="filter" aria-label="Search logs" placeholder="Search logs" class="in" data-slot="input" type="search" value=""><button aria-label="Regular expression" aria-pressed="false" class="btn sm" data-slot="button" type="button">.*</button><button aria-label="Match case" aria-pressed="false" class="btn sm" data-slot="button" type="button">Aa</button></div><button aria-expanded="false" class="btn log-filters" data-slot="button" type="button">Filters </button><div class="log-filter-controls "><span class="sel"><label for="_r_6_" class="sel-l">Show</label><button id="_r_6_" class="in" aria-label="Show" data-slot="select-trigger" role="combobox" type="button" aria-haspopup="listbox" aria-expanded="false" data-closed="">All lines</button><textarea data-slot="select-form-input" id="ui-sdk-_r_7_-form-input" aria-hidden="true" tabindex="-1" style="position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0px; border: 0px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; opacity: 0; pointer-events: none;">all</textarea></span><div class="log-levels"><button aria-label="Show error lines" aria-pressed="true" class="btn sm" data-slot="button" type="button">Error<span class="log-level-count">230</span></button><button aria-label="Show warning lines" aria-pressed="true" class="btn sm" data-slot="button" type="button">Warning<span class="log-level-count">114</span></button><button aria-label="Show info lines" aria-pressed="true" class="btn sm" data-slot="button" type="button">Info<span class="log-level-count">462</span></button><button aria-label="Show debug lines" aria-pressed="true" class="btn sm" data-slot="button" type="button">Debug<span class="log-level-count">116</span></button><button aria-label="Show other lines" aria-pressed="true" class="btn sm" data-slot="button" type="button">Other<span class="log-level-count">230</span></button></div><span class="sel"><label for="_r_d_" class="sel-l">Range</label><button id="_r_d_" class="in" aria-label="Range" data-slot="select-trigger" role="combobox" type="button" aria-haspopup="listbox" aria-expanded="false" data-closed="">Live</button><textarea data-slot="select-form-input" id="ui-sdk-_r_e_-form-input" aria-hidden="true" tabindex="-1" style="position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0px; border: 0px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; opacity: 0; pointer-events: none;"></textarea></span><button aria-pressed="true" class="btn sm" data-slot="button" type="button">Wrap</button><button aria-pressed="true" class="btn sm" data-slot="button" type="button">Time</button><button aria-pressed="false" class="btn sm" data-slot="button" type="button">Pause</button><a class="btn sm" href="/api/logs/download?c=svc001&amp;tail=5000" download="" title="Download the entire selected range without search or level filters">Download</a></div></div>',
+  controls: [
+    { class: 'btn log-filters', display: 'flex', rect: [Object] },
+    { class: 'log-filter-controls ', display: 'none', rect: [Object] }
+  ]
+}
+390-light picker
+390-light controls
+390-light ranges
+390-light clipboard and reconnect
+390-light stack and panes
+{
+  "results": [
+    {
+      "label": "1440-dark",
+      "burstObserveStartedAt": 1795065257304,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795065264307,
+      "wireLines": 6504,
+      "mountedRows": 22,
+      "search5000Ms": 343.2999997138977,
+      "searchMatchMs": 1.8,
+      "reconnectMs": 2017,
+      "fourBurstObserveStartedAt": 1795065293385,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795065300593,
+      "leaveAt": 1795065301965,
+      "streamCountZeroAfterMs": 2719,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "1440-light",
+      "burstObserveStartedAt": 1795065313767,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795065320771,
+      "wireLines": 6504,
+      "mountedRows": 22,
+      "search5000Ms": 284.09999990463257,
+      "searchMatchMs": 6.7,
+      "reconnectMs": 2011,
+      "fourBurstObserveStartedAt": 1795065349587,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795065356790,
+      "leaveAt": 1795065357706,
+      "streamCountZeroAfterMs": 2642,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-dark",
+      "burstObserveStartedAt": 1795065376689,
+      "burstMaxTaskMs": 107,
+      "burstObserveEndedAt": 1795065383695,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 756.8999996185303,
+      "searchMatchMs": 8.8,
+      "reconnectMs": 2040,
+      "fourBurstObserveStartedAt": 1795065440394,
+      "fourBurstMaxTaskMs": 81,
+      "fourBurstObserveEndedAt": 1795065447650,
+      "leaveAt": 1795065449871,
+      "streamCountZeroAfterMs": 3244,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-light",
+      "burstObserveStartedAt": 1795065471376,
+      "burstMaxTaskMs": 59,
+      "burstObserveEndedAt": 1795065478381,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 591.3000001907349,
+      "searchMatchMs": 7.5,
+      "reconnectMs": 2041,
+      "fourBurstObserveStartedAt": 1795065532426,
+      "fourBurstMaxTaskMs": 56,
+      "fourBurstObserveEndedAt": 1795065539639,
+      "leaveAt": 1795065541493,
+      "streamCountZeroAfterMs": 3115,
+      "consoleErrors": [],
+      "cspViolations": []
+    }
+  ],
+  "failures": [
+    "390-dark: AssertionError [ERR_ASSERTION]: burst maximum 107 ms exceeds 100 ms\n    at file:///repo/web/e2e/logs-check.mjs:267:14"
+  ]
+}
+node:internal/modules/run_main:111
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
++ [
++   '390-dark: AssertionError [ERR_ASSERTION]: burst maximum 107 ms exceeds 100 ms\n' +
++     '    at file:///repo/web/e2e/logs-check.mjs:267:14'
++ ]
+- []
+
+    at file:///repo/web/e2e/logs-check.mjs:275:69
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [
+    '390-dark: AssertionError [ERR_ASSERTION]: burst maximum 107 ms exceeds 100 ms\n' +
+      '    at file:///repo/web/e2e/logs-check.mjs:267:14'
+  ],
+  expected: [],
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.13.1
+e2e: exit 1; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-logs

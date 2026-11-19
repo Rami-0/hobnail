@@ -1,0 +1,79 @@
+{
+  "results": [
+    {
+      "label": "1440-dark",
+      "burstObserveStartedAt": 1795065257304,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795065264307,
+      "wireLines": 6504,
+      "mountedRows": 22,
+      "search5000Ms": 343.2999997138977,
+      "searchMatchMs": 1.8,
+      "reconnectMs": 2017,
+      "fourBurstObserveStartedAt": 1795065293385,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795065300593,
+      "leaveAt": 1795065301965,
+      "streamCountZeroAfterMs": 2719,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "1440-light",
+      "burstObserveStartedAt": 1795065313767,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795065320771,
+      "wireLines": 6504,
+      "mountedRows": 22,
+      "search5000Ms": 284.09999990463257,
+      "searchMatchMs": 6.7,
+      "reconnectMs": 2011,
+      "fourBurstObserveStartedAt": 1795065349587,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795065356790,
+      "leaveAt": 1795065357706,
+      "streamCountZeroAfterMs": 2642,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-dark",
+      "burstObserveStartedAt": 1795065376689,
+      "burstMaxTaskMs": 107,
+      "burstObserveEndedAt": 1795065383695,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 756.8999996185303,
+      "searchMatchMs": 8.8,
+      "reconnectMs": 2040,
+      "fourBurstObserveStartedAt": 1795065440394,
+      "fourBurstMaxTaskMs": 81,
+      "fourBurstObserveEndedAt": 1795065447650,
+      "leaveAt": 1795065449871,
+      "streamCountZeroAfterMs": 3244,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-light",
+      "burstObserveStartedAt": 1795065471376,
+      "burstMaxTaskMs": 59,
+      "burstObserveEndedAt": 1795065478381,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 591.3000001907349,
+      "searchMatchMs": 7.5,
+      "reconnectMs": 2041,
+      "fourBurstObserveStartedAt": 1795065532426,
+      "fourBurstMaxTaskMs": 56,
+      "fourBurstObserveEndedAt": 1795065539639,
+      "leaveAt": 1795065541493,
+      "streamCountZeroAfterMs": 3115,
+      "consoleErrors": [],
+      "cspViolations": []
+    }
+  ],
+  "failures": [
+    "390-dark: AssertionError [ERR_ASSERTION]: burst maximum 107 ms exceeds 100 ms\n    at file:///repo/web/e2e/logs-check.mjs:267:14"
+  ]
+}

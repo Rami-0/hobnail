@@ -1,0 +1,39 @@
+{
+  "method": "fresh empty data; no socket or host mounts; 5 sequential logins, 5 ms samples",
+  "peak_before_burst": 21823488,
+  "results": [
+    [
+      "onboarding",
+      201,
+      172.44455497711897
+    ],
+    [
+      "login-1",
+      200,
+      121.94599397480488
+    ],
+    [
+      "login-2",
+      200,
+      191.46260805428028
+    ],
+    [
+      "login-3",
+      200,
+      83.46963068470359
+    ],
+    [
+      "login-4",
+      200,
+      140.73411701247096
+    ],
+    [
+      "login-5",
+      200,
+      77.46229600161314
+    ]
+  ],
+  "samples": 404,
+  "sampled_burst_max": 21786624,
+  "lifetime_peak": 21823488
+}

@@ -1,0 +1,7 @@
+{
+  "method": "one authenticated Chromium Host page; real read-only Docker socket and host proc/sys; fresh empty config; 60 seconds after host ready",
+  "seconds": 60.00021409476176,
+  "cpu_usage_usec": 519503,
+  "percent_one_core": 0.8658352438201625,
+  "browser_exit": 0
+}

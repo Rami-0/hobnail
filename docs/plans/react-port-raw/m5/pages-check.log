@@ -1,0 +1,6 @@
+1440-dark CSP=0 console=0 exceptions=0 failed requests=0
+1440-light CSP=0 console=0 exceptions=0 failed requests=0
+390-dark CSP=0 console=0 exceptions=0 failed requests=0
+390-light CSP=0 console=0 exceptions=0 failed requests=0
+All read-page browser checks passed.
+e2e: exit 0; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-pages

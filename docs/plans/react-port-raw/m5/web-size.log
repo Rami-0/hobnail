@@ -1,0 +1,98 @@
+
+> hobnail-web@0.0.1 size
+> node scripts/size.mjs
+
+file                                               raw B     gzip B  
+assets/account-B5ciHFge.js                          4622       1844  chunk <= 60 KB
+assets/alerts-Y0bxH_1U.js                           6298       2291  chunk <= 60 KB
+assets/announce-BaDTwOl2.js                          941        569  chunk <= 60 KB
+assets/app-runtime-DLsVIt_d.js                     10756       4290  first route
+assets/Appearance-KEv8dnBm.js                       4566       2109  chunk <= 60 KB
+assets/board-Di-mSvph.css                           2965        881  chunk <= 60 KB
+assets/board-J3Sjea6r.js                            6892       2830  chunk <= 60 KB
+assets/Bookmarks-BRwpcWsu.js                        1019        581  chunk <= 60 KB
+assets/bookmarks-HIjuKMXL.js                         272        225  chunk <= 60 KB
+assets/button-dp3fTQDb.js                           1134        613  first route
+assets/Button-DwrunF04.js                           8542       3401  first route
+assets/charts-vendor-BhgI_-Ol.js                  133285      37551  charts chunk <= 60 KB
+assets/charts-vendor-C6Pdu-IP.js                  100385      25497  charts chunk <= 60 KB
+assets/children-CYU4CyM7.js                         2959       1447  chunk <= 60 KB
+assets/Collection-BchEO3Dq.js                       7672       3151  chunk <= 60 KB
+assets/Config-DF2qPR0g.js                           4745       1891  chunk <= 60 KB
+assets/container-BG7CEc1s.js                       18346       6159  chunk <= 60 KB
+assets/container-gV5Acizf.css                       6219       1864  chunk <= 60 KB
+assets/containers-C9ZYqLk9.js                       6176       2481  chunk <= 60 KB
+assets/containers-CNkSD3_X.js                      18269       6518  chunk <= 60 KB
+assets/containers-DIOiKCIT.css                      9290       2519  chunk <= 60 KB
+assets/Containers-DUvRjNnR.js                       5375       2215  chunk <= 60 KB
+assets/createLucideIcon-CRbusLLJ.js                 3663       1670  first route
+assets/Dialog-B3uVPhtz.js                          14208       5488  chunk <= 60 KB
+assets/EditDialog-BARi-kyo.js                      10890       4391  chunk <= 60 KB
+assets/Editor-e7wlhjy2.js                          12380       4350  chunk <= 60 KB
+assets/env-i8CXn8sH.js                               364        263  chunk <= 60 KB
+assets/events-B2Bcfi6U.js                            888        473  chunk <= 60 KB
+assets/events-BCX97W3_.js                           2349       1187  first route
+assets/Field-7RUjToNA.js                           18630       6818  chunk <= 60 KB
+assets/format-CF5Z1gM7.js                           4094       1866  chunk <= 60 KB
+assets/forms-DU4HvGk8.js                             777        452  chunk <= 60 KB
+assets/General-BS7yNxbg.js                          1175        665  chunk <= 60 KB
+assets/history-1HslwQfM.js                          5065       2220  chunk <= 60 KB
+assets/history-BRBLfKut.js                            98         98  chunk <= 60 KB
+assets/History-CSQqn_iB.js                          3376       1405  chunk <= 60 KB
+assets/history-Dlkw40-6.css                          457        285  chunk <= 60 KB
+assets/host-BUbc8QtP.css                             621        342  chunk <= 60 KB
+assets/host-Odp2i3mJ.js                             6904       2698  chunk <= 60 KB
+assets/index-0Y5ftNI3.js                              42         42  first route
+assets/keyboard-HHPkxq8T.js                         1565        747  chunk <= 60 KB
+assets/layers-B7tDtED_.js                            562        366  first route
+assets/live-DqPGC3QO.js                             2733       1260  chunk <= 60 KB
+assets/logs-C7iCcirE.css                            5553       1706  chunk <= 60 KB
+assets/logs-CLb8lUjJ.js                            43129      14342  chunk <= 60 KB
+assets/MenuImpl-GkuM2KrT.js                        30408      10082  chunk <= 60 KB
+assets/modal-attribute-BP04ZJUB.js                 26151      10307  chunk <= 60 KB
+assets/Notifications-C6FCuCAV.js                    7917       3014  chunk <= 60 KB
+assets/overview-Bn4RnX6U.css                         941        433  chunk <= 60 KB
+assets/overview-D7rpB5gY.js                        11386       4287  chunk <= 60 KB
+assets/Palette-D4ScbimI.css                          392        261  chunk <= 60 KB
+assets/Palette-yNr_pyGY.js                          5830       2795  chunk <= 60 KB
+assets/parts-GyezLEtB.js                            1145        673  chunk <= 60 KB
+assets/pointer-BBzP2ZJc.js                          3519       1441  chunk <= 60 KB
+assets/popup-C1bZqKLS.js                           33727      12833  chunk <= 60 KB
+assets/preload-helper-Dp5Bp1yV.js                   2094       1068  first route
+assets/react-CdlCbvX4.js                            7876       3011  first route
+assets/read-DszbDfUj.js                             1047        584  chunk <= 60 KB
+assets/RechartsUsage-CC9LOCIs.css                   3008       1050  charts chunk <= 60 KB
+assets/RechartsUsage-Cv9abRUt.js                  150919      51137  charts chunk <= 60 KB
+assets/RelativeTime-C4TN0sAR.js                      410        295  chunk <= 60 KB
+assets/rolldown-runtime-CNOWq4Kh.js                  817        477  first route
+assets/search-worker-B5Paj1wr.js                     628        385  chunk <= 60 KB
+assets/Security-8lIEN2kZ.js                         1383        654  chunk <= 60 KB
+assets/Select-Cai2KDVa.js                          43297      15309  chunk <= 60 KB
+assets/session-7ttDCFor.js                          4587       1957  first route
+assets/settings-DDwTshO5.js                        14470       4664  chunk <= 60 KB
+assets/settings-DktKE8Cv.css                        1372        521  chunk <= 60 KB
+assets/settings-Dq18O-bI.js                           98         98  chunk <= 60 KB
+assets/SettingsForm-DILsZIp3.js                     3328       1560  chunk <= 60 KB
+assets/shared-Biha3iLl.js                           6408       2800  chunk <= 60 KB
+assets/sheet-presentation-DyhvGWRA.js              37481      13491  chunk <= 60 KB
+assets/shortcut-slot-Cs7WM6Rv.js                    1007        581  chunk <= 60 KB
+assets/shortcuts-B26-QLIQ.js                        2339       1268  chunk <= 60 KB
+assets/Shortcuts-DSdpKul5.js                        2733       1056  chunk <= 60 KB
+assets/sides-Ce7I_LlF.js                             257        198  chunk <= 60 KB
+assets/Switch-BUS2Y8uf.js                           4728       1892  chunk <= 60 KB
+assets/TabNav-CRIRui1C.js                           1155        686  chunk <= 60 KB
+assets/Tabs-ExaiD3g4.js                            10042       3711  chunk <= 60 KB
+assets/Toaster-B_zV1Cvv.js                         22564       8844  chunk <= 60 KB
+assets/triangle-exclamation-point-Bxrvyj48.js       1266        568  first route
+assets/typeahead-D5O04iSg.js                        3540       1781  chunk <= 60 KB
+assets/use-primitive-BWYySHcm.js                   27655      11057  first route
+assets/Users-BuWt-_Z_.js                            7215       2711  chunk <= 60 KB
+assets/web-DupGL4Wj.css                            65569      12460  first route
+assets/web-fgg0mksI.js                            285476      90060  first route
+assets/WidgetContent-Dzg06snL.js                     928        512  chunk <= 60 KB
+assets/Widgets-DmWyKGaL.js                          4234       1935  chunk <= 60 KB
+index.html                                          2591        965  first route
+total                                            1344189     449533  budget 1350 KB raw / 450 KB gzip
+first route                                                  133192  budget 180 KB gzip (index.html, assets/index-0Y5ftNI3.js, assets/rolldown-runtime-CNOWq4Kh.js, assets/react-CdlCbvX4.js, assets/preload-helper-Dp5Bp1yV.js, assets/app-runtime-DLsVIt_d.js, assets/session-7ttDCFor.js, assets/createLucideIcon-CRbusLLJ.js, assets/triangle-exclamation-point-Bxrvyj48.js, assets/layers-B7tDtED_.js, assets/events-BCX97W3_.js, assets/use-primitive-BWYySHcm.js, assets/button-dp3fTQDb.js, assets/Button-DwrunF04.js, assets/web-fgg0mksI.js, assets/web-DupGL4Wj.css)
+
+size: all budgets met
