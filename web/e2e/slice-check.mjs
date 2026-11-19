@@ -204,6 +204,7 @@ async function containersPage(size) {
   const data = await apiContainers().catch(() => null);
   const all = (data?.groups || []).flatMap((g) => g.containers);
   const M = all.length;
+  await step("the progressive table mounts every fixture row", () => until(`${visibleRows}.length === ${M}`, 5000));
   const s0 = await showing();
   const rows0 = (await rowNames()).length;
   check(s0.m === M && s0.n === rows0, `"Showing N of M": M = the API's ${M} containers, N = the ${rows0} rows shown`, s0);

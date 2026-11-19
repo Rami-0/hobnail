@@ -203,9 +203,13 @@ async function run(target, profile) {
           return res.json();
         };
         if (target === "board") {
+          const route = `/api/v1/boards/${boardId}`;
+          const { board } = await update(route, "GET");
+          let version = board.version;
           for (let n = 0; n < UPDATES; n++) {
             await sleep(1600);
-            await update(`/api/v1/boards/${boardId}`, "PATCH", { name: `Performance 40 items ${profile} ${n}` });
+            const updated = await update(route, "PATCH", { version, name: `Performance 40 items ${profile} ${n}` });
+            version = updated.version;
           }
         } else {
           let config = await update("/api/settings/general", "GET");
