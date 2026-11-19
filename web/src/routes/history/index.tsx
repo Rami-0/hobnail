@@ -33,18 +33,30 @@ export default function History() {
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   const steps = data ? windowSteps(data.from, data.to, data.now) : null;
   return <div className="page" data-testid="history">
-    <h1>History</h1>
-    <div className="toolbar history-controls">
-      {RANGES.map((r) => <Button key={r} aria-pressed={!zoomed && r === range} onClick={() => setSearch({ range: r, from: null, to: null, before: null })}>{r}</Button>)}
-      {steps && (["earlier", "in", "out", "later"] as const).map((key, index) => <Button key={key} disabled={!steps[key]} onClick={() => { if (steps[key]) setSearch(steps[key]); }}>{["Earlier", "Zoom in", "Zoom out", "Later"][index]}</Button>)}
-      <Button disabled={!!data && data.to - data.from > 86400} aria-pressed={search.get("cmp") === "1"} onClick={() => setSearch({ cmp: search.get("cmp") === "1" ? null : "1" })}>Compare with yesterday</Button>
-      {zoomed && <Button onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button>}
+    <p className="page-sub">Host metrics and incidents from the local history database</p>
+    <div className="toolbar hist-bar">
+      <nav className="seg" aria-label="Range">
+        {RANGES.map((r) => {
+          const query = new URLSearchParams(search);
+          query.set("range", r);
+          for (const key of ["from", "to", "before"]) query.delete(key);
+          return <a key={r} href={"/app/history?" + query.toString()} aria-current={!zoomed && r === range ? "true" : undefined}>{r}</a>;
+        })}
+      </nav>
+      {steps && <nav className="zoom-nav" aria-label="Move or zoom the window">
+        {(["earlier", "in", "out", "later"] as const).map((key, index) => <Button className="sm" key={key}
+          disabled={!steps[key]} onClick={() => { if (steps[key]) setSearch(steps[key]); }}>{["‹ Earlier", "Zoom in", "Zoom out", "Later ›"][index]}</Button>)}
+      </nav>}
+      <Button className="tgl" disabled={!!data && data.to - data.from > 86400} aria-pressed={search.get("cmp") === "1"}
+        onClick={() => setSearch({ cmp: search.get("cmp") === "1" ? null : "1" })}><i className="tgl-box" aria-hidden="true" /> Compare with yesterday</Button>
+      {zoomed ? <Button className="sm" onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button> :
+        <span className="hint muted">Drag across a chart to zoom in</span>}
     </div>
     {error && <p role="alert">{error}</p>}
     {!data ? !error && <ChartPlaceholder count={8} /> : <>
       <HistoryCharts data={data} />
       <section className="panel history-block">
-        <h2>Container starts per day</h2>
+        <div className="panel-h"><h2>Container starts per day</h2></div>
         {Object.keys(data.starts_per_day).length === 0 ? <p>No container starts recorded in the last seven days.</p> :
           <ul>{Object.entries(data.starts_per_day).map(([name, days]) => <li key={name}>
             {names.has(name) ? <a href={containerHref(name)}>{name}</a> : name}
@@ -52,7 +64,7 @@ export default function History() {
           </li>)}</ul>}
       </section>
       <section className="panel history-block" id="events" aria-label="Incident timeline">
-        <h2>Incident timeline</h2>
+        <div className="panel-h"><h2>Incident timeline</h2></div>
         <div className="toolbar history-controls">
           {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
         </div>
