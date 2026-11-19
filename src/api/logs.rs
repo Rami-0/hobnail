@@ -79,7 +79,12 @@ pub(super) async fn get(state: &std::sync::Arc<AppState>, principal: Principal) 
     let state = state.clone();
     match tokio::task::spawn_blocking(move || picker(&state, &principal)).await {
         Ok(picker) => super::json(StatusCode::OK, &picker),
-        Err(_) => super::error::ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "log picker failed").response(),
+        Err(_) => super::error::ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "log picker failed",
+        )
+        .response(),
     }
 }
 

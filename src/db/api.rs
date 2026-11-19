@@ -30,8 +30,16 @@ pub async fn route(
 ) -> Response<Body> {
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
-    if let Some(name) = path.strip_prefix("/api/history/container/").and_then(percent_decode)
-        && crate::api::containers::excluded_subject(&state.config.current(), &state.snapshot(), &name)
+    if path
+        .strip_prefix("/api/history/container/")
+        .and_then(percent_decode)
+        .is_some_and(|name| {
+            crate::api::containers::excluded_subject(
+                &state.config.current(),
+                &state.snapshot(),
+                &name,
+            )
+        })
     {
         return json_error(StatusCode::NOT_FOUND, "container not found");
     }

@@ -82,12 +82,18 @@ impl Principal {
     pub fn container_visibility(&self, state: &AppState) -> ContainerVisibility {
         let config = state.config.current();
         let snapshot = state.snapshot();
-        let excluded = snapshot.containers.iter()
+        let excluded = snapshot
+            .containers
+            .iter()
             .filter(|container| crate::ui::view::is_excluded(&config, container))
             .map(|container| container.name.clone())
             .collect();
         if !self.is_scoped() {
-            return ContainerVisibility { scoped: None, excluded, config };
+            return ContainerVisibility {
+                scoped: None,
+                excluded,
+                config,
+            };
         }
         let targets = state
             .db
@@ -98,11 +104,14 @@ impl Principal {
         ContainerVisibility {
             excluded,
             config,
-            scoped: Some(snapshot.containers
-                .iter()
-                .filter(|c| targets.contains(&ContainerMatch::from(*c)))
-                .map(|c| c.name.clone())
-                .collect()),
+            scoped: Some(
+                snapshot
+                    .containers
+                    .iter()
+                    .filter(|c| targets.contains(&ContainerMatch::from(*c)))
+                    .map(|c| c.name.clone())
+                    .collect(),
+            ),
         }
     }
 
@@ -132,11 +141,22 @@ pub struct ContainerVisibility {
 
 impl ContainerVisibility {
     pub fn allows(&self, name: &str) -> bool {
-        self.scoped.as_ref().is_none_or(|names| names.contains(name))
+        self.scoped
+            .as_ref()
+            .is_none_or(|names| names.contains(name))
             && !self.excluded.contains(name)
-            && !self.config.containers.get(name).and_then(|entry| entry.hide).unwrap_or_else(|| {
-                self.config.docker.exclude.iter().any(|pattern| crate::util::glob_match(pattern, name))
-            })
+            && !self
+                .config
+                .containers
+                .get(name)
+                .and_then(|entry| entry.hide)
+                .unwrap_or_else(|| {
+                    self.config
+                        .docker
+                        .exclude
+                        .iter()
+                        .any(|pattern| crate::util::glob_match(pattern, name))
+                })
     }
 
     pub fn is_scoped(&self) -> bool {
