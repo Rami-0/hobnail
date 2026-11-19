@@ -115,11 +115,11 @@ export function matcher(q: string, re: boolean, sensitive: boolean): { test: (s:
   try { const r = new RegExp(q, sensitive ? "" : "i"); return { test: (s) => r.test(s), error: null }; }
   catch { return { test: () => false, error: "Invalid regular expression" }; }
 }
-export function filterRows(rows: Row[], test: (s: string) => boolean, only: boolean, context: number, levels: string): { rows: Row[]; hits: Row[]; counts: Record<string, number> } {
+export function filterRows(rows: Row[], test: (s: string, id: number) => boolean, only: boolean, context: number, levels: string): { rows: Row[]; hits: Row[]; counts: Record<string, number> } {
   const hits: Row[] = [];
   const indexes = new Set<number>();
   rows.forEach((row, i) => {
-    if (!test(row.plain)) return;
+    if (!test(row.plain, row.id)) return;
     hits.push(row);
     if (only) for (let k = Math.max(0, i - context); k <= Math.min(rows.length - 1, i + context); k++) indexes.add(k);
   });

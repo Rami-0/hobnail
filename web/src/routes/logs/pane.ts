@@ -54,7 +54,7 @@ export class LogPane {
     if (!LogPane.initialMatchPending || LogPane.searchFrame) return;
     LogPane.searchFrame = requestAnimationFrame(() => {
       LogPane.searchFrame = 0;
-      if ([...LogPane.panes].some((pane) => pane.searchKey !== LogPane.searchIdentity)) return;
+      if ([...LogPane.panes].some((pane) => pane.searchKey !== LogPane.searchIdentity || pane.regexWorker !== null)) return;
       const hits = [...LogPane.panes].flatMap((pane) => pane.hits.map((row) => ({ pane: pane.query, id: row.id, t: row.t })));
       const newest = nextMatch(hits, null, -1);
       if (newest) { LogPane.initialMatchPending = false; LogPane.selectMatch(newest); }
@@ -63,6 +63,10 @@ export class LogPane {
   readonly ring: Ring;
   private source: EventSource | null = null;
   private older: EventSource | null = null;
+  private regexWorker: Worker | null = null;
+  private regexTimer = 0;
+  private searchedRows: readonly Row[] | null = null;
+  private regexHits = new Map<number, [number, number][]>();
   private pending: LogLine[] = [];
   private pendingOlder: LogLine[] = [];
   private retry = 0;
@@ -152,6 +156,7 @@ export class LogPane {
   private disconnect(): void { this.source?.close(); this.older?.close(); clearTimeout(this.retry); this.source = this.older = null; }
   close(): void {
     LogPane.panes.delete(this); LogPane.highlights.delete(this); LogPane.paintHighlights();
+    this.cancelRegex();
     if (!LogPane.panes.size) { LogPane.match = null; LogPane.searchIdentity = ""; LogPane.initialMatchPending = false; cancelAnimationFrame(LogPane.searchFrame); LogPane.searchFrame = 0; }
     window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: null } }));
     this.closed = true; this.disconnect(); clearTimeout(this.hiddenTimer); LogPane.queue.delete(this);
@@ -410,23 +415,13 @@ export class LogPane {
       this.box.style.setProperty("--log-name-width", `${length}ch`);
     }
     const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
-    if (this.searchKey !== changedSearch) this.searchPaused = false;
-    const search = matcher(this.options.search, this.options.regex, this.options.sensitive);
+    if (this.searchKey !== changedSearch) this.resetRegex();
+    const { search: query, regex, sensitive } = this.options;
+    const search = matcher(query, regex, sensitive);
     const searchStarted = performance.now();
-    const deadline = searchStarted + 8;
-    const test = (line: string) => {
-      if (this.searchPaused) return false;
-      if (performance.now() >= deadline) {
-        this.searchPaused = true;
-        return false;
-      }
-      return search.test(line);
-    };
-    const only = this.options.only && !search.error && !this.searchPaused;
-    let filtered = filterRows(this.ring.rows, this.options.regex ? test : search.test, only, this.options.context, this.options.levels);
-    if (this.searchPaused && (only || filtered.hits.length)) {
-      filtered = filterRows(this.ring.rows, () => false, false, 0, this.options.levels);
-    }
+    if (query && regex && !search.error) this.searchRegex(query, sensitive);
+    const only = this.options.only && !search.error && !this.searchPaused && (!regex || this.searchedRows !== null);
+    const filtered = filterRows(this.ring.rows, regex ? (_, id) => this.regexHits.has(id) : search.test, only, this.options.context, this.options.levels);
     this.box.dataset.searchMs = (performance.now() - searchStarted).toFixed(3);
     this.box.dataset.searchLines = String(this.ring.rows.length);
     this.visible = filtered.rows; this.hits = filtered.hits; this.counts = filtered.counts;
@@ -472,21 +467,59 @@ export class LogPane {
     }
     requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
     if ((this.pending.length || this.pendingOlder.length) && !this.options.paused) this.schedule();
-    this.highlight(this.options.regex ? performance.now() + 4 : Infinity);
+    this.highlight();
     this.report({ state: this.options.paused && this.state === "live" ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following, waiting: this.pending.length,
       message: (this.searchPaused ? "Search too slow, paused. Narrow the expression to resume." : search.error) ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
   }
   private searchPaused = false;
-  private highlight(deadline: number): void {
+  private cancelRegex(): void {
+    this.regexWorker?.terminate();
+    this.regexWorker = null;
+    clearTimeout(this.regexTimer);
+  }
+  private resetRegex(): void {
+    this.cancelRegex();
+    this.searchedRows = null;
+    this.regexHits.clear();
+    this.searchPaused = false;
+  }
+  private searchRegex(query: string, sensitive: boolean): void {
+    const rows = this.ring.rows;
+    if (this.searchPaused || this.regexWorker || this.searchedRows === rows) return;
+    const seen = new Set(this.searchedRows?.map((row) => row.id));
+    const pending = rows.filter((row) => !seen.has(row.id)).map((row) => [row.id, row.plain]);
+    const finish = (error: boolean) => {
+      this.cancelRegex();
+      this.searchedRows = rows;
+      if (error) this.regexHits.clear();
+      if (error) this.searchPaused = true;
+      this.schedule();
+    };
+    const worker = new Worker(new URL("./search-worker.ts", import.meta.url), { type: "module" });
+    this.regexWorker = worker;
+    this.regexTimer = window.setTimeout(() => finish(true), 500);
+    worker.addEventListener("error", () => finish(true), { once: true });
+    worker.addEventListener("message", (event: MessageEvent<{ hits: [number, [number, number][]][]; error?: boolean }>) => {
+      if (event.data.error) { finish(true); return; }
+      const retained = new Set(rows.map((row) => row.id));
+      for (const id of this.regexHits.keys()) if (!retained.has(id)) this.regexHits.delete(id);
+      for (const [id, ranges] of event.data.hits) this.regexHits.set(id, ranges);
+      finish(false);
+    }, { once: true });
+    worker.postMessage({ query, sensitive, rows: pending }, []);
+  }
+  private highlight(): void {
     const ranges: Range[] = [];
     if (!this.searchPaused && this.options.search) for (const element of this.content.querySelectorAll(".log-text")) {
-      if (performance.now() >= deadline) break;
       const nodes: Array<{ node: Text; start: number; end: number }> = [];
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       let node: Node | null, text = "";
       while ((node = walker.nextNode())) { const start = text.length; text += node.textContent ?? ""; nodes.push({ node: node as Text, start, end: text.length }); }
-      for (const [start, end] of matchRanges(text, this.options.search, this.options.regex, this.options.sensitive)) {
+      const matches = this.options.regex
+        ? element.querySelector("details") ? [] : this.regexHits.get(Number(element.closest<HTMLElement>("[data-log-id]")?.dataset.logId)) ?? []
+        : matchRanges(text, this.options.search, false, this.options.sensitive);
+      for (const [start, end] of matches) {
         const first = nodes.find((n) => start >= n.start && start < n.end), last = nodes.find((n) => end > n.start && end <= n.end);
         if (first && last) { const range = document.createRange(); range.setStart(first.node, start-first.start); range.setEnd(last.node, end-last.start); ranges.push(range); }
       }
