@@ -391,11 +391,11 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 </nav>
               ) : <span className="title">{title}</span>}
             </div>
-            <button type="button" className="cmd" data-testid="palette-open" aria-label="Search and commands (Ctrl K)" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+            <Button className="cmd" data-testid="palette-open" aria-label="Search and commands (Ctrl K)" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
               <span className="cmd-t">Search or jump to…</span>
               <kbd className="cmd-k">Ctrl K</kbd>
-            </button>
+            </Button>
             {b && !b.scoped && !phone && <Vitals />}
             <ThemeButton />
             <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
