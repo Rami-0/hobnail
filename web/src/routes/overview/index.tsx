@@ -203,9 +203,13 @@ export default function Overview() {
   </div>;
 }
 
+function rate(value: number | null | undefined) {
+  return typeof value === "number" ? bytes(value) + "/s" : "—";
+}
+
 function HostStrip({ system }: { system: ReturnType<typeof useSystem> }) {
   const disk = system?.disks.find((volume) => volume.total > 0);
-  const rate = (value: number | null | undefined) => value == null ? "—" : bytes(value) + "/s";
+  const temperature = system?.temp_c;
   const widgets = [
     { Icon: CpuIcon, label: "CPU", value: pct(system?.cpu_pct ?? null), note: system && "load " + system.load.map((v) => v.toFixed(2)).join(" ") },
     { Icon: MemoryStickIcon, label: "Memory", value: system?.mem_total ? bytes(system.mem_used) : "—",
@@ -214,7 +218,7 @@ function HostStrip({ system }: { system: ReturnType<typeof useSystem> }) {
     { Icon: HardDriveIcon, label: "Disk", value: disk ? pct(disk.used / disk.total * 100) : "—",
       note: disk && bytes(disk.avail) + " free on " + disk.label, gauge: disk && disk.used / disk.total * 100 },
     { Icon: ActivityIcon, label: "Network", value: <><span title="received"><ArrowDownIcon aria-hidden="true" />{rate(system?.net_rx_bps)}</span><span title="sent"><ArrowUpIcon aria-hidden="true" />{rate(system?.net_tx_bps)}</span></> },
-    { Icon: ThermometerIcon, label: "Temperature", value: system?.temp_c == null ? "—" : Math.round(system.temp_c) + " °C", note: "CPU package" },
+    { Icon: ThermometerIcon, label: "Temperature", value: typeof temperature === "number" ? Math.round(temperature) + " °C" : "—", note: "CPU package" },
     { Icon: ClockIcon, label: "Uptime", value: system?.uptime_secs ? duration(system.uptime_secs) : "—", note: "since last boot" },
   ];
   return <div className="strip" aria-label="Host vitals">{widgets.map(({ Icon, label, value, note, gauge }) => (
