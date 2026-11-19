@@ -9,9 +9,8 @@ An optional bearer token entered in the browser is write-only. The database
 stores it together with its normalized origin (scheme, hostname and port).
 Only that origin receives it; changing the origin requires entering it again,
 or clearing the old token first. Paths are not part of the binding. Secret
-values never return in responses or drafts. Admins see configuration and whether
-a token is set; Viewers see identity/origin, without URL paths or credential
-metadata. Tokens are plaintext on the data volume: protect database backups.
+values never return in responses or drafts. Admins see configuration; Viewers see identity, origin and whether a token
+is set, without URL paths or secret values. Tokens are plaintext on the data volume: protect database backups.
 
 Test connection sends a bounded backend request to the saved URL with the
 bound credential. Disabled integrations cannot be tested. The verdict contains
