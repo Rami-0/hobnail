@@ -13,7 +13,7 @@ fetches configured JSON widgets and sends notifications. Boards are curated in
 the browser. Application data requires login.
 
 The M5 image is **13.3 MB** (`docker images`; compressed content 4,578,941 B).
-Warm-cache idle median: **2,117,632 B** of cgroup memory.current (2.01953125 MiB),
+Warm-cache idle median: **1,722,368 B** of cgroup memory.current (1.642578125 MiB),
 180 samples over 90 seconds on a fresh database/config. This excludes the
 browser. Login hashing can exceed the 20 MiB peak budget; bundle and browser
 budgets also have misses. Methods and limits: [React results](docs/plans/react-port-phase-2-5.md).
