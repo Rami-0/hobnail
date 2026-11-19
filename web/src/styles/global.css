@@ -1,17 +1,12 @@
-/* The client's one global stylesheet (imported once, by src/main.tsx).
-   Hand-written CSS on the tokens in tokens.css; no Tailwind.
-
-   `@layer ui-sdk;` comes first (decision rule 4): it fixes the layer order
-   so UI SDK's styles, once installed, sit in a layer below every unlayered
-   rule here. When UI SDK is installed, `@ui-sdk/core/web.css` is imported
-   once at the app entry (src/main.tsx), not here. */
+/* Global styles. The SDK layer sits below the unlayered app rules. The app
+   entry imports this stylesheet and @ui-sdk/core/web.css. */
 @layer ui-sdk;
 
 @import "./tokens.css";
 @import "./ui.css";
 @import "./shell.css";
 
-/* ---- login (src/ui/pages/login.rs; routes/Login.tsx uses these Phase 0 field classes) ---- */
+/* ---- sign-in and setup ---- */
 .field{display:grid;gap:var(--s-1)}
 .field label{font-size:var(--fs-sm);font-weight:500;color:var(--text-2)}
 .input{width:100%;height:var(--ctl-h);padding:0 var(--s-3);border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field);color:var(--text);font-size:var(--fs-input)}

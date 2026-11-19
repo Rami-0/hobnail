@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { humanDuration, level, sparkPaths, stripClass, stripRuns, stripSummary, windowLabel } from "./svg.ts";
 
-test("sparkline: zero based, 1 px padding, like static/app.js sparkPath", () => {
+test("sparkline: zero based, 1 px padding", () => {
   const p = sparkPaths([0, 10]);
   assert.ok(p);
   assert.equal(p.line, "M0 23L100 1");

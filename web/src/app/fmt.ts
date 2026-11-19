@@ -1,7 +1,4 @@
-// The few formatters the shell needs. The pages stream owns the full
-// formatting twins (src/format/, checked against Rust fixtures); these
-// local copies keep the shell independent of that folder until it exists
-// and follow the same rules (util::human_bytes, static/app.js fmtVal).
+// Compact formats for the shell and vitals.
 
 /** `512 B`, `1.5 KiB`, `120 MiB` (util::human_bytes). */
 export function bytes(n: number): string {

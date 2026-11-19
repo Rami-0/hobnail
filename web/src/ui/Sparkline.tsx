@@ -1,7 +1,7 @@
 // Plain-SVG data marks (no Recharts; the charts chunk stays lazy):
 // Sparkline (vitals chips, table cells, tiles), HealthStrip (24 h status
 // bar), Meter (a used-of-total bar). Stretched to their box; CSS sets the
-// size (static/app.css `.spark`, `.hstrip`, `.meter`). The drawing rules
+// size. The drawing rules
 // are in svg.ts.
 import type { CSSProperties } from "react";
 

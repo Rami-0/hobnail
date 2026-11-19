@@ -1,4 +1,4 @@
-// Toasts (DESIGN.md §11.8; static/ui.js HB.toast): one polite stack in the
+// Toasts (DESIGN.md §11.8): one polite stack in the
 // corner, at most three, newest last; an error ("bad") stays until closed,
 // others leave after 4.5 s (8 s with an action). Never over an open dialog:
 // a toast raised while one is open waits in a queue and shows when the last

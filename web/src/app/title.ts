@@ -1,5 +1,5 @@
 // The tab: title "(<problems>) <page> · <site> · Hobnail" and the favicon
-// with a red count (static/app.js badge). The favicon is built from
+// with a red count. The favicon is built from
 // /icon.svg as a data: URL (CSP `img-src 'self' data:`); nothing is parsed
 // as HTML.
 import { useEffect } from "react";

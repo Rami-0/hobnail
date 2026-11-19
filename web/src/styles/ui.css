@@ -1,8 +1,5 @@
-/* The component layer of src/ui/ (DESIGN.md §11.4 to §11.9), ported from
-   static/components.css and static/app.css with the same tokens. Field
-   rules are not scoped to dialogs and Settings here: every control of the
-   client uses them. Motion only through the duration tokens, which
-   tokens.css sets to 0 under prefers-reduced-motion. */
+/* Shared component styles (DESIGN.md §11.4–11.9). Motion uses the duration
+   tokens from tokens.css, which honor prefers-reduced-motion. */
 
 /* ---- status: dot and pill (state is never colour alone) ---- */
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--off)}

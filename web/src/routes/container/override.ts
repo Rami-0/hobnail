@@ -1,9 +1,4 @@
-// The Edit override dialog's decisions, pure (override.test.ts): the values
-// a container's `[containers."<name>"]` table gives the form, the field
-// checks, which fields changed (an edit sends only those: THE DIFF RULE,
-// static/settings.js OVERRIDE.request), the RETARGET RULE after a 409, and
-// what a settings API answer means for the dialog (static/ui.js HB.result).
-// The dialog component (EditDialog.tsx) only wires these to the DOM.
+// Validation, diffing and conflict resolution for container overrides.
 import type { ApiResult } from "../../api/client.ts";
 
 export const OV_KEYS = ["name", "group", "icon", "url", "description", "hide", "order", "size"] as const;
@@ -41,7 +36,7 @@ export function readOverride(body: unknown, name: string): { hash: string; value
   return { hash: body.hash, values: valuesOf(ovs[name]), groups };
 }
 
-/** The values as the form sends them: text trimmed (static/ui.js `values`). */
+/** The values as the form sends them: text trimmed. */
 export function trimmed(v: OvValues): OvValues {
   const out = { ...v };
   for (const k of OV_KEYS) out[k] = v[k].trim();
@@ -51,7 +46,7 @@ export function trimmed(v: OvValues): OvValues {
 const HTTP = /^https?:\/\/[^\s/?#]+[^\s]*$/i;
 
 /**
- * Field checks (static/ui.js `problem` with the dialog's rules): name at
+ * Field checks: name at
  * most 80 characters, description 200, URL a web link, order a whole number
  * from -100000 to 100000. A value left as the dialog opened it is not
  * checked again (a hand-written `url = "/files"` stays editable).
@@ -113,7 +108,7 @@ export function isDirty(v: OvValues, was: OvValues): boolean {
 }
 
 /**
- * THE RETARGET RULE (static/settings.js listDialog, for one override): after
+ * Retargeting an override after a conflict: after
  * a 409, the dialog may move to the file as it is now only when this
  * container's override still has every value the dialog was opened with.
  * Then the new hash is adopted and the input is kept; otherwise the input

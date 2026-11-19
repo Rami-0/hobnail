@@ -1,6 +1,6 @@
-/* The shell (src/app/Shell.tsx), ported from static/app.css: sidebar with
+/* The shell: sidebar with
    the stack tree, rail and drawer, top bar with vitals, phone bottom bar,
-   the "live updates stopped" pill. Same breakpoints as the old UI: over
+   the "live updates stopped" pill. Above
    1100 px the sidebar is in the page (`:root[data-side=rail]` collapses
    it), 700 to 1100 px it is a rail that opens over the page, under 700 px
    a drawer (`:root.side-open`). */

@@ -1,9 +1,5 @@
-// Pure drawing logic of the plain-SVG primitives (Sparkline, HealthStrip,
-// Meter), no DOM, so svg.test.ts can check it. The rules follow the old UI:
-// a sparkline is drawn from zero to its maximum in a 100 × 24 box with 1 px
-// padding (src/ui/chart.rs sparkline_path, static/app.js sparkPath); a gap
-// (null) breaks the line; a health strip merges runs of equal buckets into
-// one rect and sums the window up in words (src/ui/view/strip.rs).
+// Geometry for SVG sparklines and health strips. Null breaks a sparkline.
+// A strip merges consecutive equal buckets and summarizes the time window.
 
 export interface SparkPaths {
   /** Path data of the line (one M…L run per stretch without gaps). */
@@ -50,7 +46,7 @@ export function sparkPaths(values: readonly (number | null)[], max?: number, w =
 /** Health strip bucket codes (GET /api/v1/strips; db::strips::Cell order). */
 export const STRIP = { unknown: 0, off: 1, ok: 2, warn: 3, bad: 4 } as const;
 
-/** CSS class per code (static/app.css `.hstrip .u/.f/.o/.w/.b`). */
+/** CSS class per code. */
 export function stripClass(code: number): "u" | "f" | "o" | "w" | "b" {
   switch (code) {
     case STRIP.off:

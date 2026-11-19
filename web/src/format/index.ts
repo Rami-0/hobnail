@@ -1,5 +1,5 @@
 // Formatting twins of the server's helpers (src/util.rs `human_bytes`,
-// `human_duration`; src/ui/fmt.rs `pct`, `ago`; src/ui/view `status_label`,
+// `human_duration`; the display fixtures; src/read_model `status_label`,
 // `port_views`, `binding_link`). Pure: no DOM, no clock (callers pass `now`).
 // fixtures.json (written by a Rust test) holds inputs and the outputs the
 // server gives; format.test.ts asserts the same outputs here.

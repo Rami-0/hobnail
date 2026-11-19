@@ -3,7 +3,7 @@
 // frame is applied in one animation frame, so React renders at most once
 // per frame however many events came in (plan 4.9). While the user is
 // touching or scrolling the page, the frame waits until they stop
-// (static/app.js: updates never move what is being read). Injected timers,
+// so updates never move what is being read. Injected timers,
 // no DOM (store.test.ts).
 
 export interface Store<T> {

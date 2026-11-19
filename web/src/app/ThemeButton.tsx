@@ -1,7 +1,4 @@
-// The theme toggle in the top bar: one click per step through the same
-// themes, in the same order, as the server-rendered UI (static/app.js), and
-// a toast that says which theme it switched to (NAV-41, A11Y-11; a phone
-// shows it too). A new click replaces the previous theme toast.
+// Cycle through the themes and announce the new choice with a toast.
 import { ContrastIcon, FlameIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useSyncExternalStore, type ReactNode } from "react";
 

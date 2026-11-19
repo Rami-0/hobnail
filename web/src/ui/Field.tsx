@@ -1,4 +1,4 @@
-// Form controls (DESIGN.md §11.5; static/components.css `.fld`): a Field is
+// Form controls (DESIGN.md §11.5): a Field is
 // a label, one control, a hint and an error; the control inside picks up
 // its id, `aria-describedby` and `aria-invalid` from the Field, so a page
 // writes <Field label="Name" id="name" error={e}><TextInput name="name"/></Field>.

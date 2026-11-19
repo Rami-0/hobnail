@@ -1,4 +1,4 @@
-// Menu (DESIGN.md §11.9; the old account menu, static/app.js): a button
+// Menu (DESIGN.md §11.9): a button
 // that opens a list of actions under it. Opening focuses the first item;
 // Up/Down/Home/End move; Esc closes and returns focus to the button; Tab, a
 // click outside or choosing an item closes it.

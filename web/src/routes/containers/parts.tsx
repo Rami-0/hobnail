@@ -14,7 +14,7 @@ function avatarLetter(label: string): string {
   return c ? c.toUpperCase() : "?";
 }
 
-/** ui::letter_avatar's hue: the same colour for the same name as the old UI. */
+/** A stable avatar hue for each name. */
 export function avatarHue(label: string): number {
   let h = 7;
   for (const b of new TextEncoder().encode(label)) h = (Math.imul(h, 31) + b) >>> 0;

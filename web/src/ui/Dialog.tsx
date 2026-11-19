@@ -1,8 +1,4 @@
-// Dialog (DESIGN.md §11.7; static/ui.js HB.open / HB.close): the native
-// <dialog> opened with showModal(), so the page behind is inert and the
-// browser keeps focus inside. Focus moves to `initialFocus` (else the first
-// control of the body) and returns to what had it before, when the dialog
-// closes.
+// SDK dialog with focus restoration and an optional unsaved-changes guard.
 //
 // Closing: Esc, the header's Close button, a click that starts and ends on
 // the backdrop, and Back. Each asks `guard()` first: when it says there is

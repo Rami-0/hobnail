@@ -1,4 +1,4 @@
-// The global keyboard map (static/app.js "keyboard map"), as a pure
+// The global keyboard map as a pure
 // function of the key press (keys.test.ts). Off while typing in a text
 // field and with Ctrl, ⌘ or Alt held; `g` then a letter within 1.2 s jumps
 // to a page.
@@ -15,7 +15,7 @@ export type KeyAction =
 
 export type GoPage = "overview" | "containers" | "host" | "logs" | "history" | "alerts" | "settings";
 
-/** `g` + this key (src/ui/shell.rs keys_dialog). */
+/** `g` + this key. */
 export const GO: Record<string, GoPage> = {
   o: "overview",
   c: "containers",
@@ -42,7 +42,7 @@ export interface KeyState {
 
 /**
  * What a key press does, and the next state. `typing`: focus is in a field
- * that takes text (static/app.js typing()); `blocked`: a dialog or the
+ * that takes text; `blocked`: a dialog or the
  * drawer is open (they handle their own keys).
  */
 export function keyAction(

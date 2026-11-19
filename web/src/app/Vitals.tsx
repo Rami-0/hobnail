@@ -1,4 +1,4 @@
-// The top bar's host vitals (src/ui/shell.rs vitals): CPU, memory and the
+// The top bar's host vitals: CPU, memory and the
 // first disk in percent, and network throughput, each with a sparkline of
 // the last points (seeded from the last hour of history, then live from the
 // `system` topic). They link to the Host page.

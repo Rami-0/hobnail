@@ -1,6 +1,4 @@
-// The `?` sheet (src/ui/shell.rs keys_dialog): every binding this client
-// has, in the old sheet’s order.
-// "/" names this page's filter (NAV-62). ⌘ instead of Ctrl on a Mac.
+// Keyboard shortcuts. On macOS, display ⌘ instead of Ctrl.
 import type { ReactNode } from "react";
 
 import { useBootstrap } from "../live/index.ts";

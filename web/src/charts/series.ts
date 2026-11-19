@@ -5,7 +5,7 @@
 //   breaks the line at a null and the tooltip there says "no data".
 // - `ticks`: local-time axis ticks on whole minutes, hours or days.
 // - `chartMarkers`: the events worth marking (crash, OOM, failing health
-//   check, fired alert; src/ui/chart.rs `markers_from_events`), folded when
+//   check, fired alert), folded when
 //   closer than 1.5 % of the width (`cluster_markers`).
 // - `zoomTo`: a drag in pixels as a `from`/`to` window, or null for a tap.
 import type { EventRow } from "../api/gen/EventRow.ts";

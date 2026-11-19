@@ -1,6 +1,4 @@
-/* Usage charts (Recharts) on the container page. Colours are the chart
-   tokens (tokens.css --ch-*): the SVG draws in currentColor. Ported from
-   static/app.css `.chart`, `.canvas`, `.tip`, `.mk`, `.lg`. */
+/* Usage charts draw in currentColor, set by the --ch-* chart tokens. */
 .chart{margin:0;min-width:0;padding:10px 12px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
 .chart.ch-cpu{color:var(--ch-cpu)}
 .chart.ch-mem{color:var(--ch-mem)}

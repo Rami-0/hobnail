@@ -1,5 +1,4 @@
-// The sidebar's stack tree as data (src/ui/shell.rs tree_inner,
-// static/app.js treeFilter), pure so tree.test.ts can check the filter.
+// Data and filtering for the sidebar stack tree.
 import type { ContainersView } from "../api/gen/ContainersView.ts";
 
 export interface TreeCtr {
@@ -61,8 +60,7 @@ export interface FilteredStack {
 }
 
 /**
- * The stacks and containers a filter text leaves (static/app.js
- * treeFilter): a stack whose name matches keeps all its containers, else
+ * The stacks and containers a filter text leaves: a stack whose name matches keeps all its containers, else
  * only the matching ones; a stack with none goes.
  */
 export function filterTree(stacks: TreeStack[], query: string): FilteredStack[] {

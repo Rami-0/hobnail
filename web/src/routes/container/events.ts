@@ -1,5 +1,4 @@
 // Event words and links for the container page's timeline (pure).
-// src/ui/pages/mod.rs `event_label` and src/ui/chart.rs marker links.
 
 const LABELS: Record<string, string> = {
   "app.start": "Hobnail started",

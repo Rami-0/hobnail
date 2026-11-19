@@ -1,8 +1,6 @@
 // The Containers table's view: filter, sort and grouping, held in the URL
 // (`?q=&state=&stack=&sort=&dir=&group=`), the parts worth keeping (sort,
 // direction, grouping) remembered per browser. Pure (no DOM): view.test.ts.
-// Mirrors src/ui/pages/containers.rs `ListQuery`, `select`, `cmp_card` and
-// static/app.js `applyView`, with the client's six columns.
 import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { GroupRow } from "../../api/gen/GroupRow.ts";
 

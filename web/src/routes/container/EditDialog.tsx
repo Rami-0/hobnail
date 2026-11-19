@@ -1,13 +1,5 @@
-// The Edit override dialog (static/settings.js OVERRIDE + listDialog,
-// static/ui.js HB.result), opened by `?edit=override` on the container page.
-// It reads the file's values and hash from GET /api/settings/containers,
-// sends only the changed fields with that hash as `base_hash`, and handles
-// every answer the way the old dialog does: field errors on their fields
-// (422), "Reload and keep my input" under THE RETARGET RULE (409), "Sign in
-// (new tab)" and "Retry" (401), the refusal's own words (403). The
-// decisions are in override.ts; this file wires them to the form. The
-// note's buttons are data (`NoteAct`), drawn with this render's handlers,
-// so a Retry always sends what the form holds now.
+// Opened by ?edit=override. The form reads the saved override and hash,
+// sends only changed fields and uses override.ts to handle errors and rebase.
 import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from "react";
 
 import type { ApiResult } from "../../api/client.ts";
