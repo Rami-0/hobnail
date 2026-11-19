@@ -17,7 +17,7 @@ mod boards;
 mod bookmarks;
 pub mod bootstrap;
 mod container_tabs;
-pub pub(crate) mod containers;
+pub mod containers;
 mod dashboard_settings;
 pub mod error;
 mod history;
