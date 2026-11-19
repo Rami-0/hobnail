@@ -830,12 +830,18 @@ fn api_events() {
     let body = api::answer(&db, "/api/events", "kind=auth.", T0, true).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["events"][0]["subject"], "admin");
-    // Anonymous viewers never see auth.* events (failed logins carry IPs).
+    db.record_event(T0 + 10, "config.save", "info", "admin", "change note");
+    db.record_event(T0 + 11, "history.clear", "info", "admin", "change note");
+    // Audit events are only visible to administrators.
     let body = api::answer(&db, "/api/events", "kind=auth.", T0, false).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["events"].as_array().unwrap().len(), 0);
     let body = api::answer(&db, "/api/events", "limit=500", T0, false).unwrap();
-    assert!(!body.contains("\"auth."), "{body}");
+    for prefix in ["auth.", "config.", "history."] {
+        assert!(!body.contains(prefix), "{body}");
+    }
+    let admin = api::answer(&db, "/api/events", "limit=500", T0, true).unwrap();
+    assert!(admin.contains("config.save") && admin.contains("history.clear"));
 }
 
 #[test]

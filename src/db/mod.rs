@@ -180,10 +180,8 @@ pub struct EventFilter {
     pub before_id: Option<i64>,
     /// 0 means the default of 50. Capped at 500.
     pub limit: usize,
-    /// Leave out `kind`s starting with this. Anonymous viewers get
-    /// `auth.` excluded: login history (with client IPs) is not dashboard
-    /// data. See [`EventFilter::for_viewer`].
-    pub exclude_kind_prefix: Option<String>,
+    /// Hide private audit events from viewers.
+    pub hide_audit_events: bool,
     /// Only events with `ts >= since` / `ts <= until` (unix seconds).
     /// Served by the `events_ts` index (schema v6), so a window reads only
     /// its own rows however long the table is.
@@ -192,12 +190,9 @@ pub struct EventFilter {
 }
 
 impl EventFilter {
-    /// Apply what a viewer may see: without a session, `auth.*` events are
-    /// hidden (failed logins carry the client IP).
-    pub fn for_viewer(mut self, signed_in: bool) -> Self {
-        if !signed_in {
-            self.exclude_kind_prefix = Some("auth.".into());
-        }
+    /// Audit events may include account details and configuration changes.
+    pub fn for_viewer(mut self, admin: bool) -> Self {
+        self.hide_audit_events = !admin;
         self
     }
 }
@@ -787,14 +782,8 @@ impl Db {
                     args.len()
                 ));
             }
-            if let Some(k) = f.exclude_kind_prefix.as_ref().filter(|k| !k.is_empty()) {
-                args.push((k.chars().count() as i64).into());
-                args.push(k.clone().into());
-                sql.push_str(&format!(
-                    " AND substr(kind, 1, ?{}) != ?{}",
-                    args.len() - 1,
-                    args.len()
-                ));
+            if f.hide_audit_events {
+                sql.push_str(" AND kind NOT GLOB 'auth.*' AND kind NOT GLOB 'config.*' AND kind NOT GLOB 'history.*'");
             }
             if let Some(b) = f.before_id {
                 args.push(b.into());
