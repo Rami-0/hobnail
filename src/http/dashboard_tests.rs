@@ -515,6 +515,54 @@ async fn scoped_board_edits_cannot_introduce_targets_or_reuse_foreign_ids() {
 }
 
 #[tokio::test]
+async fn scoped_widget_subscriptions_only_count_when_a_widget_is_visible() {
+    let st = state();
+    std::fs::write(st.config.path(), "[[widgets]]\nid = \"board-only\"\ntype = \"custom-api\"\nurl = \"http://127.0.0.1:1/fixture\"\n").unwrap();
+    st.config.reload();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st.clone()).await).await;
+    let board = owner.board("Widgets").await;
+    let viewer = owner
+        .guest("widget-viewer", "viewer", json!({"boards": [board]}))
+        .await;
+    let (mut stream, _) = Stream::open(
+        owner.addr,
+        "/api/v1/stream?topics=widget,boards",
+        &viewer.cookie,
+    )
+    .await;
+    assert_eq!(stream.next().await.0, "hello");
+    st.changed("reload");
+    assert_eq!(stream.next().await.0, "config");
+    assert_eq!(st.widget_viewers(), 0);
+    let path = format!("/api/v1/boards/{board}");
+    owner
+        .json(
+            "PUT",
+            &path,
+            json!({"version": 0, "sections": [{
+                "title": "Widgets", "position": 0, "items": [{
+                    "position": 0, "spans": {"mobile": 4, "tablet": 4, "desktop": 6, "rows": 1},
+                    "payload": {"kind": "widget", "widget_id": "board-only"}
+                }]
+            }]}),
+            200,
+        )
+        .await;
+    assert_eq!(stream.next().await.0, "boards");
+    assert_eq!(st.widget_viewers(), 1);
+    st.changed("w-board-only");
+    let (topic, item) = stream.next().await;
+    assert_eq!(topic, "widget");
+    assert_eq!(item["id"], "board-only");
+    owner
+        .json("PUT", &path, json!({"version": 1, "sections": []}), 200)
+        .await;
+    assert_eq!(stream.next().await.0, "boards");
+    assert_eq!(st.widget_viewers(), 0);
+}
+
+#[tokio::test]
 async fn scoped_viewers_only_read_containers_on_their_boards() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
