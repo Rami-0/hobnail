@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useId, type ReactNode } from "react";
-import { api, getSession, refreshEditingSession } from "../../api/session.ts";
+import { api, editingSessionRequired, getSession, refreshEditingSession } from "../../api/session.ts";
 import { useRoute } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
@@ -91,7 +91,7 @@ export function Collection(props: Props) {
     order[index + offset] = from;
     void run({ action: "reorder", id: typeof from === "number" ? to : from, order });
   }
-  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then(() => refresh()); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
+  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session) { setFailure(undefined); void refresh(); } else setFailure({ kind: "sign_in", message: editingSessionRequired }); }); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
       <header className="board-heading"><h2>{title}</h2>
@@ -236,7 +236,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
       {props.renderDetails?.(input)}
       {rename && base.entry && <Note kind="warn">The rename also updates these rules: {props.renameRules?.(base.entry.id).join(", ")}</Note>}
       {errors.form && failure?.kind !== "invalid" && <Note kind="bad">{errors.form}</Note>}
-      <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); }); }} rebase={() => { void rebase(); }} />
+      <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); else setFailure({ kind: "sign_in", message: editingSessionRequired }); }); }} rebase={() => { void rebase(); }} />
       {preview && <Note kind="info">{preview}</Note>}
     </form>
   </Dialog>;

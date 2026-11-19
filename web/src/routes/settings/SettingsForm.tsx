@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, refreshEditingSession } from "../../api/session.ts";
+import { api, editingSessionRequired, refreshEditingSession } from "../../api/session.ts";
 import { navigate } from "../../app/router.ts";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Button } from "../../ui/Button.tsx";
@@ -105,7 +105,7 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     <form className={wide ? "settings-form settings-wide" : "settings-form"} noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
       {renderDetails?.(input, dirty)}
       <Controls fields={fields} input={input} base={snapshot.values} errors={errors} onChange={(values) => setDraft({ base, input: values })} />
-      <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); }); }} rebase={() => { void rebase(); }} />
+      <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); else setFailure({ kind: "sign_in", message: editingSessionRequired }); }); }} rebase={() => { void rebase(); }} />
       {warnings.map((warning) => <Note key={warning} kind="warn">{warning}</Note>)}
       <div className="settings-actions">
         <Button type="submit" variant="primary" disabled={!dirty} busy={busy}>Save</Button>

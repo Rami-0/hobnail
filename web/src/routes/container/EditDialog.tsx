@@ -11,7 +11,7 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from "react";
 
 import type { ApiResult } from "../../api/client.ts";
-import { api, refreshEditingSession } from "../../api/session.ts";
+import { api, editingSessionRequired, refreshEditingSession } from "../../api/session.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput, type TextInputProps } from "../../ui/Field.tsx";
@@ -224,7 +224,10 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
 
   // After signing in elsewhere the session has a new CSRF token: read it, then go again.
   const retryAfterSignIn = async (what: "save" | "load") => {
-    if (!(await refreshEditingSession())) return;
+    if (!(await refreshEditingSession())) {
+      showNote({ kind: "bad", text: editingSessionRequired, act: what === "save" ? "signin-save" : "signin-load" });
+      return;
+    }
     if (what === "save") await save();
     else await load();
   };

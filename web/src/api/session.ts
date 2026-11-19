@@ -54,6 +54,8 @@ export function refreshSession(): Promise<SessionState> {
 
 /** Retry an in-progress write only for the same principal. Keep the editor
  * mounted when the new tab has yet to finish signing in. */
+export const editingSessionRequired = "Sign in as the same account in the other tab, then retry.";
+
 export async function refreshEditingSession(): Promise<Session | null> {
   const principal = state.session?.user?.name;
   if (!principal) return null;
