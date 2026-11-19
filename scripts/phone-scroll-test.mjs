@@ -1,7 +1,7 @@
 // Phone scroll-stability check (regression test for the "page keeps
 // scrolling" bug). Mimics iOS Safari (no CSS scroll anchoring) at 390 px and
 // injects live updates through the page's real SSE listeners.
-//   node scripts/phone-scroll-test.mjs http://127.0.0.1:3200/
+//   node scripts/phone-scroll-test.mjs http://127.0.0.1:3396/
 // Expect: grow_above.moved_px 0; during_touch.swaps_while_touching 0.
 import { spawn } from "node:child_process";
 import os from "node:os";

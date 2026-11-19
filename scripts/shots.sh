@@ -4,7 +4,7 @@
 # Default paths: / /containers /history /alerts /login /settings
 # Widths 1440, 900, 390; dark and light. Needs the playwright headless shell.
 set -u
-out=${1:?outdir}; base=${2:-http://127.0.0.1:3200}; shift 2 2>/dev/null || shift $#
+out=${1:?outdir}; base=${2:-http://127.0.0.1:3396}; shift 2 2>/dev/null || shift $#
 paths=("$@"); [ ${#paths[@]} -eq 0 ] && paths=(/ /containers /history /alerts /login /settings)
 CH=${CH:-$HOME/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell}
 mkdir -p "$out"
