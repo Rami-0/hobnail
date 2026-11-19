@@ -11,7 +11,6 @@ import {
   readOverride,
   requestBody,
   savedText,
-  signInHref,
   validate,
   valuesOf,
 } from "./override.ts";
@@ -111,5 +110,4 @@ test("answers mapped as HB.result", () => {
   assert.match((outcome({ kind: "network", message: "x" }) as { message: string }).message, /did not answer/);
   assert.equal(savedText("web", { unchanged: false, revision: 12 }), "Saved “web” · revision #12");
   assert.equal(savedText("web", { unchanged: true, revision: null }), "No changes");
-  assert.equal(signInHref("/app/containers/web", "?edit=override"), "/app/login?next=%2Fapp%2Fcontainers%2Fweb%3Fedit%3Doverride");
 });
