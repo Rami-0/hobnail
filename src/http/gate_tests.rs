@@ -343,7 +343,7 @@ async fn settings_reads_need_a_session() {
 }
 
 #[tokio::test]
-async fn login_refuses_foreign_origin_and_bad_redirects() {
+async fn login_refuses_foreign_origin_and_form_credentials() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
     let addr = start(st).await;
@@ -360,7 +360,7 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
     )
     .await;
     assert_eq!(r.status, 403);
-    // Form login with a tab-smuggled next goes home, not off-site.
+    // The former form login cannot create a session or redirect.
     let origin = format!("http://{addr}");
     let form = format!(
         "username=admin&password={}&next=%2F%09%2Fevil.example",
@@ -377,13 +377,9 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
         &form,
     )
     .await;
-    assert_eq!(r.status, 303, "{}", r.head);
-    let loc = r
-        .head
-        .lines()
-        .find(|l| l.to_ascii_lowercase().starts_with("location:"))
-        .unwrap();
-    assert_eq!(loc[9..].trim(), "/app", "{loc}");
+    assert_eq!(r.status, 415, "{}", r.head);
+    assert!(header(&r.head, "location").is_none());
+    assert!(header(&r.head, "set-cookie").is_none());
 }
 
 /// ROB-15: a Settings form that is submitted without the script (a plain

@@ -8,7 +8,7 @@ use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, Salt
 use argon2::Argon2;
 use http_body_util::{BodyExt, Limited};
 use hyper::header::{
-    HeaderValue, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HOST, LOCATION, ORIGIN, REFERER, RETRY_AFTER,
+    HeaderValue, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HOST, ORIGIN, REFERER, RETRY_AFTER,
     SET_COOKIE,
 };
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
@@ -29,7 +29,6 @@ pub const MIN_PASSWORD_CHARS: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 1024;
 /// Login request bodies larger than this are refused.
 const MAX_BODY: usize = 4096;
-const MAX_NEXT: usize = 2048;
 
 pub(crate) fn now_s() -> i64 {
     crate::util::unix_now() as i64
@@ -97,7 +96,7 @@ pub(crate) fn check_write(session: &Session, headers: &HeaderMap) -> Result<(), 
     Ok(())
 }
 
-/// `/api/login` (POST: form or JSON `{password}`; checks Origin, rate limit)
+/// `/api/login` (POST JSON credentials; checks Origin and rate limits)
 /// and `/api/logout` (POST, already passed `require_write`).
 /// The peer address is in `req.extensions().get::<http::server::Peer>()`.
 pub(crate) async fn route(
@@ -199,29 +198,6 @@ pub fn cli_set_password(args: &[String]) -> i32 {
             1
         }
     }
-}
-
-/// Server-side check of a post-login redirect target. Returns the path when it
-/// is a same-origin relative path, else `None` (caller falls back to `/`).
-/// Rules (security review): reject every control character (incl. TAB, which
-/// browsers strip, turning `/\t/evil` into `//evil`) and space; require a
-/// leading `/`; no leading `//`; no backslash anywhere; percent-decoded form
-/// must pass the same checks.
-pub fn safe_next(next: &str) -> Option<&str> {
-    // The raw form also has to be plain ASCII so it is a valid Location
-    // header that every browser reads the same way.
-    if next.len() > MAX_NEXT || !next.is_ascii() || !local_path_ok(next) {
-        return None;
-    }
-    let decoded = crate::db::api::percent_decode(next)?;
-    local_path_ok(&decoded).then_some(next)
-}
-
-fn local_path_ok(s: &str) -> bool {
-    !s.chars().any(|c| c.is_control() || c == ' ')
-        && s.starts_with('/')
-        && !s.starts_with("//")
-        && !s.contains('\\')
 }
 
 pub(crate) fn change_password_for(
@@ -690,8 +666,7 @@ pub(crate) async fn credential_route(
         .next()
         .unwrap_or("")
         .trim();
-    let form = legacy && ctype.eq_ignore_ascii_case("application/x-www-form-urlencoded");
-    if !form && !ctype.eq_ignore_ascii_case("application/json") {
+    if !ctype.eq_ignore_ascii_case("application/json") {
         return error(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "unsupported_media_type",
@@ -714,33 +689,7 @@ pub(crate) async fn credential_route(
             "request too large",
         );
     };
-    let body = body.to_bytes();
-    let parsed = if form {
-        std::str::from_utf8(&body)
-            .ok()
-            .and_then(crate::db::api::parse_query)
-            .and_then(|pairs| {
-                let get = |key| {
-                    pairs
-                        .iter()
-                        .find(|(name, _)| name == key)
-                        .map(|(_, value)| value.clone())
-                };
-                Some((
-                    Credentials {
-                        username: get("username")?,
-                        password: get("password")?,
-                        token: None,
-                    },
-                    get("next"),
-                ))
-            })
-    } else {
-        serde_json::from_slice(&body)
-            .ok()
-            .map(|credentials| (credentials, None))
-    };
-    let Some((credentials, next)) = parsed else {
+    let Ok(credentials) = serde_json::from_slice(&body.to_bytes()) else {
         return error(
             StatusCode::BAD_REQUEST,
             "bad_request",
@@ -794,25 +743,14 @@ pub(crate) async fn credential_route(
             )
         }
     };
-    let mut response = if form {
-        let mut r = full(StatusCode::SEE_OTHER, "");
-        set(
-            &mut r,
-            LOCATION,
-            next.as_deref().and_then(safe_next).unwrap_or("/app"),
-        );
-        set(&mut r, CACHE_CONTROL, "no-store");
-        r
-    } else {
-        json_response(
-            if legacy {
-                StatusCode::OK
-            } else {
-                StatusCode::CREATED
-            },
-            &serde_json::json!({"ok": true, "csrf": csrf_for(&token)}),
-        )
-    };
+    let mut response = json_response(
+        if legacy {
+            StatusCode::OK
+        } else {
+            StatusCode::CREATED
+        },
+        &serde_json::json!({"ok": true, "csrf": csrf_for(&token)}),
+    );
     set(
         &mut response,
         SET_COOKIE,
@@ -1153,46 +1091,6 @@ mod tests {
         for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"] {
             assert!(c.contains(part), "{c}");
         }
-    }
-
-    #[test]
-    fn safe_next_rules() {
-        for bad in [
-            "/\t/evil.example",
-            "/\u{0}",
-            "/ /evil",
-            "/%09/evil.example",
-            "//evil.example",
-            "/\\evil.example",
-            "https://evil.example",
-            "javascript:alert(1)",
-            "",
-            "evil",
-            "/\n/evil.example",
-            "/\r/evil.example",
-            "/\u{7f}x",
-            "/%2F/evil.example",
-            "/%5Cevil.example",
-            "/%20/evil",
-            "/a%20b", // decoded form has a space
-            "/%00",
-            "/%zz",
-            "/%E2%80%",
-            "/ü",
-            "\\\\evil.example",
-        ] {
-            assert_eq!(safe_next(bad), None, "{bad:?}");
-        }
-        for good in [
-            "/",
-            "/containers?state=running",
-            "/containers/web-1",
-            "/history#cpu",
-            "/a%2Db",
-        ] {
-            assert_eq!(safe_next(good), Some(good), "{good:?}");
-        }
-        assert_eq!(safe_next(&format!("/{}", "a".repeat(5000))), None);
     }
 
     #[test]
