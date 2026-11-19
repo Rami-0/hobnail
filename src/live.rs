@@ -12,7 +12,7 @@ use crate::state::AppState;
 const TICK: Duration = Duration::from_secs(1);
 const STATS_EVERY: Duration = Duration::from_secs(5);
 
-/// Watch the config file; push a page reload to viewers when it changes.
+/// Watch the configuration file and notify live clients after a change.
 pub async fn config_watcher(state: Arc<AppState>) {
     let mut iv = tokio::time::interval(Duration::from_secs(2));
     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);

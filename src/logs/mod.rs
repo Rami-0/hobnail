@@ -90,9 +90,7 @@ pub fn may_tail(state: &AppState, name: &str) -> bool {
         .any(|c| c.name == name && tailable_c(&cfg, c))
 }
 
-/// Names of the containers whose logs may be read (`may_tail`), for pages
-/// that put a logs link next to names they did not get from the snapshot
-/// (events, alerts, host processes).
+/// Names of containers whose logs may be read by the logs picker.
 pub fn tailable(state: &AppState) -> std::collections::HashSet<String> {
     let cfg = state.config.current();
     state

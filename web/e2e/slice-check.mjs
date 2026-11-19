@@ -257,9 +257,8 @@ async function containersPage(size) {
 
   // sort
   const TH = 'th[data-sort="name"]';
-  // The URL leaves defaults out, as the old UI does (static/app.js: name
-  // ascending is no sort/dir; cpu and mem default to descending, so their
-  // dir appears only when ascending). The phone layout has no header row:
+  // The URL omits default sort directions (name ascending, CPU and memory
+  // descending). The phone layout has no header row:
   // it sorts with [data-testid=sort-select] and [data-testid=sort-dir].
   const narrow = !(await inp.box(TH, false));
   if (!narrow) {

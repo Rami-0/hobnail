@@ -9,8 +9,8 @@
 //!
 //! # Access
 //!
-//! The central HTTP router requires a signed-in user for reads and Admin
-//! access, CSRF and same Origin for writes.
+//! The central HTTP router requires an Admin session for reads and writes.
+//! Writes also require a CSRF token and a same-origin Origin or Referer.
 //!
 //! # Conventions
 //!

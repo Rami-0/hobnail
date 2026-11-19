@@ -109,8 +109,7 @@ pub struct AppState {
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
     pub login_verifying: Mutex<()>,
-    /// Fragment ids that changed ("groups", "sys", "w-<id>", "alerts") or
-    /// "reload". Each SSE connection re-renders what it receives.
+    /// Internal notifications for JSON stream topics and config changes.
     pub events: broadcast::Sender<Arc<str>>,
     /// Woken when the first viewer connects.
     pub wake: Notify,

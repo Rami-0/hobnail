@@ -1,7 +1,7 @@
 //! View model for containers and bookmarks, grouped by stack.
 //!
-//! `build_groups` turns config + snapshot + stats into plain data (unit-tested);
-//! the pages and the sidebar only render it. No I/O, no clock.
+//! `build_groups` projects config, a snapshot and stats into plain data
+//! for the container and logs APIs.
 
 mod ports;
 #[cfg(test)]

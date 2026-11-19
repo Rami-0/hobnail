@@ -23,7 +23,7 @@ const PROXIED = [
   "/icons",
   "/custom.css",
   "/manifest.webmanifest",
-  // The PWA icons the document head links to (src/ui/pwa.rs), and the
+  // The PWA icons the document head links to (src/http/pwa.rs), and the
   // health check the noscript text names.
   "/icon.svg",
   "/icon-192.png",

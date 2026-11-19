@@ -128,24 +128,21 @@ export function nextSearch(current: string, next: URLSearchParams | SearchPatch)
   return s ? `?${s}` : "";
 }
 
-/** Longest `next` the server accepts (auth.rs MAX_NEXT). */
+/** Maximum length of a post-login return target. */
 const MAX_NEXT = 2048;
 
 // Rust's `char::is_control` (Unicode Cc): C0, DEL and C1.
 // eslint-disable-next-line no-control-regex
 const CONTROL_OR_SPACE = /[\u0000-\u001f\u007f-\u009f ]/;
 
-/** auth.rs `local_path_ok`: a rooted path, not `//host`, no backslash. */
+/** A single root slash, with no backslash, space or control characters. */
 function localPathOk(s: string): boolean {
   return !CONTROL_OR_SPACE.test(s) && s.startsWith("/") && !s.startsWith("//") && !s.includes("\\");
 }
 
 /**
- * Where to go after signing in. Mirrors `auth::safe_next` (ASCII only, no
- * control characters or spaces, rooted, not `//`, no backslash, the
- * percent-decoded form passing the same rules) and additionally keeps the
- * client inside itself: only `/app`, `/app/…`, `/app?…` and `/app#…`.
- * Anything else, or a missing value, gives `/app`.
+ * After sign-in, stay under /app. Validate both forms of the path before
+ * navigating so encoded separators and control characters cannot escape it.
  */
 export function safeNext(next: string | null | undefined): string {
   if (!next || next.length > MAX_NEXT || !/^\p{ASCII}*$/u.test(next) || !localPathOk(next)) {
