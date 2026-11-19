@@ -121,9 +121,6 @@ ws.addEventListener("message", (m) => {
       if (r.status >= 400) {
         if (allowNext401 && r.status === 401 && q.method === "POST" && new URL(r.url).pathname === "/api/login") {
           allowNext401 = false; pass.allowedUrls.add(r.url); pass.allowed.push(what + " (the wrong password)");
-        } else if (r.status === 401 && q.method === "GET" && new URL(r.url).origin === ORIGIN &&
-          ["/api/v1/bootstrap", "/api/v1/containers"].includes(new URL(r.url).pathname) && pass.label === "signed out") {
-          pass.allowedUrls.add(r.url); pass.allowed.push(what + " (signed-out direct-entry read)");
         } else if (ALLOW && ALLOW.test(r.url)) { pass.allowedUrls.add(r.url); pass.allowed.push(what + " (ALLOW)"); }
         else pass.failed.push(what);
       }

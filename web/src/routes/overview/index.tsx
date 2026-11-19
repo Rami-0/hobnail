@@ -13,6 +13,7 @@ import { bytes, duration, pct } from "../../format/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { ChartPlaceholder, HealthStrip, Meter } from "../../ui/Sparkline.tsx";
 import { WidgetContent } from "../../ui/WidgetContent.tsx";
+import { SEEN, overviewPath, readSeen } from "./request.ts";
 import { treemap } from "./treemap.ts";
 import "../history/history.css";
 import "./overview.css";
@@ -20,17 +21,6 @@ import "./overview.css";
 const EditBookmarks = lazy(() => import("../settings/Bookmarks.tsx"));
 const EditWidgets = lazy(() => import("../settings/Widgets.tsx"));
 const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
-const SEEN = "rh-seen";
-
-function readSeen(): number {
-  try {
-    const value = Number(local()?.getItem(SEEN));
-    return Number.isSafeInteger(value) && value > 0 ? value : 0;
-  } catch {
-    return 0;
-  }
-}
-
 const HostCharts = memo(function HostCharts({ overview, recording }: { overview: OverviewView; recording: boolean }) {
   return <Suspense fallback={<ChartPlaceholder count={4} />}><Charts
     series={{ from: overview.now - 3600, to: overview.now, range: "1h", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: overview.markers }}
@@ -46,7 +36,7 @@ export default function Overview() {
   const admin = allowed && boot.role !== "viewer";
   const now = useNow();
   const [seen] = useState(readSeen);
-  const { data: overview, error } = useRead<OverviewView>(allowed ? `/api/v1/overview?since=${seen}${admin ? "&probes=1" : ""}` : null, "alerts", 15000);
+  const { data: overview, error } = useRead<OverviewView>(allowed ? overviewPath(seen, admin) : null, "alerts", 15000);
   const { data: widgets } = useRead<WidgetView[]>(allowed ? "/api/v1/widgets" : null);
   const [widgetUpdates, setWidgetUpdates] = useState<Record<string, WidgetView>>({});
   useEffect(() => {
