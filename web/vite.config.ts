@@ -48,9 +48,20 @@ const sdkStyles: PostcssPlugin = {
       const selectors = rule.selectors.filter((selector) => {
         const slots = [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
         return slots.length === 0 || slots.some((slot) => sdkComponents.has((slot[1] ?? slot[2] ?? "").split("-")[0] ?? ""));
-      });
+      }).map((selector) => selector.replace(/:is\(((?:\s*\[data-slot="[a-z-]+"\]\s*,?)+)\)/g, (group, choices: string) => {
+        const live = [...choices.matchAll(/\[data-slot="([a-z-]+)"\]/g)]
+          .filter((slot) => sdkComponents.has((slot[1] ?? "").split("-")[0] ?? "") || slot[1] === "textarea");
+        return live.length ? `:is(${live.map((slot) => slot[0]).join(",")})` : group;
+      }));
       if (selectors.length === 0) rule.remove();
-      else if (selectors.length !== rule.selectors.length) rule.selectors = selectors;
+      else if (selectors.join(",") !== rule.selectors.join(",")) rule.selectors = selectors;
+    });
+    const usedIcons = new Set<string>();
+    root.walkDecls((decl) => {
+      for (const match of decl.value.matchAll(/var\((--ui-icon-[a-z-]+)\b/g)) usedIcons.add(match[1] ?? "");
+    });
+    root.walkDecls(/^--ui-icon-/, (decl) => {
+      if (decl.value.startsWith("url(") && !usedIcons.has(decl.prop)) decl.remove();
     });
   },
 };
