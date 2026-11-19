@@ -208,7 +208,7 @@ async function run(target, profile) {
           let version = board.version;
           for (let n = 0; n < UPDATES; n++) {
             await sleep(1600);
-            const updated = await update(route, "PATCH", { version, name: `Performance 40 items ${profile} ${n}` });
+            const updated = await update(route, "PATCH", { version, position: board.position, icon: board.icon, name: `Performance 40 items ${profile} ${n}` });
             version = updated.version;
           }
         } else {
