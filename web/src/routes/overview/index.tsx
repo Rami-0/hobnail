@@ -94,7 +94,10 @@ export default function Overview() {
     { value: overview.firing, label: "alerts firing", href: "/app/alerts", hot: overview.firing > 0 },
   ];
   const total = running + stopped;
-  const clock = new Date(now * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const localTime = new Date(now * 1000);
+  const clock = localTime.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + "  " +
+    localTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const hasCoverage = strips && Object.values(strips.stacks).some((codes) => codes.some((code) => code > 0));
   const extraProblems = Math.max(0, problems - overview.attention.length);
   const cleanStops = rows.filter((row) => row.state !== "running" && row.attention === null).length;
   return <div className="page ov" data-testid="overview">
@@ -140,7 +143,7 @@ export default function Overview() {
           <h2 className="label">Last 24h</h2>
           <span className="strips-key" aria-hidden="true"><i className="o" />running<i className="w" />restarted<i className="b" />problem<i className="f" />stopped</span>
         </div>
-        {strips && Object.keys(strips.stacks).length > 0 ? <ul className="strip-list">{groups.map((g) => {
+        {strips && hasCoverage ? <ul className="strip-list">{groups.map((g) => {
           const codes = strips.stacks[g.name];
           return codes ? <li key={g.name}>
             <a className="sl-n" href={"/app/containers?stack=" + encodeURIComponent(g.name)}>{g.title}</a>

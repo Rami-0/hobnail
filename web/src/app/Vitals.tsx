@@ -51,23 +51,11 @@ export function Vitals() {
   const cpuTip = s ? `CPU · load ${s.load.map((x) => x.toFixed(2)).join(" ")}` : "CPU";
   const memTip = s && s.mem_total > 0 ? `Memory: ${bytes(s.mem_used)} of ${bytes(s.mem_total)}` : "Memory";
   const diskTip = disk && disk.total > 0 ? `Disk ${disk.label}: ${bytes(disk.used)} of ${bytes(disk.total)}` : "Disk";
-  const netTip =
-    s && (s.net_rx_bps !== null || s.net_tx_bps !== null)
-      ? `Network: ${bytes(s.net_rx_bps ?? 0)}/s in, ${bytes(s.net_tx_bps ?? 0)}/s out`
-      : "Network";
   return (
     <div className="vitals" role="group" aria-label="Host vitals" data-testid="vitals">
       <Chip label="CPU" value={pct0(v.cpu)} lv={level(v.cpu)} tip={cpuTip} color="--ch-cpu" points={r.cpu.v} />
       <Chip label="MEM" value={pct0(v.mem)} lv={level(v.mem)} tip={memTip} color="--ch-mem" points={r.mem.v} />
       <Chip label="DISK" value={pct0(v.disk)} lv={level(v.disk)} tip={diskTip} color="--ch-disk" points={r.disk.v} />
-      <Chip
-        label="NET"
-        value={v.net === null ? "—" : `${bytes(v.net)}/s`}
-        lv=""
-        tip={netTip}
-        color="--ch-rx"
-        points={r.net.v}
-      />
     </div>
   );
 }
