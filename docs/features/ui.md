@@ -39,12 +39,12 @@ OS, the ◐ button overrides it per browser.
 - **Overview:** "Needs attention" rows are whole-row links to the cause with
   the reason inline (a container: its page and logs icon; "unhealthy for 41
   min", never longer than the container has been running, plus the first
-  line of the failing health check for a Admin/Owner; a firing alert
+  line of the failing health check for Admin/Owner; a firing alert
   about the host, a widget or a URL: that subject and its rule). The probe
   line is looked up for the first 5 unhealthy containers only (one `docker
   inspect` each, Admin/Owner only); it is the check's output when the page
   was loaded, kept through live updates while the same failing run goes on
-  and dropped when it ends or a new one starts (Viewer live updates never carry probe output). Signed in, Bookmarks and Widgets have
+  and dropped when it ends or a new one starts (Viewer live updates never carry probe output). Admin/Owner see Bookmarks and Widgets with
   "Add", which opens the Settings dialog on the page. The memory treemap folds tiles too small for a
   name on a phone into "+N others", a link to the table sorted by memory; a
   tile big enough (64 × 40 px, 88 × 56 px on touch) carries its logs icon.
@@ -58,7 +58,7 @@ OS, the ◐ button overrides it per browser.
 - **Alerts:** firing incidents and the alert log link to their subject (the
   container, the Host page, the widget, the URL), name the rule and show a
   clock time ("since …" in one right-aligned column); rows about a container
-  have their logs at that moment. Signed in, channels and rules are the
+  have their logs at that moment. For Admin/Owner, channels and rules are the
   Notifications tab's own lists and dialogs ("Add channel", "Add rule",
   "Send test", the rule switches, edit, delete) and a firing rule's name
   opens its dialog; Viewers see the read-only tables.
@@ -80,8 +80,8 @@ OS, the ◐ button overrides it per browser.
 - **Container detail** tabs: Overview, Logs (the log viewer itself, at
   `/app/containers/<name>/logs`, under the same header and tabs), Metrics
   (network, block I/O, PIDs, throttling, OOM), Inspect (env values, commands
-  and health-check output only for Admin/Owner), Processes (signed in), Events.
-  The header has "Open" (when the service has a link) and, signed in, "Edit";
+  and health-check output only for Admin/Owner), Processes (commands require Admin/Owner), Events.
+  The header has "Open" (when the service has a link) and, for Admin/Owner, "Edit";
   its sub-line is `name · image · stack · id` (the name only when a display
   name differs). Every tab link keeps the range, and a tab or range click
   keeps the scroll position. On a phone the tab strip scrolls with the
@@ -90,13 +90,11 @@ OS, the ◐ button overrides it per browser.
   scrolls sideways. Tiles: State, CPU, Memory, Restarts (1 h) and, with a
   health check, Health check. A range that is mostly empty says how much history
   there is and links the shortest range that holds it; Metrics charts that
-  stayed at zero are one line of text. Signed out, every hidden Inspect
-  value is a "Sign in to view" link.
+  stayed at zero are one line of text. Viewer Inspect values are redacted; signed-out requests go to sign-in.
   "Why is this red?" sits on top of every tab: for a failing health check,
-  since when and how many in a row, "Logs around HH:MM" and, signed in, the
+  since when and how many in a row, "Logs around HH:MM" and, for Admin/Owner, the
   probe's first line and Docker's last five checks (folded on a phone);
-  signed out it says "Sign in to see the check's output" and the page holds
-  no probe output. "Since" is never before the container's own start: a
+  Viewers receive no probe output. "Since" is never before the container's own start: a
   container recreated under the same name does not inherit the old one's
   failing time.
 - **Logs** one click from everywhere a container is named (see
