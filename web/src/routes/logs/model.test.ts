@@ -90,3 +90,12 @@ test("pane selection links retain search, levels, range and permalink state", ()
   assert.equal(pick.searchParams.has("c"),false); assert.equal(pick.searchParams.get("sel"), "a,b");
   assert.equal(pick.searchParams.get("range"), "1h"); assert.equal(pick.hash, "#t=123");
 });
+
+test("guards log regular expressions before matching or highlighting", () => {
+  for (const query of ["(a+)+$", "((a+))+$", "(a|aa)+$", "a".repeat(257)]) {
+    const search = matcher(query, true, false);
+    assert.ok(search.error, query);
+    assert.equal(search.test("a".repeat(1024) + "!"), false);
+  }
+  assert.equal(matcher("(?:warn|error): [0-9]+", true, false).test("Error: 42"), true);
+});

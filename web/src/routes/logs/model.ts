@@ -81,16 +81,48 @@ export function jsonFold(text: string): { summary: string; pretty: string } | nu
     return { summary: [key ? String(obj[key]) : "JSON", ...fields.map(([k, v]) => `${k}=${String(v)}`)].join(" · "), pretty: JSON.stringify(value, null, 2) };
   } catch { return null; }
 }
+// Quantified groups containing another repetition or an alternation can
+// explore many equivalent partitions of the same text.
+function regexProblem(pattern: string): string | null {
+  if (pattern.length > 256) return "Use at most 256 characters in a regular expression.";
+  const groups: boolean[] = [];
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\") { i++; continue; }
+    if (ch === "]" && inClass) { inClass = false; continue; }
+    if (inClass) continue;
+    if (ch === "[") { inClass = true; continue; }
+    if (ch === "(") { groups.push(false); continue; }
+    if (ch === ")") {
+      const risky = groups.pop();
+      if (risky && /^[*+?{]/.test(pattern.slice(i + 1))) return "Use a simpler regular expression without nested repetitions or repeated alternatives.";
+      if (risky && groups.length) groups[groups.length - 1] = true;
+      continue;
+    }
+    if (groups.length && (ch === "|" || ch === "*" || ch === "+" || ch === "{" || (ch === "?" && pattern[i - 1] !== "("))) {
+      groups[groups.length - 1] = true;
+    }
+  }
+  return null;
+}
+
 export function matcher(q: string, re: boolean, sensitive: boolean): { test: (s: string) => boolean; error: string | null } {
   if (!q) return { test: () => false, error: null };
   if (!re) return { test: sensitive ? (s) => s.includes(q) : (s) => s.toLowerCase().includes(q.toLowerCase()), error: null };
+  const problem = regexProblem(q);
+  if (problem) return { test: () => false, error: problem };
   try { const r = new RegExp(q, sensitive ? "" : "i"); return { test: (s) => r.test(s), error: null }; }
   catch { return { test: () => false, error: "Invalid regular expression" }; }
 }
 export function filterRows(rows: Row[], test: (s: string) => boolean, only: boolean, context: number, levels: string): { rows: Row[]; hits: Row[]; counts: Record<string, number> } {
-  const hits = rows.filter((r) => test(r.plain));
+  const hits: Row[] = [];
   const indexes = new Set<number>();
-  if (only) rows.forEach((r, i) => { if (test(r.plain)) for (let k = Math.max(0, i - context); k <= Math.min(rows.length - 1, i + context); k++) indexes.add(k); });
+  rows.forEach((row, i) => {
+    if (!test(row.plain)) return;
+    hits.push(row);
+    if (only) for (let k = Math.max(0, i - context); k <= Math.min(rows.length - 1, i + context); k++) indexes.add(k);
+  });
   const counts: Record<string, number> = { e: 0, w: 0, i: 0, d: 0, o: 0 };
   for (const r of rows) counts[r.l || "o"] = (counts[r.l || "o"] || 0) + 1;
   return { rows: rows.filter((r, i) => levels.includes(r.l || "o") && (!only || indexes.has(i))), hits: hits.filter((r) => levels.includes(r.l || "o")), counts };
@@ -114,11 +146,16 @@ export function chipName(name: string, stack: string, limit: number): string {
 }
 
 export function matchRanges(text: string, query: string, regex: boolean, sensitive: boolean): Array<[number, number]> {
-  if (!query) return [];
+  if (!query || (regex && regexProblem(query))) return [];
   try {
     const pattern = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const expression = new RegExp(pattern, sensitive ? "g" : "gi");
-    return [...text.matchAll(expression)].filter((m) => m[0].length > 0).slice(0, 1000).map((m) => [m.index, m.index + m[0].length]);
+    const ranges: Array<[number, number]> = [];
+    for (const match of text.matchAll(expression)) {
+      if (match[0].length) ranges.push([match.index, match.index + match[0].length]);
+      if (ranges.length >= 1000) break;
+    }
+    return ranges;
   } catch { return []; }
 }
 

@@ -396,12 +396,26 @@ export class LogPane {
       const length = Math.max(1, ...[...this.names.values()].map((name) => chipName(name, stack, this.width < 700 ? 12 : 20).length));
       this.box.style.setProperty("--log-name-width", `${length}ch`);
     }
+    const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
+    if (this.searchKey !== changedSearch) this.searchPaused = false;
     const search = matcher(this.options.search, this.options.regex, this.options.sensitive);
     const searchStarted = performance.now();
-    const filtered = filterRows(this.ring.rows, search.test, this.options.only, this.options.context, this.options.levels);
+    const deadline = searchStarted + 8;
+    const test = (line: string) => {
+      if (this.searchPaused) return false;
+      if (performance.now() >= deadline) {
+        this.searchPaused = true;
+        return false;
+      }
+      return search.test(line);
+    };
+    const only = this.options.only && !search.error && !this.searchPaused;
+    let filtered = filterRows(this.ring.rows, this.options.regex ? test : search.test, only, this.options.context, this.options.levels);
+    if (this.searchPaused && (only || filtered.hits.length)) {
+      filtered = filterRows(this.ring.rows, () => false, false, 0, this.options.levels);
+    }
     this.box.dataset.searchMs = (performance.now() - searchStarted).toFixed(3);
     this.box.dataset.searchLines = String(this.ring.rows.length);
-    const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
     this.visible = filtered.rows; this.hits = filtered.hits; this.counts = filtered.counts;
     const countKey = Object.values(this.counts).join(",");
     if (countKey !== this.countsKey) { this.countsKey = countKey; window.dispatchEvent(new CustomEvent("rh:log-counts", { detail: { query: this.query, counts: this.counts } })); }
@@ -445,14 +459,16 @@ export class LogPane {
     }
     requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
     if ((this.pending.length || this.pendingOlder.length) && !this.options.paused) this.schedule();
-    this.highlight();
+    this.highlight(this.options.regex ? performance.now() + 4 : Infinity);
     this.report({ state: this.options.paused && this.state === "live" ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following, waiting: this.pending.length,
-      message: search.error ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
+      message: (this.searchPaused ? "Search too slow, paused. Narrow the expression to resume." : search.error) ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
   }
-  private highlight(): void {
+  private searchPaused = false;
+  private highlight(deadline: number): void {
     const ranges: Range[] = [];
-    if (this.options.search) for (const element of this.content.querySelectorAll(".log-text")) {
+    if (!this.searchPaused && this.options.search) for (const element of this.content.querySelectorAll(".log-text")) {
+      if (performance.now() >= deadline) break;
       const nodes: Array<{ node: Text; start: number; end: number }> = [];
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       let node: Node | null, text = "";
