@@ -145,8 +145,12 @@ cost is measured in `docs/measurements.md`). Interval is configurable
 | `ctr_samples` | per container name: cpu %, memory bytes | 6 h at 15 s | same rollups |
 | `events` | docker lifecycle (start, stop, die with exit code, oom, health change), alert fired/resolved/delivery failed, config saved/restored, login ok/failed, app start | n/a | kept 180 d, capped at 100k rows |
 | `config_revisions` | full config text, author, note, time | n/a | newest 200 kept |
-| `sessions` | hash of the session token, created, expires | n/a | pruned when expired |
+| `sessions` | user ID, hash of token, public revocation ID, created, expires | n/a | pruned when expired |
 | `kv` | small legacy settings and migration metadata | n/a | n/a |
+| `users`, `access_grants`, `invites` | accounts, board/integration grants and single-use invitations | durable | none |
+| `boards`, `board_items` | versioned sections, items and responsive layout | durable | none |
+| `integrations` | HTTP connection metadata and write-only origin-bound credentials | durable | none |
+| `settings`, `drafts` | dashboard settings and per-user setup/edit drafts | durable | none |
 
 Containers are keyed by **name** (ids change on every recreate). A maintenance job
 runs hourly: roll up, prune, `PRAGMA optimize`; weekly `incremental_vacuum`.
@@ -252,6 +256,10 @@ read models rather than rendering HTML templates.
 
 ## 9. Corrections after implementation
 
+Historical v2 implementation ledger. Current security and client behavior are
+in sections 1, 6 and 7 and the feature guides; old asset references below are
+retained to explain earlier measurements.
+
 | Where | Spec said | Built / why |
 |---|---|---|
 | §4 events API | response shape not specified | `{"events":[{id,ts,kind,level,subject,detail}]}`, newest first, paged with `before`. Anonymous viewers never get `auth.*` events. |
@@ -270,7 +278,7 @@ read models rather than rendering HTML templates.
 
 > **Partly superseded by §11** (ux-pass). Still valid: panel hierarchy, calm
 > zeros, health strips, charts, keyboard, alarm tab. Replaced: Type (§11.3),
-> Motion (§11.2), Themes (§11.2: Ember retired), Installable (§11.12: no
+> Motion (§11.2), Themes (§11.2: Ember retained by the owner), Installable (§11.12: no
 > offline page), the teal accent.
 
 From the Wave 1 design review. The
