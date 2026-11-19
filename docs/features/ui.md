@@ -1,7 +1,8 @@
 # The interface
 
-Server-rendered pages (maud), hand-written CSS and a little vanilla JS. No
-framework, no build step, no web fonts, no CDN. Dark first, light follows the
+A React client (TypeScript, Vite), served by Rust from the same binary.
+UI SDK primitives are wrapped in `web/src/ui/`; Lucide supplies icons,
+Recharts full charts and plain SVG the small graphics. No web fonts or CDN. Dark first, light follows the
 OS, the ◐ button overrides it per browser.
 
 - **Sidebar:** pages, then every compose stack with running/total counts and its
@@ -15,10 +16,7 @@ OS, the ◐ button overrides it per browser.
   scrim). The rail's "Stacks" item opens the sidebar with the filter focused.
   The foot has the live indicator, the shortcuts button and the version.
 - **Phones (under 700 px):** a bottom bar (Overview, Containers, Logs,
-  Alerts, More). "More" is the only way into the drawer: a real link to
-  `/more`, a plain page with every page and every stack's containers (so
-  everything is reachable with JavaScript blocked), which the script opens
-  as the drawer instead. "More" is marked current on Host, History and
+  Alerts, More). "More" opens the drawer. "More" is marked current on Host, History and
   Settings. A closed drawer is out of the tab order; an open one makes the
   page behind inert, has a Close button, and Esc or Back closes it (Forward
   then opens it again).
@@ -41,13 +39,12 @@ OS, the ◐ button overrides it per browser.
 - **Overview:** "Needs attention" rows are whole-row links to the cause with
   the reason inline (a container: its page and logs icon; "unhealthy for 41
   min", never longer than the container has been running, plus the first
-  line of the failing health check for a signed-in viewer; a firing alert
+  line of the failing health check for a Admin/Owner; a firing alert
   about the host, a widget or a URL: that subject and its rule). The probe
   line is looked up for the first 5 unhealthy containers only (one `docker
-  inspect` each, signed in only); it is the check's output when the page
+  inspect` each, Admin/Owner only); it is the check's output when the page
   was loaded, kept through live updates while the same failing run goes on
-  and dropped when it ends or a new one starts (the live updates are public
-  and never carry probe output). Signed in, Bookmarks and Widgets have
+  and dropped when it ends or a new one starts (Viewer live updates never carry probe output). Signed in, Bookmarks and Widgets have
   "Add", which opens the Settings dialog on the page. The memory treemap folds tiles too small for a
   name on a phone into "+N others", a link to the table sorted by memory; a
   tile big enough (64 × 40 px, 88 × 56 px on touch) carries its logs icon.
@@ -64,33 +61,26 @@ OS, the ◐ button overrides it per browser.
   have their logs at that moment. Signed in, channels and rules are the
   Notifications tab's own lists and dialogs ("Add channel", "Add rule",
   "Send test", the rule switches, edit, delete) and a firing rule's name
-  opens its dialog; signed out the page shows the read-only tables it always
-  did.
-- **A config change elsewhere** reloads the open page (owner decision Y12),
-  the Overview and Alerts included, except a logs page, a page with an open
-  dialog or confirm, and a page with unsaved input: those keep what is on
-  screen, and their save gets the 409 with "Reload and keep my input". A
-  page's own save swaps in only what it changed (the Overview's Bookmarks
-  and Widgets panels; focus stays on the same control).
-- **Caching:** any page or fragment rendered with a session is served
-  `Cache-Control: no-store` (it can hold the config hash, the CSRF token,
-  settings data or probe output); signed out, pages are `no-cache`, Settings
-  `no-store`.
+  opens its dialog; Viewers see the read-only tables.
+- **A config change elsewhere** refetches affected data without reloading.
+  Unsaved forms keep their input and report conflicts on save.
+- **Caching:** configuration, sessions and probe JSON are `no-store`;
+  the app document is `no-cache` without a session, and hashed assets are
+  immutable. Authenticated responses are `no-store`.
 - **Pages:** Overview (health strip, host vitals with 1 h charts, needs
   attention, widgets, top consumers, recent events, bookmarks), Containers
   (dense table: filter, sort, group by stack or flat; sort and grouping are
   remembered, filters are not; phones get stacked rows and a "Sort" select
-  with a direction button in the toolbar, which also works without the
-  script through "Apply"; grouped and sorted by CPU or memory, the stacks
+  with a direction button in the toolbar; grouped and sorted by CPU or memory, the stacks
   follow their top row; states read "healthy 6 d" and are never cut; long
   stack names ellipsise with the full name on hover; the count says how
   many rows are in collapsed stacks), container detail (charts, timeline,
   ports and links, labels with Compose and image bookkeeping folded,
   matching alert rules), History, Alerts, Settings, Login.
 - **Container detail** tabs: Overview, Logs (the log viewer itself, at
-  `/containers/<name>/logs`, under the same header and tabs), Metrics
+  `/app/containers/<name>/logs`, under the same header and tabs), Metrics
   (network, block I/O, PIDs, throttling, OOM), Inspect (env values, commands
-  and health-check output only when signed in), Processes (signed in), Events.
+  and health-check output only for Admin/Owner), Processes (signed in), Events.
   The header has "Open" (when the service has a link) and, signed in, "Edit";
   its sub-line is `name · image · stack · id` (the name only when a display
   name differs). Every tab link keeps the range, and a tab or range click
@@ -129,15 +119,11 @@ OS, the ◐ button overrides it per browser.
   icons; no service worker, so nothing works offline). The installed app has
   a reload button in the top bar. The tab title and favicon show the number
   of problems, refreshed once a minute while the tab is hidden.
-- **Live:** one SSE stream per visible page; numbers update in place. Updates
-  never move what you are reading: each one is scroll-anchored by hand (Safari
-  on iOS has no CSS scroll anchoring), and updates that arrive while you touch
-  or scroll wait until 1.5 s after you stop (`scripts/phone-scroll-test.mjs`). The stream
-  closes when the tab is hidden for 10 s (no work for nobody) and reopens on
-  return; after more than a minute hidden the page reloads instead (not a
-  logs page, an open dialog or unsaved input). A new build reloads open pages.
-- **Charts:** inline SVG drawn on the server from the history database; hover
-  for values; gaps stay gaps.
+- **Live:** one SSE stream per tab carries JSON events. Topics follow the
+  mounted page. The stream closes on pagehide and after ten seconds hidden;
+  return reopens it, and a long absence refetches data. New builds offer reload.
+- **Charts:** drawn in the browser from JSON series; hover for values, drag
+  to zoom, gaps stay gaps.
 - **Theming:** every color is a CSS variable (the token list is in
   DESIGN.md §11.2); `data/custom.css` loads last (editable in Settings →
   Appearance). Moving onto the brand tokens renamed or re-pointed a few
@@ -155,12 +141,9 @@ OS, the ◐ button overrides it per browser.
   - Settings › Appearance warns when the saved `custom.css` sets one of the
     retired names (or `--border` without `--line`) and names the token to set
     instead.
-- **Components:** buttons, form fields, dialog, toast, menu, tabs, empty
-  states and skeletons are one shared layer (`static/components.css`, part of
-  the one page stylesheet `/static/app.css?v=<build>`, `static/ui.js` as the first part of `/static/app.js`,
-  `window.HB`). DESIGN.md §11.4 to §11.9. The field styles (inputs,
-  checkboxes, switches) apply inside a dialog and on the Settings pages,
-  which use the same fields and toasts.
+- **Components:** shared interaction wrappers live in `web/src/ui/` and
+  styles in `web/src/styles/`. UI SDK is pinned exactly to 0.1.0-beta.10,
+  published 2026-11-18 under the owner's sole seven-day age exception.
 
 - **Motion:** four duration tokens (`--dur-1` 90 ms hover and press,
   `--dur-2` 160 ms toast, menu, tab underline, palette, leaving dialogs,
@@ -169,38 +152,14 @@ OS, the ◐ button overrides it per browser.
   Only opacity and transform move; nothing animates per log line or per live
   tick (meters change at once). A `<details>` you open unfolds; a removed
   list row fades where it was and is out of the pointer's way at once.
-  Page to page there is no View Transition: Chromium sends every click to
-  the page root while a cross-document one runs, so links would be dead for
-  its duration. `prefers-reduced-motion: reduce` makes all of it instant: one rule
-  in `app.css` sets the tokens to 0, stops every transition and animation
-  (spinners and skeletons stand still), and the
-  script's own motion (`HB.dur`, `HB.anim`) asks the same query. Checked by
-  `scripts/motion-check.mjs`.
-- **Page changes:** every navigation is a full page load, painted once.
-  The page's `<head>` holds the first paint (`<link rel="expect"
-  href="#hb-end" blocking="render">`), so Chromium keeps the previous page
-  on screen until the new one is parsed to its last element, then swaps;
-  the deferred app script (still last in the body, after a page's own
-  scripts) makes its start-up changes before that paint. The icon sprite is the body's first child,
-  so icons are in that paint. Shell state is set before it too: theme and
-  rail by the boot script in the head; folded stacks, the tree filter and
-  the tree's scroll position (carried over from the last page, with the open
-  container kept in view) by a small inline script right after the
-  sidebar. The stylesheet (tokens, components, page parts) is one file
-  cached for a year per build, linked in the head before `custom.css`, so
-  a page no longer carries ~110 KB of CSS. The live indicator starts as "live" and says "connecting" only
-  when the stream has not opened within 1.5 s; leaving a page does not
-  change it. Browsers without render blocking render as the HTML arrives;
-  nothing waits for the script, so a blocked or failing script never keeps
-  a page blank. Checked by
-  `scripts/smooth-check.mjs`.
+  Navigation is client-side; the shell stays mounted. Reduced motion
+  disables transitions and animation.
+- **Page changes:** real `/app` URLs preserve route/range/dialog state;
+  lazy routes load inside the persistent shell. JavaScript is required.
 - **Loading:** content that comes after the page (a first sample, a
   widget's first answer, the first log lines) waits as a skeleton on a busy
   region; a skeleton shows only after 150 ms, so a fast answer never
-  flashes, and keeps the size of what replaces it. Both are switched on by
-  the loaded script (the server marks nothing busy), so with the script off,
-  blocked or failed to load it is a plain word ("—", "Waiting for the first
-  answer…") and a log pane says how to download the lines. A quiet
+  flashes, and keeps the size of what replaces it. A quiet
   container's live tail says "No lines yet" once connected. A full page
   load shows a 2 px line after 150 ms, and a page tab or range you click is
   marked at once; a navigation that does not happen (a dismissed "leave
@@ -216,7 +175,7 @@ OS, the ◐ button overrides it per browser.
   pill goes when the stream is back. A log pane says "Disconnected,
   retrying" and the line counter adds it.
 - **Empty and error states:** one component (icon, one-line title, one
-  sentence, at most one action), rendered by the server: first use (no
+  sentence, at most one action), rendered by React: first use (no
   containers, widgets, bookmarks, events, rules), no match (the containers
   filter, the `/logs` list, a log filter that hides every line: "Clear
   filters"), good news ("Nothing is stopped", "No problems", "Nothing has
@@ -248,3 +207,7 @@ Keyboard: `Ctrl/⌘ K` palette, `g` then `o c h l y a s` for pages, `j/k` rows,
 `?` cheat sheet, `l` logs of the current container. The tab title and favicon
 show the number of problems. Installable as an app (manifest and icons; no
 service worker, no offline page, no data caching); a bottom bar on phones. Decisions: DESIGN.md §10.
+
+All application data requires login; scoped accounts see only granted data.
+See [login.md](login.md). Boards and the Account page are also part of the shell.
+The old UI is on `rust-only`; retired URLs return 404, with a link at `/`.
