@@ -95,22 +95,31 @@ try {
       await tab.shot(path.join(out, `${label}-overview.png`));
 
       if (size === sizes[0] && scheme === schemes[0]) {
-        // Keep the real ten-second hidden pause, accelerate only the minute poll.
+        const alarmConfig = await api("/api/settings/config");
+        const containers = await api("/api/v1/containers");
+        const names = containers.groups.flatMap(g => g.containers)
+          .filter(c => ["unhealthy", "restarting", "dead"].includes(c.label)).map(c => c.name);
+        assert.ok(names.length > 0, "fixture has problem containers to hide");
+        await wait('document.title.startsWith("(")', "visible title has a problem count");
+        // Keep the real ten-second stream pause, accelerate only the minute poll.
         await tab.ev(`(() => {
           window.alarmInterval = window.setInterval;
-          window.setInterval = (fn, ms, ...args) => window.alarmInterval(fn, ms === 60000 ? 50 : ms, ...args);
+          window.setInterval = (fn, ms, ...args) => window.alarmInterval(fn, ms === 60000 ? 250 : ms, ...args);
           Object.defineProperty(document, "hidden", { configurable: true, value: true });
           document.dispatchEvent(new Event("visibilitychange"));
-          document.title = "Waiting for hidden alarm";
         })()`);
-        await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm", 15000);
-        const alarm = await api("/api/v1/alarm");
-        await wait(`document.title !== "Waiting for hidden alarm" && ${alarm.problems > 0 ? `document.title.startsWith(${q(`(${alarm.problems}) `)})` : '!/^\\(\\d+\\)/.test(document.title)'}`, "hidden tab title reflects alarm count");
+        await sleep(11000);
+        await api("/api/settings/containers/override", { base_hash: alarmConfig.hash, names, set: { hide: true } });
+        assert.equal((await api("/api/v1/alarm")).problems, 0);
+        await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm");
+        await wait('!document.title.startsWith("(")', "hidden tab title updates to the filtered alarm count");
         await tab.ev(`(() => {
           window.setInterval = window.alarmInterval;
           delete document.hidden;
           document.dispatchEvent(new Event("visibilitychange"));
         })()`);
+        const hiddenConfig = await api("/api/settings/config");
+        await api("/api/settings/config", { base_hash: hiddenConfig.hash, text: alarmConfig.text });
       }
 
       const palette = '[data-testid="palette"] [role="combobox"]';
