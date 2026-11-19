@@ -49,14 +49,13 @@ const sdkStyles: PostcssPlugin = {
     const file = root.source?.input.file ?? "";
     if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
     root.walkRules((rule) => {
-      if (rule.parent?.type === "rule") return;
       const selectors = rule.selectors.filter((selector) => {
         const slots = [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
         return slots.length === 0 || slots.some((slot) => usedSdkPart(slot[1] ?? slot[2] ?? ""));
-      }).map((selector) => selector.replace(/:is\(((?:\s*\[data-slot="[a-z-]+"\]\s*,?)+)\)/g, (group, choices: string) => {
+      }).map((selector) => selector.replace(/:(is|where)\(((?:\s*\[data-slot="[a-z-]+"\]\s*,?)+)\)/g, (group, kind: string, choices: string) => {
         const live = [...choices.matchAll(/\[data-slot="([a-z-]+)"\]/g)]
           .filter((slot) => usedSdkPart(slot[1] ?? ""));
-        return live.length ? `:is(${live.map((slot) => slot[0]).join(",")})` : group;
+        return live.length ? ":" + kind + "(" + live.map((slot) => slot[0]).join(",") + ")" : group;
       }));
       if (selectors.length === 0) rule.remove();
       else if (selectors.join(",") !== rule.selectors.join(",")) rule.selectors = selectors;
@@ -90,6 +89,8 @@ export default defineConfig(({ command }) => {
     css: { postcss: { plugins: [sdkStyles] } },
     build: {
       outDir: "dist",
+      target: "esnext",
+      cssCodeSplit: false,
       assetsDir: "assets",
       emptyOutDir: true,
       sourcemap: false,
@@ -98,6 +99,8 @@ export default defineConfig(({ command }) => {
       // interaction boundaries instead of joining a global vendor bundle.
       rolldownOptions: { output: { strictExecutionOrder: true, codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
+        { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
+        { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
         { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 450_000, includeDependenciesRecursively: false },
       ] } } },
       // Inline nothing as data: URLs; every asset is a hashed file the
