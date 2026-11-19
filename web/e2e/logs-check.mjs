@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CSP_LISTENER, input, launch, q, recorder, sleep } from "./cdp.mjs";
 const base = new URL(process.argv[2] || "http://127.0.0.1:3396");
-assert.match(base.hostname, /^(localhost|127\.0\.0\.1)$/); assert.match(base.port, /^339[5-9]$/);
+assert.match(base.hostname, /^(localhost|127\.0\.0\.1)$/); assert.ok(/^339[5-9]$/.test(base.port) || (base.hostname === "127.0.0.1" && base.port === "3300"));
 assert.ok(process.env.HB_PASSWORD); assert.ok(process.env.OUT);
 const out = process.env.OUT; fs.mkdirSync(out, { recursive: true });
 const session = await fetch(new URL("/api/v1/session", base)).then((r) => r.json());
