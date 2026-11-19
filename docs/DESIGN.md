@@ -35,7 +35,7 @@ configured it.
 | Fonts | System stacks only, `tabular-nums` for every number. | Works offline, no download. |
 | Database | SQLite via `rusqlite` (bundled), WAL mode, page cache capped at 2 MiB. | Range queries and rollups are exactly what it is good at. Costs about 1 MB of binary. |
 | Config editing | Lossless edits with `toml_edit` (keeps comments, order, unknown keys), validated with the existing `config::parse` before every write. | A form save must never destroy the user's hand-written comments. |
-| Auth | **Viewing stays open** (network-level, as today). **Any write needs a login.** | See section 6. An editor that anyone on the LAN can use is a remote-code-execution hole in this container. |
+| Auth | Application data requires named-account login; Owner/Admin/Viewer and optional board/integration scopes. | See section 6. |
 | Command widgets | Can only be created or changed **in the file**, never from the app. | They run shell commands. The app shows them read-only with a lock icon. |
 
 ## 2. Visual language
@@ -233,12 +233,11 @@ src/auth.rs         argon2id, sessions, rate limits and recovery CLI
 src/settings/       lossless TOML editing, guards, revisions and legacy JSON API
 ```
 
-`AppState` gets `pub db: Arc<db::Db>`. `db::Db` is a synchronous handle (internal
+`AppState` holds `pub db: Arc<db::Db>`. `db::Db` is a synchronous handle (internal
 mutex around one connection). Async callers wrap read queries in
 `tokio::task::spawn_blocking`; the sampler's 15 s batch write is small enough to
-run inline. The public API is fixed in `src/db/mod.rs` (signatures only until the
-storage work lands). The UI must compile and render against the stub, showing an
-empty chart state, and fill in once the real implementation is merged.
+run inline. Database operations serialize through this handle; API handlers expose typed JSON
+read models rather than rendering HTML templates.
 
 ## 8. Quality bar and how it is checked
 
@@ -264,7 +263,7 @@ empty chart state, and fill in once the real implementation is merged.
 | §6 secrets | env var names only | Plus the secrets-directory allowlist and destination binding (see the §6 table). Found by security review. |
 | §6 brute force | global back-off | Exempts clients that already signed in (see §6). |
 | §3 `page.columns`, group `columns`/`layout` | (v1 options) | No effect in the v2 table; `layout = "list"` makes the flat table the default. |
-| §7 assets | one CSS/JS bundle | The main CSS is inlined in every page; settings pages load `/static/settings.css` and `/static/settings.js` separately so other pages do not carry them. |
+| Historical §7 assets (superseded by React) | one CSS/JS bundle | The main CSS was inlined in every page; settings pages load `/static/settings.css` and `/static/settings.js` separately so other pages do not carry them. |
 | §1 JS size | ~15 KB | `app.js` is ~30 KB (palette, live table patching, charts hover, drawer/rail). Recorded as missed in `docs/measurements.md`. |
 
 ## 10. Design system v3 (Wave 1 design pass)
