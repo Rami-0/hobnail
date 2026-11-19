@@ -10,9 +10,9 @@
 // `changeOrigin: false` keeps `Host: localhost:5173` and the browser's
 // `Origin`, so the server's Host guard and same-origin write check pass
 // without any dev-only allowance (plan 4.4).
-import { defineConfig } from "vite";
+import { defineConfig, type CSSOptions } from "vite";
 import react from "@vitejs/plugin-react";
-import type { Plugin } from "postcss";
+
 
 // No @types/node in this project: declare the one global the config reads.
 declare const process: { env: Record<string, string | undefined> };
@@ -36,7 +36,9 @@ const PROXIED = [
 // exclusively to unused primitives can be omitted from the shipped layer.
 const sdkComponents = new Set(["button", "dialog", "field", "input", "label", "menu", "select", "switch", "toast", "listbox"]);
 
-const sdkStyles: Plugin = {
+type PostcssPlugin = NonNullable<Exclude<CSSOptions["postcss"], string | undefined>["plugins"]>[number];
+
+const sdkStyles: PostcssPlugin = {
   postcssPlugin: "hobnail-sdk-styles",
   Once(root) {
     const file = root.source?.input.file ?? "";

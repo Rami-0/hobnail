@@ -129,9 +129,7 @@ export function filterRows(rows: Row[], test: (s: string) => boolean, only: bool
 }
 export function names(q: URLSearchParams, key: string): string[] { return [...new Set(q.getAll(key).flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean))]; }
 export function permalink(hash: string): number | null { const m = /^#t=(\d+(?:\.\d+)?)$/.exec(hash); const t = m ? Number(m[1]) : NaN; return Number.isFinite(t) && t >= 0 ? t : null; }
-export function cursor(rows: LogLine[]): number | null { return rows.length ? Math.max(...rows.map((r) => r.t)) / 1000 + 0.000001 : null; }
 export function searchState(q: URLSearchParams) { return { search: q.get("search") || "", sensitive: q.get("case") === "1", regexFromLink: q.get("re") === "1" }; }
-export function retryDelay(attempt: number): number { return Math.min(30000, 2000 * 2 ** attempt); }
 
 export interface MatchPosition { pane: string; id: number; t: number }
 export function nextMatch(hits: MatchPosition[], current: MatchPosition | null, direction: number): MatchPosition | null {

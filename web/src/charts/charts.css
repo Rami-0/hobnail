@@ -8,9 +8,9 @@
 .ch-t{font-size:var(--fs-sm);font-weight:600}
 .ch-v{font:600 var(--fs-sm) var(--mono);color:var(--text-2)}
 .ch-lg{display:flex;gap:4px;margin-left:auto}
-.lg{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--line);border-radius:var(--r-pill);background:none;color:var(--text-2);font-size:var(--fs-xs);cursor:pointer}
+.ch-lg .btn.lg{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--line);border-radius:var(--r-pill);background:none;color:var(--text-2);font-size:var(--fs-xs);cursor:pointer}
 .lg::before{content:"";width:10px;height:2px;border-radius:1px;background:var(--lg-c,currentColor)}
-.ch-cpu .lg{--lg-c:var(--ch-cpu)}.ch-mem .lg{--lg-c:var(--ch-mem)}
+.ch-cpu .ch-lg .btn.lg{--lg-c:var(--ch-cpu)}.ch-mem .ch-lg .btn.lg{--lg-c:var(--ch-mem)}
 .lg.max::before{height:8px;opacity:.35}
 .lg[aria-pressed=false]{color:var(--text-3);text-decoration:line-through}
 .lg[aria-pressed=false]::before{opacity:.25}
@@ -32,9 +32,9 @@
 .ch-mlines .mk-l{stroke:var(--warn);stroke-width:1;stroke-dasharray:2 2;opacity:.7}
 .ch-mlines .mk-l.bad{stroke:var(--bad)}
 .ch-marks{position:absolute;top:0;height:0;pointer-events:none}
-.mk{position:absolute;top:0;width:16px;height:16px;margin:0 0 0 -8px;padding:0;border:0;background:none;cursor:pointer;pointer-events:auto}
-.mk::before{content:"";position:absolute;left:3px;top:2px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--warn)}
+.ch-marks .btn.mk{position:absolute;top:0;width:16px;height:16px;margin:0 0 0 -8px;padding:0;border:0;background:none;cursor:pointer;pointer-events:auto}
+.ch-marks .btn.mk::before{content:"";position:absolute;left:3px;top:2px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--warn)}
 .mk.bad::before{border-top-color:var(--bad)}
 .mk:focus-visible{outline:2px solid var(--focus);outline-offset:1px;border-radius:3px}
-@media (pointer:coarse){.mk{width:44px;height:44px;margin-left:-22px;top:0}.mk::before{left:17px;top:16px}.lg{height:44px}}
+@media (pointer:coarse){.ch-marks .btn.mk{width:44px;height:44px;margin-left:-22px;top:0}.ch-marks .btn.mk::before{left:17px;top:16px}.ch-lg .btn.lg{height:44px}}
 

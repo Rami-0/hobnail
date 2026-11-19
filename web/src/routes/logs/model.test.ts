@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, cursor, searchState, retryDelay, nextMatch, chipName, matchRanges, streamParams, paneHref } from "./model.ts";
+import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, searchState, nextMatch, chipName, matchRanges, streamParams, paneHref } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -30,13 +30,11 @@ test("levels and matching context compose", () => {
   const f = filterRows(r.rows, matcher("hit", false, false).test, true, 1, "i");
   assert.deepEqual(f.rows.map((row) => row.plain), ["before", "after"]); assert.equal(f.counts.e, 1);
 });
-test("URL state, permalinks and reconnect cursor retain units and disable linked regex", () => {
+test("URL state and permalinks retain units and disable linked regex", () => {
   const q = new URLSearchParams("c=a,b&c=b,c&search=%5B&re=1&case=1");
   assert.deepEqual(names(q, "c"), ["a", "b", "c"]);
   assert.deepEqual(searchState(q), { search: "[", sensitive: true, regexFromLink: true });
   assert.equal(permalink("#t=123.5"), 123.5); assert.equal(permalink("#t=Infinity"), null);
-  assert.equal(cursor([{ c: "a", m: "", t: 123000 }]), 123.000001);
-  assert.equal(cursor([]), null); assert.equal(retryDelay(6), 30000);
 });
 
 test("match stepping merges panes chronologically and wraps across panes", () => {

@@ -1,7 +1,6 @@
 // The sidebar (src/ui/shell.rs layout, tree_inner; static/app.js tree):
 // the pages, the stack tree, and the foot (live indicator, shortcuts,
-// version). Pages of this client are client links; every other page links
-// to the current interface (a full page load) and says so.
+// version).
 //
 // Stack tree: every stack with its running/total count, a problem dot, its
 // 24 h strip and (compose projects only) its merged logs; under it each

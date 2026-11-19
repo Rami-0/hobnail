@@ -30,6 +30,7 @@ import {
 
 import type { HistoryMetric } from "../api/gen/HistoryMetric.ts";
 import type { SeriesSet } from "../api/gen/SeriesSet.ts";
+import { Button } from "../ui/Button.tsx";
 import { bytes, pct } from "../format/index.ts";
 import { chartMarkers, chartRows, lonePoints, rowsForWidth, tickLabel, ticks, yTop, zoomTo, type ChartRow, type Marker } from "./series.ts";
 import "./charts.css";
@@ -297,15 +298,15 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
         <span className="ch-v num">{last === null ? "—" : format(unit, last)}</span>
         <fieldset className="ch-lg">
           <legend className="sr">{`${title} layers`}</legend>
-          <button type="button" className="lg avg" aria-pressed={showAvg} onClick={() => toggle("avg")}>
+          <Button type="button" className="lg avg" aria-pressed={showAvg} onClick={() => toggle("avg")}>
             Average
-          </button>
+          </Button>
           {hasBand && (
-            <button type="button" className="lg max" aria-pressed={!off.includes("max")} onClick={() => toggle("max")}>
+            <Button type="button" className="lg max" aria-pressed={!off.includes("max")} onClick={() => toggle("max")}>
               Max
-            </button>
+            </Button>
           )}
-          {compare && <button type="button" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</button>}
+          {compare && <Button type="button" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</Button>}
         </fieldset>
       </figcaption>
       {!hasValues ? (
@@ -378,7 +379,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
                 const left = ((m.at - series.from) / Math.max(1, span)) * 100;
                 if (!(left >= 0 && left <= 100)) return null;
                 return (
-                  <button
+                  <Button
                     key={m.id}
                     type="button"
                     className={`mk ${m.level}`}

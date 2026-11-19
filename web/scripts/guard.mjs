@@ -59,6 +59,15 @@ function* files(dir) {
   }
 }
 
+// Existing hot-path controls have bespoke styling. Catch additions as the
+// remaining controls migrate to wrappers.
+const nativeControls = new Map([
+  ["src/app/Sidebar.tsx", 5],
+  ["src/app/Shell.tsx", 2],
+  ["src/app/ThemeButton.tsx", 1],
+  ["src/routes/containers/index.tsx", 6],
+  ["src/routes/Login.tsx", 3],
+]);
 const problems = [];
 for (const file of files(src)) {
   const rel = relative(root, file).split(sep).join("/");
@@ -66,6 +75,10 @@ for (const file of files(src)) {
   // Keep an explicit log-viewer invariant even if the general CSP list changes.
   if (rel.startsWith("src/routes/logs/") && /dangerouslySetInnerHTML|(?:\.|\[\s*["'])innerHTML/.test(text)) {
     problems.push(`${rel}: log text must be rendered through text nodes`);
+  }
+  if (/\.[jt]sx$/.test(rel) && !rel.startsWith("src/ui/")) {
+    const count = [...text.matchAll(/<(?:button|input|select|textarea|dialog)(?:\s|>)/g)].length;
+    if (count > (nativeControls.get(rel) ?? 0)) problems.push(`${rel}: use interactive controls from src/ui/`);
   }
   const lines = text.split("\n");
   lines.forEach((line, i) => {

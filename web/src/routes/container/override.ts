@@ -196,8 +196,3 @@ export function savedText(label: string, o: { unchanged: boolean; revision: numb
   if (o.unchanged) return "No changes";
   return `Saved “${label}”${o.revision !== null ? ` · revision #${o.revision}` : ""}`;
 }
-
-/** Where "Sign in (new tab)" goes: the login page, back to this dialog afterwards. */
-export function signInHref(pathname: string, search: string): string {
-  return `/app/login?next=${encodeURIComponent(pathname + search)}`;
-}

@@ -101,7 +101,7 @@ export function containerHref(name: string): string {
   return `${BASE}/containers/${encodeURIComponent(name)}`;
 }
 
-/** Routes reserved for the Logs milestone. Timeline fragments are milliseconds. */
+/** Log links use millisecond timeline fragments. */
 export function logsHref(name: string, at: number | null = null): string {
   const root = `${containerHref(name)}/logs`;
   return at === null ? root : `${root}#t=${Math.max(0, at) * 1000}`;
