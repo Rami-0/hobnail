@@ -222,7 +222,13 @@ export class LogPane {
     return lines.map((line) => ({ c: this.names.get(line.c) ?? String(line.c), t: line.t, m: line.m, s: line.s, l: line.l, x: line.x }));
   }
   loadOlder(): void {
-    if (this.older || this.pendingOlder.length || !this.ring.rows.length || this.ring.rows.length >= this.cap) { this.message = "The ring is full; choose an earlier range to read older lines."; this.schedule(); return; }
+    if (this.older || this.pendingOlder.length) this.message = "Older lines are already loading.";
+    else if (!this.ring.rows.length) this.message = "No loaded lines to search before.";
+    else if (this.ring.rows.length >= this.cap) this.message = "The ring is full; choose an earlier range to read older lines.";
+    else this.message = "";
+    if (this.message) { this.schedule(); return; }
+    this.message = "Loading older lines…";
+    this.schedule();
     const oldest = (this.ring.rows[0]?.t ?? 0);
     const newest = (this.ring.rows.at(-1)?.t ?? 0);
     const span = Math.max(60000, (newest - oldest) * this.tail / this.ring.rows.length);
@@ -231,7 +237,7 @@ export class LogPane {
     const older: LogLine[] = [];
     const es = this.older = new EventSource(`/api/logs/stream?${p}`);
     es.addEventListener("l", (e) => older.push(...this.decode((e as MessageEvent<string>).data)));
-    const finish = () => { es.close(); this.older = null; this.pendingOlder = older.toSorted((a, b) => a.t - b.t); if (!older.length) this.message = "No older lines in this window."; this.schedule(); };
+    const finish = () => { es.close(); this.older = null; this.pendingOlder = older.toSorted((a, b) => a.t - b.t); this.message = older.length ? "" : "No older lines in this window."; this.schedule(); };
     es.addEventListener("done", finish); es.addEventListener("error", finish);
   }
   latest(): void { this.following = true; this.unseen = 0; this.anchor = null; this.schedule(); }
@@ -389,7 +395,14 @@ export class LogPane {
       for (const id of this.openedJson) if (!retained.has(id)) this.openedJson.delete(id);
     }
     if (!this.options.paused && !this.pending.length && this.pendingOlder.length && accepted < 128) {
-      this.ring.append(this.pendingOlder.splice(-(128 - accepted)), true);
+      const batch = this.pendingOlder.splice(-(128 - accepted));
+      const room = this.cap - this.ring.rows.length;
+      if (batch.length > room) {
+        const dropped = batch.length - room + this.pendingOlder.length;
+        this.pendingOlder = [];
+        this.message = `Dropped ${dropped} older lines because the ring is full.`;
+      }
+      this.ring.append(batch, true);
     }
     if (this.query.startsWith("stack=")) {
       const stack = new URLSearchParams(this.query).get("stack") ?? "";
