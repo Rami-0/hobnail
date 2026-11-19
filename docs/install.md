@@ -39,7 +39,7 @@ No Rust or Node toolchain is needed on the host; everything builds in Docker. Th
 
 ```sh
 scripts/deploy.sh        # build (fmt + clippy + tests gate the build), deploy, health-check
-scripts/measure.sh       # RAM / image size / cold start / page load, as markdown
+PORT=3395 scripts/bench-mem.sh hobnail-rp:m5 /tmp/hobnail-bench # throwaway image required
 scripts/cargo.sh test    # run cargo in the dev container (also: clippy, fmt, build)
 ```
 
