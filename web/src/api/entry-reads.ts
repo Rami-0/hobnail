@@ -22,7 +22,7 @@ void refreshSession().then(({ session }) => {
     case "host": if (session.user.role === "owner") prefetchEntryRead("/api/v1/host"); break;
     case "overview":
       if (session.user.role !== "owner") break;
-      prefetchEntryRead(overviewPath(readSeen(), session.user.role !== "viewer"));
+      prefetchEntryRead(overviewPath(readSeen(), true));
       prefetchEntryRead("/api/v1/widgets");
       prefetchEntryRead("/api/v1/bookmarks");
       break;
