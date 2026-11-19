@@ -1,6 +1,5 @@
-// Performance check of the React slice against the budgets of
-// docs/plans/react-port.md 4.9, with the old server-rendered page as the
-// baseline. Raw DevTools protocol in headless Chromium (no npm packages).
+// Browser performance against the budgets of docs/plans/react-port.md 4.9.
+// Uses the DevTools protocol in headless Chromium.
 // For every target x profile, in a fresh tab with the cache disabled:
 //   - load the page cold; time until the ready selector (the table with its
 //     rows, or both charts) is in the DOM; FCP, LCP, CLS, DOM size;
@@ -8,22 +7,17 @@
 //     renderer main thread, from navigationStart to 2 s after ready), with
 //     PerformanceObserver "longtask" (buffered) and Performance.getMetrics as
 //     cross-checks;
-//   - wait for UPDATES (3) live updates (SSE `stats` events; `frag` bursts on
-//     the old pages) and record the tasks in the second after each one;
+//   - wait for UPDATES (3) live updates and record tasks in the next second;
 //   - a scripted interaction (type in the filter, click a sortable header
 //     twice; on chart pages: sweep the pointer over the CPU chart, click it)
 //     with PerformanceObserver "event" (durationThreshold 16): INP-style
 //     worst interaction, plus the longest task in the interaction window.
-// Targets (TARGETS, default "app chart old old-ctr"):
-//   app     <base>/app/containers          ready: table[data-testid=containers] tr[data-testid=row]
-//   chart   <base>/app/containers/<name>   ready: visible CPU plot and reserved memory figure
-//   old     <base>/containers              ready: #ctable tr.row (baseline)
-//   old-ctr <base>/containers/<name>       ready: figure.chart (baseline)
+// Targets: app, chart, overview, history, host, board, logs, settings.
 // Profiles (PROFILES, default "phone desktop"): phone = 390x844, touch,
 // Emulation.setCPUThrottlingRate 4; desktop = 1440x900, unthrottled.
 //   node web/e2e/perf-check.mjs <base URL> [container name, default svc002]
 //   scripts/e2e.sh web/e2e/perf-check.mjs <base URL> [name]     (no host Node)
-//   E2E_ENV="TARGETS PROFILES UPDATES MIN_ROWS" TARGETS=old scripts/e2e.sh ...
+//   E2E_ENV="TARGETS PROFILES UPDATES MIN_ROWS" TARGETS=app scripts/e2e.sh ...
 // Env: TARGETS, PROFILES, UPDATES (3), MIN_ROWS (rows the ready selector
 // waits for, default 1), READY_MS (30000), LIVE_MS (wait for the updates,
 // 45000), TRACE (1; 0 = no Tracing, long tasks from the observer only),
@@ -31,7 +25,7 @@
 // Budgets (exit 1, printing which): a task > 200 ms in the load of
 // /app/containers on the phone profile (4x); a task > 50 ms in the second
 // after a live update on app or chart (any profile); app not ready or fewer
-// than UPDATES updates on app. The old pages are measured, never failed.
+// than UPDATES updates on app.
 // Authenticates and writes throwaway board and config fixtures for live updates.
 import fs from "node:fs";
 import os from "node:os";
@@ -88,18 +82,16 @@ if (TARGETS.includes("board")) {
   if (!saved.ok) throw new Error(`Board fixture: ${saved.status} ${await saved.text()}`);
 }
 const T = {
-  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-strips summary', fails: true },
-  history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: ["config"], interaction: '.history-controls button', fails: true },
-  host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary', fails: true },
-  board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]', fails: true },
-  logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: ["l"], filter: '[data-testid="filter"]', fails: true },
-  settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: ["config"], filter: 'input[name="greeting"]', fails: true },
+  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-strips summary' },
+  history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: ["config"], interaction: '.history-controls button' },
+  host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary' },
+  board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]' },
+  logs: { path: `/app/containers/${enc}/logs`, ready: `document.querySelector('[data-testid="log-body"]')?.dataset.searchLines >= 100`, rows: '[data-log-id]', live: ["l"], filter: '[data-testid="filter"]' },
+  settings: { path: "/app/settings/general", ready: `!!document.querySelector('input[name="greeting"]')`, rows: '.field', live: ["config"], filter: 'input[name="greeting"]' },
   app: { path: "/app/containers", ready: `document.querySelectorAll('table[data-testid="containers"] tr[data-testid="row"]').length >= ${MIN_ROWS}`,
-    rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]', fails: true },
+    rows: 'table[data-testid="containers"] tr[data-testid="row"]', live: ["stats"], filter: 'input[data-testid="filter"]', header: 'th[data-sort="name"]' },
   chart: { path: `/app/containers/${enc}`, ready: `!!document.querySelector('figure[data-testid="chart-cpu"] svg') && !!document.querySelector('figure[data-testid="chart-mem"]')`,
-    rows: 'figure[data-testid^="chart-"]', live: ["stats"], chart: 'figure[data-testid="chart-cpu"]', fails: true },
-  old: { path: "/containers", ready: `document.querySelectorAll('#ctable tr.row').length >= ${MIN_ROWS}`, rows: "#ctable tr.row", live: ["frag"], filter: "#cq", header: 'th[data-sort="name"] a' },
-  "old-ctr": { path: `/containers/${enc}`, ready: `!!document.querySelector('figure.chart')`, rows: "figure.chart", live: ["frag"], chart: "figure.chart" },
+    rows: 'figure[data-testid^="chart-"]', live: ["stats"], chart: 'figure[data-testid="chart-cpu"]' },
 };
 const P = {
   phone: { w: 390, h: 844, mobile: true, rate: 4 },
@@ -118,7 +110,7 @@ const probe = (t) => `(() => {
   obs("layout-shift", (e) => { if (!e.hadRecentInput) { H.cls += e.value; H.shifts++; } });
   obs("paint", (e) => { if (e.name === "first-contentful-paint") H.fcp = e.startTime; });
   obs("event", (e) => H.events.push({ name: e.name, id: e.interactionId || 0, start: e.startTime, dur: e.duration, delay: e.processingStart - e.startTime, proc: e.processingEnd - e.processingStart }), { durationThreshold: 16 });
-  const NAMES = ["hello", "stats", "containers", "system", "host", "boards", "l", "config", "resync", "frag", "reload"];
+  const NAMES = ["hello", "stats", "containers", "system", "host", "boards", "l", "config", "resync"];
   const ES = window.EventSource;
   if (ES) window.EventSource = class extends ES {
     constructor(...a) { super(...a); for (const n of NAMES) this.addEventListener(n, () => { performance.mark("hb-live:" + n); H.live.push({ n, at: performance.now() }); }); }
@@ -358,26 +350,24 @@ async function run(target, profile) {
   }
   // budgets
   res.violations = [];
-  if (t.fails) {
-    if (!res.ok) res.violations.push(`${label}: ${res.notes.join("; ")}`);
-    // Plan §4.9 sets the load-task budget at 4× CPU. Report desktop tasks without enforcing it.
-    if (profile === "phone") {
-      const traceMax = res.trace?.load.max_ms ?? 0;
-      const observerMax = Math.max(0, ...(res.longtask_observer?.load || []));
-      if (traceMax > LOAD_BUDGET) res.violations.push(`${label}: trace load task ${traceMax} ms (> ${LOAD_BUDGET})`);
-      if (observerMax > LOAD_BUDGET) res.violations.push(`${label}: observer load task ${observerMax} ms (> ${LOAD_BUDGET})`);
-    }
-    const lcpBudget = profile === "phone" ? 1200 : 400;
-    if (res.lcp_ms === null) res.violations.push(`${label}: missing LCP measurement`);
-    else if (res.lcp_ms > lcpBudget) res.violations.push(`${label}: LCP ${res.lcp_ms} ms (> ${lcpBudget})`);
-    if (res.cls === null) res.violations.push(`${label}: missing CLS measurement`);
-    else if (res.cls > .1) res.violations.push(`${label}: CLS ${res.cls} (> 0.1)`);
-    if (res.inp_ms === null) res.violations.push(`${label}: missing INP measurement`);
-    else if (res.inp_ms > 200) res.violations.push(`${label}: INP ${res.inp_ms} ms (> 200)`);
-    const liveMax = res.trace ? res.trace.live.map((l) => l.max_ms) : (res.longtask_observer?.live || []).map((l) => Math.max(0, ...l));
-    liveMax.forEach((m, i) => { if (m > LIVE_BUDGET) res.violations.push(`${label}: live update ${i + 1}: a task took ${m} ms (> ${LIVE_BUDGET} ms)`); });
-    if (t.live.length && res.ok && (res.live_updates ?? 0) < UPDATES) res.violations.push(`${label}: only ${res.live_updates} live update(s), wanted ${UPDATES}`);
+  if (!res.ok) res.violations.push(`${label}: ${res.notes.join("; ")}`);
+  // Plan §4.9 sets the load-task budget at 4× CPU. Report desktop tasks without enforcing it.
+  if (profile === "phone") {
+    const traceMax = res.trace?.load.max_ms ?? 0;
+    const observerMax = Math.max(0, ...(res.longtask_observer?.load || []));
+    if (traceMax > LOAD_BUDGET) res.violations.push(`${label}: trace load task ${traceMax} ms (> ${LOAD_BUDGET})`);
+    if (observerMax > LOAD_BUDGET) res.violations.push(`${label}: observer load task ${observerMax} ms (> ${LOAD_BUDGET})`);
   }
+  const lcpBudget = profile === "phone" ? 1200 : 400;
+  if (res.lcp_ms === null) res.violations.push(`${label}: missing LCP measurement`);
+  else if (res.lcp_ms > lcpBudget) res.violations.push(`${label}: LCP ${res.lcp_ms} ms (> ${lcpBudget})`);
+  if (res.cls === null) res.violations.push(`${label}: missing CLS measurement`);
+  else if (res.cls > .1) res.violations.push(`${label}: CLS ${res.cls} (> 0.1)`);
+  if (res.inp_ms === null) res.violations.push(`${label}: missing INP measurement`);
+  else if (res.inp_ms > 200) res.violations.push(`${label}: INP ${res.inp_ms} ms (> 200)`);
+  const liveMax = res.trace ? res.trace.live.map((l) => l.max_ms) : (res.longtask_observer?.live || []).map((l) => Math.max(0, ...l));
+  liveMax.forEach((m, i) => { if (m > LIVE_BUDGET) res.violations.push(`${label}: live update ${i + 1}: a task took ${m} ms (> ${LIVE_BUDGET} ms)`); });
+  if (t.live.length && res.ok && (res.live_updates ?? 0) < UPDATES) res.violations.push(`${label}: only ${res.live_updates} live update(s), wanted ${UPDATES}`);
   console.log(`${res.violations.length ? "FAIL" : "ok  "} ${label}: ready ${res.ready_ms ?? "-"} ms, rows ${res.rows_at_ready ?? "-"}, LCP ${res.lcp_ms ?? "-"} ms, CLS ${res.cls ?? "-"}, load max task ${res.trace?.load.max_ms ?? "-"} ms, live max ${res.trace ? JSON.stringify(res.trace.live.map((l) => l.max_ms)) : "-"} ms, INP ${res.inp_ms ?? "-"} ms${res.notes.length ? "\n       " + res.notes.join("\n       ") : ""}`);
   return res;
 }

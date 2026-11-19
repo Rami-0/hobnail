@@ -3,9 +3,7 @@
 # container, no memory limit, sampled from the host's cgroup v2 files while
 # load clients (in a second container on the host network) use it.
 #   scripts/bench-mem.sh <image> <outdir> [config.toml]
-# e.g.
-#   scripts/bench-mem.sh hobnail:latest /var/tmp/bench-base src/settings/fixtures/config.toml
-#   PROFILE=app scripts/bench-mem.sh hobnail:p0 /var/tmp/bench-app config.toml
+#   scripts/bench-mem.sh hobnail-rp:m4 /var/tmp/bench-app config.toml
 #   quick smoke: STARTUP_S=5 IDLE_S=5 LOAD_S=5 AFTER_S=5 CLIENTS="1 3" scripts/bench-mem.sh ...
 #
 # Phases: start-up STARTUP_S (10) s at 100 ms, counted from `docker start`
@@ -20,13 +18,9 @@
 # A load client holds one event stream, reads state every 2 s and history
 # every 5 s, and downloads every client asset at its start and every 20 s;
 # it counts requests, errors, stream events and latency into
-# <outdir>/clients/<phase>/client-<n>.json. PROFILE picks the endpoints:
-#   html (default)  /api/stream, /api/state, /api/history/system?metric=cpu&range=1h,
-#                   assets / plus every /static/... URL the page references
-#   app             /api/v1/stream?topics=containers,stats,system if it answers 200
-#                   (else /api/stream), /api/v1/containers if it answers 200 (else
-#                   /api/state), the same history read, assets /app plus every
-#                   /assets/... URL the page references
+# <outdir>/clients/<phase>/client-<n>.json. The load uses /api/v1/stream,
+# /api/v1/containers, /api/history/system and the embedded app assets.
+# Each load process shares an authenticated session on the fresh instance.
 # Other env: PORT (3421; 127.0.0.1:PORT -> 3200), TOOLS_IMAGE (an image with
 # python3, default hobnail-bench-tools:latest), LABEL (written into the
 # report; default "warm cache": the page cache is not dropped), HEALTH (1:
@@ -47,13 +41,11 @@ usage() { echo "usage: scripts/bench-mem.sh <image> <outdir> [config.toml]" >&2;
 [ $# -ge 2 ] || usage
 IMAGE=$1; OUTDIR=$2; CONFIG=${3:-}
 PORT=${PORT:-3421}
-PROFILE=${PROFILE:-html}
 CLIENTS=${CLIENTS:-"1 10 25"}
 STARTUP_S=${STARTUP_S:-10}; IDLE_S=${IDLE_S:-90}; LOAD_S=${LOAD_S:-60}; AFTER_S=${AFTER_S:-60}
 TOOLS_IMAGE=${TOOLS_IMAGE:-hobnail-bench-tools:latest}
 LABEL=${LABEL:-"warm cache"}
 HEALTH=${HEALTH:-1}
-case $PROFILE in html|app) ;; *) echo "PROFILE must be html or app" >&2; exit 2 ;; esac
 [ "$PORT" != 3200 ] || { echo "refusing port 3200: that is the live instance" >&2; exit 2; }
 [ -z "$CONFIG" ] || [ -f "$CONFIG" ] || { echo "no such config: $CONFIG" >&2; exit 2; }
 docker image inspect "$IMAGE" >/dev/null || { echo "no such image: $IMAGE" >&2; exit 2; }
@@ -65,7 +57,7 @@ mkdir -p "$OUTDIR"; OUTDIR=$(cd "$OUTDIR" && pwd)
 NAME=hobnail-p0-bench-$$
 LOADNAME=$NAME-load
 TMP=$(mktemp -d "${BENCH_TMP:-/var/tmp}/hobnail-p0-bench.XXXXXX")
-mkdir -p "$TMP/data" "$TMP/bin" "$OUTDIR/clients"
+mkdir -p "$TMP/data" "$TMP/bin" "$TMP/credentials" "$OUTDIR/clients"
 [ -z "$CONFIG" ] || cp "$CONFIG" "$TMP/data/config.toml"
 
 cleanup() {
@@ -83,8 +75,9 @@ now_us() { local t=${EPOCHREALTIME/./}; echo $((10#$t)); }
 # ---- the load client and the report (python3 in TOOLS_IMAGE) ----
 cat > "$TMP/bin/client.py" <<'PY'
 # One process, N clients: each has a stream thread and a poller thread.
-import gzip, http.client, json, os, re, socket, sys, threading, time
-host, port, profile, n, dur, outdir = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), float(sys.argv[5]), sys.argv[6]
+import gzip, http.client, json, os, re, secrets, socket, sys, threading, time
+host, port, clients, duration, outdir = sys.argv[1:]
+port, n, dur = int(port), int(clients), float(duration)
 HDR = {"Accept-Encoding": "gzip", "User-Agent": "hobnail-bench"}
 
 def get(path, timeout=10):
@@ -98,23 +91,42 @@ def get(path, timeout=10):
     finally:
         c.close()
 
+def authenticate():
+    status, session = get("/api/v1/session")
+    if status != 200:
+        raise RuntimeError(f"session probe returned {status}")
+    password_file = "/credentials/password"
+    if os.path.isfile(password_file):
+        with open(password_file) as saved:
+            password = saved.read()
+    else:
+        password = secrets.token_urlsafe(24)
+        fd = os.open(password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as saved:
+            saved.write(password)
+    path = "/api/login" if json.loads(session)["owner_exists"] else "/api/v1/onboarding/owner"
+    conn = http.client.HTTPConnection(host, port, timeout=10)
+    try:
+        conn.request("POST", path, json.dumps({"username": "bench", "password": password}),
+                     {"Origin": f"http://{host}:{port}", "Content-Type": "application/json"})
+        response = conn.getresponse()
+        if response.status not in (200, 201):
+            raise RuntimeError(f"benchmark sign-in returned {response.status}")
+        HDR["Cookie"] = response.getheader("Set-Cookie").split(";", 1)[0]
+    finally:
+        conn.close()
+
 def discover():
     hist = "/api/history/system?metric=cpu&range=1h"
-    if profile == "app":
-        stream = "/api/v1/stream?topics=containers,stats,system"
-        c = http.client.HTTPConnection(host, port, timeout=5)
-        c.request("GET", stream, headers={"Accept": "text/event-stream", **HDR})
-        ok = c.getresponse().status == 200
-        c.close()
-        if not ok: stream = "/api/stream"
-        state = "/api/v1/containers" if get("/api/v1/containers")[0] == 200 else "/api/state"
-        page = "/app"; pat = r'''["'(](/assets/[^"')\s?#]+)'''
-    else:
-        stream, state, page, pat = "/api/stream", "/api/state", "/", r'''["'(](/static/[^"')\s#]+)'''
+    stream = "/api/v1/stream?topics=containers,stats,system"
+    state = "/api/v1/containers"
+    page = "/app"
+    pat = r'''["'(](/assets/[^"')\s?#]+)'''
     st, body = get(page)
     assets = [page] + sorted(set(re.findall(pat, body.decode("utf-8", "replace"))))
     return {"stream": stream, "state": state, "history": hist, "assets": assets, "page_status": st}
 
+authenticate()
 ep = discover()
 json.dump(ep, open(os.path.join(outdir, "endpoints.json"), "w"), indent=1)
 
@@ -267,7 +279,7 @@ docker create --name "$NAME" \
 {
   echo "image=$IMAGE"
   echo "image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE")"
-  echo "profile=$PROFILE"
+  echo "profile=app"
   echo "label=$LABEL"
   echo "config=$([ -n "$CONFIG" ] && basename "$CONFIG" || echo none) ($([ -n "$CONFIG" ] && sha256sum "$CONFIG" | cut -c1-12 || echo empty))"
   echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -313,7 +325,7 @@ rss() { # phase
   echo "  $1 done: memory.current $(awk '{printf "%.2f", $1/1048576}' "$CG/memory.current") MiB, RssAnon $(awk "BEGIN{printf \"%.2f\", $a/1024}") MiB" >&2
 }
 
-echo "bench: $IMAGE profile $PROFILE on 127.0.0.1:$PORT, container $NAME, out $OUTDIR" >&2
+echo "bench: $IMAGE on 127.0.0.1:$PORT, container $NAME, out $OUTDIR" >&2
 # Start -> first /healthz 200, polled from the host from before `docker start`.
 T0=$(now_us)
 ( until curl -fs -o /dev/null --max-time 0.2 "http://127.0.0.1:$PORT/healthz" 2>/dev/null; do
@@ -342,8 +354,8 @@ run_phase idle 0 500 "$IDLE_S"
 for n in $CLIENTS; do
   ph=clients-$n; d=$OUTDIR/clients/$ph; mkdir -p "$d"
   docker run -d --name "$LOADNAME" --network host -u "$(id -u):$(id -g)" \
-    -v "$TMP/bin:/bench:ro" -v "$d:/out" --entrypoint python3 "$TOOLS_IMAGE" \
-    -I /bench/client.py 127.0.0.1 "$PORT" "$PROFILE" "$n" "$LOAD_S" /out >/dev/null
+    -v "$TMP/bin:/bench:ro" -v "$TMP/credentials:/credentials" -v "$d:/out" --entrypoint python3 "$TOOLS_IMAGE" \
+    -I /bench/client.py 127.0.0.1 "$PORT" "$n" "$LOAD_S" /out >/dev/null
   for _ in $(seq 150); do [ -e "$d/ready" ] && break; sleep 0.1; done
   [ -e "$d/ready" ] || { echo "the load clients did not start" >&2; docker logs "$LOADNAME" >&2; exit 1; }
   run_phase "$ph" "$n" 500 "$LOAD_S"
