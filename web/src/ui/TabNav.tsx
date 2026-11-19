@@ -19,7 +19,7 @@ export interface TabNavProps {
   /** The id of the current tab. */
   current: string;
   testId?: string;
-  settingsLayout?: boolean;
+  layout?: "settings" | "container";
 }
 
 const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
@@ -33,7 +33,7 @@ const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
     links[next]?.focus();
   };
 
-export function TabNav({ label, items, current, testId, settingsLayout }: TabNavProps) {
+export function TabNav({ label, items, current, testId, layout }: TabNavProps) {
   const ref = useRef<HTMLElement>(null);
   const ids = items.map((t) => t.id).join("\n");
   useEffect(() => {
@@ -52,8 +52,8 @@ export function TabNav({ label, items, current, testId, settingsLayout }: TabNav
     </a>
   ));
   return (
-    <nav ref={ref} className={settingsLayout ? "set-nav" : "tabs"} aria-label={label} data-testid={testId}>
-      {settingsLayout ? <ul>{links.map((link) => <li key={link.key}>{link}</li>)}</ul> : links}
+    <nav ref={ref} className={layout === "settings" ? "set-nav" : layout === "container" ? "cd-tabs" : "tabs"} aria-label={label} data-testid={testId}>
+      {layout === "settings" ? <ul>{links.map((link) => <li key={link.key}>{link}</li>)}</ul> : links}
     </nav>
   );
 }

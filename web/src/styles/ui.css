@@ -257,3 +257,11 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 @media (max-width:900px){.charts.two{grid-template-columns:minmax(0,1fr)}}
 
 .ch-wait{min-height:calc(206px + var(--hit));background:var(--surface)}
+
+.cd-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:4px 0 16px;overflow-x:auto;scrollbar-width:none}
+.cd-tabs a{flex:none;padding:9px 14px;color:var(--text-3);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;transition:color var(--dur-1) var(--ease-out),border-color var(--dur-2) var(--ease-out),background-color var(--dur-1) var(--ease-out)}
+.cd-tabs a:hover{color:var(--text);text-decoration:none}
+.cd-tabs a[aria-current]{color:var(--text);border-bottom-color:var(--accent)}
+.cd-tabs .tab::after{content:none}
+@media (max-width:640px){.cd-tabs a{padding:9px 10px}}
+@media (pointer:coarse),(max-width:699px){.cd-tabs a{min-width:44px;min-height:44px}}

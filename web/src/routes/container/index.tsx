@@ -239,7 +239,7 @@ export default function ContainerPage() {
         </output>
       )}
       {detail.why && <WhyNote why={detail.why} name={row.name} admin={canEdit} />}
-      <TabNav label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />
+      <TabNav layout="container" label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
         <div className="cell">

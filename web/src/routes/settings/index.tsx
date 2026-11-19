@@ -51,7 +51,7 @@ export default function SettingsPage() {
   const Panel = tab !== "boards" && tab !== "integrations" ? panels[tab] : null;
   useEffect(() => { if (allowed) rememberSettingsTab(local(), tab); }, [allowed, tab]);
   return <div className={available.length > 0 ? "page set" : "page set locked"}>
-    {available.length > 0 && <TabNav label="Settings sections" current={tab} testId="settings-tabs" settingsLayout
+    {available.length > 0 && <TabNav label="Settings sections" current={tab} testId="settings-tabs" layout="settings"
       items={available.map((id) => {
         const Icon = tabIcons[id];
         return { id, label: <><Icon aria-hidden="true" /><span>{settingsTabs[id]}</span></>, href: "/app/settings/" + id };

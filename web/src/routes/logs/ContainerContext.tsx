@@ -20,6 +20,6 @@ export function ContainerContext({ name, query }: { name: string; query: string 
       <a href={paneHref(query, [name], location.hash, true)}>Side by side</a>
     </header>
     {live.data?.docker_error && <p className="banner warn" role="alert">Docker is unreachable. Logs cannot be read right now. {live.data.docker_error}</p>}
-    <TabNav label="Container sections" items={tabs(name, query).filter((tab) => tab.id !== "processes" || admin)} current="logs" testId="ctr-tabs" />
+    <TabNav layout="container" label="Container sections" items={tabs(name, query).filter((tab) => tab.id !== "processes" || admin)} current="logs" testId="ctr-tabs" />
   </div>;
 }
