@@ -363,7 +363,7 @@ fn history(state: &AppState, query: &str, admin: bool) -> Result<HostHistory, Ap
                 until: Some(to),
                 ..Default::default()
             }
-            .for_viewer(admin),
+            .for_admin(admin),
             1000,
         )
         .iter()

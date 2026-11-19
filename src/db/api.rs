@@ -80,7 +80,7 @@ pub(crate) fn answer(db: &Db, path: &str, query: &str, now: i64, signed_in: bool
     let q = parse_query(query).ok_or_else(|| bad("malformed query string"))?;
     let get = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
     if path == "/api/events" {
-        let f = events_filter(get)?.for_viewer(signed_in);
+        let f = events_filter(get)?.for_admin(signed_in);
         return Ok(events_json(&db.events(&f)));
     }
     let rest = path

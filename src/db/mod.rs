@@ -180,6 +180,7 @@ pub struct EventFilter {
     pub before_id: Option<i64>,
     /// 0 means the default of 50. Capped at 500.
     pub limit: usize,
+    pub hide_auth_events: bool,
     /// Hide private audit events from viewers.
     pub hide_audit_events: bool,
     /// Only events with `ts >= since` / `ts <= until` (unix seconds).
@@ -190,8 +191,14 @@ pub struct EventFilter {
 }
 
 impl EventFilter {
+    /// Legacy page filter retained until the classic UI is removed.
+    pub fn for_viewer(mut self, signed_in: bool) -> Self {
+        self.hide_auth_events = !signed_in;
+        self
+    }
+
     /// Audit events may include account details and configuration changes.
-    pub fn for_viewer(mut self, admin: bool) -> Self {
+    pub fn for_admin(mut self, admin: bool) -> Self {
         self.hide_audit_events = !admin;
         self
     }
@@ -782,8 +789,11 @@ impl Db {
                     args.len()
                 ));
             }
+            if f.hide_auth_events || f.hide_audit_events {
+                sql.push_str(" AND kind NOT GLOB 'auth.*'");
+            }
             if f.hide_audit_events {
-                sql.push_str(" AND kind NOT GLOB 'auth.*' AND kind NOT GLOB 'config.*' AND kind NOT GLOB 'history.*'");
+                sql.push_str(" AND kind NOT GLOB 'config.*' AND kind NOT GLOB 'history.*'");
             }
             if let Some(b) = f.before_id {
                 args.push(b.into());

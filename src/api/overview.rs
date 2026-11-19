@@ -176,7 +176,7 @@ fn read(state: &AppState, role: Role, since: Option<i64>, probes: bool) -> Overv
             limit: 200,
             ..Default::default()
         }
-        .for_viewer(role >= Role::Admin),
+        .for_admin(role >= Role::Admin),
     );
     let filtered: Vec<_> = scan
         .into_iter()

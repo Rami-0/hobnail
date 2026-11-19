@@ -121,7 +121,7 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
         until: Some(to),
         ..Default::default()
     }
-    .for_viewer(role >= Role::Admin);
+    .for_admin(role >= Role::Admin);
     let mut scanned = db.window_events(&filter, SCAN_LIMIT);
     let markers = scanned
         .iter()

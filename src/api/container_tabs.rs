@@ -267,7 +267,7 @@ fn run(
                         limit: 101,
                         ..Default::default()
                     }
-                    .for_viewer(admin),
+                    .for_admin(admin),
                 )
                 .iter()
                 .map(event_row)

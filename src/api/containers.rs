@@ -492,7 +492,7 @@ pub fn detail(
                 limit: DETAIL_EVENTS,
                 ..Default::default()
             }
-            .for_viewer(signed),
+            .for_admin(signed),
         )
         .iter()
         .map(event_row)
@@ -649,7 +649,7 @@ fn series(db: &crate::db::Db, name: &str, w: &Window, signed: bool) -> SeriesSet
                 limit: MARKERS_MAX,
                 ..Default::default()
             }
-            .for_viewer(signed),
+            .for_admin(signed),
         )
         .iter()
         .map(event_row)
