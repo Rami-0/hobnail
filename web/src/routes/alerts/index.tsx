@@ -8,6 +8,7 @@ import { useRead } from "../../live/read.ts";
 import { Button } from "../../ui/Button.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import "../history/history.css";
+import "./alerts.css";
 
 
 const Notifications = lazy(() => import("../settings/Notifications.tsx"));
@@ -25,21 +26,27 @@ export default function Alerts() {
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   if (boot?.scoped) return <p className="page">Alerts are unavailable with board-scoped access.</p>;
   return <div className="page" data-testid="alerts">
-    <h1>Alerts</h1>
     {admin && (search.has("add") || search.has("edit")) && <Suspense fallback={<p role="status">Loading editor…</p>}><Notifications editorOnly /></Suspense>}
     {error && <p role="alert">{error}</p>}
     {!data ? !error && <p role="status">Loading alerts…</p> : <>
-      <section className="panel history-block" aria-label="Firing now">
-        <h2>Firing now</h2>
-        {data.firing.length ? <ul className="history-events">{data.firing.map((incident) => <li key={`${incident.rule}:${incident.subject}`} data-testid="row">
-          <strong><a href={incident.href}>{incident.subject}</a></strong>{" "}
-          {incident.state} · {incident.rule} · <RelativeTime at={incident.since} />
+      <section className={data.firing.length ? "alerts bad" : "alerts"} aria-label="Firing now">
+        <header className="alerts-head">
+          <h2 className="tile-title">Alerts</h2>
+          <span className="alerts-sum"><span className={data.firing.length ? "dot bad" : "dot ok"} aria-hidden="true" />
+            {data.firing.length ? data.firing.length + " firing" : "No alerts firing"}
+          </span>
+          <span className="alerts-counts muted">{data.rules.length} rules · {data.channels.length} channels</span>
+        </header>
+        {data.firing.length ? <ul className="incidents">{data.firing.map((incident) => <li key={`${incident.rule}:${incident.subject}`} data-testid="row" className="incident">
+          <strong className="inc-subject"><a href={incident.href}>{incident.subject}</a></strong>{" "}
+          <span className="inc-state">{incident.state}</span><span className="inc-rule">{incident.rule}</span>
+          <span className="inc-since"><RelativeTime at={incident.since} /></span>
           {incident.container && names.has(incident.subject) && <> · <a href={logsHref(incident.subject, incident.since)}>Logs</a></>}
           {!incident.notified && <span className="muted"> · Notification pending or suppressed</span>}
-        </li>)}</ul> : <p>{boot?.docker_error ? "Container rules cannot run while Docker is unreachable." : "No alerts firing."}</p>}
+        </li>)}</ul> : boot?.docker_error && <p>Container rules cannot run while Docker is unreachable.</p>}
       </section>
       <section className="panel history-block">
-        <h2>Rules</h2>
+        <div className="panel-h"><h2>Rules</h2></div>
         {admin && <Button onClick={() => setSearch({ add: "rule", edit: null })}>Add rule</Button>}
         {data.rules.length ? <ul className="history-events">{data.rules.map((rule) => <li key={rule.name}>
           <strong>{rule.name}</strong> · {rule.kind} · {rule.summary}{!!rule.channels.length && <> · {rule.channels.join(", ")}</>}
@@ -47,7 +54,7 @@ export default function Alerts() {
         </li>)}</ul> : <p>No alert rules configured.</p>}
       </section>
       <section className="panel history-block">
-        <h2>Notification channels</h2>
+        <div className="panel-h"><h2>Notification channels</h2></div>
         {admin && <Button onClick={() => setSearch({ add: "channel", edit: null })}>Add channel</Button>}
         {data.channels.length ? <ul className="history-events">{data.channels.map((channel) => <li key={channel.name}>
           <strong>{channel.name}</strong> · {channel.kind} · {channel.status}
@@ -58,7 +65,7 @@ export default function Alerts() {
         </li>)}</ul> : <p>No channels configured.</p>}
       </section>
       <section className="panel history-block">
-        <h2>Alert log</h2>
+        <div className="panel-h"><h2>Alert log</h2></div>
         <div className="toolbar history-controls">
           <Button aria-pressed={!search.has("from")} onClick={() => setSearch({ from: null, to: null, before: null })}>All time</Button>
           {[[86400, "24 hours"], [604800, "7 days"]].map(([span, label]) => <Button key={span}
