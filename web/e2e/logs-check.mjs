@@ -150,6 +150,10 @@ try {
       await inp.click('[aria-label="Show error lines"]'); await wait('!document.querySelector("[data-log-id][data-level=e]")', "level exclusion"); await inp.click('[aria-label="Show error lines"]');
       await choose("Show", "all"); await setQuery("["); await inp.click('[aria-label="Regular expression"]');
       await wait('document.querySelector("[data-testid=filter]").getAttribute("aria-invalid")==="true"', "invalid regex stays safe");
+      await setQuery("(a+)+$");
+      await wait('document.querySelector("[data-testid=filter]").getAttribute("aria-invalid")==="true"', "nested regex repetition is rejected");
+      await setQuery("ERR[O]R");
+      await wait('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[1])>0', "valid regex matches in the search worker");
       await inp.click('[aria-label="Regular expression"]'); await setQuery("");
       console.log(label, "ranges");
       for (const preset of ["15m", "1h", "6h", "24h", "start"]) { await choose("Range",preset); await wait(`new URL(location.href).searchParams.get('range')===${q(preset)}`, `range ${preset}`); }
