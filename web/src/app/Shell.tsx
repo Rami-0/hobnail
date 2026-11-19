@@ -12,7 +12,7 @@
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS, as before.
 import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
@@ -25,9 +25,20 @@ import { interceptedPath, logsHref } from "./paths.ts";
 import { settingsHref, local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
 import { pageFilter } from "./page-filter.ts";
+import { getToasts, subscribeToasts } from "../ui/toast.ts";
+
 const Palette = lazy(() => import("./Palette.tsx"));
 const Shortcuts = lazy(() => import("./Shortcuts.tsx").then((m) => ({ default: m.Shortcuts })));
-const Toaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
+function hasToasts() {
+  return getToasts().shown.length > 0;
+}
+
+function ShellToasts() {
+  const visible = useSyncExternalStore(subscribeToasts, hasToasts, hasToasts);
+  return <Suspense fallback={null}>{visible ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</Suspense>;
+}
+
+const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
 import { Brand, Sidebar } from "./Sidebar.tsx";
 import { applyDefaultTheme } from "./theme.ts";
 import { ThemeButton } from "./ThemeButton.tsx";
@@ -457,7 +468,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       {palette && <Suspense fallback={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></Suspense>}
       {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}
       <StalePill />
-      <Suspense fallback={null}><Toaster /></Suspense>
+      <ShellToasts />
     </>
   );
 }
