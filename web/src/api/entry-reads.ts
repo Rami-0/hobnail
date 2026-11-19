@@ -7,7 +7,7 @@ import { prefetchEntryRead, refreshSession } from "./session.ts";
 void refreshSession();
 const { pathname, search } = window.location;
 const route = matchRoute(pathname);
-if (route.name !== "login" && route.name !== "invite" && route.name !== "notfound") {
+if (route.name !== "login" && route.name !== "invite" && route.name !== "not_found") {
   prefetchEntryRead("/api/v1/bootstrap");
   prefetchEntryRead("/api/v1/containers");
 }

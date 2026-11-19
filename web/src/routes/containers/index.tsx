@@ -102,15 +102,18 @@ function statReadings() {
 
 /** Rows rendered on the first frame; the rest follow in slices of this size, one per task. */
 const FIRST = 10;
-const SLICE = 12;
+const SLICE = 10;
 
 function useProgressive(total: number): number {
   const [limit, setLimit] = useState(FIRST);
   useEffect(() => {
     if (limit >= total) return;
     // A transition: React renders the slice in yielding chunks.
-    const t = window.setTimeout(() => startTransition(() => setLimit((l) => l + SLICE)), 0);
-    return () => window.clearTimeout(t);
+    let tick = 0;
+    const frame = requestAnimationFrame(() => {
+      tick = window.setTimeout(() => startTransition(() => setLimit((l) => l + SLICE)), 0);
+    });
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(tick); };
   }, [limit, total]);
   return limit;
 }
@@ -120,7 +123,15 @@ export default function ContainersPage() {
   // The list as a deferred value: its first arrival (and any later change)
   // renders in a transition, which React slices into short tasks.
   const { data: liveData, error } = useContainers();
-  const data = useDeferredValue(liveData, null);
+  const [tableReady, setTableReady] = useState(false);
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => startTransition(() => setTableReady(true)));
+    });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, []);
+  const data = useDeferredValue(tableReady ? liveData : null, null);
   const boot = useBootstrap();
   const strips = useStrips();
   const host = viewerHost(window.location.hostname);

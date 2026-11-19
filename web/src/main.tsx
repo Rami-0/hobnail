@@ -10,18 +10,13 @@ import "./styles/global.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { refreshSession } from "./api/session.ts";
 import { App } from "./app/App.tsx";
-import { prepareShellData } from "./live/runtime.ts";
 import { interceptLinks } from "./app/router.ts";
 import { applyStoredRail } from "./app/Shell.tsx";
 import { applyStoredTheme } from "./app/theme.ts";
 
 applyStoredTheme();
 applyStoredRail();
-void refreshSession().then(({ session }) => {
-  if (session?.user) prepareShellData();
-});
 interceptLinks();
 
 const el = document.getElementById("root");

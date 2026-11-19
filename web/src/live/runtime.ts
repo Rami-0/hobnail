@@ -348,12 +348,6 @@ function wantContainersData(): void {
   void fetchContainers();
 }
 
-/** Fetch shell data before commit; stream subscriptions still follow mounted hooks. */
-export function prepareShellData(): void {
-  wantBootstrap();
-  wantContainersData();
-}
-
 export function wantContainers(): () => void {
   start();
   const a = stream.want("containers");

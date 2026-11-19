@@ -35,7 +35,7 @@
 .ct{display:grid;gap:var(--s-3)}
 .ct search.bar{display:flex}
 .ct .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.ct .search-in{position:relative;flex:1 1 240px;max-width:360px}
+.ct .search-in{position:relative;flex:0 1 320px;min-width:min(100%,240px);max-width:320px}
 .ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
 .ct .search-in input{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-input)}
 .ct .search-in input:focus{border-color:var(--accent)}
