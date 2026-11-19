@@ -246,6 +246,12 @@ try {
         const widget = `browser-widget-${width}`;
         await fill(editor + ' input[name="id"]', widget);
         await fill(editor + ' input[name="url"]', "http://127.0.0.1:8081/fixture/session");
+        for (const bad of ["//example.invalid", "/\\example.invalid"]) {
+          await fill(editor + ' input[name="link"]', bad);
+          await button(editor, "Save");
+          await wait(text(editor, "Enter a local path or an HTTP or HTTPS URL."), "widget form rejects network-path links");
+        }
+        await inp.clear(editor + ' input[name="link"]');
         await button(editor, "Add field");
         await wait(text(editor, "Path in the response"), "widget supports named fields");
         await fill(editor + ' .settings-pair input[id$="-label"]', "owner");
@@ -269,7 +275,7 @@ try {
         await go("/app/settings/notifications", text('.settings-row', channel));
         await tab.ev(`Array.from(document.querySelectorAll('[data-testid="settings-channel-list"] .settings-row')).find(row=>row.querySelector('h3')?.textContent===${q(channel)}).setAttribute('data-channel-check','')`);
         await button('[data-channel-check]', "Send test");
-        await wait(text('[data-channel-check] [role="alert"]', "connection refused"), "refused notification test is shown as an error");
+        await wait(text('[data-channel-check] [role="alert"]', "Connection refused"), "refused notification test is shown as an error");
         await inp.click(`button[aria-label=${q('Delete '+channel)}]`); await button(dialog,"Delete");
         await wait(text(dialog, "rule"), "a referenced channel cannot be deleted");
         await inp.key("Escape");
