@@ -160,12 +160,12 @@ export default function Users() {
         {error && <Note kind="bad">{error}</Note>}
       </form>}
     </Dialog>
-    <Dialog open={!!link} title="Invitation link" onClose={closeLink}
+    <Dialog open={!!link} title="Invitation link" onClose={() => { if (copied) closeLink(); }}
       footer={<><Button onClick={closeLink}>Done</Button><Button variant="primary" onClick={async () => {
         try { await navigator.clipboard.writeText(link); setCopied(true); }
         catch { setError("Select the link and copy it manually."); }
       }}>Copy link</Button></>}>
-      <Field id="new-invite-link" label="Copy this link before closing" hint="This link is shown only once."><TextInput readOnly value={link} data-testid="invite-link" onFocus={(event) => event.currentTarget.select()} /></Field>
+      <Field id="new-invite-link" label="Copy this link before closing" hint="This link is shown only once."><TextInput readOnly value={link} data-testid="invite-link" onCopy={() => setCopied(true)} onFocus={(event) => event.currentTarget.select()} /></Field>
       {copied && <Note kind="ok">Link copied.</Note>}
       {error && <Note kind="bad">{error}</Note>}
     </Dialog>
