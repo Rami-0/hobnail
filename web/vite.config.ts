@@ -34,7 +34,12 @@ const PROXIED = [
 
 // Keep the pinned SDK stylesheet import and its global tokens. Rules scoped
 // exclusively to unused primitives can be omitted from the shipped layer.
-const sdkComponents = new Set(["button", "dialog", "field", "input", "label", "menu", "select", "switch", "toast", "listbox"]);
+const sdkComponents = new Set(["button", "dialog", "field", "input", "label", "menu", "select", "switch", "textarea", "toast"]);
+const unusedSdkParts = new Set([
+  "dialog-close", "dialog-trigger", "field-group", "field-legend", "field-set", "menu-checkbox-item",
+  "menu-radio-item", "menu-item-indicator", "menu-group-label", "menu-separator", "menu-shortcut",
+]);
+const usedSdkPart = (part: string) => sdkComponents.has(part.split("-")[0] ?? "") && !unusedSdkParts.has(part);
 
 type PostcssPlugin = NonNullable<Exclude<CSSOptions["postcss"], string | undefined>["plugins"]>[number];
 
@@ -47,10 +52,10 @@ const sdkStyles: PostcssPlugin = {
       if (rule.parent?.type === "rule") return;
       const selectors = rule.selectors.filter((selector) => {
         const slots = [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
-        return slots.length === 0 || slots.some((slot) => sdkComponents.has((slot[1] ?? slot[2] ?? "").split("-")[0] ?? ""));
+        return slots.length === 0 || slots.some((slot) => usedSdkPart(slot[1] ?? slot[2] ?? ""));
       }).map((selector) => selector.replace(/:is\(((?:\s*\[data-slot="[a-z-]+"\]\s*,?)+)\)/g, (group, choices: string) => {
         const live = [...choices.matchAll(/\[data-slot="([a-z-]+)"\]/g)]
-          .filter((slot) => sdkComponents.has((slot[1] ?? "").split("-")[0] ?? "") || slot[1] === "textarea");
+          .filter((slot) => usedSdkPart(slot[1] ?? ""));
         return live.length ? `:is(${live.map((slot) => slot[0]).join(",")})` : group;
       }));
       if (selectors.length === 0) rule.remove();
