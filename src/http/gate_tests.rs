@@ -1497,7 +1497,7 @@ async fn legacy_reads_require_a_session_and_public_assets_do_not() {
         "/apple-touch-icon.png",
     ] {
         for method in ["GET", "HEAD", "OPTIONS"] {
-            let r = req_bounded(addr, method, &path, &[]).await;
+            let r = req_bounded(addr, method, path, &[]).await;
             if method == "OPTIONS" {
                 assert_eq!(r.status, 401, "{method} {path}");
             } else {
