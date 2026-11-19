@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use hyper::{Response, StatusCode};
@@ -12,7 +12,6 @@ use crate::state::AppState;
 use crate::ui::{
     fmt::{parse_query, query_get},
     pages::history::restarts_per_day,
-    view::is_excluded,
 };
 
 type Points = Vec<(i64, f64)>;
@@ -106,26 +105,7 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
         .collect();
     let config = state.config.current();
     let snap = state.snapshot();
-    let excluded: HashSet<_> = snap
-        .containers
-        .iter()
-        .filter(|c| is_excluded(&config, c))
-        .map(|c| c.name.as_str())
-        .collect();
-    let hidden = |name: &str| {
-        config
-            .containers
-            .get(name)
-            .and_then(|entry| entry.hide)
-            .unwrap_or_else(|| {
-                excluded.contains(name)
-                    || config
-                        .docker
-                        .exclude
-                        .iter()
-                        .any(|pattern| crate::util::glob_match(pattern, name))
-            })
-    };
+    let hidden = |name: &str| super::containers::excluded_subject(&config, &snap, name);
     let starts_per_day = restarts_per_day(
         (1..=7)
             .map(|day| {

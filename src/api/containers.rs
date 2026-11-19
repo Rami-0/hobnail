@@ -546,7 +546,7 @@ pub fn detail(
 }
 
 /// Historical subjects can outlive the current Docker snapshot.
-pub(super) fn excluded_subject(
+pub(crate) fn excluded_subject(
     config: &crate::config::Config,
     snapshot: &Snapshot,
     name: &str,

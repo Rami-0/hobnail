@@ -30,6 +30,11 @@ pub async fn route(
 ) -> Response<Body> {
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
+    if let Some(name) = path.strip_prefix("/api/history/container/").and_then(percent_decode)
+        && crate::api::containers::excluded_subject(&state.config.current(), &state.snapshot(), &name)
+    {
+        return json_error(StatusCode::NOT_FOUND, "container not found");
+    }
     let db = state.db.clone();
     let now = crate::util::unix_now() as i64;
     let res = tokio::task::spawn_blocking(move || answer(&db, &path, &query, now, admin))

@@ -23,7 +23,7 @@ impl Principal {
     }
 
     pub fn can_see_container(&self, visible: &ContainerVisibility, name: &str) -> bool {
-        !self.is_scoped() || visible.allows(name)
+        visible.allows(name)
     }
 
     fn scoped_targets<T: Eq + std::hash::Hash>(
@@ -80,8 +80,14 @@ impl Principal {
     }
 
     pub fn container_visibility(&self, state: &AppState) -> ContainerVisibility {
+        let config = state.config.current();
+        let snapshot = state.snapshot();
+        let excluded = snapshot.containers.iter()
+            .filter(|container| crate::ui::view::is_excluded(&config, container))
+            .map(|container| container.name.clone())
+            .collect();
         if !self.is_scoped() {
-            return ContainerVisibility(None);
+            return ContainerVisibility { scoped: None, excluded, config };
         }
         let targets = state
             .db
@@ -89,15 +95,15 @@ impl Principal {
             .ok()
             .flatten()
             .unwrap_or_default();
-        ContainerVisibility(Some(
-            state
-                .snapshot()
-                .containers
+        ContainerVisibility {
+            excluded,
+            config,
+            scoped: Some(snapshot.containers
                 .iter()
                 .filter(|c| targets.contains(&ContainerMatch::from(*c)))
                 .map(|c| c.name.clone())
-                .collect(),
-        ))
+                .collect()),
+        }
     }
 
     pub fn can_see_board(&self, id: &str) -> bool {
@@ -118,15 +124,23 @@ impl Principal {
 }
 
 /// An unrestricted view, or the names visible in the request's snapshot.
-pub struct ContainerVisibility(Option<HashSet<String>>);
+pub struct ContainerVisibility {
+    scoped: Option<HashSet<String>>,
+    excluded: HashSet<String>,
+    config: std::sync::Arc<crate::config::Config>,
+}
 
 impl ContainerVisibility {
     pub fn allows(&self, name: &str) -> bool {
-        self.0.as_ref().is_none_or(|names| names.contains(name))
+        self.scoped.as_ref().is_none_or(|names| names.contains(name))
+            && !self.excluded.contains(name)
+            && !self.config.containers.get(name).and_then(|entry| entry.hide).unwrap_or_else(|| {
+                self.config.docker.exclude.iter().any(|pattern| crate::util::glob_match(pattern, name))
+            })
     }
 
     pub fn is_scoped(&self) -> bool {
-        self.0.is_some()
+        self.scoped.is_some()
     }
 
     pub(super) fn filter_view(
