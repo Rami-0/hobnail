@@ -47,7 +47,7 @@ atomically (temp file + rename, same mode) → add a revision → record a
   `?edit=rule:disk-full`, `?edit=widget:mailpit`, `?add=exclude`,
   `?edit=group:media`, `?edit=override:grafana`), so a reload or a link opens
   the same dialog. "Edit" on a container page (signed in) opens its override
-  dialog (`?name=<container>` still works). Esc, ×, Cancel or the backdrop
+  dialog at `?edit=override`. Esc, ×, Cancel or the backdrop
   close it, and ask first when something was typed. Enter saves (Ctrl+Enter
   from any field); the button shows progress; the list behind updates in
   place and the changed row flashes.
