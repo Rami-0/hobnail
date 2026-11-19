@@ -1244,7 +1244,8 @@ async fn fake_docker_inspect(tag: &str) -> String {
                 let (status, body) = if path == format!("/containers/{web_id}/json") {
                     let body = serde_json::json!({
                         "Id": web_id, "Name": "/web",
-                        "Config": {"Cmd": ["--token=SECRET-CMD"], "Env": ["PASSWORD=hunter2"]},
+                        "Config": {"Cmd": ["--token=SECRET-CMD"], "Env": ["PASSWORD=hunter2"], "Healthcheck": {"Test": ["CMD", "SECRET-HEALTH-TEST"]}},
+                        "Mounts": [{"Type": "bind", "Source": "/private/SECRET-MOUNT", "Destination": "/app/data", "RW": false}],
                         "State": {
                             "Status": "running", "Running": true,
                             "StartedAt": "2026-11-14T21:00:00Z",
@@ -2012,7 +2013,7 @@ async fn concurrent_owner_onboarding_issues_one_session() {
 
 #[tokio::test]
 async fn invite_roles_and_account_management() {
-    let st = state();
+    let st = privacy_state("invite-roles-inspect").await;
     crate::auth::set_password_for_tests(&st.db, PW);
     let addr = start(st.clone()).await;
     let owner = login(addr).await;
@@ -2503,6 +2504,8 @@ async fn viewer_cannot_read_administrative_details() {
     )
     .await;
     assert!(inspect.body.contains("SECRET-CMD"));
+    assert!(inspect.body.contains("SECRET-MOUNT"));
+    assert!(inspect.body.contains("SECRET-HEALTH-TEST"));
     assert!(!inspect.body.contains("hunter2"));
     let env = req(
         addr,
