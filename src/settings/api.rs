@@ -81,7 +81,7 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             let r: ops::RawReq = body(call)?;
             json(store::edit(state, &r.base_hash, user, |current| {
                 Ok(store::Draft {
-                    text: restore_channel_fields(&current.text, &r.text),
+                    text: restore_channel_fields(&current.text, &r.text)?,
                     note: "raw edit".into(),
                     kind: "config.saved",
                     fields: ops::RAW_FIELDS,
@@ -385,21 +385,21 @@ fn redact_channel_fields(text: &str) -> Option<String> {
     })
 }
 
-fn restore_channel_fields(original: &str, edited: &str) -> String {
+fn restore_channel_fields(original: &str, edited: &str) -> Result<String, ApiError> {
     if !edited.contains(CHANNEL_VALUE_HIDDEN) {
-        return edited.into();
+        return Ok(edited.into());
     }
     let (Ok(mut original), Ok(mut edited_doc)) = (
         original.parse::<toml_edit::DocumentMut>(),
         edited.parse::<toml_edit::DocumentMut>(),
     ) else {
-        return edited.into();
+        return Ok(edited.into());
     };
     let (Some(original), Some(channels)) = (
         channel_tables(&mut original),
         channel_tables(&mut edited_doc),
     ) else {
-        return edited.into();
+        return Ok(edited.into());
     };
     for (name, channel) in channels.iter_mut() {
         let Some(saved) = original
@@ -411,6 +411,10 @@ fn restore_channel_fields(original: &str, edited: &str) -> String {
         let Some(table) = channel.as_table_like_mut() else {
             continue;
         };
+        let keeps_payload = ["headers", "body"].iter().any(|key| {
+            table.get(key).and_then(toml_edit::Item::as_str) == Some(CHANNEL_VALUE_HIDDEN)
+                && saved.contains_key(key)
+        });
         for &key in CHANNEL_PLAIN_FIELDS {
             if table.get(key).and_then(toml_edit::Item::as_str) == Some(CHANNEL_VALUE_HIDDEN) {
                 if let Some(value) = saved.get(key) {
@@ -418,8 +422,20 @@ fn restore_channel_fields(original: &str, edited: &str) -> String {
                 }
             }
         }
+        if keeps_payload
+            && ["url", "url_env", "url_file"].iter().any(|key| {
+                table.get(key).and_then(toml_edit::Item::as_str)
+                    != saved.get(key).and_then(toml_edit::Item::as_str)
+            })
+        {
+            return Err(ApiError::denied(super::guard::Denied(format!(
+                "refused: channel {:?} would send hidden values to a new destination; {}",
+                name.get(),
+                super::guard::SECRET_BINDING_RULE
+            ))));
+        }
     }
-    edited_doc.to_string()
+    Ok(edited_doc.to_string())
 }
 
 fn raw_get(state: &AppState) -> Result<J, ApiError> {
@@ -461,8 +477,12 @@ fn validate_report(text: &str, old: Option<&str>, secrets_dir: &std::path::Path)
 
 fn validate_text(state: &AppState, text: &str) -> Result<J, ApiError> {
     let cur = store::read_current(state)?;
-    let restored = restore_channel_fields(&cur.text, text);
-    let mut v = validate_report(&restored, Some(&cur.text), &store::secrets_dir(state));
+    let mut v = match restore_channel_fields(&cur.text, text) {
+        Ok(restored) => validate_report(&restored, Some(&cur.text), &store::secrets_dir(state)),
+        Err(error) => {
+            json!({"ok": false, "error": error.body["error"], "locked": true, "line": null, "col": null})
+        }
+    };
     v["hash"] = J::String(cur.hash);
     Ok(v)
 }

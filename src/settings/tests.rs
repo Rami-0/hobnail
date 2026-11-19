@@ -2613,6 +2613,18 @@ async fn settings_hide_inline_channel_values_and_undo_preserves_them() {
         assert!(!data.to_string().contains("SECRET-"), "{path}: {data}");
     }
     let (_, raw) = get(&st, "config").await;
+    let moved = raw["text"].as_str().unwrap().replace(
+        "url = \"<set on host>\"",
+        "url = \"https://other.example/path\"",
+    );
+    let (status, problem) = post(
+        &st,
+        "config",
+        json!({"base_hash": raw["hash"], "text": moved}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(file(&dir), config);
     let (status, saved) = post(&st, "config", json!({
         "base_hash": raw["hash"], "text": format!("{}\n[page]\ntitle = \"New title\"\n", raw["text"].as_str().unwrap())
     })).await;
