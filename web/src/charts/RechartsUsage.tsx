@@ -5,7 +5,7 @@
 // Recharts draws the lines, axes, grid, tooltip and crosshair. The max
 // band uses its axis scales. Recharts also provides the
 // keyboard tooltip (accessibilityLayer), and the linked crosshair across
-// both charts (`syncId`, index-synced: both charts share one row array, see
+// both charts (synced by timestamp; both charts share a source row array, see
 // series.ts `chartRows`). Lines break at the empty rows chartRows puts into
 // gaps (`connectNulls` off), and the tooltip there says "no data".
 // Custom code: drag to zoom (pointer events on the plot, so mouse, touch and
@@ -31,7 +31,7 @@ import {
 import type { HistoryMetric } from "../api/gen/HistoryMetric.ts";
 import type { SeriesSet } from "../api/gen/SeriesSet.ts";
 import { bytes, pct } from "../format/index.ts";
-import { chartMarkers, chartRows, lonePoints, tickLabel, ticks, yTop, zoomTo, type ChartRow, type Marker } from "./series.ts";
+import { chartMarkers, chartRows, lonePoints, rowsForWidth, tickLabel, ticks, yTop, zoomTo, type ChartRow, type Marker } from "./series.ts";
 import "./charts.css";
 
 export interface UsageChartsProps {
@@ -191,7 +191,6 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   const showCompare = compare && !off.includes("cmp");
   const top = useMemo(() => Math.max(yTop(rows, kind, showMax), showCompare ? yTop(rows, "mem", false) : 0), [rows, kind, showMax, showCompare]);
   const bottom = unit === "temp" ? Math.min(0, ...rows.map((row) => row[kind] ?? 0), ...rows.map((row) => showCompare ? row.mem ?? 0 : 0)) : 0;
-  const lone = useMemo(() => lonePoints(rows, kind), [rows, kind]);
   const values = rows.flatMap((r) => (r[kind] === null ? [] : [r[kind] as number]));
   const last = values.length ? (values[values.length - 1] as number) : null;
   const span = series.to - series.from;
@@ -204,12 +203,17 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   }, []);
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const plotRows = useMemo(
+    () => rowsForWidth(rows, series.from, series.to, width - 66),
+    [rows, series.from, series.to, width],
+  );
+  const lone = useMemo(() => lonePoints(plotRows, kind), [plotRows, kind]);
   const hasValues = values.length > 0 || rows.some((r) => showCompare && r.mem !== null);
   useEffect(() => {
     const canvas = wrap.current;
     if (!canvas) return;
     const size = new ResizeObserver(([entry]) => {
-      if (entry) setWidth(Math.floor(entry.contentRect.width));
+      if (entry) startTransition(() => setWidth(Math.floor(entry.contentRect.width)));
     });
     // Keep the plot active once visited, including when the user tabs back.
     const near = new IntersectionObserver(([entry]) => {
@@ -311,9 +315,9 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
       ) : (
         <div className="ch-canvas" ref={wrap} onPointerDown={onPointerDown}>
           {width > 0 && <ComposedChart
-            data={rows}
+            data={plotRows}
             syncId={sync}
-            syncMethod={sync === "history" ? "value" : "index"}
+            syncMethod="value"
             width={width}
             height={180}
             margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
@@ -348,7 +352,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
               cursor={{ className: "ch-cursor" }}
               content={<Tip kind={kind} unit={unit} compare={showCompare} span={span} markers={markers} />}
             />
-            {showMax && <Band rows={rows} bandKey={bandKey} />}
+            {showMax && <Band rows={plotRows} bandKey={bandKey} />}
             {showAvg && (
               <Line
                 dataKey={kind}
@@ -363,7 +367,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
               />
             )}
             {showCompare && <Line dataKey="mem" stroke="currentColor" strokeOpacity={0.55} strokeDasharray="4 3" name="Yesterday" dot={false} isAnimationActive={false} />}
-            {showAvg && <LoneDots rows={rows} kind={kind} indices={lone} />}
+            {showAvg && <LoneDots rows={plotRows} kind={kind} indices={lone} />}
             <MarkerLines markers={markers} />
             <PlotProbe onPlot={onPlot} />
           </ComposedChart>}

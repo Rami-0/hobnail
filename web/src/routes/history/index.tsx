@@ -81,7 +81,7 @@ const HistoryCharts = memo(function HistoryCharts({ data }: { data: HistoryView 
           metrics={data.metrics}
           recording={data.recording}
           onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
-          onMarker={(id) => navigate(`/app/history?${window.location.search.slice(1)}#ev-${id}`)}
+          onMarker={(id) => navigate(`/app/history?${historyWindow(new URLSearchParams(window.location.search)).query}#ev-${id}`)}
         />
       </Suspense>;
 });

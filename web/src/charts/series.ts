@@ -94,6 +94,41 @@ function medianStep(times: readonly number[]): number {
   return d.length ? (d[Math.floor(d.length / 2)] as number) : 60;
 }
 
+/** Retain the endpoints, extrema and gaps that a plot can distinguish at its width. */
+export function rowsForWidth(rows: ChartRow[], from: number, to: number, width: number): ChartRow[] {
+  if (width <= 0 || rows.length <= width || to <= from) return rows;
+  const result: ChartRow[] = [];
+  const buckets = Math.max(1, Math.floor(width / 8));
+  const bucket = (row: ChartRow) => Math.floor(((row.t - from) / (to - from)) * buckets);
+  const mask = (row: ChartRow) =>
+    Number(row.cpu !== null) + 2 * Number(row.mem !== null)
+      + 4 * Number(row.cpuBand !== null) + 8 * Number(row.memBand !== null);
+  for (let first = 0; first < rows.length;) {
+    const initial = rows[first]!;
+    const bin = bucket(initial);
+    const present = mask(initial);
+    let end = first + 1;
+    let cpuMin = first, cpuMax = first, memMin = first, memMax = first;
+    let cpuPeak = first, memPeak = first;
+    while (end < rows.length) {
+      const row = rows[end]!;
+      if (bucket(row) !== bin || mask(row) !== present) break;
+      if (row.cpu !== null && row.cpu < rows[cpuMin]!.cpu!) cpuMin = end;
+      if (row.cpu !== null && row.cpu > rows[cpuMax]!.cpu!) cpuMax = end;
+      if (row.mem !== null && row.mem < rows[memMin]!.mem!) memMin = end;
+      if (row.mem !== null && row.mem > rows[memMax]!.mem!) memMax = end;
+      if (row.cpuBand && row.cpuBand[1] > rows[cpuPeak]!.cpuBand![1]) cpuPeak = end;
+      if (row.memBand && row.memBand[1] > rows[memPeak]!.memBand![1]) memPeak = end;
+      end++;
+    }
+    for (const i of [...new Set([first, cpuMin, cpuMax, memMin, memMax, cpuPeak, memPeak, end - 1])].toSorted((a, b) => a - b)) {
+      result.push(rows[i]!);
+    }
+    first = end;
+  }
+  return result;
+}
+
 /** Lone points (no neighbour on either side) need a dot: a line of one point draws nothing. */
 export function lonePoints(rows: readonly ChartRow[], key: "cpu" | "mem"): number[] {
   const out: number[] = [];
