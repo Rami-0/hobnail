@@ -4,9 +4,9 @@
   python3 docs/brand/src/build.py          # needs: pillow, fonttools, a Chromium headless shell
 
 Writes
-  static/brand/hobnail.svg            favicon / sidebar tile (glyph, close-up)
-  static/brand/icon-1024.png          app icon master (faceted, close-up)
-  static/pwa/icon-512.png, icon-192.png, apple-touch-icon.png
+  src/http/pwa/hobnail.svg            favicon / sidebar tile (glyph, close-up)
+  docs/brand/icon-1024.png          app icon master (faceted, close-up)
+  src/http/pwa/icon-512.png, icon-192.png, apple-touch-icon.png
   docs/brand/mark-glyph.svg, mark-facets.svg, wordmark.svg, wordmark-light.svg
   docs/brand/social-preview.png       the wordmark banner (1280x640)
   docs/brand/banner-pulse.png, banner-plate.png   (2560x1280)
@@ -125,7 +125,7 @@ def vectors():
     # The clip keeps the point inside the rounded corner it runs off.
     tile = (f'<clipPath id="hn"><rect {box}/></clipPath><rect {box} fill="{P["ground"]}"/>'
             f'<g clip-path="url(#hn)">{glyph()}</g>')
-    write(os.path.join(ROOT, "static/brand/hobnail.svg"), svg(tile, CLOSE, ' class="logo" aria-hidden="true"'))
+    write(os.path.join(ROOT, "src/http/pwa/hobnail.svg"), svg(tile, CLOSE, ' class="logo" aria-hidden="true"'))
     write(os.path.join(BRAND, "mark-glyph.svg"), svg(glyph(), FULL))
     write(os.path.join(BRAND, "mark-facets.svg"), svg(facets(), FULL))
     write(os.path.join(BRAND, "wordmark.svg"), wordmark_svg(P["cream"]))
@@ -134,8 +134,8 @@ def vectors():
 # ---- app icons -------------------------------------------------------------------------------
 def icons():
     art = svg(facets(), CLOSE, ' width="100%" height="100%"')
-    for out, px in (("static/brand/icon-1024.png", 1024), ("static/pwa/icon-512.png", 512),
-                    ("static/pwa/icon-192.png", 192), ("static/pwa/apple-touch-icon.png", 180)):
+    for out, px in (("docs/brand/icon-1024.png", 1024), ("src/http/pwa/icon-512.png", 512),
+                    ("src/http/pwa/icon-192.png", 192), ("src/http/pwa/apple-touch-icon.png", 180)):
         shoot(page(art, "svg{display:block}", P["ground"], px, px, fonts=False), os.path.join(ROOT, out), px, px, colors=48)
 
 # ---- banners ---------------------------------------------------------------------------------
