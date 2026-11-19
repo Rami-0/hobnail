@@ -6,11 +6,17 @@
 
 **A tiny home for your homelab.**
 
-Hobnail is a home-server dashboard written in Rust: one static binary in a
-~12 MB `scratch` image, idling at about 4 MiB of RAM. It discovers every Docker
-container by itself, shows host stats and their history, tails logs, pulls data
-from any JSON API, sends notifications when something breaks and recovers, and
-can be configured from the browser behind a login.
+Hobnail is a home-server dashboard with a Rust server and an embedded React
+client. One static binary runs in one `scratch` container; Node is build-time
+only. It discovers Docker containers, shows host stats and history, tails logs,
+fetches configured JSON widgets and sends notifications. Boards are curated in
+the browser. Application data requires login.
+
+The M5 image is **13.3 MB** (`docker images`; compressed content 4,578,941 B).
+Warm-cache idle median: **2,117,632 B** of cgroup memory.current (2.01953125 MiB),
+180 samples over 90 seconds on a fresh database/config. This excludes the
+browser. Login hashing can exceed the 20 MiB peak budget; bundle and browser
+budgets also have misses. Methods and limits: [React results](docs/plans/react-port-phase-2-5.md).
 
 ## Quick start
 
@@ -23,15 +29,23 @@ docker build -t hobnail:latest .
 docker compose -f deploy/compose.yaml up -d
 ```
 
-Open <http://127.0.0.1:3200>. With no configuration it lists every container on
-the host, grouped by Compose project. To change settings from the browser, set
-a password once:
+Open <http://127.0.0.1:3200/app> and set the owner username and password
+in the browser. Use a fresh writable data directory for a new installation;
+no console setup is needed. The first visitor claims the instance, so restrict
+access during setup. The Owner invites Admin and Viewer accounts and can scope
+their access to boards and integrations.
 
-```sh
-docker exec -it hobnail /hobnail set-password
-```
+A new board is empty. Create and arrange it in Settings → Boards and edit mode,
+then Save. Containers remain available as discovery suggestions. There is no
+automatic All containers board. The app needs JavaScript. The old UI is on
+`rust-only`; old URLs are gone and `/` returns 404 with a link to `/app`.
+For an existing database, read the forward-only migration and legacy-password
+recovery notes in [install](docs/install.md) before upgrading.
 
 ## Documentation
+
+[Boards](docs/features/boards.md) · [Integrations](docs/features/integrations.md) ·
+[Accounts and login](docs/features/login.md) · [HTTP API](docs/api.md)
 
 | Topic | Read |
 |---|---|
