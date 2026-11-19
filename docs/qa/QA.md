@@ -1,5 +1,10 @@
 # Hobnail QA list (ux-pass audit)
 
+Historical audit: the original findings and file/URL references below describe
+the retired Rust UI, not the current React client. Phase 2–5 outcomes are at the
+end; [the results](../plans/react-port-phase-2-5.md) record current browser
+checks and measurements. Original observations are retained as evidence.
+
 Audit of branch `ux-pass` at build `02c21fb` (the app as it is on `main`, plus
 the test fix), 2026-11-15. Five agents walked the app in headless Chromium
 (playwright-core 1.64) at 1440 and 390 px, dark and light, signed out and
@@ -1055,3 +1060,26 @@ Re-run by hand (a second script, not the agents') before the list was accepted:
 - **Stream drop on Host, History and the log viewer in detail**: Overview, Containers and one log page were watched; the others were only checked for the absence of a freshness indicator.
 - **Login back-off beyond five attempts** (how long the wait grows, when it resets) and the lock-out message on a phone keyboard.
 - **Text spacing overrides (WCAG 1.4.12), forced-colors / Windows high-contrast mode, and 400 % zoom.**
+
+## React port: outcomes of the deferred findings
+
+These are implementation outcomes, not a blanket closure of the historical
+findings. Current measured passes and misses are in the
+[Phase 2–5 results](../plans/react-port-phase-2-5.md).
+
+| Finding | Current outcome |
+|---|---|
+| SET-42 | Board edit mode has private drafts and explicit Save/Cancel, one document write per session (D17). Legacy config collection reorder arrows still write one revision per click; the original finding is only partly addressed. |
+| SET-46 | Still deferred. Fetch now returns structured display/values, not the raw upstream response. There are no provider integrations to replace this workflow. |
+| SET-69 | The React raw editor wraps on phones (`web/src/routes/settings/settings.css`); tested by settings-check. |
+| NAV-81 | The client has a shared sign-in/credential-entry flow. Application data requires login; obsolete public/read-only lock prompts were removed. |
+| OV-27 | Container sparklines seed from batched history and share a scale per column (`liveCells.ts`, Containers route). This is implemented; cost is included in the browser measurements, which still have performance misses. |
+| OV-29 | Toolbar controls use shared wrapper/styles; phone sort controls are exercised by slice-check. |
+| OV-32 | Sort uses the wrapped UI SDK Select; no native-select substitution. |
+| LG-18 | Logs use a bounded ring, windowed rows and a shared 128-line frame budget across panes. Burst tasks are measured by logs-check; see the results rather than assuming the implementation passes the 100 ms budget. |
+| A11Y-19 | Shared hit-target sizing and real hit testing are enforced by a11y-check. Its measured pass/fail count is in the results; this does not verify screen-reader behavior. |
+| ROB-04 | Embedded assets ship raw/gzip. Dynamic JSON and SSE remain uncompressed; measured response sizes and the D9 recommendation are in the results. |
+| ROB-05 | The Containers table progressively mounts rows and defers offscreen heavy cells. Phone load and live tasks remain measured acceptance criteria, with misses recorded in the results. |
+| ROB-10 | A fresh React load needs its JS and CSS before content. Immutable assets help repeat visits; cold-browser LCP still misses budgets. A 400 kbit/s first visit was not measured in M5. |
+| ROB-14 | Structured widget bodies and plain errors are rendered by React, with result age. Read refresh retains the current result, but an error replaces it: a separate last-good-value cache and raw-error disclosure are not built. Partly addressed. |
+| ROB-17 | Superseded by D6: the application requires JavaScript and says so in noscript. Health, API and authenticated log downloads still answer; old no-script UI controls are deleted. |
