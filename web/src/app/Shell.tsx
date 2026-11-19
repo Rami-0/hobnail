@@ -69,14 +69,14 @@ export function applyStoredRail(): void {
   if (readRail(local())) document.documentElement.dataset.side = "rail";
 }
 
-const GO_HREF: Record<GoPage, () => string> = {
+const GO_HREF: Record<GoPage, (owner?: boolean, scoped?: boolean) => string> = {
   overview: () => "/app/overview",
   containers: () => appHref("/containers"),
   host: () => "/app/host",
   logs: () => "/app/logs",
   history: () => "/app/history",
   alerts: () => "/app/alerts",
-  settings: () => `/app${settingsHref(local())}`,
+  settings: (owner, scoped) => `/app${settingsHref(local(), owner, scoped)}`,
 };
 
 const visible = (el: Element) => el instanceof HTMLElement && el.offsetParent !== null && !el.closest("[hidden]");
@@ -306,7 +306,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           if (act.page === "settings" && b?.role === "viewer") return;
           if (b?.scoped && act.page !== "containers" && act.page !== "logs" && !(act.page === "settings" && b.role === "admin")) return;
           e.preventDefault();
-          navigate(GO_HREF[act.page]());
+          navigate(GO_HREF[act.page](b?.role === "owner", b?.scoped));
           return;
         case "palette":
           e.preventDefault();

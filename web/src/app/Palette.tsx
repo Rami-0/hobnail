@@ -7,7 +7,7 @@ import { navigate } from "./router.ts";
 import { paletteIndex, rankPalette, type PaletteItem, type PaletteKind } from "./palette.ts";
 import { chooseTheme } from "./ThemeButton.tsx";
 import { THEMES, THEME_LABEL } from "./theme.ts";
-import { rowLink } from "../format/index.ts";
+import { rowLink, viewerHost } from "../format/index.ts";
 import { useBootstrap, useContainers } from "../live/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { TextInput } from "../ui/Field.tsx";
@@ -64,7 +64,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
     { kind: "Action", name: "Sign out", run: () => void signOut() },
     ...(data?.groups.flatMap((g) => g.containers.map((row): PaletteItem => {
       const href = containerHref(row.name);
-      const url = rowLink(row, window.location.hostname);
+      const url = rowLink(row, viewerHost(window.location.hostname));
       const children: PaletteItem[] = [];
       children.push({ kind: "Logs", name: `Logs: ${row.title}`, href: logsHref(row.name) });
       if (url) children.push({ kind: "Open", name: "Open service ↗", href: url, detail: row.title });
