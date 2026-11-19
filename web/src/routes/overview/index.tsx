@@ -1,4 +1,4 @@
-import { ArrowRightIcon, CheckIcon, ScrollTextIcon } from "lucide-react";
+import { ActivityIcon, ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ClockIcon, CpuIcon, HardDriveIcon, MemoryStickIcon, ScrollTextIcon, ThermometerIcon } from "lucide-react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, memo, useEffect, useState } from "react";
@@ -94,14 +94,16 @@ export default function Overview() {
     { value: overview.firing, label: "alerts firing", href: "/app/alerts", hot: overview.firing > 0 },
   ];
   const total = running + stopped;
-  const clock = new Date(now * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clock = new Date(now * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  const extraProblems = Math.max(0, problems - overview.attention.length);
+  const cleanStops = rows.filter((row) => row.state !== "running" && row.attention === null).length;
   return <div className="page ov" data-testid="overview">
     <div className="ov-head">
       <div className="ov-hi">
         <h1 className="display">{overview.greeting ?? "Hello"}</h1>
         {seen > 0 && now - seen >= 300 && <p className="since">Since you last looked (<RelativeTime at={seen} />) · {overview.starts_since} starts · {overview.crashes_since} crashes · {overview.alerts_since} alerts</p>}
       </div>
-      <div className="ov-meta"><span className="ov-clock num">{clock}</span></div>
+      <div className="ov-meta"><span className="ov-clock num">{clock}</span><span className="upd">updated <RelativeTime at={overview.now} /></span></div>
     </div>
     {error && <p role="alert">{error}</p>}
     <section className="panel primary pulse" aria-label="Status">
@@ -116,14 +118,23 @@ export default function Overview() {
           {problems > 0 && <span className="u" style={{ width: problems / total * 100 + "%" }} />}
         </div>}
       </section>
-      <div className={overview.attention.length ? "attn" : "attn quiet"}>
-      {overview.attention.length ? <><div className="attn-h"><h2 className="label">Needs attention</h2></div><ul className="history-events rows">{overview.attention.map((item) => <li key={[item.name, item.reason, item.detail].join(":")} data-name={item.container ? item.name : undefined}>
-        <span className={`dot ${item.severity}`} /> <a href={item.href}>{item.title}</a> · {item.detail}
-        {item.since !== null && <> · <RelativeTime at={item.since} /></>}
-        {item.container && <>{" · "}<a className="ia" aria-label={`Logs of ${item.title}`} title="Logs" href={logsHref(item.name, item.since)}><ScrollTextIcon aria-hidden="true" /></a></>}
-        {item.probe && <small className="overview-probe">{item.probe}</small>}
-      </li>)}</ul></> : <p className="ok-line"><CheckIcon aria-hidden="true" /> All clear</p>}
-      </div>
+      <section className={overview.attention.length ? "attn" : "attn quiet"} aria-label="Needs attention">
+        {overview.attention.length ? <>
+          <div className="attn-h">
+            <h2 className="label">Needs attention</h2>
+            <span className="count-pill bad">{overview.attention.length + extraProblems}</span>
+          </div>
+          <ul className="rows">{overview.attention.map((item) => <li key={[item.name, item.reason, item.detail].join(":")} data-name={item.container ? item.name : undefined}>
+            <span className={"dot " + item.severity} aria-hidden="true" />
+            <a className="nm" href={item.href}>{item.title}</a>
+            <span className="why">{item.detail}{item.probe && <small className="overview-probe"> · {item.probe}</small>}</span>
+            {item.since !== null && <span className="when"><RelativeTime at={item.since} /></span>}
+            {item.container && <a className="ia" aria-label={"Logs of " + item.title} title="Logs" href={logsHref(item.name, item.since)}><ScrollTextIcon aria-hidden="true" /></a>}
+          </li>)}</ul>
+          {extraProblems > 0 && <p className="foot-line"><a href="/app/containers?state=problem">{extraProblems} more on the Containers page</a></p>}
+        </> : <p className="ok-line"><CheckIcon aria-hidden="true" /> {total ? <>All clear. <span className="muted">{total} containers, nothing needs you.</span></> : "No containers yet."}</p>}
+        {cleanStops > 0 && <p className="foot-line"><a href="/app/containers?state=stopped">{cleanStops} {cleanStops === 1 ? "container is" : "containers are"} stopped cleanly</a></p>}
+      </section>
       {groups.length > 0 && <div className="strips">
         <div className="strips-h">
           <h2 className="label">Last 24h</h2>
@@ -141,19 +152,11 @@ export default function Overview() {
     </section>
     {boot?.features.system && <section className="sec">
       <div className="sec-h"><h2 className="label">Host</h2><a className="more" href="/app/host">Host details <ArrowRightIcon aria-hidden="true" /></a></div>
-      {system && <div className="overview-counts">
-        <span>CPU {pct(system.cpu_pct)}</span><span>Memory {bytes(system.mem_used)} / {bytes(system.mem_total)}</span>
-        <span>Load {system.load[0].toFixed(2)}</span><span>Uptime {duration(system.uptime_secs)}</span>
-      </div>}
+      <HostStrip system={system} />
       {!!overview.hour.length && <HostCharts overview={overview} recording={boot.features.history} />}
     </section>}
-    {boot?.features.stats && <section className="panel history-block">
-      <h2>Top consumers</h2><div className="overview-consumers">
-        <div><h3>CPU</h3>{!top.length && <p>No CPU samples yet.</p>}<ul className="history-events">{top.map((r) => <li key={r.name}>
-          <a href={containerHref(r.name)}>{r.title}</a> · {pct(r.cpu)}
-          <Meter value={r.cpu ?? 0} max={Math.max(100, top[0]?.cpu ?? 0)} label={`${r.title} CPU`} />
-        </li>)}</ul></div>
-        <div><h3>Memory</h3>{!map.boxes.length ? <p>No memory samples yet.</p> :
+    {boot?.features.stats && <section className="overview-consumers" aria-label="Where resources go">
+        <div className="panel"><div className="panel-h"><h2>Memory by container</h2><a className="more" href="/app/containers?sort=mem">All <ArrowRightIcon aria-hidden="true" /></a></div>{!map.boxes.length ? <p>No memory samples yet.</p> :
           <svg className="overview-map" viewBox="0 0 360 180" aria-label="Memory usage treemap">
             {map.boxes.map(([x, y, width, height], i) => {
               const row = i < map.shown ? memory[i] : null;
@@ -165,7 +168,10 @@ export default function Overview() {
               </a>;
             })}
           </svg>}</div>
-      </div>
+        <div className="panel res-cpu"><div className="panel-h"><h2>Top CPU</h2><a className="more" href="/app/containers?sort=cpu">All <ArrowRightIcon aria-hidden="true" /></a></div>{!top.length && <p>No CPU samples yet.</p>}<ul className="history-events">{top.map((r) => <li key={r.name}>
+          <a href={containerHref(r.name)}>{r.title}</a> · {pct(r.cpu)}
+          <Meter value={r.cpu ?? 0} max={Math.max(100, top[0]?.cpu ?? 0)} label={`${r.title} CPU`} />
+        </li>)}</ul></div>
     </section>}
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
       {admin && <a href="/app/overview?add=widget">Add widget</a>}
@@ -195,4 +201,28 @@ export default function Overview() {
       </div>)}
     </section>}
   </div>;
+}
+
+function HostStrip({ system }: { system: ReturnType<typeof useSystem> }) {
+  const disk = system?.disks.find((volume) => volume.total > 0);
+  const rate = (value: number | null | undefined) => value == null ? "—" : bytes(value) + "/s";
+  const widgets = [
+    { Icon: CpuIcon, label: "CPU", value: pct(system?.cpu_pct ?? null), note: system && "load " + system.load.map((v) => v.toFixed(2)).join(" ") },
+    { Icon: MemoryStickIcon, label: "Memory", value: system?.mem_total ? bytes(system.mem_used) : "—",
+      note: system?.mem_total ? "of " + bytes(system.mem_total) + (system.swap_total > 0 ? " · swap " + bytes(system.swap_used) : "") : "—",
+      gauge: system?.mem_total ? system.mem_used / system.mem_total * 100 : undefined },
+    { Icon: HardDriveIcon, label: "Disk", value: disk ? pct(disk.used / disk.total * 100) : "—",
+      note: disk && bytes(disk.avail) + " free on " + disk.label, gauge: disk && disk.used / disk.total * 100 },
+    { Icon: ActivityIcon, label: "Network", value: <><span title="received"><ArrowDownIcon aria-hidden="true" />{rate(system?.net_rx_bps)}</span><span title="sent"><ArrowUpIcon aria-hidden="true" />{rate(system?.net_tx_bps)}</span></> },
+    { Icon: ThermometerIcon, label: "Temperature", value: system?.temp_c == null ? "—" : Math.round(system.temp_c) + " °C", note: "CPU package" },
+    { Icon: ClockIcon, label: "Uptime", value: system?.uptime_secs ? duration(system.uptime_secs) : "—", note: "since last boot" },
+  ];
+  return <div className="strip" aria-label="Host vitals">{widgets.map(({ Icon, label, value, note, gauge }) => (
+    <div className="cell" key={label}>
+      <div className="cell-h"><Icon aria-hidden="true" /><span className="label">{label}</span></div>
+      <div className={label === "Network" ? "big net" : "big"}>{value}</div>
+      <div className="sub">{note}</div>
+      {gauge !== undefined && <Meter value={gauge} max={100} label={label + " usage"} />}
+    </div>
+  ))}</div>;
 }
