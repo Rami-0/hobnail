@@ -1,9 +1,19 @@
 #!/bin/sh
 # Build the image (fmt + clippy + tests run inside the build) and (re)deploy
-# the compose stack at /opt/stacks/hobnail. Safe to run repeatedly.
+# the compose stack at /opt/stacks/hobnail. Requires explicit confirmation.
 set -eu
-cd "$(dirname "$0")/.."
 STACK=${STACK:-/opt/stacks/hobnail}
+printf '==> will replace image hobnail:latest, container hobnail, stack %s\n' "$STACK"
+if [ "${DEPLOY_YES:-}" != 1 ]; then
+  if [ ! -t 0 ]; then
+    echo 'Refusing non-interactive deployment; set DEPLOY_YES=1 to confirm.' >&2
+    exit 1
+  fi
+  printf 'Replace this instance? Type yes: '
+  read -r answer
+  [ "$answer" = yes ] || exit 1
+fi
+cd "$(dirname "$0")/.."
 sha=$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
 git diff --quiet HEAD -- src web build.rs Cargo.toml Cargo.lock Dockerfile .dockerignore 2>/dev/null || sha="$sha-dirty"
 built=$(date -u +%Y-%m-%dT%H:%MZ)
