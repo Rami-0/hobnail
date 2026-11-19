@@ -1512,6 +1512,38 @@ async fn legacy_reads_require_a_session_and_public_assets_do_not() {
 }
 
 #[tokio::test]
+async fn anonymous_known_handlers_require_a_session_but_unknown_reads_are_404() {
+    use crate::api::access::{Access, ROUTES};
+    let addr = start(state()).await;
+    for route in ROUTES
+        .iter()
+        .filter(|r| r.method == "GET" && r.access != Access::Public)
+    {
+        let path = route
+            .pattern
+            .replace("<name>", "web")
+            .replace("<id>", "example");
+        for method in ["GET", "HEAD"] {
+            assert_eq!(
+                req_bounded(addr, method, &path, &[]).await.status,
+                401,
+                "{method} {path}"
+            );
+        }
+    }
+    // Settings and retained legacy reads are covered by the visitor walk above.
+    for path in ["/", "/unknown", "/api/unknown", "/api/v1/unknown"] {
+        for method in ["GET", "HEAD"] {
+            assert_eq!(
+                req_bounded(addr, method, path, &[]).await.status,
+                404,
+                "{method} {path}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn retired_routes_are_gone_with_or_without_a_session() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

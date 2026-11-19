@@ -132,6 +132,9 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             | "/custom.css"
     ) || path.starts_with("/api/history/container/")
         || path.starts_with("/icons/");
+    // Only paths without a read handler may return before the session gate.
+    // Keep handler recognition in sync with dispatch: retired URLs (including
+    // `/`) stay 404 instead of exposing data or redirecting to sign-in.
     if read
         && !(v1
             || public_asset
