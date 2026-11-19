@@ -1,28 +1,18 @@
-//! HTTP server on hyper directly (no axum/tower): six routes do not need a
-//! router framework, and skipping it saves binary size and allocations.
-//!
-//! Live updates use Server-Sent Events: each open page holds one `/api/stream`
-//! connection. The connection counts as a viewer (which is what makes the
-//! refresh loop run), receives "fragment changed" ids from the broadcast
-//! channel, renders that fragment for its own Host (links depend on the
-//! address the page was opened on) and pushes the HTML.
+//! Hyper server for the embedded client and HTTP APIs.
 
 use bytes::Bytes;
 use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
-use hyper::body::{Frame, Incoming};
+use hyper::body::Incoming;
 use hyper::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc};
 
-use crate::state::{AppState, ViewerGuard};
+use crate::state::AppState;
 
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -164,16 +154,8 @@ pub fn host_allowed(host: &str, env: &crate::state::Env) -> bool {
 
 /// The peer address of the connection, stored in request extensions.
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // read by auth::route (login rate limit)
 pub struct Peer(pub SocketAddr);
 
-/// Central router. Ownership of route groups (so parallel work does not
-/// collide in this file):
-/// - `/api/login`, `/api/logout`            → `auth::route`
-/// - `/api/history/*`, `/api/events`        → `db::api::route`
-/// - `/api/settings/*`                      → `settings::route`
-/// - every other page (`/`, `/containers`…) → `ui::routes::route`
-///
 async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     let host = request_host(&req);
     let path = req.uri().path().to_string();
@@ -203,11 +185,26 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
                     | "/icon-512.png"
                     | "/apple-touch-icon.png"
             ));
-    let page = read
-        && !(path.starts_with("/api/")
-            || path.starts_with("/static/")
-            || path.starts_with("/icons/")
-            || matches!(path.as_str(), "/custom.css" | "/alarm.json"));
+    let legacy_read = matches!(
+        path.as_str(),
+        "/api/history/system"
+            | "/api/events"
+            | "/api/logs/stream"
+            | "/api/logs/download"
+            | "/api/logs/levels"
+            | "/api/logs/status"
+            | "/custom.css"
+    ) || path.starts_with("/api/history/container/")
+        || path.starts_with("/icons/");
+    if read
+        && !(v1
+            || public_asset
+            || legacy_read
+            || path == "/healthz"
+            || path.starts_with("/api/settings/"))
+    {
+        return not_found(&path);
+    }
     let access = match &lookup {
         Some(Lookup::Found(m)) => m.route.access,
         // Unknown paths have no handler or data. Keep v1 404/405 for reads.
@@ -218,19 +215,12 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
         {
             Access::Public
         }
-        _ if path == "/api/settings"
-            || path.starts_with("/api/settings/")
-            || path == "/settings"
-            || path.starts_with("/settings/")
-            || path.starts_with("/api/containers/") =>
-        {
-            Access::Admin
-        }
+        _ if path.starts_with("/api/settings/") => Access::Admin,
         _ => Access::Viewer,
     };
     let session = match access::check(&state, req.headers(), access, !read) {
         Ok(session) => session,
-        Err(denied) => return denied.response(v1, page),
+        Err(denied) => return denied.response(v1),
     };
     if let Some(session) = &session {
         if let Err(denied) = access::check_scope(
@@ -240,7 +230,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
             &path,
             req.uri().query().unwrap_or_default(),
         ) {
-            return denied.response(v1, page);
+            return denied.response(v1);
         }
         if let Some(name) = path.strip_prefix("/api/history/container/") {
             let visible = session.account.container_visibility(&state);
@@ -254,7 +244,7 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     }
     let dashboard_icon = matches!(&lookup, Some(Lookup::Found(m))
         if m.route.handler == access::Handler::DashboardIcon);
-    let mut response = dispatch(&state, req, &path, host, read, lookup, session.as_ref()).await;
+    let mut response = dispatch(&state, req, &path, read, lookup, session.as_ref()).await;
     if let Some(session) = session {
         crate::auth::refresh_cookie(&state, &session, &mut response);
         if dashboard_icon && response.status().is_success() {
@@ -269,9 +259,8 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
 
 async fn dispatch(
     state: &Arc<AppState>,
-    mut req: Request<Incoming>,
+    req: Request<Incoming>,
     path: &str,
-    host: String,
     read: bool,
     lookup: Option<crate::api::access::Lookup>,
     session: Option<&crate::auth::Session>,
@@ -285,32 +274,13 @@ async fn dispatch(
     if !read {
         return match path {
             "/api/login" | "/api/logout" => crate::auth::route(state, req, session).await,
-            _ => text(StatusCode::METHOD_NOT_ALLOWED, "method not allowed\n"),
+            _ => not_found(path),
         };
     }
     let admin = session.is_some_and(|s| s.account.role >= crate::db::accounts::Role::Admin);
     match path {
         "/healthz" => text(StatusCode::OK, "ok\n"),
         "/favicon.ico" => crate::ui::pwa::route(state, "/icon.svg").expect("favicon asset"),
-        "/login" => {
-            let mut response = full(StatusCode::SEE_OTHER, "");
-            set(&mut response, hyper::header::LOCATION, "/app/login");
-            set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
-            response
-        }
-        "/api/stream" => sse(
-            state.clone(),
-            host,
-            session.expect("viewer gate").hash.clone(),
-        ),
-        "/api/state" => json(&crate::render::state_json(state, admin)),
-        "/api/login" | "/api/logout" => crate::auth::route(state, req, session).await,
-        "/static/app.css" => asset(APP_CSS, CSS),
-        "/static/app.js" => asset(APP_JS, JS),
-        "/static/logs.css" => asset(LOGS_CSS, CSS),
-        "/static/logs.js" => asset(LOGS_JS, JS),
-        "/static/settings.css" => asset(SETTINGS_CSS, CSS),
-        "/static/settings.js" => asset(SETTINGS_JS, JS),
         "/custom.css" => {
             let css =
                 std::fs::read_to_string(state.env.data_dir.join("custom.css")).unwrap_or_default();
@@ -333,9 +303,6 @@ async fn dispatch(
             let visible = session.account.container_visibility(state);
             crate::logs::route(state, &req, &session.hash, &visible).await
         }
-        p if p.starts_with("/api/containers/") => {
-            crate::ui::pages::container::api(state, &req).await
-        }
         p if crate::ui::pwa::route(state, p).is_some() => crate::ui::pwa::route(state, p).unwrap(),
         p if p.starts_with("/api/history/") || p == "/api/events" => {
             crate::db::api::route(state, &req, admin).await
@@ -345,15 +312,28 @@ async fn dispatch(
         p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
             crate::http::assets::route(&req)
         }
-        _ => {
-            // The legacy renderer uses the presence of a session to expose
-            // administrative details. Reuse its redacted rendering for Viewers.
-            if !admin {
-                req.headers_mut().remove(hyper::header::COOKIE);
-            }
-            crate::ui::routes::route(state, &req, &host).await
-        }
+        _ => not_found(path),
     }
+}
+
+fn not_found(path: &str) -> Response<Body> {
+    if path == "/" {
+        let mut response = full(
+            StatusCode::NOT_FOUND,
+            r#"<!doctype html><html lang="en"><meta charset="utf-8"><title>Hobnail</title><h1>Hobnail</h1><p><a href="/app">Open Hobnail</a></p></html>"#,
+        );
+        set(&mut response, CONTENT_TYPE, "text/html; charset=utf-8");
+        set(
+            &mut response,
+            hyper::header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        );
+        return response;
+    }
+    if path == "/api" || path.starts_with("/api/") {
+        return crate::db::api::json_error(StatusCode::NOT_FOUND, "not found");
+    }
+    text(StatusCode::NOT_FOUND, "not found\n")
 }
 
 pub fn full(status: StatusCode, body: impl Into<Bytes>) -> Response<Body> {
@@ -391,32 +371,6 @@ pub fn json(v: &serde_json::Value) -> Response<Body> {
     r
 }
 
-const CSS: &str = "text/css; charset=utf-8";
-const JS: &str = "text/javascript; charset=utf-8";
-
-fn asset(body: &'static str, ctype: &str) -> Response<Body> {
-    let mut r = full(StatusCode::OK, body);
-    set(&mut r, CONTENT_TYPE, ctype);
-    r
-}
-
-/// SSE body backed by a channel; holding the viewer guard for its lifetime.
-struct SseBody {
-    rx: mpsc::Receiver<Bytes>,
-    _guard: ViewerGuard,
-}
-
-impl hyper::body::Body for SseBody {
-    type Data = Bytes;
-    type Error = Infallible;
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
-        self.rx.poll_recv(cx).map(|o| o.map(|b| Ok(Frame::data(b))))
-    }
-}
-
 /// Encode one SSE event; multi-line data becomes several `data:` lines.
 pub fn sse_event(event: &str, data: &str) -> Bytes {
     let mut s = String::with_capacity(data.len() + 32);
@@ -430,49 +384,6 @@ pub fn sse_event(event: &str, data: &str) -> Bytes {
     }
     s.push('\n');
     Bytes::from(s)
-}
-
-fn sse(state: Arc<AppState>, host: String, session_hash: String) -> Response<Body> {
-    let (tx, rx) = mpsc::channel::<Bytes>(16);
-    let mut sub = state.events.subscribe();
-    let guard = state.viewer_guard(true);
-    let st = state.clone();
-    tokio::spawn(async move {
-        if tx.send(sse_event("hello", st.build.sha)).await.is_err() {
-            return;
-        }
-        let mut ping = tokio::time::interval(Duration::from_secs(25));
-        ping.tick().await;
-        loop {
-            tokio::select! {
-                m = sub.recv() => {
-                    if !st.db.account_session(&session_hash, crate::auth::now_s()).is_some_and(|account| !account.is_scoped()) { break; }
-                    let id = match m {
-                        Ok(id) => id,
-                        Err(broadcast::error::RecvError::Lagged(_)) => Arc::from("reload"),
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    };
-                    let msg = if &*id == "reload" {
-                        sse_event("reload", "")
-                    } else if let Some(html) = crate::render::fragment(&st, &id, &host) {
-                        sse_event("frag", &format!("{id}\n{html}"))
-                    } else {
-                        continue;
-                    };
-                    if tx.send(msg).await.is_err() { break; }
-                }
-                _ = ping.tick() => {
-                    if !st.db.account_session(&session_hash, crate::auth::now_s()).is_some_and(|account| !account.is_scoped()) { break; }
-                    if tx.send(Bytes::from_static(b": ping\n\n")).await.is_err() { break; }
-                }
-                _ = tx.closed() => break,
-            }
-        }
-    });
-    let mut r = Response::new(SseBody { rx, _guard: guard }.boxed_unsync());
-    set(&mut r, CONTENT_TYPE, "text/event-stream");
-    set(&mut r, CACHE_CONTROL, "no-cache");
-    r
 }
 
 #[cfg(test)]
@@ -508,160 +419,5 @@ mod tests {
     fn sse_multiline() {
         let b = sse_event("frag", "a\nb");
         assert_eq!(&b[..], b"event: frag\ndata: a\ndata: b\n\n");
-    }
-
-    /// GET `path` from a server on a real socket: (status, head, body).
-    async fn get(path: &str) -> (u16, String, String) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let st = crate::ui::testutil::state_with(crate::ui::testutil::sample(), "");
-        let token = "ab".repeat(32);
-        let hash = crate::auth::sha256_hex(token.as_bytes());
-        let now = crate::auth::now_s();
-        assert!(st.db.create_session(&hash, now, now + 60));
-        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = l.local_addr().unwrap();
-        tokio::spawn(serve_listener(st, l));
-        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
-        let r = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nCookie: rh_session={token}\r\nConnection: close\r\n\r\n");
-        s.write_all(r.as_bytes()).await.unwrap();
-        let mut out = Vec::new();
-        s.read_to_end(&mut out).await.unwrap();
-        let text = String::from_utf8_lossy(&out).into_owned();
-        let (head, body) = text.split_once("\r\n\r\n").unwrap();
-        let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
-        (status, head.to_ascii_lowercase(), body.to_string())
-    }
-
-    /// The component script is the first part of `/static/app.js` (one
-    /// cached request, no new one), before the app script.
-    #[tokio::test]
-    async fn app_js_serves_the_component_layer_then_the_app() {
-        let (status, head, body) = get(&format!("/static/app.js?v={APP_JS_V}")).await;
-        assert_eq!(status, 200);
-        assert!(head.contains("content-type: text/javascript"), "{head}");
-        assert!(head.contains("cache-control: no-store"), "{head}");
-        assert!(body.contains(APP_JS), "the whole bundle, unchunked");
-        let hb = body
-            .find("const HB = (window.HB = {});")
-            .expect("window.HB");
-        let app = body
-            .find("// hobnail client: theme, sidebar")
-            .expect("app.js");
-        assert!(hb < app, "ui.js comes first so app.js can use HB");
-        for api in [
-            "HB.open = ",
-            "HB.close = ",
-            "HB.validate = ",
-            "HB.toast = ",
-            "HB.confirm = ",
-            "HB.flash = ",
-            "HB.remove = ",
-        ] {
-            assert!(body.contains(api), "{api}");
-        }
-        // Not built (owner decision Y13): no reorder dialog code is shipped.
-        assert!(!body.contains("data-move"), "reorder script shipped");
-    }
-
-    /// The offline page is gone (NAV-70): no route, no worker, and nothing
-    /// (manifest, page head) points at it.
-    #[tokio::test]
-    async fn no_offline_page_and_no_service_worker() {
-        let (status, _, body) = get("/offline").await;
-        assert_eq!(status, 404);
-        assert!(body.contains("Page not found"), "the shell's 404");
-        let (status, head, manifest) = get("/manifest.webmanifest").await;
-        assert_eq!(status, 200);
-        assert!(head.contains("application/manifest+json"), "{head}");
-        assert!(!manifest.contains("offline"), "{manifest}");
-        assert!(!manifest.contains("serviceworker"));
-        let (_, _, page) = get("/").await;
-        assert!(page.contains("rel=\"manifest\""));
-        assert!(!page.contains("/offline") && !page.contains("serviceWorker"));
-        assert!(!APP_JS.contains("serviceWorker"));
-    }
-
-    /// The page CSS (tokens, then components, then the page parts) is one
-    /// cached file, `/static/app.css?v=<hash of its bytes>`, linked in every page's head
-    /// before `custom.css` (which loads last); nothing is inlined.
-    #[tokio::test]
-    async fn every_page_links_tokens_and_components() {
-        let (status, head, css) = get(&format!("/static/app.css?v={APP_CSS_V}")).await;
-        assert_eq!(status, 200);
-        assert!(head.contains("content-type: text/css"), "{head}");
-        assert!(head.contains("cache-control: no-store"), "{head}");
-        assert_eq!(css, APP_CSS);
-        let tokens = css.find("\n:root,[data-theme=dark]{").expect("dark tokens");
-        let comp = css.find("dialog.dlg{").expect("dialog");
-        let cards = css.find(".tbl{").expect("cards.css");
-        assert!(tokens < comp && comp < cards, "tokens, components, pages");
-        for sel in [
-            ".btn.primary{",
-            ".fld-err{",
-            ".in{",
-            ".note{",
-            "dialog.dlg::backdrop{",
-            ".toasts{",
-            ".toast{",
-            ".menu{",
-            ".mi{",
-            ".tab{",
-            ".empty-ic{",
-            ".navbar{",
-            ".sw{",
-            ".choice{",
-        ] {
-            assert!(css.contains(sel), "{sel}");
-        }
-        assert!(
-            !css.contains(".reorder"),
-            "reorder CSS shipped (Y13: not built)"
-        );
-        let (status, _, html) = get("/").await;
-        assert_eq!(status, 200);
-        let head = &html[..html.find("</head>").unwrap()];
-        assert!(!html.contains("<style>"), "nothing inlined");
-        assert_eq!(
-            head.matches(r#"<link rel="stylesheet" href="/static/app.css?v="#)
-                .count(),
-            1
-        );
-        assert_eq!(
-            html.matches(r#"<script src="/static/app.js?v="#).count(),
-            1,
-            "one app script request"
-        );
-    }
-
-    /// Protected legacy assets carry content hashes and are never cached.
-    #[tokio::test]
-    async fn protected_assets_are_no_store() {
-        assert_eq!(APP_CSS_V.len(), 16);
-        assert_eq!(fnv1a(""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a("a"), 0xaf63_dc4c_8601_ec8c);
-        assert_ne!(APP_CSS_V, APP_JS_V);
-        for (path, v) in [
-            ("/static/app.css", APP_CSS_V),
-            ("/static/app.js", APP_JS_V),
-            ("/static/logs.css", LOGS_CSS_V),
-            ("/static/logs.js", LOGS_JS_V),
-            ("/static/settings.css", SETTINGS_CSS_V),
-            ("/static/settings.js", SETTINGS_JS_V),
-        ] {
-            let (st, head, _) = get(&format!("{path}?v={v}")).await;
-            assert_eq!(st, 200);
-            assert!(head.contains("cache-control: no-store"), "{path}: {head}");
-            for q in ["", "?v=dev", "?v=0000000000000000", &format!("?x=1&v={v}x")] {
-                let (_, head, _) = get(&format!("{path}{q}")).await;
-                assert!(
-                    head.contains("cache-control: no-store"),
-                    "{path}{q}: {head}"
-                );
-                assert!(!head.contains("immutable"), "{path}{q}");
-            }
-        }
-        let (_, _, html) = get("/").await;
-        assert!(html.contains(&format!("/static/app.css?v={APP_CSS_V}\"")));
-        assert!(html.contains(&format!("/static/app.js?v={APP_JS_V}\"")));
     }
 }

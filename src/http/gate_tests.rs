@@ -386,38 +386,6 @@ async fn login_refuses_foreign_origin_and_bad_redirects() {
     assert_eq!(loc[9..].trim(), "/app", "{loc}");
 }
 
-#[tokio::test]
-async fn anonymous_events_and_pages_are_protected() {
-    let st = state();
-    crate::auth::set_password_for_tests(&st.db, PW);
-    let addr = start(st.clone()).await;
-    // A failed login records an auth.login_failed event with the IP.
-    let origin = format!("http://{addr}");
-    let _ = req(
-        addr,
-        "POST",
-        "/api/login",
-        &[("Content-Type", "application/json"), ("Origin", &origin)],
-        r#"{"username":"admin","password":"wrong password"}"#,
-    )
-    .await;
-    let r = req(addr, "GET", "/api/events?limit=500", &[], "").await;
-    assert_eq!(r.status, 401);
-    assert!(
-        !r.body.contains("auth."),
-        "anonymous /api/events: {}",
-        r.body
-    );
-    for page in ["/", "/history", "/alerts"] {
-        let r = req(addr, "GET", page, &[], "").await;
-        assert_eq!(r.status, 303, "{page}");
-        assert!(
-            !r.body.contains("auth.login_failed"),
-            "{page} shows login history"
-        );
-    }
-}
-
 /// ROB-15: a Settings form that is submitted without the script (a plain
 /// form post, no `X-RH-CSRF`) is refused by the gate exactly as before,
 /// changes nothing and echoes nothing of what was sent.
@@ -483,354 +451,6 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
     );
 }
 
-/// The Settings list fragment reads the session from the request: 401 and
-/// an empty body without one, the list with one.
-#[tokio::test]
-async fn settings_fragments_need_a_session() {
-    let st = state();
-    crate::auth::set_password_for_tests(&st.db, PW);
-    std::fs::write(
-        st.config.path(),
-        "[[bookmarks]]\nname = \"Wiki\"\nurl = \"https://wiki.example/frag-mark\"\n",
-    )
-    .unwrap();
-    let addr = start(st).await;
-    let r = req(addr, "GET", "/settings/bookmarks?frag=list", &[], "").await;
-    assert_eq!(r.status, 303);
-    assert!(r.body.is_empty(), "{}", r.body);
-    let r = req(addr, "GET", "/settings/bookmarks?edit=bookmark:0", &[], "").await;
-    assert_eq!(r.status, 303);
-    assert!(!r.body.contains("data-item") && !r.body.contains("value=\"Wiki\""));
-    let (cookie, _) = login(addr).await;
-    let r = req(
-        addr,
-        "GET",
-        "/settings/bookmarks?frag=list",
-        &[("Cookie", &cookie)],
-        "",
-    )
-    .await;
-    assert_eq!(r.status, 200, "{}", r.body);
-    assert!(r.body.contains("frag-mark") && r.body.contains("data-hash="));
-    assert!(!r.body.contains("<html"), "a fragment, not a page");
-    // Form values and the CSRF token are never stored by a cache.
-    let no_store = |h: &str| {
-        h.lines()
-            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
-    };
-    assert!(no_store(&r.head), "{}", r.head);
-    let r = req(
-        addr,
-        "GET",
-        "/settings/bookmarks",
-        &[("Cookie", &cookie)],
-        "",
-    )
-    .await;
-    assert!(
-        r.body.contains("rh-csrf") && no_store(&r.head),
-        "{}",
-        r.head
-    );
-}
-
-/// Notifications and Widgets (wave 2b) behave like Bookmarks: their list
-/// fragments need a session (401, empty, without one); the `?edit=` page
-/// forms show nothing to a visitor; with a session both are `no-store`.
-/// Their writes still go through the unchanged guards: a channel a rule
-/// uses is refused in plain words and nothing is written.
-#[tokio::test]
-async fn channel_rule_widget_lists_need_a_session() {
-    let st = state();
-    crate::auth::set_password_for_tests(&st.db, PW);
-    let cfg = "[[widgets]]\nid = \"wmark\"\ntype = \"custom-api\"\nurl = \"http://w.example/frag-mark\"\n\n\
-               [channels.chmark]\ntype = \"webhook\"\nurl_env = \"RH_FRAG_MARK\"\n\n\
-               [[alerts]]\nname = \"rulemark\"\ntype = \"container\"\nchannels = [\"chmark\"]\n";
-    std::fs::write(st.config.path(), cfg).unwrap();
-    let addr = start(st.clone()).await;
-    let marks = [
-        "frag-mark",
-        "RH_FRAG_MARK",
-        "rulemark",
-        "data-item",
-        "data-hash",
-    ];
-    for path in [
-        "/settings/notifications?frag=list",
-        "/settings/widgets?frag=list",
-    ] {
-        let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 303, "{path}");
-        assert!(r.body.is_empty(), "{path}: {}", r.body);
-    }
-    for path in [
-        "/settings/notifications?edit=channel:chmark",
-        "/settings/notifications?edit=rule:rulemark",
-        "/settings/widgets?edit=widget:wmark",
-    ] {
-        let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 303, "{path}");
-        // The sign-in link echoes the visitor's own URL (`next=`): not data.
-        let body: String = r
-            .body
-            .split("/login?next=")
-            .enumerate()
-            .map(|(i, p)| {
-                if i == 0 {
-                    p
-                } else {
-                    &p[p.find('"').unwrap_or(0)..]
-                }
-            })
-            .collect();
-        for m in marks {
-            assert!(!body.contains(m), "{path}: leaked {m}");
-        }
-    }
-    let (cookie, csrf) = login(addr).await;
-    let no_store = |h: &str| {
-        h.lines()
-            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
-    };
-    for (path, mark) in [
-        ("/settings/notifications?frag=list", "RH_FRAG_MARK"),
-        ("/settings/widgets?frag=list", "frag-mark"),
-        (
-            "/settings/notifications?edit=channel:chmark",
-            "RH_FRAG_MARK",
-        ),
-        ("/settings/widgets?edit=widget:wmark", "frag-mark"),
-    ] {
-        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
-        assert_eq!(r.status, 200, "{path}: {}", r.body);
-        assert!(r.body.contains(mark), "{path}");
-        assert!(no_store(&r.head), "{path}: {}", r.head);
-    }
-    let origin = format!("http://{addr}");
-    let hash = crate::settings::read_current(&st).unwrap().hash;
-    let r = req(
-        addr,
-        "POST",
-        "/api/settings/channels",
-        &[
-            ("Content-Type", "application/json"),
-            ("Origin", &origin),
-            ("Cookie", &cookie),
-            ("X-RH-CSRF", &csrf),
-        ],
-        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
-    )
-    .await;
-    assert_eq!(r.status, 422, "{}", r.body);
-    assert!(r.body.contains("used by the rule"), "{}", r.body);
-    assert_eq!(std::fs::read_to_string(st.config.path()).unwrap(), cfg);
-    // Without the CSRF header the same delete is refused by the gate.
-    let r = req(
-        addr,
-        "POST",
-        "/api/settings/channels",
-        &[
-            ("Content-Type", "application/json"),
-            ("Origin", &origin),
-            ("Cookie", &cookie),
-        ],
-        &format!(r#"{{"base_hash":"{hash}","action":"delete","id":"chmark"}}"#),
-    )
-    .await;
-    assert_eq!(r.status, 403);
-}
-
-/// Wave 2c: Containers and groups, General, Appearance, History and Config
-/// file are rendered with their values for a session only. Signed out they
-/// show nothing of the file and their fragments answer 401 with an empty
-/// body; signed in, pages and fragments are `no-store`. The one-entry
-/// requests on the existing `docker` and `groups` routes go through the
-/// unchanged gate: refused without the CSRF header or from another origin,
-/// written with both.
-#[tokio::test]
-async fn wave2c_tabs_need_a_session_and_writes_stay_gated() {
-    let st = state();
-    crate::auth::set_password_for_tests(&st.db, PW);
-    let cfg = "# raw-mark\n[page]\ngreeting = \"greet-mark\"\n\n[docker]\nexclude = [\"ex-mark\"]\n\n[[groups]]\nname = \"grp-mark\"\n\n[containers.ov-mark]\nname = \"Ov-mark\"\n\n[history]\nsample_interval = \"45s\"\n";
-    std::fs::write(st.config.path(), cfg).unwrap();
-    std::fs::write(st.env.data_dir.join("custom.css"), "/* css-mark */").unwrap();
-    let addr = start(st.clone()).await;
-    let marks = [
-        "raw-mark",
-        "greet-mark",
-        "ex-mark",
-        "grp-mark",
-        "Ov-mark",
-        "45s",
-        "css-mark",
-        "data-hash",
-        "data-item",
-    ];
-    for path in [
-        "/settings/containers?frag=list",
-        "/settings/history?frag=list",
-        "/settings/config?frag=list",
-    ] {
-        let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 303, "{path}");
-        assert!(r.body.is_empty(), "{path}: {}", r.body);
-    }
-    for path in [
-        "/settings/general",
-        "/settings/containers",
-        "/settings/containers?edit=override:ov-mark",
-        "/settings/containers?name=ov-mark",
-        "/settings/containers?edit=group:grp-mark",
-        "/settings/appearance",
-        "/settings/history",
-        "/settings/config",
-    ] {
-        let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 303, "{path}");
-        let body: String = r
-            .body
-            .split("/login?next=")
-            .enumerate()
-            .map(|(i, p)| {
-                if i == 0 {
-                    p
-                } else {
-                    &p[p.find('"').unwrap_or(0)..]
-                }
-            })
-            .collect();
-        for m in marks {
-            assert!(!body.contains(m), "{path}: leaked {m}");
-        }
-    }
-    let (cookie, csrf) = login(addr).await;
-    let no_store = |h: &str| {
-        h.lines()
-            .any(|l| l.eq_ignore_ascii_case("cache-control: no-store"))
-    };
-    for (path, mark) in [
-        ("/settings/containers?frag=list", "ex-mark"),
-        ("/settings/containers", "Ov-mark"),
-        ("/settings/containers?edit=override:ov-mark", "Ov-mark"),
-        ("/settings/general", "greet-mark"),
-        ("/settings/appearance", "css-mark"),
-        ("/settings/history", "45s"),
-        ("/settings/history?frag=list", "db-stats"),
-        ("/settings/config", "raw-mark"),
-        ("/settings/config?frag=list", "rev-list"),
-    ] {
-        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
-        assert_eq!(r.status, 200, "{path}: {}", r.body);
-        assert!(r.body.contains(mark), "{path}");
-        assert!(no_store(&r.head), "{path}: {}", r.head);
-    }
-    let origin = format!("http://{addr}");
-    let hash = crate::settings::read_current(&st).unwrap().hash;
-    let add = format!(r#"{{"base_hash":"{hash}","action":"add","item":{{"pattern":"new-*"}}}}"#);
-    for (headers, want) in [
-        (
-            vec![
-                ("Content-Type", "application/json"),
-                ("Origin", origin.as_str()),
-                ("Cookie", cookie.as_str()),
-            ],
-            403,
-        ),
-        (
-            vec![
-                ("Content-Type", "application/json"),
-                ("Origin", "http://evil.example"),
-                ("Cookie", cookie.as_str()),
-                ("X-RH-CSRF", csrf.as_str()),
-            ],
-            403,
-        ),
-        (
-            vec![
-                ("Content-Type", "application/json"),
-                ("Origin", origin.as_str()),
-                ("X-RH-CSRF", csrf.as_str()),
-            ],
-            401,
-        ),
-    ] {
-        for path in ["/api/settings/docker", "/api/settings/groups"] {
-            let r = req(addr, "POST", path, &headers, &add).await;
-            assert_eq!(r.status, want, "{path} {headers:?}: {}", r.body);
-        }
-    }
-    assert_eq!(
-        std::fs::read_to_string(st.config.path()).unwrap(),
-        cfg,
-        "nothing written"
-    );
-    let r = req(
-        addr,
-        "POST",
-        "/api/settings/docker",
-        &[
-            ("Content-Type", "application/json"),
-            ("Origin", &origin),
-            ("Cookie", &cookie),
-            ("X-RH-CSRF", &csrf),
-        ],
-        &add,
-    )
-    .await;
-    assert_eq!(r.status, 200, "{}", r.body);
-    assert!(std::fs::read_to_string(st.config.path())
-        .unwrap()
-        .contains(r#"exclude = ["ex-mark", "new-*"]"#));
-}
-
-/// Any page or fragment rendered with a session is `no-store`: signed in,
-/// `/` and `/alerts` carry the config hash, the CSRF token and the
-/// Settings dialogs (and `/` the probe lines). Signed out they keep
-/// `no-cache`; Settings stays `no-store` either way.
-#[tokio::test]
-async fn pages_rendered_with_a_session_are_no_store() {
-    let st = state();
-    crate::auth::set_password_for_tests(&st.db, PW);
-    let addr = start(st.clone()).await;
-    let cache = |h: &str| {
-        h.lines()
-            .find_map(|l| {
-                let (k, v) = l.split_once(':')?;
-                k.eq_ignore_ascii_case("cache-control")
-                    .then(|| v.trim().to_ascii_lowercase())
-            })
-            .unwrap_or_default()
-    };
-    let pages = [
-        "/",
-        "/?add=bookmark",
-        "/alerts",
-        "/alerts?add=channel",
-        "/containers/web",
-        "/more",
-    ];
-    for path in pages {
-        let r = req(addr, "GET", path, &[], "").await;
-        assert_eq!(r.status, 303, "{path}");
-        assert_eq!(cache(&r.head), "no-store", "{path} signed out: {}", r.head);
-    }
-    let (cookie, _) = login(addr).await;
-    for path in pages {
-        let r = req(addr, "GET", path, &[("Cookie", &cookie)], "").await;
-        assert_eq!(r.status, 200, "{path}");
-        assert_eq!(cache(&r.head), "no-store", "{path} signed in: {}", r.head);
-    }
-    let r = req(addr, "GET", "/alerts", &[("Cookie", &cookie)], "").await;
-    assert!(
-        r.body.contains("data-hash"),
-        "the signed-in /alerts has the hash"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// /api/v1 (docs/plans/react-port.md 4.2): session, access table, errors.
-
-/// The value of a response header (first match, name case-insensitive).
 fn header(head: &str, name: &str) -> Option<String> {
     head.lines().skip(1).find_map(|l| {
         let (k, v) = l.split_once(':')?;
@@ -1807,78 +1427,21 @@ async fn api_v1_stream_topics_and_head() {
 }
 
 #[tokio::test]
-async fn all_legacy_reads_require_sign_in_except_public_assets() {
-    let st = crate::ui::testutil::state_with(vec![], "[logs]\nrequire_login = false\n");
-    let addr = start(st).await;
-    let protected = [
-        "/api/login",
-        "/api/logout",
-        "/api/state",
-        "/api/stream",
+async fn legacy_reads_require_a_session_and_public_assets_do_not() {
+    let addr = start(state()).await;
+    for path in [
         "/api/history/system?metric=cpu",
         "/api/history/container/web?metric=cpu",
         "/api/events",
-        "/api/palette",
         "/api/logs/stream?c=web",
         "/api/logs/download?c=web",
         "/api/logs/levels?c=web",
         "/api/logs/status",
-        "/api/containers/web/env",
-        "/api/containers/web/top",
-        "/api/containers/web/health",
-        "/alarm.json",
         "/custom.css",
-        "/static/app.css",
-        "/static/app.js",
-        "/static/logs.css",
-        "/static/logs.js",
-        "/static/settings.css",
-        "/static/settings.js",
-        "/icons/di/nginx",
-        "/icons/web",
-    ];
-    let pages = [
-        "/",
-        "/containers",
-        "/containers/",
-        "/containers?frag=table",
-        "/containers/web",
-        "/containers/web/logs",
-        "/stacks/shop/logs",
-        "/history",
-        "/alerts",
-        "/login",
-        "/host",
-        "/logs",
-        "/more",
-        "/settings",
-        "/settings/",
-        "/missing-page",
-    ];
-    let public = [
-        "/healthz",
-        "/api/v1/session",
-        "/api/v1/invites/validate?token=example",
-        "/app",
-        "/app/login",
-        "/app/invite/example",
-        "/assets/missing.js",
-        "/manifest.webmanifest",
-        "/favicon.ico",
-        "/icon.svg",
-        "/icon-192.png",
-        "/icon-512.png",
-        "/apple-touch-icon.png",
-    ];
-    let settings: Vec<_> = SETTINGS_READS
-        .iter()
-        .map(|s| format!("/api/settings/{s}"))
-        .collect();
-    for method in ["GET", "HEAD", "OPTIONS"] {
-        for path in protected
-            .into_iter()
-            .chain(settings.iter().map(String::as_str))
-        {
+        "/icons/di/nginx.svg",
+        "/icons/web.svg",
+    ] {
+        for method in ["GET", "HEAD", "OPTIONS"] {
             let r = req_bounded(addr, method, path, &[]).await;
             assert_eq!(r.status, 401, "{method} {path}");
             assert_eq!(
@@ -1887,42 +1450,101 @@ async fn all_legacy_reads_require_sign_in_except_public_assets() {
                     ""
                 } else {
                     "sign in required\n"
-                },
-                "{path}"
+                }
             );
         }
-        for path in pages {
+    }
+
+    for path in [
+        "/healthz",
+        "/api/v1/session",
+        "/api/v1/invites/validate?token=example",
+        "/app",
+        "/app/containers/web",
+        "/assets/missing.js",
+        "/manifest.webmanifest",
+        "/favicon.ico",
+        "/icon.svg",
+        "/icon-192.png",
+        "/icon-512.png",
+        "/apple-touch-icon.png",
+    ] {
+        for method in ["GET", "HEAD", "OPTIONS"] {
             let r = req_bounded(addr, method, path, &[]).await;
             if method == "OPTIONS" {
                 assert_eq!(r.status, 401, "{method} {path}");
-                continue;
+            } else {
+                assert!(
+                    !matches!(r.status, 303 | 401 | 403),
+                    "{method} {path}: {}",
+                    r.status
+                );
             }
-            assert_eq!(r.status, 303, "{method} {path}");
-            assert_eq!(
-                header(&r.head, "location").as_deref(),
-                Some("/app/login"),
-                "{path}"
-            );
         }
-        for (_, slug, _) in crate::ui::routes::SETTINGS {
-            let path = format!("/settings/{slug}");
-            assert_eq!(
-                req_bounded(addr, method, &path, &[]).await.status,
-                if method == "OPTIONS" { 401 } else { 303 },
-                "{method} {path}"
-            );
-        }
-        for path in public {
-            let r = req_bounded(addr, method, path, &[]).await;
-            if method == "OPTIONS" {
-                assert_eq!(r.status, 401, "{method} {path}");
-                continue;
+    }
+}
+
+#[tokio::test]
+async fn retired_routes_are_gone_with_or_without_a_session() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    for headers in [&[][..], &[("Cookie", cookie.as_str())][..]] {
+        for path in [
+            "/",
+            "/containers",
+            "/containers/",
+            "/containers/web",
+            "/containers/web/logs",
+            "/containers?frag=table",
+            "/logs",
+            "/logs/split",
+            "/stacks/shop",
+            "/stacks/shop/logs",
+            "/host",
+            "/host?frag=live",
+            "/history",
+            "/alerts",
+            "/login",
+            "/more",
+            "/settings",
+            "/settings/",
+            "/settings/general",
+            "/settings/containers",
+            "/settings/bookmarks",
+            "/settings/widgets",
+            "/settings/notifications",
+            "/settings/appearance",
+            "/settings/history",
+            "/settings/config",
+            "/settings/security",
+            "/settings/containers?frag=list",
+            "/missing-page",
+            "/static/app.js",
+            "/alarm.json",
+            "/api/state",
+            "/api/stream",
+            "/api/palette",
+            "/api/containers/web/top",
+            "/api/missing",
+        ] {
+            let r = req_bounded(addr, "GET", path, headers).await;
+            assert_eq!(r.status, 404, "{path}: {}", r.body);
+            assert!(header(&r.head, "location").is_none(), "{path}");
+            if path == "/" {
+                assert!(r.body.contains("Hobnail") && r.body.contains("href=\"/app\""));
+                assert!(header(&r.head, "content-security-policy")
+                    .unwrap()
+                    .contains("default-src 'none'"));
+            } else if path.starts_with("/api/") {
+                assert_eq!(
+                    header(&r.head, "content-type").as_deref(),
+                    Some("application/json")
+                );
+            } else {
+                assert_eq!(r.body, "not found\n");
             }
-            assert!(
-                !matches!(r.status, 303 | 401 | 403),
-                "{method} {path}: {}",
-                r.status
-            );
         }
     }
 }
@@ -2358,11 +1980,6 @@ async fn viewer_cannot_read_administrative_details() {
         "/api/settings/revisions",
         "/api/settings/history/export",
         "/api/settings/security",
-        "/settings",
-        "/settings/security",
-        "/api/containers/web/env",
-        "/api/containers/web/health",
-        "/api/containers/web/top",
     ] {
         assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
     }
@@ -2371,12 +1988,6 @@ async fn viewer_cannot_read_administrative_details() {
         "viewer bootstrap",
     );
     assert!(bootstrap["config_error"].is_null());
-    let state = json_of(
-        &req(addr, "GET", "/api/state", &h, "").await,
-        "viewer state",
-    );
-    assert!(state["config"]["error"].is_null());
-    assert!(state["config"]["path"].is_null());
     for path in ["/api/v1/containers/web/env", "/api/v1/containers/web/top"] {
         assert_eq!(req(addr, "GET", path, &h, "").await.status, 403, "{path}");
     }
@@ -2421,13 +2032,7 @@ async fn viewer_cannot_read_administrative_details() {
     assert!(detail["why"]["probe"].is_null());
     assert_eq!(detail["why"]["checks"], serde_json::json!([]));
     assert!(!detail.to_string().contains("auth.login_failed"));
-    for path in [
-        "/api/events",
-        "/api/events?kind=auth.",
-        "/history",
-        "/containers/web",
-        "/containers/web/logs",
-    ] {
+    for path in ["/api/events", "/api/events?kind=auth."] {
         let response = req(addr, "GET", path, &h, "").await;
         assert_eq!(response.status, 200, "{path}");
         assert!(!response.body.contains("192.0.2.7"), "{path}");
@@ -2528,18 +2133,6 @@ async fn viewer_cannot_read_administrative_details() {
     let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
     assert_eq!(owner_history.status, 200);
     assert!(owner_history.body.contains("auth.login_failed"));
-    for name in ["secret-ovr", "secret-lbl", "secret-exc"] {
-        for endpoint in ["env", "health", "top"] {
-            let path = format!("/api/containers/{name}/{endpoint}");
-            assert_eq!(
-                req(addr, "GET", &path, &[("Cookie", &owner)], "")
-                    .await
-                    .status,
-                404,
-                "{path}"
-            );
-        }
-    }
 }
 
 #[tokio::test]

@@ -237,7 +237,6 @@ pub(crate) fn check_scope(
             path,
             "/api/logs/stream" | "/api/logs/download" | "/api/logs/levels"
         )
-        || path.starts_with("/static/")
         || path.starts_with("/icons/")
     {
         return Ok(());
@@ -726,18 +725,12 @@ pub(crate) enum Denied {
 }
 
 impl Denied {
-    pub fn response(self, v1: bool, page: bool) -> hyper::Response<crate::http::server::Body> {
-        use crate::http::server::{full, set, text};
+    pub fn response(self, v1: bool) -> hyper::Response<crate::http::server::Body> {
+        use crate::http::server::text;
         use hyper::StatusCode;
         match self {
             Self::Write(error) => error.response(),
             Self::SignIn if v1 => ApiError::sign_in_required().response(),
-            Self::SignIn if page => {
-                let mut response = full(StatusCode::SEE_OTHER, "");
-                set(&mut response, hyper::header::LOCATION, "/app/login");
-                set(&mut response, hyper::header::CACHE_CONTROL, "no-store");
-                response
-            }
             Self::SignIn => WriteDenied::NoSession.response(),
             Self::Role if v1 => {
                 ApiError::new(StatusCode::FORBIDDEN, "forbidden", "insufficient role").response()

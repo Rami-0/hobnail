@@ -600,14 +600,14 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
         ("/api/logs/stream?c=db", 400),
         ("/api/logs/download?c=db", 400),
         ("/api/logs/status", 403),
-        ("/api/state", 403),
+        ("/api/state", 404),
         ("/api/events", 403),
         ("/api/history/system?metric=cpu", 403),
-        ("/api/palette", 403),
+        ("/api/palette", 404),
         ("/api/v1/stream?topics=system", 403),
-        ("/api/stream", 403),
+        ("/api/stream", 404),
         ("/", 403),
-        ("/containers/web", 403),
+        ("/containers/web", 404),
     ] {
         assert_eq!(
             viewer.call("GET", route, Value::Null).await.status,
@@ -630,30 +630,13 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
         .chain(
             WRITES
                 .iter()
-                .filter(|(_, path)| {
-                    path.starts_with("/api/settings/") || path.starts_with("/settings/")
-                })
+                .filter(|(_, path)| path.starts_with("/api/settings/"))
                 .map(|(method, path)| (*method, path.to_string())),
         )
         .chain(
             SETTINGS_READS
                 .iter()
                 .map(|suffix| ("GET", format!("/api/settings/{suffix}"))),
-        )
-        .chain(
-            crate::ui::routes::SETTINGS
-                .iter()
-                .map(|(_, slug, _)| ("GET", format!("/settings/{slug}"))),
-        )
-        .chain(
-            [
-                "/settings",
-                "/api/settings",
-                "/api/containers/web/env",
-                "/api/containers/web/health",
-                "/api/containers/web/top",
-            ]
-            .map(|p| ("GET", p.to_string())),
         )
         .chain([("DELETE", path.clone())])
     {
