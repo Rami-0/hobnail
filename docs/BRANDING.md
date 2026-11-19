@@ -86,7 +86,7 @@ All four are under the SIL Open Font License.
 | `docs/brand/banner-plate.png` | 2560×1280 | README: anatomy of the nail |
 
 The three PWA PNGs are compiled into the binary, so they must stay small: a
-test in `src/ui/pwa.rs` fails above 8 KB (192 px, 180 px) or 24 KB (512 px).
+test in `src/http/pwa.rs` fails above 8 KB (192 px, 180 px) or 24 KB (512 px).
 
 ## Rebuilding
 
