@@ -138,7 +138,7 @@ try {
       await load("/app/containers", '[data-testid="row"]');
       await inp.key('/'); await wait(`document.activeElement?.matches('[data-testid="filter"]')`, "slash focuses the table filter");
       const filter = '[data-testid="filter"]';
-      await tab.ev(`window.originalContainerFilter = document.activeElement`);
+      await tab.ev(`void (window.originalContainerFilter = document.activeElement)`);
       let typed = await tab.ev(`document.querySelector(${q(filter)}).value`);
       for (const key of ["g", "a", "j", "k", "l", "?"]) {
         typed += key;
