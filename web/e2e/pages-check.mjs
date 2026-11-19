@@ -137,7 +137,14 @@ try {
 
       await load("/app/containers", '[data-testid="row"]');
       await inp.key('/'); await wait(`document.activeElement?.matches('[data-testid="filter"]')`, "slash focuses the table filter");
-      for (const key of ['g','a','j','k','l','?']) await inp.key(key);
+      const filter = '[data-testid="filter"]';
+      await tab.ev(`window.originalContainerFilter = document.activeElement`);
+      let typed = await tab.ev(`document.querySelector(${q(filter)}).value`);
+      for (const key of ["g", "a", "j", "k", "l", "?"]) {
+        typed += key;
+        await inp.key(key);
+        await wait(`document.activeElement === window.originalContainerFilter && document.activeElement.value === ${q(typed)}`, `filter keeps focus and text after ${key}`);
+      }
       assert.equal(await tab.ev('location.pathname'), '/app/containers', "global keys stay off while typing");
       assert.ok(!await tab.ev(`!!document.querySelector('[data-testid="shortcuts"],[data-testid="palette"]')`));
       await inp.clear('[data-testid="filter"]');

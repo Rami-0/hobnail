@@ -42,7 +42,11 @@ try {
       for (let i=0; i<values.indexOf(value); i++) await inp.key("ArrowDown");
       await inp.key("Enter");
     };
-    const setQuery = async (text) => { await inp.clear('[data-testid="filter"]'); if (text) await inp.type(text); };
+    const setQuery = async (text) => {
+      await inp.clear('[data-testid="filter"]');
+      if (text) await tab.send("Input.insertText", { text });
+      await wait(`document.querySelector('[data-testid="filter"]').value === ${q(text)} && (new URLSearchParams(location.search).get("search") ?? "") === ${q(text)}`, "search text is committed to its URL");
+    };
     const setDate = async (id, text) => tab.ev(`{const e=document.getElementById(${q(id)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${q(text)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}`);
 
     
