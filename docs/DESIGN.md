@@ -146,7 +146,7 @@ cost is measured in `docs/measurements.md`). Interval is configurable
 | `events` | docker lifecycle (start, stop, die with exit code, oom, health change), alert fired/resolved/delivery failed, config saved/restored, login ok/failed, app start | n/a | kept 180 d, capped at 100k rows |
 | `config_revisions` | full config text, author, note, time | n/a | newest 200 kept |
 | `sessions` | hash of the session token, created, expires | n/a | pruned when expired |
-| `kv` | small settings (password hash, schema extras) | n/a | n/a |
+| `kv` | small legacy settings and migration metadata | n/a | n/a |
 
 Containers are keyed by **name** (ids change on every recreate). A maintenance job
 runs hourly: roll up, prune, `PRAGMA optimize`; weekly `incremental_vacuum`.
@@ -180,7 +180,7 @@ here. Environment settings (listen address, data dir, socket path) stay in compo
 | Appearance | Theme, `custom.css` editor with live preview (no density setting: there is no config key for it yet) |
 | History and data | Retention, sample interval, database size and row counts, export a snapshot, clear history |
 | Config file | Raw TOML editor with validation as you type (error with line and column), **Revisions** (list, diff against current, restore) |
-| Security | Change password, sign out other sessions, recent logins |
+| Security | Recent logins and account links; password and session management on `/app/account` |
 
 **Editing rules**
 - Edits go through `toml_edit`: comments, ordering and unknown keys survive.
@@ -342,9 +342,9 @@ every rule marked "checked" below (70 checks).
   same seven-day policy.
 - **The application needs JavaScript.** The noscript message names the health
   probe, JSON API and authenticated log download that still answer.
-- **Nothing a signed-out visitor receives carries settings data.** Dialogs,
-  `data-item` JSON, widget URLs, environment-variable names and any form
-  value are rendered only for a session (§11.14).
+- **No anonymous or Viewer response carries administrative settings data.**
+  Configuration, secret references and form values require Admin/Owner.
+  The shared access gate applies equally to JSON and streams (§6).
 - One primary action per view. Status is never colour alone: a word, a shape
   or an icon always goes with it. The accent is never a status colour (brand
   Accent and Error have the same luminance, A11Y-17).
@@ -590,13 +590,13 @@ runs the primary (checked).
 
 | Rule | Detail |
 |---|---|
-| The URL is the dialog | Triggers are links (`[data-dlg=<id>]`, `href="?add=bookmark"`, `?edit=bookmark:3`; `data-item` holds the row's values, `data-key` its identity). Opening pushes the current page's URL with that `add=` / `edit=` parameter. A page loaded with the parameter opens the dialog on load (a reload, a shared link, and **Ctrl/⌘/middle click, which opens a new tab whose page opens the same dialog**; checked). The React router opens the same dialog at that URL; JavaScript is required. Closing removes the parameter: `history.back()` for an entry we pushed, `replaceState` for one we landed on. |
+| The URL is the dialog | Triggers are links (`href="?add=bookmark"`, `?edit=bookmark:3`; React holds row values and identity). Opening pushes the current page's URL with that `add=` / `edit=` parameter. A page loaded with the parameter opens the dialog on load (a reload, a shared link, and **Ctrl/⌘/middle click, which opens a new tab whose page opens the same dialog**; checked). The React router opens the same dialog at that URL; JavaScript is required. Closing removes the parameter: `history.back()` for an entry we pushed, `replaceState` for one we landed on. |
 | Opening | Scales in from 97 % with a slight offset toward the trigger, over `--dur-3`, with `@starting-style`. Focus goes to the first editable field, or the field named by `data-focus`, or the first focusable item of the body. Tab stays inside (native modal). |
 | One at a time | Opening another dialog while one has unsaved input shows the guard instead and opens nothing; from a clean dialog it switches and reuses the history entry with `replaceState` (checked). |
 | Close | Esc, ×, Cancel, a backdrop click (press and release outside the box), **a native close request (`cancel` event, e.g. `requestClose()` or the Android back gesture)** and Back all go through one path: with unsaved input they show the guard, focused on "Keep editing", and Back re-pushes the dialog's URL. A `close` listener clears the state, the history entry and returns focus whatever closed it. "Unsaved" means the values differ from what was loaded (SET-04, SET-58). Esc is ignored by the form dialog while another modal (the confirm) is on top (checked). |
 | Enter | Enter in a single-line field submits with the primary; Ctrl/⌘ Enter submits from a textarea or a list (SET-31). |
 | Save | Validate (§11.5); then busy (§11.4), the body `inert`, Cancel and × disabled (SET-09). Where `inert` is missing the body stays interactive, and a second submit is ignored while busy. |
-| Success | The dialog closes, a toast says what happened ("Added “Wiki” · revision #67"), the list behind updates in place (the server re-renders the list fragment, §11.14) and the new or changed row flashes once (SET-10). Focus returns to the trigger; when the trigger was re-rendered, to the element with the same `data-key` (the edited row's link; checked, SET-08). Saves that change the chrome (title, theme) update it (SET-25). |
+| Success | The dialog closes, a toast says what happened ("Added “Wiki” · revision #67"), the list behind updates in place (the client refetches authenticated JSON) and the new or changed row flashes once (SET-10). Focus returns to the trigger; when the trigger was re-rendered, to the element with the same `data-key` (the edited row's link; checked, SET-08). Saves that change the chrome (title, theme) update it (SET-25). |
 | Server errors | 422: on the field. 409 stale file: a note with "Reload and keep my input" (fetch the new hash, keep every value) and "Discard my input" (SET-15, SET-16, SET-65). 401 session gone: a note with "Sign in", which opens `/app/login` in a new tab; when that tab is done the user presses Save again and the script first **asks `GET /api/v1/session` for the new token**, then retries. 403 locked: a note with the lock sentence. Network error: a note, input kept. **When the answer is a note only, focus moves to the note** (checked). |
 | Stays open | Actions that save and then show a result keep the dialog open in edit mode and put the result in the dialog note, never a toast: "Save and send test" (channel), "Fetch now" (widget). |
 
@@ -738,7 +738,7 @@ says so first (SET-53). Esc and the backdrop cancel only the confirm.
 - **History**: the timeline follows the chart range and zoom, pages back,
   shows clock times, rows link to their subject and logs at that moment;
   a chart marker highlights its row (LG-43, LG-44, LG-47, LG-48).
-- **Settings**: `/settings` without the index (SET-22); signed out, only the
+- **Settings**: `/app/settings` without the index (SET-22); signed out, only the
   lock panel (SET-21).
 - **Command palette**: "Logs: X" ranks directly under X; actions for the top
   tasks (Add bookmark, Add widget, Add channel, Add alert rule, Edit X) and one
