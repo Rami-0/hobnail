@@ -1,10 +1,15 @@
 // M2b board/integration browser acceptance. Run only against a throwaway
-// fake-instance on 3395–3399, through scripts/e2e.sh. No npm dependencies.
+// fake-instance on 3300 or 3395–3399, through scripts/e2e.sh. No npm dependencies.
 import fs from "node:fs";
 import path from "node:path";
 import { launch, input, recorder, sleep, q, CSP_LISTENER } from "./cdp.mjs";
 const base = (process.argv[2] ?? "").replace(/\/+$/, "");
-if (!/^https?:\/\//.test(base) || !/^339[5-9]$/.test(new URL(base).port) || !process.env.HB_PASSWORD || !process.env.OUT) throw new Error("usage: HB_PASSWORD=... OUT=... scripts/e2e.sh web/e2e/board-check.mjs http://127.0.0.1:3396");
+const target = new URL(base);
+const fixturePort = /^339[5-9]$/.test(target.port)
+  || (target.hostname === "127.0.0.1" && target.port === "3300");
+if (!["http:", "https:"].includes(target.protocol) || !fixturePort || !process.env.HB_PASSWORD || !process.env.OUT) {
+  throw new Error("usage: HB_PASSWORD=... OUT=... scripts/e2e.sh web/e2e/board-check.mjs http://127.0.0.1:3300");
+}
 const PW = process.env.HB_PASSWORD, OUT = process.env.OUT, origin = new URL(base).origin;
 fs.mkdirSync(OUT, { recursive: true });
 const browser = await launch(); const tab = await browser.tab(); const inp = input(tab); const rec = recorder(tab, origin);
