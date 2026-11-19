@@ -1,4 +1,4 @@
-import { ScrollTextIcon } from "lucide-react";
+import { ArrowRightIcon, CheckIcon, ScrollTextIcon } from "lucide-react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, memo, useEffect, useState } from "react";
@@ -84,44 +84,63 @@ export default function Overview() {
   const top = consumers.filter((r) => r.cpu !== null).toSorted((a, b) => (b.cpu ?? 0) - (a.cpu ?? 0)).slice(0, 8);
   const memory = consumers.filter((r) => (r.mem ?? 0) > 0).toSorted((a, b) => (b.mem ?? 0) - (a.mem ?? 0));
   const map = treemap(memory.map((r) => r.mem ?? 0));
-  const running = containers ? groups.reduce((n, g) => n + g.running, 0) : overview?.running;
-  const stopped = containers ? groups.reduce((n, g) => n + g.stopped, 0) : overview?.stopped;
-  const problems = containers ? rows.filter((r) => r.attention !== null).length : overview?.problems;
-  return <div className="page overview" data-testid="overview">
-    <h1>{overview?.greeting ?? "Overview"}</h1>
-    {error && <p role="alert">{error}</p>}
-    {seen > 0 && now - seen >= 300 && overview && <p>Since you last looked (<RelativeTime at={seen} />) · {overview.starts_since} starts · {overview.crashes_since} crashes · {overview.alerts_since} alerts</p>}
-    <section className="panel history-block">
-      <h2>Container health</h2>
-      <div className="overview-counts">
-        <a href="/app/containers?state=running"><strong>{running ?? "—"}</strong> running</a>
-        <a href="/app/containers?state=stopped"><strong>{stopped ?? "—"}</strong> stopped</a>
-        <a href="/app/containers?state=problem"><strong>{problems ?? "—"}</strong> problems</a>
-        <a href="/app/alerts"><strong>{overview?.firing ?? "—"}</strong> alerts firing</a>
+  const running = groups.reduce((n, g) => n + g.running, 0);
+  const stopped = groups.reduce((n, g) => n + g.stopped, 0);
+  const problems = rows.filter((r) => r.attention !== null).length;
+  const health = [
+    { value: running, label: "running", href: "/app/containers?state=running", hot: false },
+    { value: stopped, label: "stopped", href: "/app/containers?state=stopped", hot: false },
+    { value: problems, label: "problems", href: "/app/containers?state=problem", hot: problems > 0 },
+    { value: overview.firing, label: "alerts firing", href: "/app/alerts", hot: overview.firing > 0 },
+  ];
+  const total = running + stopped;
+  const clock = new Date(now * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return <div className="page ov" data-testid="overview">
+    <div className="ov-head">
+      <div className="ov-hi">
+        <h1 className="display">{overview.greeting ?? "Hello"}</h1>
+        {seen > 0 && now - seen >= 300 && <p className="since">Since you last looked (<RelativeTime at={seen} />) · {overview.starts_since} starts · {overview.crashes_since} crashes · {overview.alerts_since} alerts</p>}
       </div>
-      {running !== undefined && stopped !== undefined && running + stopped > 0 && <Meter
-        value={running} max={running + stopped} label="Containers running" className="overview-health-meter" />}
-      <div className="overview-status">
-      <div>
-      {!!overview?.attention.length && <><h3>Needs attention</h3><ul className="history-events rows">{overview.attention.map((item) => <li key={`${item.name}:${item.reason}:${item.detail}`} data-name={item.container ? item.name : undefined}>
+      <div className="ov-meta"><span className="ov-clock num">{clock}</span></div>
+    </div>
+    {error && <p role="alert">{error}</p>}
+    <section className="panel primary pulse" aria-label="Status">
+      <section className="hs" aria-label="Container health">
+        {health.map(({ value, label, href, hot }) => (
+          <a key={label} href={href} className={["hs-cell", hot && "hot", value === 0 && "zero"].filter(Boolean).join(" ")}>
+            <span className="hs-n">{value}</span><span className="hs-l">{label}</span>
+          </a>
+        ))}
+        {total > 0 && <div className="hs-bar" role="img" aria-label={running + " of " + total + " running"}>
+          <span className="r" style={{ width: running / total * 100 + "%" }} />
+          {problems > 0 && <span className="u" style={{ width: problems / total * 100 + "%" }} />}
+        </div>}
+      </section>
+      <div className={overview.attention.length ? "attn" : "attn quiet"}>
+      {overview.attention.length ? <><div className="attn-h"><h2 className="label">Needs attention</h2></div><ul className="history-events rows">{overview.attention.map((item) => <li key={[item.name, item.reason, item.detail].join(":")} data-name={item.container ? item.name : undefined}>
         <span className={`dot ${item.severity}`} /> <a href={item.href}>{item.title}</a> · {item.detail}
         {item.since !== null && <> · <RelativeTime at={item.since} /></>}
         {item.container && <>{" · "}<a className="ia" aria-label={`Logs of ${item.title}`} title="Logs" href={logsHref(item.name, item.since)}><ScrollTextIcon aria-hidden="true" /></a></>}
         {item.probe && <small className="overview-probe">{item.probe}</small>}
-      </li>)}</ul></>}
+      </li>)}</ul></> : <p className="ok-line"><CheckIcon aria-hidden="true" /> All clear</p>}
       </div>
-      <details className="overview-strips" open>
-        <summary>Stack health · last 24 hours</summary>
-{groups.map((g) => {
-        const codes = strips?.stacks[g.name];
-        return codes ? <a key={g.name} href={`/app/containers?stack=${encodeURIComponent(g.name)}`}>
-          <span>{g.title}</span><HealthStrip codes={codes} step={strips?.step} label={g.title} />
-        </a> : null;
-      })}</details>
-      </div>
+      {groups.length > 0 && <div className="strips">
+        <div className="strips-h">
+          <h2 className="label">Last 24h</h2>
+          <span className="strips-key" aria-hidden="true"><i className="o" />running<i className="w" />restarted<i className="b" />problem<i className="f" />stopped</span>
+        </div>
+        {strips && Object.keys(strips.stacks).length > 0 ? <ul className="strip-list">{groups.map((g) => {
+          const codes = strips.stacks[g.name];
+          return codes ? <li key={g.name}>
+            <a className="sl-n" href={"/app/containers?stack=" + encodeURIComponent(g.name)}>{g.title}</a>
+            <span className="sl-c num">{g.running}/{g.running + g.stopped}</span>
+            <HealthStrip codes={codes} step={strips.step} label={g.title} />
+          </li> : null;
+        })}</ul> : <p className="muted">Health strips fill in as history records (one cell per 15 minutes).</p>}
+      </div>}
     </section>
-    {boot?.features.system && <section className="history-block">
-      <h2><a href="/app/host">Host</a></h2>
+    {boot?.features.system && <section className="sec">
+      <div className="sec-h"><h2 className="label">Host</h2><a className="more" href="/app/host">Host details <ArrowRightIcon aria-hidden="true" /></a></div>
       {system && <div className="overview-counts">
         <span>CPU {pct(system.cpu_pct)}</span><span>Memory {bytes(system.mem_used)} / {bytes(system.mem_total)}</span>
         <span>Load {system.load[0].toFixed(2)}</span><span>Uptime {duration(system.uptime_secs)}</span>
