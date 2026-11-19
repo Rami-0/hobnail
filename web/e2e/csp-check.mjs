@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CSP_LISTENER, input, launch, q, recorder, sleep } from './cdp.mjs';
-import { sweepFixture } from './sweep-fixture.mjs';
+import { assertSweepTarget, sweepFixture } from './sweep-fixture.mjs';
 const EXPECTED_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const base = new URL(process.argv[2] || 'http://127.0.0.1:3396');
 if (process.env.ONBOARDING_ONLY === '1') {
-  assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/); assert.match(base.port, /^339[5-9]$/);
+  assertSweepTarget(base);
   assert.equal((await fetch(new URL('/api/v1/session',base)).then(r=>r.json())).owner_exists,false,'onboarding sweep needs a fresh instance');
   const browser = await launch(), evidence = [];
   try {

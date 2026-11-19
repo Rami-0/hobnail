@@ -1,8 +1,12 @@
 // Shared real-backend fixtures for route-wide CSP and accessibility sweeps.
 import assert from 'node:assert/strict';
-export async function sweepFixture(base) {
+export function assertSweepTarget(base) {
   assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
   assert.ok(/^339[5-9]$/.test(base.port) || (base.hostname === "127.0.0.1" && base.port === "3300"));
+}
+
+export async function sweepFixture(base) {
+  assertSweepTarget(base);
   assert.ok(process.env.HB_PASSWORD && process.env.OUT);
   const boot = await fetch(new URL('/api/v1/session', base)).then(r => r.json());
   const response = await fetch(new URL(boot.owner_exists ? '/api/login' : '/api/v1/onboarding/owner', base), {
