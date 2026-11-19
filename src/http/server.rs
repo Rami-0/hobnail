@@ -51,7 +51,7 @@ pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Resu
     }
 }
 
-/// Host part of the request's Host header (no port), for building links.
+/// Host part of the request's Host header (no port), for the allowlist.
 pub fn request_host(req: &Request<Incoming>) -> String {
     let h = req
         .headers()

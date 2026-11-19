@@ -97,7 +97,7 @@ export function statusText(row: Pick<ContainerRow, "label" | "state" | "started_
   return parts.join(" ");
 }
 
-// ---- status (src/ui/view/mod.rs status_label, dot_for, CardView::attention) ----
+// ---- status (src/read_model/mod.rs status_label, dot_for, CardView::attention) ----
 
 export interface StatusIn {
   state: string;
@@ -139,7 +139,7 @@ export function statusOf(c: StatusIn): StatusOut {
   return { label, dot, row_exit_code: rowExit, row_restarts: restarts, attention };
 }
 
-// ---- ports (src/ui/view/ports.rs) ----
+// ---- ports (src/read_model/ports.rs) ----
 
 /** Container ports that are never a web UI (databases, mail, queues, DNS). */
 const NON_HTTP_PORTS = new Set([
