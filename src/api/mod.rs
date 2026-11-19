@@ -115,7 +115,7 @@ pub(crate) async fn route(
         | Handler::SessionsRevoke => {
             accounts::route(state, req, m, principal.expect("account gate")).await
         }
-        Handler::LogsPicker => logs::get(state, &principal.expect("viewer gate").account),
+        Handler::LogsPicker => logs::get(state, principal.expect("viewer gate").account).await,
         Handler::Containers => {
             containers::list(
                 state,

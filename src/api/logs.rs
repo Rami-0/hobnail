@@ -75,8 +75,12 @@ fn picker(state: &AppState, principal: &Principal) -> LogsPicker {
     }
 }
 
-pub(super) fn get(state: &AppState, principal: &Principal) -> Response<Body> {
-    super::json(StatusCode::OK, &picker(state, principal))
+pub(super) async fn get(state: &std::sync::Arc<AppState>, principal: Principal) -> Response<Body> {
+    let state = state.clone();
+    match tokio::task::spawn_blocking(move || picker(&state, &principal)).await {
+        Ok(picker) => super::json(StatusCode::OK, &picker),
+        Err(_) => super::error::ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "log picker failed").response(),
+    }
 }
 
 #[cfg(test)]
