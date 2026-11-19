@@ -827,6 +827,38 @@ fn capture(raw: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn api_reference_matches_route_table() {
+        let documented: std::collections::BTreeSet<_> = include_str!("../../docs/api.md")
+            .lines()
+            .filter_map(|line| {
+                let cells: Vec<_> = line.split('|').map(str::trim).collect();
+                if cells.len() < 5 || !cells[2].starts_with("`/api/v1/") {
+                    return None;
+                }
+                Some((
+                    cells[1].to_string(),
+                    cells[2].trim_matches('`').to_string(),
+                    cells[3].to_string(),
+                ))
+            })
+            .collect();
+        let declared: std::collections::BTreeSet<_> = ROUTES
+            .iter()
+            .map(|route| {
+                (
+                    route.method.to_string(),
+                    route.pattern.to_string(),
+                    format!("{:?}", route.access),
+                )
+            })
+            .collect();
+        assert_eq!(
+            documented, declared,
+            "update docs/api.md with the access table"
+        );
+    }
+
     const TEST_PATTERN: &str = "/api/v1/containers/<name>/logs";
 
     #[test]

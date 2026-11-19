@@ -18,6 +18,8 @@ RUN apk add --no-cache musl-dev busybox-static && rustup component add rustfmt c
 WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
+# The API reference drift test reads the declared method/path/access rows.
+COPY docs/api.md ./docs/api.md
 # The Rust drift tests compare the generated TypeScript and the formatting
 # fixtures against these.
 COPY web/src/api/gen ./web/src/api/gen
