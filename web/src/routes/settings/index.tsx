@@ -1,3 +1,4 @@
+import { BellIcon, BookmarkIcon, BoxIcon, HistoryIcon, LayoutGridIcon, LockIcon, PlugIcon, SlidersHorizontalIcon, SunIcon, TerminalIcon, UsersIcon, ZapIcon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
@@ -31,6 +32,12 @@ const panels = {
   bookmarks: lazy(() => import("./Bookmarks.tsx")),
 };
 
+const tabIcons = {
+  general: SlidersHorizontalIcon, containers: BoxIcon, bookmarks: BookmarkIcon,
+  widgets: ZapIcon, notifications: BellIcon, appearance: SunIcon, history: HistoryIcon,
+  config: TerminalIcon, security: LockIcon, boards: LayoutGridIcon, integrations: PlugIcon, users: UsersIcon,
+} satisfies Record<SettingsTab, typeof BoxIcon>;
+
 export default function SettingsPage() {
   const { route } = useRoute();
   const boot = useBootstrap();
@@ -43,15 +50,20 @@ export default function SettingsPage() {
   const allowed = available.includes(tab);
   const Panel = tab !== "boards" && tab !== "integrations" ? panels[tab] : null;
   useEffect(() => { if (allowed) rememberSettingsTab(local(), tab); }, [allowed, tab]);
-  return <div className="page settings-page"><h1>Settings</h1>
-    {boot && !allowed && <Note kind="warn" testId="settings-locked">
-      {tab === "users" ? "Only the owner can manage users." : "These settings require an administrator with access to everything."}
-    </Note>}
-    {available.length > 0 && <TabNav label="Settings" current={tab} testId="settings-tabs"
-      items={available.map((id) => ({ id, label: settingsTabs[id], href: `/app/settings/${id}` }))} />}
-    {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
-    {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
-    {allowed && Panel && <Suspense fallback={<p role="status">Loading settings…</p>}><Panel /></Suspense>}
+  return <div className={available.length > 0 ? "page set" : "page set locked"}>
+    {available.length > 0 && <TabNav label="Settings sections" current={tab} testId="settings-tabs" settingsLayout
+      items={available.map((id) => {
+        const Icon = tabIcons[id];
+        return { id, label: <><Icon aria-hidden="true" /><span>{settingsTabs[id]}</span></>, href: "/app/settings/" + id };
+      })} />}
+    <div className="set-main">
+      {boot && !allowed && <Note kind="warn" testId="settings-locked">
+        {tab === "users" ? "Only the owner can manage users." : "These settings require an administrator with access to everything."}
+      </Note>}
+      {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
+      {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
+      {allowed && Panel && <Suspense fallback={<p role="status">Loading settings…</p>}><Panel /></Suspense>}
+    </div>
   </div>;
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {

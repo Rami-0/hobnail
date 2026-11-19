@@ -19,6 +19,7 @@ export interface TabNavProps {
   /** The id of the current tab. */
   current: string;
   testId?: string;
+  settingsLayout?: boolean;
 }
 
 const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
@@ -32,7 +33,7 @@ const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
     links[next]?.focus();
   };
 
-export function TabNav({ label, items, current, testId }: TabNavProps) {
+export function TabNav({ label, items, current, testId, settingsLayout }: TabNavProps) {
   const ref = useRef<HTMLElement>(null);
   const ids = items.map((t) => t.id).join("\n");
   useEffect(() => {
@@ -44,14 +45,15 @@ export function TabNav({ label, items, current, testId }: TabNavProps) {
     const b = nav.getBoundingClientRect();
     nav.scrollLeft += r.left - b.left - (nav.clientWidth - cur.offsetWidth) / 2;
   }, [current, ids]);
+  const links = items.map((t) => (
+    <a key={t.id} className="tab" href={t.href} onKeyDown={move} aria-current={t.id === current ? "page" : undefined}>
+      {t.label}
+      {t.extra}
+    </a>
+  ));
   return (
-    <nav ref={ref} className="tabs" aria-label={label} data-testid={testId}>
-      {items.map((t) => (
-        <a key={t.id} className="tab" href={t.href} onKeyDown={move} aria-current={t.id === current ? "page" : undefined}>
-          {t.label}
-          {t.extra}
-        </a>
-      ))}
+    <nav ref={ref} className={settingsLayout ? "set-nav" : "tabs"} aria-label={label} data-testid={testId}>
+      {settingsLayout ? <ul>{links.map((link) => <li key={link.key}>{link}</li>)}</ul> : links}
     </nav>
   );
 }
