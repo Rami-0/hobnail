@@ -69,16 +69,6 @@ impl Principal {
         })
     }
 
-    pub(super) fn can_see_widget(&self, state: &AppState, id: &str) -> bool {
-        !self.is_scoped()
-            || state
-                .db
-                .dashboard(|conn| self.widget_targets(conn))
-                .ok()
-                .flatten()
-                .is_some_and(|targets| targets.contains(id))
-    }
-
     pub fn container_visibility(&self, state: &AppState) -> ContainerVisibility {
         let config = state.config.current();
         let snapshot = state.snapshot();

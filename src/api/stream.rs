@@ -28,7 +28,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use super::containers::ContainersView;
 use crate::http::server::{full, set, sse_event, Body};
-use crate::state::{AppState, ViewerGuard};
+use crate::state::AppState;
 
 /// Messages queued per connection before the sender waits.
 const QUEUE: usize = 16;
@@ -241,10 +241,9 @@ fn event(name: &str, v: &impl Serialize) -> Bytes {
     )
 }
 
-/// SSE body backed by a channel, holding the viewer guard for its lifetime.
+/// SSE body backed by a channel.
 struct StreamBody {
     rx: mpsc::Receiver<Bytes>,
-    _guard: ViewerGuard,
 }
 
 impl hyper::body::Body for StreamBody {
@@ -268,6 +267,38 @@ fn current(state: &AppState, account: &super::access::Principal) -> (ContainersV
     (v, sig)
 }
 
+async fn account(state: &Arc<AppState>, hash: &Arc<str>) -> Option<super::access::Principal> {
+    let state = state.clone();
+    let hash = hash.clone();
+    tokio::task::spawn_blocking(move || state.db.account_session(&hash, crate::auth::now_s()))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// None represents unrestricted access; a failed scope read fails closed.
+async fn widget_targets(
+    state: &Arc<AppState>,
+    account: &super::access::Principal,
+    requested: bool,
+) -> Option<std::collections::HashSet<String>> {
+    if !requested || !account.is_scoped() {
+        return None;
+    }
+    let state = state.clone();
+    let account = account.clone();
+    Some(
+        tokio::task::spawn_blocking(move || {
+            state.db.dashboard(|conn| account.widget_targets(conn))
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+        .unwrap_or_default(),
+    )
+}
+
 async fn run(
     st: Arc<AppState>,
     topics: Topics,
@@ -278,17 +309,32 @@ async fn run(
     if tx.send(event("hello", &hello(&st))).await.is_err() {
         return;
     }
+    let session_hash: Arc<str> = session_hash.into();
     let list = topics.containers || topics.stats;
-    let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else {
+    let Some(mut principal) = account(&st, &session_hash).await else {
         return;
     };
-    let mut sig = list.then(|| current(&st, &account).1);
+    let mut targets = widget_targets(&st, &principal, topics.widget).await;
+    let visible_widget = |targets: &Option<std::collections::HashSet<String>>, id: &str| {
+        targets.as_ref().is_none_or(|ids| ids.contains(id))
+    };
+    let widget_viewer = |targets: &Option<std::collections::HashSet<String>>| {
+        topics.widget
+            && st
+                .config
+                .current()
+                .widgets
+                .iter()
+                .any(|w| visible_widget(targets, &w.id))
+    };
+    let mut guard = st.viewer_guard(widget_viewer(&targets));
+    let mut sig = list.then(|| current(&st, &principal).1);
     if topics.widget {
         let config = st.config.current();
         for widget in config
             .widgets
             .iter()
-            .filter(|w| account.can_see_widget(&st, &w.id))
+            .filter(|w| visible_widget(&targets, &w.id))
         {
             if tx
                 .send(event("widget", &super::widgets::view(&st, widget)))
@@ -299,7 +345,7 @@ async fn run(
             }
         }
     }
-    if topics.system && !account.is_scoped() {
+    if topics.system && !principal.is_scoped() {
         if let Some(s) = system_view(&st) {
             if tx.send(event("system", &s)).await.is_err() {
                 return;
@@ -314,7 +360,12 @@ async fn run(
         let msg = tokio::select! {
             m = sub.recv() => match m {
                 Ok(id) => {
-                    let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
+                    let Some(account) = account(&st, &session_hash).await else { break };
+                    if account != principal || id.starts_with("board:") || &*id == "reload" {
+                        targets = widget_targets(&st, &account, topics.widget).await;
+                        guard.set_widgets(widget_viewer(&targets));
+                        principal = account.clone();
+                    }
                     match &*id {
                     "groups" if list => {
                         let (v, s) = current(&st, &account);
@@ -341,7 +392,7 @@ async fn run(
                     "alerts" if topics.alerts && !account.is_scoped() => {
                         event("alerts", &serde_json::json!({"firing": super::alerts::firing(&st).len()}))
                     }
-                    raw if topics.widget && raw.starts_with("w-") && account.can_see_widget(&st, &raw[2..]) => {
+                    raw if topics.widget && raw.starts_with("w-") && visible_widget(&targets, &raw[2..]) => {
                         let config = st.config.current();
                         let Some(widget) = config.widgets.iter().find(|w| w.id == raw[2..]) else { continue };
                         event("widget", &super::widgets::view(&st, widget))
@@ -356,25 +407,33 @@ async fn run(
                     }
                 },
                 Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let Some(account) = account(&st, &session_hash).await else { break };
+                    targets = widget_targets(&st, &account, topics.widget).await;
+                    guard.set_widgets(widget_viewer(&targets));
+                    principal = account;
                     sig = None;
                     event("resync", &serde_json::json!({}))
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             _ = host_tick.tick(), if topics.host => {
-                let Some(account) = st.db.account_session(&session_hash, crate::auth::now_s()) else { break };
+                let Some(account) = account(&st, &session_hash).await else { break };
                 if account.is_scoped() { continue; }
                 let admin = account.role >= crate::db::accounts::Role::Admin;
                 let state = st.clone();
                 let Ok(view) = tokio::task::spawn_blocking(move || super::host::live(&state, admin, true)).await else { continue; };
                 event("host", &view)
             }
-            _ = ping.tick() => Bytes::from_static(b": ping\n\n"),
+            _ = ping.tick() => {
+                let Some(account) = account(&st, &session_hash).await else { break };
+                targets = widget_targets(&st, &account, topics.widget).await;
+                guard.set_widgets(widget_viewer(&targets));
+                principal = account;
+                Bytes::from_static(b": ping\n\n")
+            },
             _ = tx.closed() => break,
         };
-        if !st.db.session_is_valid(&session_hash, crate::auth::now_s())
-            || tx.send(msg).await.is_err()
-        {
+        if tx.send(msg).await.is_err() {
             break;
         }
     }
@@ -388,9 +447,8 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String)
         let (tx, rx) = mpsc::channel::<Bytes>(QUEUE);
         let sub = state.events.subscribe();
         let topics = Topics::parse(query);
-        let guard = state.viewer_guard(topics.widget);
         tokio::spawn(run(state.clone(), topics, session_hash, sub, tx));
-        Response::new(StreamBody { rx, _guard: guard }.boxed_unsync())
+        Response::new(StreamBody { rx }.boxed_unsync())
     };
     set(&mut r, CONTENT_TYPE, "text/event-stream");
     set(&mut r, CACHE_CONTROL, "no-store");

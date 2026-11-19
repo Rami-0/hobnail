@@ -194,6 +194,20 @@ impl AppState {
 /// Counts a connected live viewer for as long as it is alive.
 pub struct ViewerGuard(Arc<AppState>, bool);
 
+impl ViewerGuard {
+    pub fn set_widgets(&mut self, widgets: bool) {
+        if widgets == self.1 {
+            return;
+        }
+        if widgets {
+            self.0.widget_viewers.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
+        }
+        self.1 = widgets;
+    }
+}
+
 impl Drop for ViewerGuard {
     fn drop(&mut self) {
         if self.1 {
