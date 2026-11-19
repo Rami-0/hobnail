@@ -154,7 +154,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 @media (display-mode:standalone){.pwa-reload{display:inline-flex!important}}
 .acct{position:relative;display:flex;align-items:center;gap:var(--s-2);min-width:0}
 .acct-in{white-space:nowrap}
-.signed{position:absolute;left:19px;bottom:6px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
+.signed{position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--bg)}
 main{padding:20px 24px 48px;min-width:0;outline:none}
 main>.banner{max-width:1480px;margin:0 auto 16px}
 .page{max-width:1480px;margin:0 auto;display:grid;gap:16px;container-type:inline-size}
@@ -164,7 +164,6 @@ main>.banner{max-width:1480px;margin:0 auto 16px}
 @media (max-width:699px){
  .top{padding:0 8px 0 16px;gap:6px}
  .vitals{display:none}
- .signed{left:auto;right:10px;bottom:10px}
  main{padding:14px 12px calc(84px + env(safe-area-inset-bottom))}
 }
 

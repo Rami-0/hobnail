@@ -265,3 +265,6 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .cd-tabs .tab::after{content:none}
 @media (max-width:640px){.cd-tabs a{padding:9px 10px}}
 @media (pointer:coarse),(max-width:699px){.cd-tabs a{min-width:44px;min-height:44px}}
+
+.panel-h{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:24px}
+.panel-h h2{font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}

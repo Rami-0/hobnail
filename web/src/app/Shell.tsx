@@ -387,9 +387,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 <nav className="crumb" aria-label="Breadcrumb">
                   <a href="/app/containers">Containers</a>
                   <ChevronRightIcon aria-hidden="true" />
-                  <span className="title mono">{title}</span>
+                  <h1 className="title mono">{loc.route.ctr}</h1>
                 </nav>
-              ) : <span className="title">{title}</span>}
+              ) : <h1 className="title">{title}</h1>}
             </div>
             <Button className="cmd" data-testid="palette-open" aria-label="Search and commands (Ctrl K)" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
