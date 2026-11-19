@@ -385,7 +385,11 @@ async fn login_refuses_foreign_origin_and_form_credentials() {
 async fn a_plain_form_post_is_refused_and_leaks_nothing() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
-    let stored = st.db.credential("admin").expect("stored owner credential").1;
+    let stored = st
+        .db
+        .credential("admin")
+        .expect("stored owner credential")
+        .1;
     let cfg = std::fs::read_to_string(st.config.path()).unwrap_or_default();
     let addr = start(st.clone()).await;
     let (cookie, _) = login(addr).await;
@@ -433,7 +437,10 @@ async fn a_plain_form_post_is_refused_and_leaks_nothing() {
         assert!(!r.body.contains("Sekrit"), "{path}");
     }
     assert_eq!(
-        st.db.credential("admin").expect("owner credential remains").1,
+        st.db
+            .credential("admin")
+            .expect("owner credential remains")
+            .1,
         stored,
         "the password is unchanged"
     );
@@ -1877,6 +1884,43 @@ async fn invite_roles_and_account_management() {
 }
 
 #[tokio::test]
+async fn password_change_failures_are_field_specific_and_secret_free() {
+    for (current, new, field) in [
+        ("Wrong-Current-Secret", "Valid-New-Secret", None),
+        (PW, "tiny", Some("new")),
+    ] {
+        let st = state();
+        crate::auth::set_password_for_tests(&st.db, PW);
+        let stored = st.db.credential("admin").unwrap().1;
+        let addr = start(st.clone()).await;
+        let (cookie, csrf) = login(addr).await;
+        let origin = format!("http://{addr}");
+        let h = [
+            ("Origin", origin.as_str()),
+            ("Cookie", cookie.as_str()),
+            ("X-RH-CSRF", csrf.as_str()),
+            ("Content-Type", "application/json"),
+        ];
+        let r = req(
+            addr,
+            "POST",
+            "/api/v1/account/password",
+            &h,
+            &serde_json::json!({"current": current, "new": new}).to_string(),
+        )
+        .await;
+        assert_api_error(&r, 400, "bad_request", "password validation");
+        let error: serde_json::Value = serde_json::from_str(&r.body).unwrap();
+        assert_eq!(error["error"]["field"].as_str(), field);
+        for secret in [current, new] {
+            assert!(!r.body.contains(secret), "password leaked: {}", r.body);
+        }
+        assert!(!get_session(addr, &h).await["user"].is_null());
+        assert_eq!(st.db.credential("admin").unwrap().1, stored);
+    }
+}
+
+#[tokio::test]
 async fn password_change_preserves_only_the_callers_session() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);
@@ -1917,6 +1961,9 @@ async fn password_change_preserves_only_the_callers_session() {
     )
     .await;
     assert_eq!(r.status, 200, "{}", r.body);
+    for secret in [PW, "new password"] {
+        assert!(!r.body.contains(secret), "password leaked: {}", r.body);
+    }
     assert_eq!(get_session(addr, &h).await["csrf"], csrf);
     for revoked in [other, third] {
         assert!(get_session(addr, &[("Cookie", &revoked)]).await["user"].is_null());
