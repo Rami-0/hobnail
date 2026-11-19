@@ -1394,6 +1394,15 @@ async fn protected_views_still_hide_excluded_containers() {
         assert_api_error(&r, 404, "not_found", hidden);
         assert!(!r.body.contains(HIDDEN_PREFIX));
     }
+    for hidden in ["secret-ovr", "secret-lbl", "secret-exc"] {
+        for tab in ["inspect", "metrics", "events"] {
+            let path = format!("/api/v1/containers/{hidden}/{tab}");
+            let response = req(addr, "GET", &path, &headers, "").await;
+            assert_api_error(&response, 404, "not_found", &path);
+        }
+        let path = format!("/api/history/container/{hidden}?metric=cpu");
+        assert_eq!(req(addr, "GET", &path, &headers, "").await.status, 404);
+    }
     let r = req(addr, "GET", "/api/v1/strips", &headers, "").await;
     let v = json_of(&r, "strips");
     let keys: Vec<_> = v["containers"].as_object().unwrap().keys().collect();
@@ -2118,6 +2127,27 @@ async fn invite_roles_and_account_management() {
             let path = format!("/api/v1/containers/no-grant/{resource}");
             assert_eq!(req(addr, "GET", &path, &h, "").await.status, 404, "{path}");
         }
+        for resource in ["inspect", "metrics", "events"] {
+            let path = format!("/api/v1/containers/web/{resource}");
+            let response = req(addr, "GET", &path, &h, "").await;
+            assert_eq!(response.status, 200, "{path}");
+            if resource == "inspect" {
+                let view = json_of(&response, "scoped inspect");
+                assert!(view["command"].is_null());
+                assert!(view["health_test"].is_null());
+                assert!(view["mounts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|mount| mount["source"].is_null()));
+            }
+        }
+        assert_eq!(
+            req(addr, "GET", "/api/settings/config", &h, "")
+                .await
+                .status,
+            403
+        );
         for resource in ["top", "env"] {
             let path = format!("/api/v1/containers/no-grant/{resource}");
             assert_eq!(req(addr, "GET", &path, &h, "").await.status, 403, "{path}");
@@ -2353,6 +2383,19 @@ async fn viewer_cannot_read_administrative_details() {
     assert_eq!(
         json_of(&inspect, "viewer inspect")["env_keys"],
         serde_json::json!(["PASSWORD"])
+    );
+    let view = json_of(&inspect, "viewer inspect");
+    assert!(view["health_test"].is_null());
+    assert!(view["mounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|mount| mount["source"].is_null()));
+    assert_eq!(
+        req(addr, "GET", "/api/settings/config", &h, "")
+            .await
+            .status,
+        403
     );
     assert!(!inspect.body.contains("SECRET-CMD"));
     assert!(!inspect.body.contains("hunter2"));
