@@ -6,7 +6,7 @@ deploy
 scripts
 *.md
 .claude
-# The client is installed and built inside the image's web stage.
+# The web stage builds the embedded UI. Rust supplies the PWA icons from src/http/pwa.
 web/node_modules
 web/dist
 web/*.tsbuildinfo

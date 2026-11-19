@@ -1,4 +1,4 @@
-//! Build script: embeds the React client and the content hash.
+//! Build script for embedding the web client and recording the build content hash.
 //!
 //! - Walks `web/dist` (or `$RH_WEB_DIST`) and writes `$OUT_DIR/web_assets.rs`,
 //!   a sorted table of every file (raw bytes and, when present, the sibling
