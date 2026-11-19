@@ -1,5 +1,5 @@
 import { BellIcon, BookmarkIcon, BoxIcon, HistoryIcon, LayoutGridIcon, LockIcon, PlugIcon, SlidersHorizontalIcon, SunIcon, TerminalIcon, UsersIcon, ZapIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
@@ -19,17 +19,28 @@ import { Note, EmptyState } from "../../ui/Note.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
 
+import Users from "./Users.tsx";
+import Config from "./Config.tsx";
+import Security from "./Security.tsx";
+import History from "./History.tsx";
+import Appearance from "./Appearance.tsx";
+import Containers from "./Containers.tsx";
+import Notifications from "./Notifications.tsx";
+import Widgets from "./Widgets.tsx";
+import General from "./General.tsx";
+import Bookmarks from "./Bookmarks.tsx";
+
 const panels = {
-  users: lazy(() => import("./Users.tsx")),
-  config: lazy(() => import("./Config.tsx")),
-  security: lazy(() => import("./Security.tsx")),
-  history: lazy(() => import("./History.tsx")),
-  appearance: lazy(() => import("./Appearance.tsx")),
-  containers: lazy(() => import("./Containers.tsx")),
-  notifications: lazy(() => import("./Notifications.tsx")),
-  widgets: lazy(() => import("./Widgets.tsx")),
-  general: lazy(() => import("./General.tsx")),
-  bookmarks: lazy(() => import("./Bookmarks.tsx")),
+  users: Users,
+  config: Config,
+  security: Security,
+  history: History,
+  appearance: Appearance,
+  containers: Containers,
+  notifications: Notifications,
+  widgets: Widgets,
+  general: General,
+  bookmarks: Bookmarks,
 };
 
 const tabIcons = {
@@ -62,7 +73,7 @@ export default function SettingsPage() {
       </Note>}
       {allowed && tab === "boards" && <Boards admin={admin} manage={manage} />}
       {allowed && tab === "integrations" && <Integrations admin={admin} manage={manage} />}
-      {allowed && Panel && <Suspense fallback={<p role="status">Loading settings…</p>}><Panel /></Suspense>}
+      {allowed && Panel && <Panel />}
     </div>
   </div>;
 }
