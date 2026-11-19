@@ -47,25 +47,25 @@ export default function Host() {
   }, [allowed]);
   if (boot?.scoped) return <p className="page">Host is unavailable with board-scoped access.</p>;
   const host = live ?? initial;
-  return <div className="page" data-testid="host">
-    <h1>Host</h1>
+  return <div className="page hx" data-testid="host">
+    <p className="page-sub">Everything the kernel reports about this machine. Live values refresh while this tab is visible; rates are averages since the previous reading.</p>
     {error && <p role="alert">{error}</p>}
     {host ? <>
-      <section className="panel history-block host-summary" data-testid="host-sample" data-sampled-at={host.at}>
-        <h2>{host.hostname}</h2>
-        <p>{host.cpu_cores} cores · CPU {pct(host.cpu_pct)} · uptime {duration(host.uptime_secs)}</p>
-        <p>Load {host.load.map((n) => n.toFixed(2)).join(" / ")} · Updated <RelativeTime at={host.at} /></p>
+      <div className="hx-grid">
+      <section className="panel hx-p host-summary" data-testid="host-sample" data-sampled-at={host.at}>
+        <div className="panel-h"><h2>CPU</h2><span className="hx-h muted">{host.hostname} · {host.cpu_cores} cores</span></div>
+        <div className="hx-big"><b>{pct(host.cpu_pct)}</b><span className="muted">busy</span>
+          <span className="hx-load">Load <b>{host.load.map((n) => n.toFixed(2)).join(" / ")}</b></span>
+        </div>
         {host.cpu_pct !== null && <Meter value={host.cpu_pct} max={100} label="Total CPU usage" />}
       </section>
-      <div className="host-facts">
-        {host.groups.map((g) => <details key={g.name} className="panel history-block" data-testid="host-disclosure">
+        {host.groups.map((g) => <details key={g.name} className="panel hx-p host-facts" data-testid="host-disclosure">
           <summary>{g.name}</summary>
-          <dl className="kv">{g.values.map((entry) => <div key={entry.label} className="kv-r">
+          <dl className="kv hx-kv">{g.values.map((entry) => <div key={entry.label} className="kv-r">
             <dt>{entry.label}</dt><dd>{format(entry.value, entry.unit)}</dd>
           </div>)}</dl>
         </details>)}
-      </div>
-      {host.processes && boot?.role !== "viewer" && <details className="panel history-block" open>
+      {host.processes && boot?.role !== "viewer" && <details className="panel hx-p hx-wide" open>
         <summary>Top processes</summary>
         {host.processes.length ? <div className="host-table"><table className="tbl"><thead><tr>
           <th scope="col">PID</th><th scope="col">Command</th><th scope="col">Container</th>
@@ -75,7 +75,7 @@ export default function Host() {
           <td>{p.uid ?? "—"}</td><td>{pct(p.cpu_pct)}</td><td>{bytes(p.rss_bytes)}</td><td>{p.threads}</td>
         </tr>)}</tbody></table></div> : <p>No processes visible.</p>}
       </details>}
-      {!!host.process_groups?.length && boot?.role !== "viewer" && <details className="panel history-block">
+      {!!host.process_groups?.length && boot?.role !== "viewer" && <details className="panel hx-p hx-wide">
         <summary>Process usage by container</summary>
         {host.process_lifetime && <p className="muted">CPU averages since the processes started.</p>}
         <ul className="history-events">{host.process_groups.map((group) => <li key={group.container ?? "host"}>
@@ -83,6 +83,8 @@ export default function Host() {
           {" · "}{group.count} processes · {pct(group.cpu_pct)} CPU · {bytes(group.rss_bytes)}
         </li>)}</ul>
       </details>}
+      </div>
+      <p className="foot-line">Updated <RelativeTime at={host.at} /> · up {duration(host.uptime_secs)}</p>
       <History recording={boot?.features.history ?? false} />
     </> : !error && <p role="status">Loading host facts…</p>}
   </div>;
