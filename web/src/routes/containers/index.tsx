@@ -743,21 +743,15 @@ function LiveCell({
   const v = kind === "cpu" ? cell.cpu : cell.mem;
   return (
     <td className={`c-num c-${kind}`} data-l={kind === "cpu" ? "CPU" : "Memory"}>
-      {running && v !== null ? (
-        <>
-          <span className="num">{kind === "cpu" ? pct(v) : bytes(v)}</span>
-          {near && (
-            <Sparkline
-              values={kind === "cpu" ? cell.cpuHist : cell.memHist}
-              max={kind === "cpu" ? scale.cpu : scale.mem}
-              label=""
-              color={kind === "cpu" ? "--ch-cpu" : "--ch-mem"}
-              className="cell-spark"
-            />
-          )}
-        </>
-      ) : (
-        <span className="muted">—</span>
+      <span className={running && v !== null ? "num" : "num muted"}>{!running || v === null ? "—" : kind === "cpu" ? pct(v) : bytes(v)}</span>
+      {running && near && (
+        <Sparkline
+          values={kind === "cpu" ? cell.cpuHist : cell.memHist}
+          max={kind === "cpu" ? scale.cpu : scale.mem}
+          label=""
+          color={kind === "cpu" ? "--ch-cpu" : "--ch-mem"}
+          className="cell-spark"
+        />
       )}
     </td>
   );

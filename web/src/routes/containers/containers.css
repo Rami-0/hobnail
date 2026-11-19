@@ -44,7 +44,7 @@
 .ctbl-loading{padding:var(--s-4)}
 
 /* ---- table ---- */
-.ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;contain:paint}
+.ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
 .ctbl{table-layout:fixed}
 .ctbl .c-name{width:auto}
 .ctbl .c-stack{width:90px}
@@ -135,7 +135,7 @@ tbody.none td{padding:0}
  .ctbl tr.row td.c-num::before{content:attr(data-l) " ";color:var(--text-3);font-size:var(--fs-micro)}
  .c-num .num{min-width:0}
  .ctbl .c-num .num{width:auto;height:auto;contain:none;text-align:left}
- .ctbl tr.row td.c-num{contain:layout paint}
+ .ctbl tr.row td.c-num{min-width:0}
  .ctbl tr.row td.c-hist{display:block;order:4;flex-basis:100%;width:auto}
  .ctbl tr.row td.c-hist:empty{display:none}
  .c-hist .hstrip{width:100%;height:5px;opacity:.85}
