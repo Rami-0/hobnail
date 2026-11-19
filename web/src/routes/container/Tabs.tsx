@@ -98,6 +98,7 @@ function Inspect({ root, admin }: { root: string; admin: boolean }) {
   const [revealed, setRevealed] = useState(false);
   if (!data) return <p role={error ? "alert" : "status"}>{error || "Loading inspection…"}</p>;
   return <section className="panel history-block" data-testid="container-inspect">
+    {error && <p role="alert">{error}</p>}
     <h2>Inspect</h2>
     <Pairs rows={[
       ["Image ID", data.image_id || "—"], ["Image digests", data.image_digests.join(", ") || "—"],
@@ -145,6 +146,7 @@ function Processes({ root }: { root: string }) {
   const { data, error } = useRead<ContainerProcesses>(`${root}/top?${new URLSearchParams({ sort, dir })}`, undefined, 3000);
   return <section className="panel history-block" data-testid="container-processes">
     <h2>{data ? `${data.processes.length} ${data.processes.length === 1 ? "process" : "processes"}` : "Processes"}</h2>
+    {data && error && <p role="alert">{error}</p>}
     {!data ? <p role={error ? "alert" : "status"}>{error || "Loading processes…"}</p> :
       <div className="detail-table"><table className="tbl">
         <thead><tr>{data.titles.map((title, i) => <th key={title} scope="col" aria-sort={String(i) === sort ? (dir === "asc" ? "ascending" : "descending") : undefined}>

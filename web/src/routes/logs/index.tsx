@@ -1,3 +1,4 @@
+import { useRead } from "../../live/read.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogsPicker } from "../../api/gen/LogsPicker.ts";
 import { api } from "../../api/session.ts";
@@ -81,16 +82,10 @@ function Picker({ data }: { data: LogsPicker }) {
   </div>;
 }
 function LevelCounts({ name, range }: { name: string; range: string }) {
-  const [open, setOpen] = useState(false), [points, setPoints] = useState<Array<[number, number[]]> | null>(null), [error, setError] = useState("");
-  useEffect(() => {
-    if (!open) return;
-    const ac = new AbortController();
-    void api.get<{ points: Array<[number, number[]]> }>(`/api/logs/levels?c=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}`, { signal: ac.signal }).then((r) => {
-      if (ac.signal.aborted) return;
-      if (r.kind === "ok") setPoints(r.data.points); else setError(r.message);
-    });
-    return () => ac.abort();
-  }, [open, name, range]);
+  const [open, setOpen] = useState(false);
+  const { data, error } = useRead<{ points: Array<[number, number[]]> }>(open
+    ? `/api/logs/levels?c=${encodeURIComponent(name)}&range=${encodeURIComponent(range)}` : null);
+  const points = data?.points;
   const counts = points?.reduce((sum, p) => sum.map((n, i) => n + (p[1][i] ?? 0)), [0, 0, 0, 0, 0]);
   const maximum = Math.max(1, ...(points ?? []).map((p) => (p[1][0] ?? 0) + (p[1][1] ?? 0)));
   return <details className="log-level-history" onToggle={(e) => setOpen(e.currentTarget.open)}><summary>Errors and warnings, last {range}</summary>
