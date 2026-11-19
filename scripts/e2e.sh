@@ -4,7 +4,7 @@
 #   scripts/e2e.sh <check.mjs, relative to the repo> [args...]
 # e.g.
 #   HB_PASSWORD=... scripts/e2e.sh web/e2e/app-check.mjs http://127.0.0.1:3420
-#   HB_PASSWORD=... scripts/e2e.sh scripts/a11y-check.mjs http://127.0.0.1:3420 <container>
+#   HB_PASSWORD=... scripts/e2e.sh web/e2e/a11y-check.mjs http://127.0.0.1:3396
 # The first run builds a small local image, hobnail-e2e:p0 (node:26-alpine
 # pinned by digest + Alpine's chromium + fonts), later runs reuse it.
 # `docker rmi hobnail-e2e:p0` removes it; E2E_REBUILD=1 rebuilds it.
