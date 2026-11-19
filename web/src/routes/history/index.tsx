@@ -1,9 +1,9 @@
 import { eventLabel } from "../container/events.ts";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, memo, Suspense, useEffect } from "react";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
 import { useRead } from "../../live/read.ts";
 import { containerHref, logsHref } from "../../app/paths.ts";
-import { navigate, useRoute } from "../../app/router.ts";
+import { navigate, setSearch, useRoute } from "../../app/router.ts";
 import { useBootstrap, useContainers } from "../../live/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
@@ -14,7 +14,7 @@ import "./history.css";
 const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 
 export default function History() {
-  const { search, setSearch, hash } = useRoute();
+  const { search, hash } = useRoute();
   const { query, level, zoomed, range } = historyWindow(search);
   const bootstrap = useBootstrap();
   const sessionScoped = bootstrap?.scoped;
@@ -42,15 +42,7 @@ export default function History() {
     </div>
     {error && <p role="alert">{error}</p>}
     {!data ? !error && <ChartPlaceholder count={8} /> : <>
-      <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
-        <Charts
-          series={{ from: data.from, to: data.to, range, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
-          metrics={data.metrics}
-          recording={data.recording}
-          onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
-          onMarker={(id) => navigate(`/app/history?${query}#ev-${id}`)}
-        />
-      </Suspense>
+      <HistoryCharts data={data} />
       <section className="panel history-block">
         <h2>Container starts per day</h2>
         {Object.keys(data.starts_per_day).length === 0 ? <p>No container starts recorded in the last seven days.</p> :
@@ -81,3 +73,15 @@ export default function History() {
     </>}
   </div>;
 }
+
+const HistoryCharts = memo(function HistoryCharts({ data }: { data: HistoryView }) {
+  return <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
+        <Charts
+          series={{ from: data.from, to: data.to, range: "", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
+          metrics={data.metrics}
+          recording={data.recording}
+          onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
+          onMarker={(id) => navigate(`/app/history?${window.location.search.slice(1)}#ev-${id}`)}
+        />
+      </Suspense>;
+});
