@@ -14,7 +14,7 @@ tiles show saved connection metadata, not provider health. A deleted or missing
 target remains visible as missing instead of silently vanishing.
 
 Responsive spans are columns, not pixels: mobile 1–4, tablet 1–8, desktop 1–12,
-rows 1–8. Edit mode offers move/resize controls and pointer dragging; Alt+arrows
+rows 1–12. Edit mode offers move/resize controls and pointer dragging; Alt+arrows
 moves and Shift+arrows resizes. A document has at most 32 sections and 512 items;
 there are at most 64 boards. Server IDs retain identity across edits.
 
