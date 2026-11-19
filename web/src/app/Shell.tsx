@@ -386,7 +386,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
               <Brand site={null} />
             </span>
             <div className="top-title">{title}</div>
-            {b && !b.scoped && <Vitals />}
+            {b && !b.scoped && !phone && <Vitals />}
             <Button className="icon-btn" data-testid="palette-open" aria-label="Search and commands" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
             </Button>

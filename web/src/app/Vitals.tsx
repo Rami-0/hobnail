@@ -3,9 +3,10 @@
 // the last points (seeded from the last hour of history, then live from the
 // `system` topic). They link to the Host page of the current interface.
 // Amber from 80 %, red from 90 %, said in words too.
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { useBootstrap, useSystem, useVitalsRings, vitalsOf } from "../live/index.ts";
+import { seedVitals } from "../live/runtime.ts";
 import { level } from "../ui/svg.ts";
 import { Sparkline } from "../ui/Sparkline.tsx";
 import { bytes, pct0 } from "./fmt.ts";
@@ -41,6 +42,9 @@ export function Vitals() {
   const b = useBootstrap();
   const s = useSystem();
   const r = useVitalsRings();
+  useEffect(() => {
+    if (b) void seedVitals(b);
+  }, [b]);
   if (b && !b.features.system) return null;
   const v = vitalsOf(s);
   const disk = s?.disks[0];

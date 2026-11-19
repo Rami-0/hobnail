@@ -98,7 +98,6 @@ export async function fetchBootstrap(): Promise<void> {
   if (r.kind === "ok") {
     bootstrap.set({ data: r.data, error: null });
     skew.set(r.data.now - Date.now() / 1000);
-    void seedVitals(r.data);
   } else bootstrap.update((c) => ({ data: c.data, error: message(r) }));
 }
 
@@ -148,7 +147,7 @@ async function lastHour(metric: string): Promise<[number, number][]> {
 
 let seeded = false;
 /** The vitals sparklines start with the last hour from the history database (ui::shell vitals). */
-async function seedVitals(b: Bootstrap): Promise<void> {
+export async function seedVitals(b: Bootstrap): Promise<void> {
   if (seeded || !b.features.history || !b.features.system) return;
   seeded = true;
   const [cpu, mem, disk, rx, tx] = await Promise.all(["cpu", "mem", "disk", "net_rx", "net_tx"].map(lastHour));
