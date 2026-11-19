@@ -15,7 +15,6 @@ import {
   CircleAlertIcon,
   FunnelIcon,
   HistoryIcon,
-  HouseIcon,
   KeyboardIcon,
   LayoutGridIcon,
   PanelLeftIcon,
@@ -393,20 +392,16 @@ export function Sidebar({
         </button>
       </div>
       <nav className="nav" aria-label="Main" data-testid="sidebar">
-        <NavLink href={appHref("/")} label="Home" icon={<HouseIcon aria-hidden="true" />} current={r.name === "home" || (r.name === "overview" && !b?.default_board)} />
+        {b && !b.scoped && <NavLink href="/app/overview" label="Overview" current={r.name === "overview" || (r.name === "home" && !b.default_board)} icon={<LayoutGridIcon aria-hidden="true" />} />}
         <NavLink
           href={appHref("/containers")}
           label="Containers"
           icon={<BoxIcon aria-hidden="true" />}
           current={r.name === "containers" || r.name === "container"}
         />
-        {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
-          icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
-        {b && b.role !== "viewer" && <NavLink href={`/app${settingsHref(local(), b.role === "owner", b.scoped)}`} label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        {b && !b.scoped && <NavLink href="/app/host" label="Host" current={r.name === "host"} icon={<ServerIcon aria-hidden="true" />} />}
         <NavLink href="/app/logs" label="Logs" current={["logs", "container_logs", "stack_logs"].includes(r.name)} icon={<ScrollTextIcon aria-hidden="true" />} />
         {b && !b.scoped && <>
-        <NavLink href="/app/overview" label="Overview" current={r.name === "overview"} icon={<LayoutGridIcon aria-hidden="true" />} />
-        <NavLink href="/app/host" label="Host" current={r.name === "host"} icon={<ServerIcon aria-hidden="true" />} />
         <NavLink href="/app/history" label="History" current={r.name === "history"} icon={<HistoryIcon aria-hidden="true" />} />
         <NavLink
           href="/app/alerts"
@@ -423,6 +418,9 @@ export function Sidebar({
           }
         />
         </>}
+        {b && b.role !== "viewer" && <NavLink href={`/app${settingsHref(local(), b.role === "owner", b.scoped)}`} label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
+          icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
         <button type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
           <FunnelIcon aria-hidden="true" />
           <span className="nav-label">Stacks and containers</span>

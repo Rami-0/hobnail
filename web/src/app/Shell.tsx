@@ -8,7 +8,7 @@
 // goes into it and back to the opener; a closed drawer is out of the tab
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS.
-import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
+import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, LayoutGridIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
@@ -39,7 +39,7 @@ function ShellToasts() {
 }
 
 const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
-import { Brand, Sidebar } from "./Sidebar.tsx";
+import { Sidebar } from "./Sidebar.tsx";
 import { applyDefaultTheme } from "./theme.ts";
 import { ThemeButton } from "./ThemeButton.tsx";
 import { useTabTitle } from "./title.ts";
@@ -382,14 +382,21 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         <div className="scrim" onClick={() => setOpen(false)} aria-hidden="true" />
         <div className="col" inert={overPage}>
           <header className="top">
-            <span className="top-brand">
-              <Brand site={null} />
-            </span>
-            <div className="top-title">{title}</div>
-            {b && !b.scoped && !phone && <Vitals />}
-            <Button className="icon-btn" data-testid="palette-open" aria-label="Search and commands" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+            <div className="crumbs">
+              {r === "container" || r === "container_logs" ? (
+                <nav className="crumb" aria-label="Breadcrumb">
+                  <a href="/app/containers">Containers</a>
+                  <ChevronRightIcon aria-hidden="true" />
+                  <span className="title mono">{title}</span>
+                </nav>
+              ) : <span className="title">{title}</span>}
+            </div>
+            <button type="button" className="cmd" data-testid="palette-open" aria-label="Search and commands (Ctrl K)" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
-            </Button>
+              <span className="cmd-t">Search or jump to…</span>
+              <kbd className="cmd-k">Ctrl K</kbd>
+            </button>
+            {b && !b.scoped && !phone && <Vitals />}
             <ThemeButton />
             <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
               <RefreshCwIcon aria-hidden="true" />
@@ -430,9 +437,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         </div>
       </div>
       <nav className="bbar" aria-label="Quick navigation" inert={overPage}>
-        <a className="bb-i" href={appHref("/")} aria-current={(r === "home" || (r === "overview" && !b?.default_board)) ? "page" : undefined}>
-          <HouseIcon aria-hidden="true" />
-          <span>Home</span>
+        <a className="bb-i" href={!b?.scoped ? "/app/overview" : "/app"} aria-current={r === "overview" || r === "home" ? "page" : undefined}>
+          <LayoutGridIcon aria-hidden="true" />
+          <span>Overview</span>
         </a>
         <a className="bb-i" href={appHref("/containers")} aria-current={r === "containers" || r === "container" ? "page" : undefined}>
           <BoxIcon aria-hidden="true" />
@@ -458,6 +465,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           className="bb-i"
           data-testid="drawer-open"
           aria-controls="side"
+          aria-current={r === "host" || r === "history" || r === "settings" ? "page" : undefined}
           aria-expanded={open}
           onClick={(e) => setOpen(true, { from: e.currentTarget })}
         >

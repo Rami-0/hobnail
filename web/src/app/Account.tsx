@@ -24,11 +24,11 @@ export function Account() {
       <Menu
         label={`Account: ${user.name}`}
         testId="user"
-        triggerClassName="acct-btn"
+        triggerClassName="icon-btn"
         trigger={
           <>
             <UserIcon aria-hidden="true" />
-            <span className="acct-name">{user.name}</span>
+            <span className="sr">{user.name}</span>
             <span className="signed" aria-hidden="true" />
           </>
         }
