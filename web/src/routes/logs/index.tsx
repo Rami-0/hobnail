@@ -1,3 +1,4 @@
+import { LayersIcon, SearchIcon, ScrollTextIcon } from "lucide-react";
 import { useRead } from "../../live/read.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogsPicker } from "../../api/gen/LogsPicker.ts";
@@ -71,13 +72,42 @@ function Picker({ data }: { data: LogsPicker }) {
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   const groups = data.groups.map((g) => ({ ...g, containers: g.containers.filter((c) => terms.every((t) => `${g.title} ${c.title} ${c.name} ${c.search}`.toLowerCase().includes(t))) })).filter((g) => g.containers.length);
   const total = data.groups.reduce((n, g) => n + g.containers.length, 0), shown = groups.reduce((n, g) => n + g.containers.length, 0);
-  return <div className="page logs-page" data-testid="logs-picker"><h1>Logs</h1>
-    <div className="logs-picker-toolbar"><TextInput type="search" data-testid="filter" aria-label="Filter containers" placeholder="Filter by name, stack or image" value={q} onChange={(e) => setSearch({ q: e.target.value }, { replace: true })} onKeyDown={(e) => { if (e.key === "Enter" && groups[0]?.containers[0]) { e.preventDefault(); navigate(logsHref(groups[0].containers[0].name)); } }} />
-    <output>{shown} of {total} containers</output><Button disabled={selected.length < 2} onClick={() => setSearch({ c: selected.join(","), sel: null, q: null })}>Side by side · {selected.length}</Button></div>
-    <p className="muted">{selected.length === 4 ? "Four at a time: untick one to choose another." : "Open a name or tick two to four containers to view side by side."}</p>
+  return <div className="page logs-page lpick" data-testid="logs-picker">
+    <div className="lpick-bar">
+      <div className="lpick-f" role="search">
+        <div className="search-in">
+          <SearchIcon aria-hidden="true" />
+          <TextInput type="search" data-testid="filter" aria-label="Filter containers" placeholder="Filter by name, stack or image" value={q}
+            onChange={(e) => setSearch({ q: e.target.value }, { replace: true })}
+            onKeyDown={(e) => { if (e.key === "Enter" && groups[0]?.containers[0]) { e.preventDefault(); navigate(logsHref(groups[0].containers[0].name)); } }} />
+        </div>
+      </div>
+      <output className="lpick-n muted">{shown === total ? total : shown + " of " + total} containers</output>
+      <Button variant="primary" icon={<ScrollTextIcon aria-hidden="true" />} disabled={selected.length < 2}
+        onClick={() => setSearch({ c: selected.join(","), sel: null, q: null })}>
+        Side by side{selected.length > 0 ? " · " + selected.length : ""}
+      </Button>
+    </div>
+    <p className="muted lpick-hint">{selected.length === 4 ? "Four at a time: untick one to choose another." : "A name opens its logs. Tick two to four to see them side by side (on a phone they stack)."}</p>
     {!shown && <p>No containers match.</p>}
-    {groups.map((g) => <section className="logs-picker-group" key={g.name}><header><h2>{g.title}</h2>{g.project && <a href={`/app/stacks/${encodeURIComponent(g.name)}/logs`}>Whole stack</a>}</header>
-      {g.containers.map((c) => <div className="logs-picker-row" data-testid="logs-picker-row" key={c.name}><Switch checked={selected.includes(c.name)} disabled={selected.length >= 4 && !selected.includes(c.name)} label={`Select ${c.title}`} onChange={(on) => setSearch({ sel: (on ? [...selected, c.name] : selected.filter((n) => n !== c.name)).join(",") }, { replace: true })} /><a href={logsHref(c.name)}>{c.title}</a><span className="mono muted">{c.state}</span></div>)}
+    {groups.map((g) => <section className="lpick-g" key={g.name}>
+      <h2 className="lpick-h">
+        <span className="lpick-t" title={g.title}>{g.title}</span>
+        <span className="cnt num">{g.containers.filter((c) => c.state === "running").length}/{g.containers.length}</span>
+        {g.project && <a className="btn sm" href={"/app/stacks/" + encodeURIComponent(g.name) + "/logs"}><LayersIcon aria-hidden="true" /> Whole stack</a>}
+      </h2>
+      <ul className="lpick-list">{g.containers.map((c) => {
+        const running = c.state === "running";
+        return <li className={running ? "rl" : "rl stopped"} data-testid="logs-picker-row" key={c.name}>
+          <Switch className="lpick-cb" checked={selected.includes(c.name)} disabled={selected.length >= 4 && !selected.includes(c.name)}
+            label={"Select " + c.title} onChange={(on) => setSearch({ sel: (on ? [...selected, c.name] : selected.filter((n) => n !== c.name)).join(",") }, { replace: true })} />
+          <span className={running ? "dot ok" : "dot off"} aria-hidden="true" />
+          <a className="row-link" href={logsHref(c.name)} title={"Logs of " + c.name}>
+            <span className="lpick-nm">{c.title}</span>{c.title !== c.name && <> <span className="sub mono">{c.name}</span></>}
+          </a>
+          {!running && <span className="muted lpick-st">{c.state}</span>}
+        </li>;
+      })}</ul>
     </section>)}
   </div>;
 }
