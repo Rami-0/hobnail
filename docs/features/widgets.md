@@ -159,6 +159,6 @@ Their read API returns a structured body (text, rows, status and values); React
 renders it without inserting upstream HTML. Boards can include configured
 widget IDs; missing IDs stay visible as missing. Scoped readers receive only
 widgets targeted by granted boards, not the host-wide Widgets endpoint.
-Last values and their age can remain during refresh in an open tab; a fresh
-load starts without a cached browser value. The preview returns no raw upstream
+The current result and its age remain during a read refresh. An error result
+replaces it; there is no last-good-value cache across failed widget fetches. The preview returns no raw upstream
 response. Feed, embed, extension and provider widget types are not built yet.
