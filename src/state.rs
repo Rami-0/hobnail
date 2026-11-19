@@ -94,6 +94,7 @@ pub struct AppState {
     pub env: Env,
     pub started_unix: u64,
     pub config: ConfigStore,
+    pub(crate) settings_undo: Mutex<Option<crate::settings::store::Undo>>,
     /// Latest container list. The docker task publishes, everyone else reads
     /// (`borrow()`) or waits for changes (`subscribe()`).
     pub containers: watch::Sender<Arc<Snapshot>>,
@@ -129,6 +130,7 @@ impl AppState {
             build: BuildInfo::current(),
             started_unix: crate::util::unix_now(),
             config,
+            settings_undo: Mutex::new(None),
             containers,
             container_stats: Mutex::new((
                 crate::docker::StatsSampler::new(&env.host_sys),

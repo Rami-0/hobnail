@@ -198,7 +198,17 @@ pub struct Draft {
 
 /// Validate, guard, write, record and reload. The caller holds [`lock`] and
 /// has checked `base_hash` against `cur`. Returns the JSON for the client.
-pub fn commit(state: &AppState, cur: &Current, user: &str, mut d: Draft) -> Result<J, ApiError> {
+pub fn commit(state: &AppState, cur: &Current, user: &str, d: Draft) -> Result<J, ApiError> {
+    commit_checked(state, cur, user, d, &cur.text)
+}
+
+fn commit_checked(
+    state: &AppState,
+    cur: &Current,
+    user: &str,
+    mut d: Draft,
+    guard_base: &str,
+) -> Result<J, ApiError> {
     // A CRLF file stays CRLF (the editor and new lines bring LF). A restore
     // writes the revision exactly as it was.
     if d.kind != "config.restored" {
@@ -211,7 +221,7 @@ pub fn commit(state: &AppState, cur: &Current, user: &str, mut d: Draft) -> Resu
         }));
     }
     validate(&d.text, d.fields)?;
-    guard::check(&cur.text, &d.text, &secrets_dir(state)).map_err(ApiError::denied)?;
+    guard::check(guard_base, &d.text, &secrets_dir(state)).map_err(ApiError::denied)?;
     let mut warnings = d.warnings;
     warnings.extend(guard::secret_warnings(&cur.text, &d.text));
 
@@ -220,6 +230,7 @@ pub fn commit(state: &AppState, cur: &Current, user: &str, mut d: Draft) -> Resu
         ApiError::internal(e)
     })?;
 
+    *state.settings_undo.lock().unwrap() = None;
     let now = crate::util::unix_now() as i64;
     let db = &state.db;
     // Keep what was on disk before this save when no revision has it (the
@@ -262,6 +273,76 @@ pub fn edit(
     check_base(&cur, base_hash)?;
     let draft = f(&cur)?;
     commit(state, &cur, user, draft)
+}
+
+pub(crate) struct Undo {
+    token: String,
+    actor: String,
+    after: String,
+    before: String,
+    expires: std::time::Instant,
+}
+
+/// Keep a single short-lived receipt for the exact pre-delete document.
+pub fn edit_with_undo(
+    state: &AppState,
+    base_hash: &str,
+    user: &str,
+    deletion: bool,
+    f: impl FnOnce(&Current) -> Result<Draft, ApiError>,
+) -> Result<J, ApiError> {
+    if !deletion {
+        return edit(state, base_hash, user, f);
+    }
+    let _g = lock();
+    let cur = read_current(state)?;
+    check_base(&cur, base_hash)?;
+    let draft = f(&cur)?;
+    let token = crate::auth::random_token().map_err(ApiError::internal)?;
+    let after = doc::sha256_hex(doc::keep_line_ends(&cur.text, draft.text.clone()).as_bytes());
+    let mut reply = commit(state, &cur, user, draft)?;
+    *state.settings_undo.lock().unwrap() = Some(Undo {
+        token: token.clone(),
+        actor: user.into(),
+        after,
+        before: cur.text,
+        expires: std::time::Instant::now() + std::time::Duration::from_secs(60),
+    });
+    reply["undo_token"] = J::String(token);
+    Ok(reply)
+}
+
+pub fn undo(state: &AppState, user: &str, token: &str) -> Result<J, ApiError> {
+    let _g = lock();
+    let cur = read_current(state)?;
+    let before = {
+        let undo = state.settings_undo.lock().unwrap();
+        let receipt = undo
+            .as_ref()
+            .filter(|entry| {
+                entry.token == token
+                    && entry.actor == user
+                    && entry.after == cur.hash
+                    && entry.expires > std::time::Instant::now()
+            })
+            .ok_or_else(ApiError::stale)?;
+        receipt.before.clone()
+    };
+    // The receipt authenticates the exact pre-delete config and destination
+    // bindings. The client supplies no config, path, or destination.
+    commit_checked(
+        state,
+        &cur,
+        user,
+        Draft {
+            text: before.clone(),
+            note: "undid settings deletion".into(),
+            kind: "config.restored",
+            fields: &[],
+            warnings: Vec::new(),
+        },
+        &before,
+    )
 }
 
 /// `{data_dir}/secrets`: the only place the app may point a new `*_file` at.

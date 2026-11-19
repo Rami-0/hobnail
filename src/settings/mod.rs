@@ -32,7 +32,7 @@ mod doc;
 mod guard;
 mod notify;
 mod ops;
-mod store;
+pub(crate) mod store;
 #[cfg(test)]
 mod tests;
 

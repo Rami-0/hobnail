@@ -130,9 +130,13 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         // whole list rewrote keys the caller never showed (`columns`).
         (_, true, ["docker"]) => {
             let r: CollectionReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::exclude_action(c, &r).and_then(ops::precheck)
-            })?)
+            json(store::edit_with_undo(
+                state,
+                &r.base_hash,
+                user,
+                r.action == ops::Action::Delete,
+                |c| ops::exclude_action(c, &r).and_then(ops::precheck),
+            )?)
         }
         (_, true, ["groups"]) => json(list_post(state, call, &ops::GROUPS)?),
         (_, true, ["containers", "override"]) => {
@@ -184,13 +188,22 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             })?)
         }
 
+        (_, true, ["undo-delete"]) => {
+            let r: ops::NameReq = body(call)?;
+            json(store::undo(state, user, &r.name)?)
+        }
+
         // ---- notifications
         (true, _, ["notifications"]) => json(notifications_get(state)?),
         (_, true, ["channels"]) => {
             let r: CollectionReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::channel_action(c, &r).and_then(ops::precheck)
-            })?)
+            json(store::edit_with_undo(
+                state,
+                &r.base_hash,
+                user,
+                r.action == ops::Action::Delete,
+                |c| ops::channel_action(c, &r).and_then(ops::precheck),
+            )?)
         }
         (_, true, ["channels", "test"]) => {
             let r: ops::NameReq = body(call)?;
@@ -296,9 +309,13 @@ fn password_error(e: String) -> ApiError {
 
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
-    store::edit(state, &r.base_hash, &call.session.account.name, |c| {
-        ops::list_action(c, spec, &r).and_then(ops::precheck)
-    })
+    store::edit_with_undo(
+        state,
+        &r.base_hash,
+        &call.session.account.name,
+        r.action == ops::Action::Delete,
+        |c| ops::list_action(c, spec, &r).and_then(ops::precheck),
+    )
 }
 
 fn rev_id(s: &str) -> Result<i64, ApiError> {

@@ -58,19 +58,18 @@ export function Collection(props: Props) {
     setFailure(undefined);
     const result = await api.post<Save>(endpoint(path), { base_hash: operation.action === "delete" ? removing?.hash ?? hash : hash, ...operation });
     if (result.kind === "ok") {
-      const undo = operation.action === "delete" ? removing?.entry : undefined;
+      const undo = result.data.undo_token;
       setRemoving(undefined);
       const latest = await refresh();
       if (undo) {
         const owner = getSession().session?.user?.name;
-        const deletedHash = result.data.hash;
         const dismiss = toast(result.data.revision ? `Deleted in revision #${result.data.revision}.` : "Deleted.", {
           action: { label: "Undo", run: undoOnce(() => {
             dismiss();
             void (async () => {
               const session = await refreshEditingSession();
-              if (!owner || session?.user?.name !== owner) return;
-              const restored = await api.post<Save>(endpoint(path), { base_hash: deletedHash, action: "add", item: undo.original ?? undo.item });
+              if (!owner || session?.user?.name !== owner) { toast(editingSessionRequired, { kind: "bad" }); return; }
+              const restored = await api.post<Save>(endpoint("undo-delete"), { name: undo });
               if (restored.kind !== "ok") { toast(restored.message, { kind: "bad" }); return; }
               saved(restored.data);
               await refresh();

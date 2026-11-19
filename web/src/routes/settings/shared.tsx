@@ -14,7 +14,7 @@ import "./settings.css";
 
 export const endpoint = (path: string) => "/api/settings/" + path;
 export type Failure = Exclude<ApiResult<never>, { kind: "ok" }>;
-export type Save = { hash: string; revision?: number | null; warnings?: string[]; unchanged?: boolean };
+export type Save = { hash: string; revision?: number | null; warnings?: string[]; unchanged?: boolean; undo_token?: string };
 
 export function saved(result: Save) {
   toast(result.unchanged ? "Already up to date." : result.revision ? `Saved revision #${result.revision}.` : "Saved.");
