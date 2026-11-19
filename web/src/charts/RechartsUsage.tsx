@@ -35,7 +35,7 @@ import { chartMarkers, chartRows, lonePoints, tickLabel, ticks, yTop, zoomTo, ty
 import "./charts.css";
 
 export interface UsageChartsProps {
-  series: SeriesSet;
+  series: Omit<SeriesSet, "range"> & Partial<Pick<SeriesSet, "range">>;
   /** A drag selected this window. */
   onZoom: (from: number, to: number) => void;
   /** A marker was activated: open its timeline row (`id`), at `at`. */
@@ -168,7 +168,7 @@ interface OneProps {
   compare?: boolean;
   sync?: string;
   rows: ChartRow[];
-  series: SeriesSet;
+  series: Omit<SeriesSet, "range"> & Partial<Pick<SeriesSet, "range">>;
   markers: Marker[];
   xt: number[];
   off: string[];

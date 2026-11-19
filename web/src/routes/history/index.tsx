@@ -77,7 +77,7 @@ export default function History() {
 const HistoryCharts = memo(function HistoryCharts({ data }: { data: HistoryView }) {
   return <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
         <Charts
-          series={{ from: data.from, to: data.to, range: "", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
+          series={{ from: data.from, to: data.to, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
           metrics={data.metrics}
           recording={data.recording}
           onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
