@@ -2605,7 +2605,7 @@ fn switches_off_then_on_give_back_the_file() {
 
 #[tokio::test]
 async fn settings_hide_inline_channel_values_and_undo_preserves_them() {
-    let config = "[channels.hook]\ntype = \"webhook\"\nurl = \"https://example.com/SECRET-URL\"\nbody = \"SECRET-BODY\"\nheaders = { Authorization = \"SECRET-HEADER\" }\n";
+    let config = "[channels.hook]\ntype = \"webhook\"\nurl = \"https://example.com/SECRET-URL\"\nbody = '{\"message\":\"SECRET-BODY\"}'\nheaders = { Authorization = \"SECRET-HEADER\" }\n";
     let (dir, st) = state_with(Some(config));
     for path in ["notifications", "config", "env", "meta"] {
         let (status, data) = get(&st, path).await;
