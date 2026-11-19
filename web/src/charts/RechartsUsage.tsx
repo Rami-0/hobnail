@@ -211,7 +211,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   const hasValues = values.length > 0 || rows.some((r) => showCompare && r.mem !== null);
   useEffect(() => {
     const canvas = wrap.current;
-    if (!canvas) return;
+    if (!hasValues || !canvas) return;
     const size = new ResizeObserver(([entry]) => {
       if (entry) startTransition(() => setWidth(Math.floor(entry.contentRect.width)));
     });
