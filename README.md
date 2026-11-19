@@ -63,6 +63,6 @@ recovery notes in [install](docs/install.md) before upgrading.
 | Spec, design and measurements | [GOALS.md](GOALS.md), [docs/DESIGN.md](docs/DESIGN.md), [docs/measurements.md](docs/measurements.md) |
 | Brand | [docs/BRANDING.md](docs/BRANDING.md) |
 | QA audit: what was fixed and what is deferred | [docs/qa/QA.md](docs/qa/QA.md) |
-| Agreed next direction (not started): React client on the same Rust server | [docs/decisions/react-client-and-dashboard.md](docs/decisions/react-client-and-dashboard.md) |
+| Binding React client and dashboard decisions | [docs/decisions/react-client-and-dashboard.md](docs/decisions/react-client-and-dashboard.md) |
 
 Each topic has one page. The README only points to them.
