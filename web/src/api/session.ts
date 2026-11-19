@@ -14,6 +14,15 @@ export type SessionState =
   | { status: "error"; session: Session | null; message: string };
 
 let state: SessionState = { status: "loading", session: null };
+const entryReads = new Map<string, Promise<Response | null>>();
+
+/** Start a protected direct-entry read before the route chunk mounts. */
+export function prefetchEntryRead(path: string): void {
+  const request = fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).catch(() => null);
+  entryReads.set(path, request);
+  window.setTimeout(() => entryReads.delete(path), 10_000);
+}
+
 const listeners = new Set<() => void>();
 
 function set(next: SessionState): void {
@@ -39,7 +48,10 @@ export function refreshSession(): Promise<SessionState> {
   inflight ??= (async () => {
     try {
       const r: ApiResult<Session> = await api.get<Session>("/api/v1/session");
-      if (r.kind === "ok") set({ status: "ready", session: r.data });
+      if (r.kind === "ok") {
+        if (!r.data.user || (state.session?.user && state.session.user.name !== r.data.user.name)) entryReads.clear();
+        set({ status: "ready", session: r.data });
+      }
       else {
         const message = r.kind === "network" ? r.message : `${r.message} (HTTP ${r.status})`;
         set({ status: "error", session: state.session, message });
@@ -66,6 +78,16 @@ export async function refreshEditingSession(): Promise<Session | null> {
 }
 
 export const api = createClient({
+  async fetch(path, init) {
+    const request = init.method === "GET" ? entryReads.get(path) : undefined;
+    if (request) {
+      entryReads.delete(path);
+      const response = await request;
+      init.signal?.throwIfAborted();
+      if (response) return response;
+    }
+    return fetch(path, init);
+  },
   csrf: () => state.session?.csrf ?? null,
   refreshCsrf: async () => (await refreshEditingSession())?.csrf ?? null,
 });

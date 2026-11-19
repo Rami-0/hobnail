@@ -3,6 +3,7 @@
 // first-paint limit), then the session request, then React. The live
 // stream starts with the first component that asks for live data.
 //
+import "./api/entry-reads.ts";
 import "@ui-sdk/core/web.css";
 import "./styles/global.css";
 
