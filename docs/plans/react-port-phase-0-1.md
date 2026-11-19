@@ -212,3 +212,10 @@ a real Hobnail with a signed-in write; whether `npm ci` re-checks ages of
 locked versions (the lock was audited instead: 128 packages, youngest 7.3
 days); screen readers; the max band and markers on a long history (the
 instances lived minutes); old browser checks on the phase 1 build.
+
+## Phase 2–5 results
+
+The [Phase 2–5 report](react-port-phase-2-5.md) records the React-only image,
+locked-decision changes, authenticated full-asset workload and login peaks,
+bundle/browser budget misses, checks and remaining limits. The results above
+remain the historical phase 0–1 evidence.
