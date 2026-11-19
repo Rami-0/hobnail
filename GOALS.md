@@ -106,8 +106,10 @@ Rules for every widget:
 - Each widget has its own timeout and refresh interval, set in the config.
 - **One failing widget never breaks the page.** It shows an error state and the
   rest of the page keeps working.
-- Secrets (API tokens) come from environment variables or files, never from the
-  config file, and are never written to logs.
+- Widget/channel secrets should use env vars or host-managed files. Existing
+  inline channel secrets are redacted from Settings responses, including raw
+  text, revisions and diffs. Integration credentials entered in the browser
+  are write-only in SQLite and origin-bound, never returned or logged.
 - Outgoing HTTP can be restricted to an allow-list of hosts.
 
 ## 5. Notifications and alerts
@@ -137,8 +139,9 @@ look.
 - **Routing.** Each rule names its channels, so noisy things go to one place
   and serious things to another.
 - **Messages are templates** with the container, service, value and time available.
-- **Secrets** (bot tokens, webhook URLs) come from environment variables or files,
-  never from the config, and are never logged.
+- **Secrets** (bot tokens, webhook URLs) normally use env vars or host-managed
+  files. Legacy inline channel values are redacted from Settings responses;
+  an invalid file must be repaired on the host before raw editing is available.
 - **Test from the CLI:** a command that sends a test message to a channel, so a
   new channel can be verified without breaking something.
 - **Survives restarts.** Keep a tiny state file so a restart does not re-send
