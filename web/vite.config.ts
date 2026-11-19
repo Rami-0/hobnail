@@ -91,13 +91,17 @@ export default defineConfig(({ command }) => {
       outDir: "dist",
       target: "esnext",
       cssCodeSplit: false,
+      modulePreload: { polyfill: false },
       assetsDir: "assets",
       emptyOutDir: true,
       sourcemap: false,
       // Split the chart implementation itself; its former single lazy chunk
       // exceeded M2b's 60 KB gzip cap. React and SDK imports keep their normal
       // interaction boundaries instead of joining a global vendor bundle.
-      rolldownOptions: { output: { strictExecutionOrder: true, codeSplitting: { groups: [
+      rolldownOptions: { output: {
+        strictExecutionOrder: true,
+        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
+        codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
         { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
         { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
