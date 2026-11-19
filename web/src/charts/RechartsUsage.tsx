@@ -14,7 +14,7 @@
 // lines from the axis scale hook inside the SVG, and HTML buttons above the
 // plot, so they are focusable and named), local-time
 // ticks (series.ts `ticks`), lone points as dots, and the legend toggles
-// (buttons, remembered in localStorage under the old UI's key).
+// (buttons, remembered in localStorage ).
 import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ComposedChart,
@@ -71,7 +71,7 @@ function metricLabel(key: string): [string, Unit] {
   return [key, "scalar"];
 }
 
-/** The old UI's key: layers switched off on every chart ("avg", "max", "cmp"). */
+/** Layers switched off on every chart ("avg", "max", "cmp"). */
 const OFF_KEY = "hb.chartOff";
 const LAYERS = new Set(["avg", "max", "cmp"]);
 
@@ -137,7 +137,7 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
       return n;
     });
   }, []);
-  // Another tab (or the old UI) changed the layers.
+  // Another tab changed the layers.
   useEffect(() => {
     const on = (e: StorageEvent) => {
       if (e.key === OFF_KEY) setOff(loadOff());

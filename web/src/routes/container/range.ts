@@ -1,7 +1,4 @@
-// The container page's time window and its links, pure (range.test.ts):
-// `?range=` (a preset) or `?from=&to=` (a zoom), the API query for it, the
-// tab links into the old UI that keep the range, and the "history starts N
-// ago" note (src/ui/pages/container.rs `range_picker`, `history_note`).
+// Container detail time windows and range-preserving tab links.
 export const RANGES = ["1h", "6h", "24h", "7d", "30d"] as const;
 export type RangeName = (typeof RANGES)[number];
 
@@ -47,7 +44,6 @@ export function withParams(search: string, set: Record<string, string | null>): 
 
 /** A preset link: the range replaces any zoom. */
 export function rangeSearch(search: string, r: RangeName): string {
-  // Always explicit, as the old range picker: every link names its range.
   return withParams(search, { range: r, from: null, to: null });
 }
 

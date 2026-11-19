@@ -5,11 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#1D1210" />
-    <!-- UI SDK's documented CSP switch: with this tag it styles through
-         constructed style sheets instead of inserting <style> elements, which
-         `style-src 'self'` would block (docs/plans/react-port.md 4.3). UI SDK
-         is not installed yet (release-age rule); the tag stays so installing
-         it cannot break the CSP. -->
+    <!-- UI SDK uses constructed style sheets under the document CSP. -->
     <meta property="csp-nonce" />
     <title>Hobnail</title>
     <link rel="icon" href="/icon.svg" />
@@ -26,20 +22,11 @@
     <noscript>
       <div class="nojs">
         <h1>Hobnail needs JavaScript here</h1>
-        <p>
-          Hobnail is a self-hosted dashboard for the containers and the host it
-          runs on. This page is its new browser client, which runs in your browser
-          and needs JavaScript; it is blocked or turned off.
-        </p>
-        <p>Without JavaScript these still answer:</p>
+        <p>Enable JavaScript to use the dashboard.</p>
         <ul>
-          <li><a href="/">The current interface</a>, until this client replaces it</li>
-          <li><a href="/healthz">/healthz</a>: the health check</li>
-          <li>
-            The JSON API: <a href="/api/v1/session">/api/v1/session</a> and
-            <a href="/api/state">/api/state</a>
-          </li>
-          <li><code>/api/logs/download</code>: log downloads as plain text</li>
+          <li><a href="/healthz">/healthz</a> checks server health.</li>
+          <li>The JSON API is available under <code>/api/v1/</code>.</li>
+          <li>With a session cookie, <code>/api/logs/download?c=NAME</code> downloads plain-text logs.</li>
         </ul>
       </div>
     </noscript>

@@ -1,12 +1,11 @@
-// The sidebar (src/ui/shell.rs layout, tree_inner; static/app.js tree):
+// Sidebar navigation:
 // the pages, the stack tree, and the foot (live indicator, shortcuts,
 // version).
 //
 // Stack tree: every stack with its running/total count, a problem dot, its
 // 24 h strip and (compose projects only) its merged logs; under it each
 // container with its status dot and logs. A stack's name opens it in the
-// Containers table; the chevron folds it, remembered per browser (rh-tree,
-// as the old UI); the stack of the open container stays open. The filter
+// Containers table; the chevron folds it, remembered per browser (rh-tree); the stack of the open container stays open. The filter
 // text is kept while moving between pages until cleared (rh-tree-q); Enter
 // opens the first match, Down moves into the list.
 import { useAlertCount } from "./useAlertCount.ts";

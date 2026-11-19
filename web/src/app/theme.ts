@@ -1,7 +1,4 @@
-// Themes: the same five as the server-rendered UI, in the same click order
-// (static/app.js, owner decision Y9), stored under the same localStorage key
-// with the same raw string values, so both UIs show the theme last picked in
-// either of them.
+// Theme selection and persistence.
 //
 // First paint. index.html carries no inline script (CSP `script-src 'self'`),
 // so nothing can read localStorage before the browser first paints: with no
@@ -19,10 +16,10 @@
 export const THEMES = ["auto", "dark", "light", "ember", "contrast"] as const;
 export type Theme = (typeof THEMES)[number];
 
-/** The localStorage key static/app.js and src/ui/shell.rs (BOOT_JS) use. */
+/** The localStorage key for the selected theme. */
 export const THEME_KEY = "rh-theme";
 
-/** Words for the theme button's label (static/app.js THEME_NAME). */
+/** Words for the theme button's label. */
 export const THEME_NAME: Record<Theme, string> = {
   auto: "auto (follows the system)",
   dark: "dark",
@@ -31,7 +28,7 @@ export const THEME_NAME: Record<Theme, string> = {
   contrast: "high contrast",
 };
 
-/** Words for the announcement after a change (static/app.js THEME_LABEL). */
+/** Words for the announcement after a change. */
 export const THEME_LABEL: Record<Theme, string> = {
   auto: "Auto (follows the system)",
   dark: "Dark",
@@ -90,7 +87,7 @@ function browserStorage(): ThemeStorage | null {
 /**
  * Put `t` on `<html data-theme>` and point the browser chrome colour
  * (`<meta name="theme-color">`, phone status bar, installed-app title bar)
- * at the theme's page background, as static/app.js does.
+ * at the theme's page background.
  */
 const themeListeners = new Set<() => void>();
 

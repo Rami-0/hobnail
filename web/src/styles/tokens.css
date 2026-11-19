@@ -1,17 +1,8 @@
-/* Design tokens and themes, ported as they are from static/app.css
-   (DESIGN.md §11.2 colour, §11.3 type, space, shape, elevation, motion).
-   Keep the two files in step until the old UI is removed (plan Phase 6):
-   the contrast test `theme_contrast` in src/ui/shell.rs checks app.css.
-
-   Themes are variable sets on <html data-theme>: dark (default), light,
-   ember, contrast (high contrast); "auto" and no attribute follow the OS
-   between dark and light. The bare [data-theme=x] selectors let a preview
-   show another theme inside a page. A user's /custom.css (linked after this
-   file in index.html) can override any token.
-
-   The theme is set before first render by src/app/theme.ts from the same
-   localStorage key the old UI uses ("rh-theme"); before that the
-   `:root:not([data-theme])` rules follow the OS. */
+/* Design tokens and themes (DESIGN.md §11.2–11.3).
+   Themes are variable sets on <html data-theme>. With no attribute or
+   the auto theme, CSS follows the OS. Settings previews can use the same
+   theme selectors on a nested element. The custom stylesheet loads after
+   the client styles and can override these tokens. */
 :root{
 --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;

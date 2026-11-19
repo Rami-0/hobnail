@@ -15,7 +15,7 @@ the JSON API. Same origin, no Node in production.
 |---|---|
 | `index.html` | the document; no inline script or style |
 | `src/main.tsx` | entry: styles, stored theme and rail, session, React root |
-| `src/app/` | shell (`Shell.tsx`, `Sidebar.tsx`, vitals, account, shortcuts sheet), router (`paths.ts` pure, `router.ts` History API: `useRoute()` with `path`, `params`, `search`, `setSearch`), theme, keyboard map (`keys.ts`), remembered shell state (`prefs.ts`, the old UI's storage keys) |
+| `src/app/` | shell (`Shell.tsx`, `Sidebar.tsx`, vitals, account, shortcuts sheet), router (`paths.ts` pure, `router.ts` History API: `useRoute()` with `path`, `params`, `search`, `setSearch`), theme, keyboard map (`keys.ts`), remembered shell state (`prefs.ts`) |
 | `src/live/` | the live layer: one `EventSource` per tab (`stream.ts`, pure), stores and frame scheduler (`store.ts`), reducers (`reducer.ts`), the app's wiring (`runtime.ts`) and hooks (`hooks.ts`; import from `live/index.ts`) |
 | `src/routes/` | one component per page; `containers/` and `container/` are lazy chunks (default exports) |
 | `src/api/client.ts` | the only fetch wrapper: typed `ApiResult`, CSRF, retry |
@@ -42,10 +42,9 @@ the JSON API. Same origin, no Node in production.
   tokens. Keep `<meta property="csp-nonce" />` in `index.html` (UI SDK's
   switch to constructed style sheets).
 - **Styles.** Hand-written CSS on the tokens in `src/styles/tokens.css`
-  (ported from `../static/app.css`; keep both in step until the old UI goes).
-  No Tailwind. `global.css` starts with `@layer ui-sdk;`. Themes are
+  and no Tailwind. `global.css` starts with `@layer ui-sdk;`. Themes are
   `<html data-theme>` (`auto` | `dark` | `light` | `ember` | `contrast`),
-  stored in `localStorage["rh-theme"]`, the key the old UI uses.
+  stored in `localStorage["rh-theme"]`.
 - **Imports.** Relative imports carry the explicit `.ts`/`.tsx` extension
   (Node's test runner strips types but does not resolve extensionless
   paths). Type-only imports use `import type` (`verbatimModuleSyntax`).
@@ -78,13 +77,6 @@ the JSON API. Same origin, no Node in production.
   `useVitalsRings`, `useStrips`, `useLiveStatus`, `useLiveInfo`,
   `useNewBuild`, `useNow` (server-corrected seconds, every 30 s),
   `onConfigChange(cb)`.
-
-## Shell state kept with the old UI
-
-Same keys and formats as `static/app.js`, so both UIs agree: `rh-theme`
-(raw), `rh-side` (`rail`/`open`, raw), `rh-tree` (JSON `{stack: true}` for
-folded stacks), `rh-tree-q` (sessionStorage, the sidebar filter), and
-`rh-set-tab` is read for the Settings link.
 
 ## Commands (from the repository root; Node runs in a container)
 

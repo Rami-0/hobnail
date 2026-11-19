@@ -1,11 +1,4 @@
-// What the shell remembers, under the same keys and value formats as the
-// old UI (static/app.js, src/ui/shell.rs BOOT_JS / SHELL_JS), so both UIs
-// agree while they live side by side:
-//   localStorage   rh-side      "rail" | "open"   (raw string)
-//   localStorage   rh-tree      {"<stack>": true}  folded stacks (JSON)
-//   sessionStorage rh-tree-q    the sidebar filter text (raw string)
-//   localStorage   rh-set-tab   the Settings tab used last (raw, read only here)
-// Pure functions over a Storage-like object (prefs.test.ts).
+// Browser preferences for the shell and its Settings link.
 
 import { isSettingsTab, type SettingsTab } from "./settings-tabs.ts";
 
@@ -45,7 +38,7 @@ export function writeRail(s: KV | null, rail: boolean): void {
   write(s, SIDE_KEY, rail ? "rail" : "open");
 }
 
-/** Folded stacks: names mapped to true (static/app.js `store.get("rh-tree", {})`). */
+/** Folded stacks: names mapped to true. */
 export function readFolded(s: KV | null): Record<string, boolean> {
   const v = read(s, TREE_KEY);
   if (!v) return {};

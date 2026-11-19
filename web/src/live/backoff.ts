@@ -1,4 +1,4 @@
-// Reconnect waits for the live stream (static/app.js connect): a stream the
+// Reconnect waits for the live stream: a stream the
 // browser gave up on (a proxy's 502 while Hobnail restarts, a refused
 // request) is opened again after 5 s, then twice as long each time up to a
 // minute; one that opens resets the wait.
@@ -15,7 +15,7 @@ export function nextRetryMs(ms: number): number {
 /** Time a tab may stay hidden before its stream is closed (plan 4.2). */
 export const HIDDEN_CLOSE_MS = 10000;
 
-/** Hidden longer than this: everything is fetched again on return (the old UI reloaded the page). */
+/** Hidden longer than this: everything is fetched again on return. */
 export const STALE_AFTER_MS = 60000;
 
 /** The "live updates stopped" pill waits this long, so quick reconnects show nothing (ROB-13). */

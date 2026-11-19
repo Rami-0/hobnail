@@ -1,16 +1,13 @@
-// The application shell (src/ui/shell.rs layout; static/app.js sidebar,
-// keyboard map, live pill, tab badge): skip link, sidebar, top bar (title,
-// vitals, theme, account), the page-wide banners, the phone bottom bar, the
-// shortcuts sheet and the toasts.
+// Application shell with navigation, status, account controls and toasts.
 //
-// Sidebar by width, as the old UI: over 1100 px it is in the page and its
+// Sidebar by width: over 1100 px it is in the page and its
 // toggle collapses it to a rail (remembered, rh-side); from 700 to 1100 px
 // it is a rail the toggle opens over the page; under 700 px it is a drawer
 // that only the bottom bar's "More" opens. Open over the page, everything
 // behind is inert, Esc and Back close it (Forward opens it again), focus
 // goes into it and back to the opener; a closed drawer is out of the tab
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
-// CSS, as before.
+// CSS.
 import { BoxIcon, BellIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
@@ -64,7 +61,7 @@ function useMedia(q: string): boolean {
   return on;
 }
 
-/** Before the first render: the remembered rail (src/ui/shell.rs BOOT_JS). */
+/** Before the first render: the remembered rail. */
 export function applyStoredRail(): void {
   if (readRail(local())) document.documentElement.dataset.side = "rail";
 }
@@ -101,7 +98,7 @@ function moveKeyRow(dir: 1 | -1): void {
   r.scrollIntoView({ block: "nearest" });
 }
 
-/** The old UI's logs page of the focused row's or the open container. */
+/** The logs page for the focused row or open container. */
 function logsTarget(current: string | null): string | null {
   const a = document.activeElement;
   const row = document.querySelector<HTMLElement>(".kfocus[data-name]") ?? (a instanceof Element ? a.closest<HTMLElement>("[data-name]") : null);
@@ -230,7 +227,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   }, [wide, setOpen]);
 
   // Leaving through a link in the open drawer replaces its history entry,
-  // so Back from the next page comes straight back here (static/app.js).
+  // so Back from the next page comes straight back here.
   useEffect(() => {
     if (!full) return;
     const side = sideRef.current;

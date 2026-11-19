@@ -113,14 +113,14 @@ export function problemCount(view: ContainersView | null): number {
   return n;
 }
 
-/** The tab title with the problem count first, as the old UI: "(2) Containers · Hobnail". */
+/** The tab title with the problem count first: "(2) Containers · Hobnail". */
 export function badgedTitle(base: string, problems: number): string {
   return problems > 0 ? `(${problems}) ${base}` : base;
 }
 
 // ---- vitals rings ----
 
-/** Points kept per sparkline (static/app.js MAXP). */
+/** Points kept per sparkline. */
 export const RING_MAX = 40;
 
 export interface Ring {

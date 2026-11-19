@@ -19,7 +19,7 @@ function fake(init: Record<string, string> = {}): ThemeStorage & { m: Map<string
   return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
 }
 
-test("storage: same key and raw values as static/app.js", () => {
+test("storage: the theme key stores raw string values", () => {
   assert.equal(THEME_KEY, "rh-theme");
   const s = fake();
   writeTheme(s, "ember");

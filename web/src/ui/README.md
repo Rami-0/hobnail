@@ -35,7 +35,8 @@ once; the global layer declaration and CSP meta tag remain in place.
 
 No SDK component has been kept on a platform fallback due to a release defect.
 No separate tooltip or popover wrapper is currently used by the pages.
-All visual styling uses Hobnail tokens in `src/styles/ui.css`.
+The wrappers use the tokens in `src/styles/tokens.css` and the shared
+component styles in `src/styles/ui.css`.
 
 Behaviour notes:
 

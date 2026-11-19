@@ -70,7 +70,7 @@ function kv(init: Record<string, string> = {}): KV & { m: Map<string, string> } 
   return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
 }
 
-test("prefs: the old UI's keys and formats", () => {
+test("prefs: storage keys and formats", () => {
   const s = kv();
   writeRail(s, true);
   assert.equal(s.m.get("rh-side"), "rail");

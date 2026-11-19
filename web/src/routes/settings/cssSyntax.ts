@@ -1,4 +1,4 @@
-// Advisory syntax diagnostics shared with the classic editor semantics.
+// Advisory syntax diagnostics for the appearance editor.
 export function cssSyntax(t: string): string {
     const open: number[] = []; let line = 1, q = "", qAt = 0, cAt = 0;
     for (let i = 0; i < t.length; i++) {

@@ -5,7 +5,7 @@
 //
 // - Stream: one EventSource per tab; closed after 10 s hidden and on
 //   pagehide (back/forward cache), opened again on return; after more than
-//   a minute away everything is fetched again (the old UI reloaded).
+//   a minute away everything is fetched again.
 // - Messages are applied in animation frames (store.ts), at most one render
 //   per frame, held while the user touches or scrolls.
 // - `containers` replaces the containers view (and seeds the stats hub),

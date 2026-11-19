@@ -61,8 +61,7 @@ function subscribe(fn: () => void): () => void {
 }
 
 /**
- * Go to a document path (`/app/login?next=…`). Same-origin only; a path
- * outside /app is a full page load (the old UI lives there).
+ * Use history navigation inside the app. Other targets load as documents.
  */
 export function navigate(to: string, opts: { replace?: boolean; keepScroll?: boolean } = {}): void {
   const u = new URL(to, window.location.href);

@@ -1,12 +1,4 @@
-// /app/containers/<name>: one container's Overview tab (src/ui/pages/
-// container.rs `head`, `why_note`, `overview_tab`, `ports_table`,
-// `rules_panel`, `labels_panel`, `range_picker`, `history_note`).
-//
-// The page reads GET /api/v1/containers/<name>?range= (or ?from=&to=, a
-// zoom) once per window; the header tiles follow the live list
-// (useContainers). The other tabs are the old UI's pages (full loads) and
-// keep the range. The charts are a lazy chunk (Recharts). `?edit=override`
-// is the Edit dialog: the URL is the dialog.
+// Container detail routes share the time window and subscribe to live stats.
 import {
   ActivityIcon,
   BoxIcon,

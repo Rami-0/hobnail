@@ -1,5 +1,4 @@
 // /app/containers: the dense, filterable, sortable table of every container
-// (src/ui/pages/containers.rs + the table parts of static/app.js).
 //
 // The URL holds the view (q, state, stack, sort, dir, group; replaced, not
 // pushed); sort, direction and grouping are remembered per browser. Live
@@ -73,7 +72,7 @@ import {
 import "./containers.css";
 
 const VIEW_KEY = "rh-app-ctr-view";
-/** Folded stacks; the old UI's key, so both agree. */
+/** Folded stacks in the container list. */
 const FOLD_KEY = "rh-collapsed";
 
 function load<T>(k: string, d: T): T {
