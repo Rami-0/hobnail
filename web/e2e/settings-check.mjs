@@ -214,7 +214,8 @@ try {
         ok(await call("/api/settings/general", "POST", { base_hash: saved.hash, values: { title: before.page?.title ?? null, greeting: before.page?.greeting ?? null } }, owner), "restore page defaults");
 
         await wait(`document.querySelector('input[name="greeting"]').value === ${q(before.page?.greeting ?? "")}`, "restore refreshes the General form before testing retry");
-        await fill('input[name="greeting"]', "Retry preserved input");
+        const retryGreeting = `Retry preserved input ${label}`;
+        await fill('input[name="greeting"]', retryGreeting);
         await tab.send("Network.clearBrowserCookies");
         const allowExpired = rec.allow(({ method, url, status }) => new URL(url).pathname === "/api/settings/general" && method === "POST" && status === 401 ? "intentional expired session" : false);
         await button(".settings-form", "Save");
@@ -226,7 +227,7 @@ try {
         await wait(`!document.querySelector('.settings-form a[target="_blank"][href^="/app/login"]')`, "same-account retry clears sign-in prompt");
         allowExpired();
         const retried = ok(await call("/api/settings/general", "GET", undefined, owner), "read retried settings");
-        assert.equal(retried.page.greeting, "Retry preserved input");
+        assert.equal(retried.page.greeting, retryGreeting);
 
         await go("/app/settings/containers", present('[data-testid="settings-containers"]'));
         await selectContainer('svc001');
