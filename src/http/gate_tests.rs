@@ -1428,7 +1428,10 @@ async fn api_v1_stream_topics_and_head() {
 
 #[tokio::test]
 async fn legacy_reads_require_a_session_and_public_assets_do_not() {
-    let addr = start(state()).await;
+    let st =
+        crate::testutil::state_with(crate::testutil::sample(), "[logs]\nrequire_login = false\n");
+    assert!(st.config.snapshot().error.is_none());
+    let addr = start(st).await;
     for path in [
         "/api/history/system?metric=cpu",
         "/api/history/container/web?metric=cpu",
@@ -1440,9 +1443,16 @@ async fn legacy_reads_require_a_session_and_public_assets_do_not() {
         "/custom.css",
         "/icons/di/nginx.svg",
         "/icons/web.svg",
-    ] {
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain(
+        SETTINGS_READS
+            .iter()
+            .map(|suffix| format!("/api/settings/{suffix}")),
+    ) {
         for method in ["GET", "HEAD", "OPTIONS"] {
-            let r = req_bounded(addr, method, path, &[]).await;
+            let r = req_bounded(addr, method, &path, &[]).await;
             assert_eq!(r.status, 401, "{method} {path}");
             assert_eq!(
                 r.body,
@@ -1470,7 +1480,7 @@ async fn legacy_reads_require_a_session_and_public_assets_do_not() {
         "/apple-touch-icon.png",
     ] {
         for method in ["GET", "HEAD", "OPTIONS"] {
-            let r = req_bounded(addr, method, path, &[]).await;
+            let r = req_bounded(addr, method, &path, &[]).await;
             if method == "OPTIONS" {
                 assert_eq!(r.status, 401, "{method} {path}");
             } else {
