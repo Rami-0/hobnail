@@ -34,7 +34,7 @@ const PROXIED = [
 
 // Keep the pinned SDK stylesheet import and its global tokens. Rules scoped
 // exclusively to unused primitives can be omitted from the shipped layer.
-const sdkComponents = new Set(["button", "checkbox", "dialog", "field", "input", "label", "menu", "select", "switch", "textarea", "toast"]);
+const sdkComponents = new Set(["button", "checkbox", "dialog", "field", "input", "label", "menu", "select", "switch", "textarea", "toast", "tooltip"]);
 const unusedSdkParts = new Set([
   "dialog-close", "dialog-trigger", "field-group", "field-legend", "field-set", "menu-checkbox-item",
   "menu-radio-item", "menu-item-indicator", "menu-group-label", "menu-separator", "menu-shortcut",
