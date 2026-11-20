@@ -139,6 +139,8 @@ function Inspect({ root, admin }: { root: string; admin: boolean }) {
   </section>;
 }
 
+const numericColumn = (title: string | undefined) => /^(p?id|ppid|uid|%?(cpu|mem)%?|rss|vsz|threads|nlwp)$/i.test(title ?? "") ? "num" : undefined;
+
 function Processes({ root }: { root: string }) {
   const { search, setSearch } = useRoute();
   const sort = search.get("sort") ?? "";
@@ -149,10 +151,10 @@ function Processes({ root }: { root: string }) {
     {data && error && <p role="alert">{error}</p>}
     {!data ? <p role={error ? "alert" : "status"}>{error || "Loading processes…"}</p> :
       <div className="detail-table"><table className="tbl">
-        <thead><tr>{data.titles.map((title, i) => <th key={title} scope="col" aria-sort={String(i) === sort ? (dir === "asc" ? "ascending" : "descending") : undefined}>
+        <thead><tr>{data.titles.map((title, i) => <th key={title} className={numericColumn(title)} scope="col" aria-sort={String(i) === sort ? (dir === "asc" ? "ascending" : "descending") : undefined}>
           <Button variant="ghost" onClick={() => setSearch({ sort: String(i), dir: String(i) === sort && dir === "desc" ? "asc" : "desc" })}>{title}</Button>
         </th>)}</tr></thead>
-        <tbody>{data.processes.map((row) => <tr key={row.join("\0")}>{row.map((value, i) => <td key={data.titles[i] ?? i}>{value}</td>)}</tr>)}</tbody>
+        <tbody>{data.processes.map((row) => <tr key={row.join("\0")}>{row.map((value, i) => <td key={data.titles[i] ?? i} className={numericColumn(data.titles[i])}>{value}</td>)}</tr>)}</tbody>
       </table></div>}
   </section>;
 }
@@ -167,7 +169,7 @@ function Events({ name, root, scoped }: { name: string; root: string; scoped: bo
   const { data, error } = useRead<ContainerEvents>(`${root}/events?${params}`, undefined, 15000);
   return <section className="panel history-block" data-testid="container-events">
     <h2>Events</h2>
-    <div className="toolbar history-controls">{KINDS.map(([key, label]) => <Button key={key} aria-pressed={kind === key}
+    <div className="history-controls seg" role="group" aria-label="Event type">{KINDS.map(([key, label]) => <Button key={key} aria-pressed={kind === key}
       onClick={() => setSearch({ kind: key ?? "all", before: null })}>{label}</Button>)}</div>
     {error && <p role="alert">{error}</p>}
     {data && !data.events.length && <p>No matching events.</p>}

@@ -154,7 +154,6 @@ main>.banner{max-width:var(--page-max);margin:0 auto 16px}
 .page{max-width:var(--page-max);margin:0 auto;display:grid;gap:16px;container-type:inline-size}
 .page.narrow{max-width:760px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s-4);min-width:0}
-.panel.primary{background:var(--raised);border-color:var(--border);border-radius:12px;box-shadow:var(--shadow-1)}
 @media (max-width:699px){
  .top{gap:var(--s-1);padding-inline:var(--page-pad) var(--s-2)}
  .vitals{display:none}

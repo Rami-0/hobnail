@@ -20,6 +20,10 @@
 .badge-destructive,.pill.bad{background:var(--danger-bg);color:var(--danger)}
 .badge-info{background:var(--info-bg);color:var(--info)}
 
+/* Container identity uses the same avatar frame in detail and logs. */
+.page-heading>.icon{width:36px;height:36px;flex:none;object-fit:contain;border-radius:var(--r)}
+.page-heading>.avatar{display:grid;place-items:center;background:var(--muted);color:var(--foreground);font-weight:600}
+
 /* ---- buttons ---- */
 .btn{--button-height:var(--ctl-h);display:inline-flex;align-items:center;justify-content:center;gap:var(--s-2);height:var(--button-height);min-width:var(--button-height);padding:0 var(--s-3);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card);color:var(--foreground);font:500 var(--fs-sm)/1 var(--font);white-space:nowrap;cursor:pointer;text-decoration:none;user-select:none;transition:background-color var(--dur-1),border-color var(--dur-1)}
 .btn:hover{background:var(--accent);text-decoration:none}
@@ -101,6 +105,7 @@ textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:
 .note .acts{display:flex;flex-wrap:wrap;gap:var(--s-2);margin-top:var(--s-2)}
 .note.bad{border-color:color-mix(in srgb,var(--bad) 55%,var(--line));background:var(--danger-bg)}.note.bad>svg{color:var(--bad-fg)}
 .note.warn{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));background:var(--warning-bg)}.note.warn>svg{color:var(--warn-fg)}
+.note.info{background:var(--info-bg)}
 .note.ok>svg{color:var(--ok-fg)}
 
 /* ---- banner: page-level message ---- */
@@ -110,7 +115,7 @@ textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:
 .banner strong{color:var(--text)}
 .banner.warn{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:var(--warning-bg)}.banner.warn>svg{color:var(--warn-fg)}
 .banner.bad{border-color:color-mix(in srgb,var(--bad) 50%,var(--line));background:var(--danger-bg)}.banner.bad>svg{color:var(--bad-fg)}
-.banner.info>svg{color:var(--accent-fg)}.banner.ok>svg{color:var(--ok-fg)}
+.banner.ok>svg{color:var(--ok-fg)}
 .banner-act{margin-left:var(--s-2)}
 .banner-act .btn{vertical-align:middle}
 .dk-raw summary{cursor:pointer;width:fit-content}
@@ -159,7 +164,7 @@ pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background
  transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out)}
 @starting-style{.toast{opacity:0;transform:translateY(10px)}}
 .toast>svg{width:16px;height:16px;flex:none;color:var(--ok-fg)}
-.toast.info>svg{color:var(--accent-fg)}.toast.warn>svg{color:var(--warn-fg)}.toast.bad>svg{color:var(--bad-fg)}
+.toast.info>svg,.note.info>svg,.banner.info>svg{color:var(--info)}.toast.warn>svg{color:var(--warn-fg)}.toast.bad>svg{color:var(--bad-fg)}
 .toast.bad{background:var(--danger-bg)}
 .toast>span{flex:1;min-width:0;padding:4px 0}
 @media (max-width:699px){.toasts{inset:auto 12px calc(68px + env(safe-area-inset-bottom)) 12px;width:auto;justify-items:stretch}.toast{max-width:none}}

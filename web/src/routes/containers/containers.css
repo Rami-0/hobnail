@@ -7,7 +7,7 @@
 :is(.ct,.cd) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
 :is(.ct,.cd) .mono.img{color:var(--text-2)}
 .port{display:inline-block;height:max(24px,var(--hit));min-width:var(--hit);text-align:center;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/calc(max(24px,var(--hit)) - 2px) var(--mono);color:var(--accent-fg);white-space:nowrap}
-.port:hover{border-color:var(--accent);text-decoration:none}
+.port:hover{border-color:var(--input);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
 .port.local small,.port.plain small{font-size:calc(10rem/14);font-family:var(--font)}
 .port.plain{color:var(--text-2)}
@@ -54,7 +54,7 @@
 .c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
 .c-name .nm-t{white-space:nowrap}
 .c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
-.c-name .pill{margin-left:8px}
+.c-name .badge{margin-left:8px}
 .c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-stack a{color:var(--text-2)}
 .ctbl.grouped .c-stack{display:none}

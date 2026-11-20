@@ -202,30 +202,19 @@ export default function ContainerPage() {
       <PageHeader className="ctr-head" testId="ctr-head"
         icon={<ServiceIcon name={row.icon} label={row.title} />}
         title={<><StatusDot dot={row.dot} /> <span className="ctr-t">{row.title}</span></>}
-        description={<p className="mono muted">
-            {row.title !== row.name && <>{row.name} · </>}
-            {row.image}
-            {row.stack !== row.name && (
-              <>
-                {" · stack "}
-                <a href={`/app/containers?stack=${encodeURIComponent(row.stack)}`}>{row.stack}</a>
-              </>
-            )}
-            {" · id "}
-            <span title={detail.id}>{detail.id.slice(0, 12)}</span>
-          </p>}
-        actions={open || canEdit ? <>{open && (
-            <a className="btn btn-link" href={open} target="_blank" rel="noopener noreferrer" data-testid="open">
-              <ExternalLinkIcon aria-hidden="true" />
-              Open
-            </a>
-          )}
-          {canEdit && (
-            <a className="btn btn-ghost" href={editHref} data-testid="edit" title="Display name, group, icon, link">
-              <PencilIcon aria-hidden="true" />
-              Edit
-            </a>
-          )}</> : undefined}
+        description={<p className="mono">
+          {row.title !== row.name && <>{row.name} · </>}{row.image}
+          {row.stack !== row.name && <> · stack <a href={`/app/containers?stack=${encodeURIComponent(row.stack)}`}>{row.stack}</a></>}
+          {" · id "}<span title={detail.id}>{detail.id.slice(0, 12)}</span>
+        </p>}
+        actions={open || canEdit ? <>
+          {open && <a className="btn btn-link" href={open} target="_blank" rel="noopener noreferrer" data-testid="open">
+            <ExternalLinkIcon aria-hidden="true" /> Open
+          </a>}
+          {canEdit && <a className="btn btn-ghost" href={editHref} data-testid="edit" title="Display name, group, icon, link">
+            <PencilIcon aria-hidden="true" /> Edit
+          </a>}
+        </> : undefined}
         tabs={<TabNav layout="container" label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />} />
       {dockerError && (
         <output className="cd-why warn">
@@ -278,13 +267,8 @@ export default function ContainerPage() {
       {charts && <section className="sec" aria-labelledby="cd-usage">
         <div className="panel-h">
           <h2 id="cd-usage">{tab === "metrics" ? "Metrics" : "Usage"}</h2>
-          <nav className="seg" aria-label="Range" data-testid="range">
-            {RANGES.map((r) => (
-              <a key={r} href={loc.pathname + rangeSearch(loc.query, r)} aria-current={!zoomed && r === range ? "true" : undefined}>
-                {r}
-              </a>
-            ))}
-          </nav>
+          <TabNav variant="segmented" label="Range" current={zoomed ? "" : range} testId="range"
+            items={RANGES.map((r) => ({ id: r, label: r, href: loc.pathname + rangeSearch(loc.query, r) }))} />
           {zoomed && (
             <a className="btn sm ghost" href={loc.pathname + resetSearch(loc.query, range)} data-testid="reset-zoom">
               Reset zoom
