@@ -34,12 +34,20 @@ const PROXIED = [
 
 // Keep the pinned SDK stylesheet import and its global tokens. Rules scoped
 // exclusively to unused primitives can be omitted from the shipped layer.
-const sdkComponents = new Set(["button", "checkbox", "dialog", "field", "input", "label", "menu", "select", "switch", "textarea", "toast", "tooltip"]);
-const unusedSdkParts = new Set([
-  "dialog-close", "dialog-trigger", "field-group", "field-legend", "field-set", "menu-checkbox-item",
-  "menu-radio-item", "menu-item-indicator", "menu-group-label", "menu-shortcut",
+// Controls with complete Hobnail styles do not need the optional SDK defaults.
+// Keep popup structure and SDK-managed visibility for the parts in use.
+const sdkParts = new Set([
+  "checkbox-indicator", "dialog-backdrop", "dialog-content", "dialog-description", "dialog-title",
+  "field", "field-description", "field-error", "field-label", "label",
+  "menu-content", "menu-item", "menu-separator", "select-content", "select-item", "select-item-indicator",
+  "toast", "toast-action", "toast-close", "toast-region", "toast-title", "tooltip-content",
 ]);
-const usedSdkPart = (part: string) => sdkComponents.has(part.split("-")[0] ?? "") && !unusedSdkParts.has(part);
+const sdkSlots = (selector: string) =>
+  [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)].map((slot) => slot[1] ?? slot[2] ?? "");
+const keepSdkSelector = (selector: string) => {
+  const slots = sdkSlots(selector);
+  return slots.length === 0 || slots.some((slot) => sdkParts.has(slot));
+};
 
 type PostcssPlugin = NonNullable<Exclude<CSSOptions["postcss"], string | undefined>["plugins"]>[number];
 
@@ -49,14 +57,12 @@ const sdkStyles: PostcssPlugin = {
     const file = root.source?.input.file ?? "";
     if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
     root.walkRules((rule) => {
-      const selectors = rule.selectors.filter((selector) => {
-        const slots = [...selector.matchAll(/\[data-slot="([a-z-]+)"\]|\bui-([a-z-]+)\b/g)];
-        return slots.length === 0 || slots.some((slot) => usedSdkPart(slot[1] ?? slot[2] ?? ""));
-      }).map((selector) => selector.replace(/:(is|where)\(((?:\s*\[data-slot="[a-z-]+"\]\s*,?)+)\)/g, (group, kind: string, choices: string) => {
-        const live = [...choices.matchAll(/\[data-slot="([a-z-]+)"\]/g)]
-          .filter((slot) => usedSdkPart(slot[1] ?? ""));
-        return live.length ? ":" + kind + "(" + live.map((slot) => slot[0]).join(",") + ")" : group;
-      }));
+      const selectors = rule.selectors.filter(keepSdkSelector).map((selector) =>
+        selector.replace(/:(is|where)\(([^()]*)\)/g, (_, kind: string, choices: string) => {
+          const live = choices.split(",").filter(keepSdkSelector);
+          return live.length ? ":" + kind + "(" + live.join(",") + ")" : ":not(*)";
+        }),
+      );
       if (selectors.length === 0) rule.remove();
       else if (selectors.join(",") !== rule.selectors.join(",")) rule.selectors = selectors;
     });
