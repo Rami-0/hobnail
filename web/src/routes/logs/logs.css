@@ -31,12 +31,12 @@
 .lpick-h .cnt{font:500 var(--fs-micro) var(--mono);color:var(--text-3)}
 .lpick-h .btn{margin-left:auto}
 .lpick-list{list-style:none;margin:0;padding:4px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 8px}
-.lpick-list li{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 8px;border-radius:var(--r-sm);font-size:var(--fs-sm);min-width:0}
+.lpick-list li{display:flex;align-items:center;gap:8px;min-height:var(--ctl-h);padding:0 8px;border-radius:var(--r-sm);font-size:var(--fs-sm);min-width:0}
 .lpick-list li:hover{background:var(--surface-2)}
 .lpick-list input{position:relative;z-index:1;flex:none;margin:0}
-.lpick-list .row-link{flex:1;align-self:stretch;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.lpick-list .log-picker-link{flex:1;align-self:stretch;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
 .lpick-list .sub{margin-inline-start:var(--s-1);font-size:calc(11.5rem/14);color:var(--text-3)}
-.lpick-list .stopped .row-link{color:var(--text-2)}
+.lpick-list .stopped .log-picker-link{color:var(--text-2)}
 .lpick-st{margin-left:auto;font-size:var(--fs-xs)}
 .lpick-none{margin:0}
 .lpick-cb{position:relative;z-index:2;flex:none;display:inline-grid;place-items:center}

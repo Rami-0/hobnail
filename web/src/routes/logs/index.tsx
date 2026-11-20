@@ -105,7 +105,7 @@ function Picker({ data }: { data: LogsPicker }) {
           <Switch className="lpick-cb" checked={selected.includes(c.name)} disabled={selected.length >= 4 && !selected.includes(c.name)}
             label={"Select " + c.title} onChange={(on) => setSearch({ sel: (on ? [...selected, c.name] : selected.filter((n) => n !== c.name)).join(",") }, { replace: true })} />
           <span className={running ? "dot ok" : "dot off"} aria-hidden="true" />
-          <a className="row-link" href={logsHref(c.name)} title={"Logs of " + c.name}>
+          <a className="log-picker-link" href={logsHref(c.name)} title={"Logs of " + c.name}>
             <span className="lpick-nm">{c.title}</span>{c.title !== c.name && <> <span className="sub mono">{c.name}</span></>}
           </a>
           {!running && <span className="muted lpick-st">{c.state}</span>}
