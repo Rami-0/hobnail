@@ -167,9 +167,9 @@ export function Dialog({
               <DialogTitle>{title}</DialogTitle>
               {description && <DialogDescription>{description}</DialogDescription>}
             </div>
-            <button type="button" className="btn icon ghost" aria-label="Close" onClick={() => request("cancel")}>
+            <Button variant="ghost" size="icon" aria-label="Close" onClick={() => request("cancel")}>
               <XIcon aria-hidden="true" />
-            </button>
+            </Button>
           </div>
           <div className="dlg-b">{children}</div>
           {(footer || cancelLabel || asking) && (
@@ -181,7 +181,7 @@ export function Dialog({
                     Keep editing
                   </Button>
                   <Button
-                    className="danger"
+                    variant="destructive"
                     onClick={() => {
                       setAsking(false);
                       live.current.onClose(pending.current);
