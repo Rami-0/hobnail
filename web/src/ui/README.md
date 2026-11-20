@@ -26,6 +26,9 @@ once; the global layer declaration and CSP meta tag remain in place.
 | Field / TextInput | SDK Field, Label, Description, Error and Input |
 | Select | SDK Select, Trigger, Content and Item |
 | Switch | SDK Switch; button semantics and controlled checked value |
+| Checkbox | SDK Checkbox with an explicit check indicator |
+| Tooltip | SDK Tooltip with its trigger and content |
+| Badge / Card / PageHeader / Separator / Skeleton | Shared dashboard presentation |
 | Menu | SDK Menu, Trigger, Content and Item |
 | Toaster | SDK ToastRegion, Toast, Title, Action and Close; keeps the app's dialog queue |
 | TabNav | Platform links: URL navigation uses aria-current, not role=tab |
@@ -34,7 +37,6 @@ once; the global layer declaration and CSP meta tag remain in place.
 | Sparkline / HealthStrip / Meter | Platform SVG and meter markup |
 
 No SDK component has been kept on a platform fallback due to a release defect.
-No separate tooltip or popover wrapper is currently used by the pages.
 The wrappers use the tokens in `src/styles/tokens.css` and the shared
 component styles in `src/styles/ui.css`.
 
@@ -56,3 +58,22 @@ Behaviour notes:
 - **Touch.** 44 px targets and 16 px input text come from the tokens
   (`--ctl-h`, `--ia`, `--hit`, `--fs-input` in tokens.css).
 - Pure logic is in `svg.ts` and `toast.ts`, unit-tested by `*.test.ts`.
+
+## Dashboard hierarchy
+
+- Use one `default` action per view or dialog when there is a clear next step.
+  `secondary` is a quiet filled action and `outline` is a bordered action.
+  Use `ghost` for row and toolbar actions, `link` for navigation, and
+  `destructive` for destructive confirmations or menu actions.
+  Action sizes are 32, 36 and 40 px. Use `icon` for square icon-only actions
+  and give them an accessible label. Provide 44 px targets on touch.
+- Use `TabNav` with `underline` for page sections. Use `segmented` or the
+  shared `seg` track for ranges and view switches. Use Select for longer
+  lists, Switch for binary settings that take effect immediately, and
+  Checkbox or a segmented toggle group for independent selections.
+- Start pages with PageHeader, then summary metrics and content cards or
+  tables. Use muted 13 px labels and tabular 24 px summary values. Explicit
+  numeric table columns use `num` and align to the end.
+- Pair status colors with readable labels. Use Badge variants for state and
+  severity. Put descriptions and validation in Field, labels and actions in
+  CardHeader, and secondary actions before the primary in Dialog footers.
