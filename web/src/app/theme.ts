@@ -109,7 +109,7 @@ export function applyTheme(t: Theme): void {
   root.dataset.theme = t;
   for (const l of themeListeners) l();
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (meta) meta.content = getComputedStyle(root).getPropertyValue("--bg").trim() || "#1D1210";
+  if (meta) meta.content = getComputedStyle(root).backgroundColor;
 }
 
 /** Entry module, before the first render: the stored theme, if any. */
