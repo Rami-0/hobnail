@@ -107,10 +107,10 @@ export default function Overview() {
       actions={<div className="ov-meta"><span className="ov-clock num">{clock}</span><span className="upd">Updated <RelativeTime at={overview.now} /></span></div>} />
     {error && <p role="alert">{error}</p>}
     <section className="panel pulse" aria-label="Status">
-      <section className="hs" aria-label="Container health">
+      <section className="overview-counts" aria-label="Container health">
         {health.map(({ value, label, href, hot }) => (
           <a key={label} href={href} className={["hs-cell", hot && "hot", value === 0 && "zero"].filter(Boolean).join(" ")}>
-            <span className="hs-n">{value}</span><span className="hs-l">{label}</span>
+            <span className="hs-l">{label}</span><strong className="hs-n">{value}</strong>
           </a>
         ))}
         {total > 0 && <div className="hs-bar" role="img" aria-label={running + " of " + total + " running"}>
