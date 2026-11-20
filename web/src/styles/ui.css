@@ -177,6 +177,7 @@ pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background
 .menu-item svg{width:16px;height:16px;flex:none}
 .menu-item:hover,.menu-item:focus-visible{background:var(--surface-2);color:var(--text);text-decoration:none}
 .menu-item:focus-visible{outline-offset:-2px}
+.menu-item kbd{margin-left:auto;color:var(--muted-foreground)}
 .menu-item.danger{color:var(--bad-fg)}
 
 /* Underline navigation and segmented in-page controls. */

@@ -37,7 +37,7 @@ const PROXIED = [
 const sdkComponents = new Set(["button", "checkbox", "dialog", "field", "input", "label", "menu", "select", "switch", "textarea", "toast", "tooltip"]);
 const unusedSdkParts = new Set([
   "dialog-close", "dialog-trigger", "field-group", "field-legend", "field-set", "menu-checkbox-item",
-  "menu-radio-item", "menu-item-indicator", "menu-group-label", "menu-separator", "menu-shortcut",
+  "menu-radio-item", "menu-item-indicator", "menu-group-label", "menu-shortcut",
 ]);
 const usedSdkPart = (part: string) => sdkComponents.has(part.split("-")[0] ?? "") && !unusedSdkParts.has(part);
 

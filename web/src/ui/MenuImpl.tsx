@@ -2,8 +2,8 @@
 // that opens a list of actions under it. Opening focuses the first item;
 // Up/Down/Home/End move; Esc closes and returns focus to the button; Tab, a
 // click outside or choosing an item closes it.
-import { useEffect, useRef } from "react";
-import { Menu as SdkMenu, MenuContent, MenuItem as SdkMenuItem, MenuTrigger } from "@ui-sdk/react/menu";
+import { Fragment, useEffect, useRef } from "react";
+import { Menu as SdkMenu, MenuContent, MenuItem as SdkMenuItem, MenuSeparator, MenuTrigger } from "@ui-sdk/react/menu";
 
 import type { MenuProps } from "./Menu.tsx";
 
@@ -25,10 +25,13 @@ export default function MenuImpl({ label, trigger, items, header, testId, trigge
           {items.map((it, i) => (
             // Items are a fixed list for each menu.
             // eslint-disable-next-line react/no-array-index-key
-            <SdkMenuItem key={i} value={String(i)} className={it.danger ? "menu-item danger" : "menu-item"}
+            <Fragment key={i}>
+              {it.separator && <MenuSeparator className="separator" />}
+              <SdkMenuItem value={String(i)} className={it.danger ? "menu-item danger" : "menu-item"}
               render={<button type="button" aria-label={typeof it.label === "string" ? it.label : undefined} />} data-testid={it.testId} onSelect={() => { it.onSelect(); }}>
-              {it.icon}<span>{it.label}</span>
-            </SdkMenuItem>
+              {it.icon}<span>{it.label}</span>{it.shortcut && <kbd>{it.shortcut}</kbd>}
+              </SdkMenuItem>
+            </Fragment>
           ))}
         </MenuContent>
       </SdkMenu>

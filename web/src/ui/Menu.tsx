@@ -8,6 +8,8 @@ export interface MenuItem {
   icon?: ReactNode;
   testId?: string;
   danger?: boolean;
+  separator?: boolean;
+  shortcut?: string;
 }
 
 export interface MenuProps {
@@ -27,7 +29,7 @@ export interface MenuProps {
 
 export function Menu(props: MenuProps) {
   const [loaded, setLoaded] = useState(false);
-  const trigger = <Button className={props.triggerClassName ?? "icon-btn"} aria-haspopup="menu" aria-expanded={false}
+  const trigger = <Button variant="ghost" className={props.triggerClassName ?? "icon-btn"} aria-haspopup="menu" aria-expanded={false}
     aria-label={props.label} title={props.label} data-testid={props.testId}
     onClick={() => setLoaded(true)} onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); setLoaded(true); } }}>
     {props.trigger}
