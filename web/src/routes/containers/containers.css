@@ -16,7 +16,7 @@
 /* ---- toolbar ---- */
 .ct search.bar{display:flex}
 .ct .seg>[data-state]{padding-inline:var(--s-2);gap:var(--s-1)}
-.ct .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ct .bar{min-width:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .ct .search-in{position:relative;flex:0 1 320px;min-width:min(100%,240px);max-width:320px}
 .ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
 .ct .search-in input{padding-left:32px}

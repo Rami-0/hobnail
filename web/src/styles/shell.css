@@ -151,7 +151,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .account-avatar{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--secondary);color:var(--foreground);font:600 var(--fs-xs)/1 var(--font)}
 main{padding:var(--page-pad) var(--page-pad) 48px;min-width:0;outline:none}
 main>.banner{max-width:var(--page-max);margin:0 auto 16px}
-.page{max-width:var(--page-max);margin:0 auto;display:grid;gap:16px;container-type:inline-size}
+.page{max-width:var(--page-max);margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s-4);container-type:inline-size}
 .page.narrow{max-width:760px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s-4);min-width:0}
 @media (max-width:699px){
