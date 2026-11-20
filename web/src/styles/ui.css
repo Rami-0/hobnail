@@ -11,11 +11,14 @@
 .dot.pulse{position:relative}
 .dot.pulse::after{content:"";position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--warn) 30%,transparent);opacity:0;will-change:opacity;animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:1}}
-.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:var(--r-pill);border:1px solid var(--line);font-size:var(--fs-xs);font-weight:500;color:var(--text-2);white-space:nowrap}
-.pill.ok{color:var(--ok-fg);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
-.pill.warn{color:var(--warn-fg);border-color:color-mix(in srgb,var(--warn) 55%,transparent)}
-.pill.bad{color:var(--bad-fg);border-color:color-mix(in srgb,var(--bad) 55%,transparent)}
-.pill.off{color:var(--text-3)}
+.badge,.pill{display:inline-flex;align-items:center;gap:var(--s-1);min-height:22px;padding:0 var(--s-2);border-radius:var(--r-pill);border:1px solid transparent;font-size:var(--fs-xs);font-weight:500;white-space:nowrap}
+.badge-outline,.pill{border-color:var(--border);color:var(--muted-foreground)}
+.badge-default{background:var(--primary);color:var(--primary-foreground)}
+.badge-secondary{background:var(--secondary);color:var(--foreground)}
+.badge-success,.pill.ok{background:var(--success-bg);color:var(--success)}
+.badge-warning,.pill.warn{background:var(--warning-bg);color:var(--warning)}
+.badge-destructive,.pill.bad{background:var(--danger-bg);color:var(--danger)}
+.badge-info{background:var(--info-bg);color:var(--info)}
 
 /* ---- buttons ---- */
 .btn{--button-height:var(--ctl-h);display:inline-flex;align-items:center;justify-content:center;gap:var(--s-2);height:var(--button-height);min-width:var(--button-height);padding:0 var(--s-3);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--card);color:var(--foreground);font:500 var(--fs-sm)/1 var(--font);white-space:nowrap;cursor:pointer;text-decoration:none;user-select:none;transition:background-color var(--dur-1),border-color var(--dur-1)}
