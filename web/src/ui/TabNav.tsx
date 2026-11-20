@@ -19,6 +19,7 @@ export interface TabNavProps {
   /** The id of the current tab. */
   current: string;
   testId?: string;
+  variant?: "underline" | "segmented";
   layout?: "settings" | "container";
 }
 
@@ -33,7 +34,7 @@ const move = (event: KeyboardEvent<HTMLAnchorElement>) => {
     links[next]?.focus();
   };
 
-export function TabNav({ label, items, current, testId, layout }: TabNavProps) {
+export function TabNav({ label, items, current, testId, layout, variant = "underline" }: TabNavProps) {
   const ref = useRef<HTMLElement>(null);
   const ids = items.map((t) => t.id).join("\n");
   useEffect(() => {
@@ -52,7 +53,7 @@ export function TabNav({ label, items, current, testId, layout }: TabNavProps) {
     </a>
   ));
   return (
-    <nav ref={ref} className={layout === "settings" ? "set-nav" : layout === "container" ? "cd-tabs" : "tabs"} aria-label={label} data-testid={testId}>
+    <nav ref={ref} className={`tab-nav ${variant === "segmented" ? "seg" : "tabs"} ${layout === "settings" ? "set-nav" : layout === "container" ? "cd-tabs" : ""}`} aria-label={label} data-testid={testId}>
       {layout === "settings" ? <ul>{links.map((link) => <li key={link.key}>{link}</li>)}</ul> : links}
     </nav>
   );
