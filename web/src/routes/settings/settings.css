@@ -1,25 +1,16 @@
-.page.set{max-width:1240px;grid-template-columns:max(200px,calc(200rem/14)) minmax(0,1fr);align-items:start;gap:24px}
-.set-nav{position:sticky;top:calc(var(--top-h) + 20px)}
-.set-nav ul{list-style:none;margin:0;padding:0;display:grid;gap:1px}
-.set-nav a{display:flex;align-items:center;gap:10px;height:max(32px,calc(32rem/14));padding:0 10px;border-radius:var(--r-sm);color:var(--text-2);font-size:.9286rem;font-weight:500;white-space:nowrap}
-.set-nav a:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
-.set-nav a[aria-current=page]{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--accent)}
-.set-nav a[aria-current=page] svg{color:var(--accent)}
-.set-nav svg{color:var(--text-3)}
-.set-main{display:grid;gap:16px;min-width:0}
-@media (max-width:900px){
- .page.set{grid-template-columns:minmax(0,1fr);gap:12px}
- .set-nav{position:static;margin:0 -12px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}
- .set-nav::-webkit-scrollbar{display:none}
- .set-nav ul{display:flex;gap:2px;padding:0 12px 8px;width:max-content}
- .set-nav a{height:max(30px,var(--ctl-h-sm));padding:0 10px;font-size:.8929rem}
- .set-nav a[aria-current=page]{box-shadow:inset 0 -2px 0 var(--accent)}
-}
+.page.set{max-width:1240px;grid-template-columns:200px minmax(0,1fr);align-items:start;gap:var(--s-6)}
+.set>.page-header{grid-column:1/-1}
+.set-nav{position:sticky;top:calc(var(--top-h) + var(--s-6));border:0}
+.set-nav ul{list-style:none;margin:0;padding:0;display:grid}
+.set-nav .tab{justify-content:flex-start;width:100%;padding-inline:var(--s-2);height:var(--ctl-h)}
+.set-main{display:grid;gap:var(--s-6);min-width:0}
 .page.set.locked{grid-template-columns:minmax(0,1fr);max-width:860px}
-.set-nav .tab::after{content:none}
-.set-nav svg{width:15px;height:15px;flex:none}
-@media (pointer:coarse),(max-width:699px){.set-nav a{min-height:44px}}
-.settings-section{display:grid;gap:var(--s-4);min-width:0}.settings-section>header p{margin-top:var(--s-2)}.settings-list{display:grid;gap:var(--s-3)}.settings-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--s-3);padding:var(--s-4);background:var(--raised);border:1px solid var(--border);border-radius:var(--r);overflow-wrap:anywhere}.settings-row>div{min-width:0}.settings-actions{display:flex;flex-wrap:wrap;gap:var(--s-2)}.settings-page .board-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);flex-wrap:wrap}
+@media (max-width:900px){
+ .page.set{grid-template-columns:minmax(0,1fr);gap:var(--s-4)}
+ .set-nav{position:static;border-bottom:1px solid var(--border)}
+ .set-nav ul{display:flex;width:max-content}
+}
+.settings-section{display:grid;gap:var(--s-4);min-width:0}.settings-section>header p{margin-top:var(--s-2)}.settings-list{display:grid;gap:var(--s-3)}.settings-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--s-3);padding:var(--s-4);background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);overflow-wrap:anywhere}.settings-row>div{min-width:0}.settings-actions{display:flex;flex-wrap:wrap;gap:var(--s-2)}.settings-page .board-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);flex-wrap:wrap}
 .settings-form{display:grid;gap:var(--s-3);max-width:42rem;min-width:0}
 .settings-role{text-transform:capitalize}
 .settings-code{width:100%;min-width:0;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -27,7 +18,9 @@
 .settings-section pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .settings-wide{max-width:none}
 .settings-path{overflow-wrap:anywhere}
-.settings-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.settings-row:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 @media (max-width:699px){.settings-section .btn,.settings-form .btn{min-height:var(--ctl-h)}}
 .settings-pair{display:grid;grid-template-columns:1fr 1fr auto;gap:var(--s-2);align-items:end}
 @media (max-width:519px){.settings-pair{grid-template-columns:1fr}}
+.settings-section>.sel{justify-self:start}
+.settings-row .settings-actions{gap:var(--s-1)}

@@ -89,7 +89,7 @@ export default function Containers() {
           <Button disabled={busy || !group.trim()} onClick={() => { void bulk({ set: { group: group.trim() } }); }}>Set group</Button>
           <Button disabled={busy} onClick={() => { void bulk({ set: { hide: true } }); }}>Hide</Button>
           <Button disabled={busy} onClick={() => { void bulk({ set: { hide: false } }); }}>Show</Button>
-          <Button disabled={busy} className="danger" onClick={() => { setError(undefined); setConfirm(true); }}>Remove overrides</Button>
+          <Button disabled={busy} variant="ghost" onClick={() => { setError(undefined); setConfirm(true); }}>Remove overrides</Button>
           <Button disabled={busy} onClick={() => setSelection([])}>Clear selection</Button>
         </div>}
         {!confirm && <FailureNote failure={error?.kind === "invalid" ? { ...error, field: undefined } : error} rebase={() => { void load(); }} />}
@@ -97,13 +97,13 @@ export default function Containers() {
           <div><Switch checked={selection.includes(row.name)} label={row.name}
             onChange={(checked) => setSelection((items) => checked ? [...items, row.name] : items.filter((key) => key !== row.name))} />
             <p className="muted">{row.project || row.image} · {row.state}{row.overridden && " · Has overrides"}</p></div>
-          <Button onClick={() => setSearch({ add: null, edit: `override:${row.name}` })}>Edit override</Button>
+          <Button variant="ghost" onClick={() => setSearch({ add: null, edit: `override:${row.name}` })}>Edit override</Button>
         </div>)}</div>
       </section>
     </>}
     {name && <EditDialog open name={name} title={name} onClosed={close} onSaved={() => { void load(); }} />}
     <Dialog open={confirm} title="Remove overrides?" onClose={() => { if (!busy) setConfirm(false); }}
-      footer={<Button className="danger" busy={busy} onClick={() => { void bulk({ remove: true }); }}>Remove overrides</Button>}>
+      footer={<Button variant="destructive" busy={busy} onClick={() => { void bulk({ remove: true }); }}>Remove overrides</Button>}>
       <p>Remove the configuration overrides for {selection.length} selected containers?</p>
       <FailureNote failure={error?.kind === "invalid" ? { ...error, field: undefined } : error} rebase={() => { void load(); }} />
     </Dialog>

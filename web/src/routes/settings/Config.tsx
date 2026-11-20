@@ -78,16 +78,16 @@ export default function Config() {
       <div className="settings-list">{revisions.data?.revisions.slice(0, count).map((revision) => <div key={revision.id} className="settings-row">
         <div><strong>#{revision.id} · {revision.note}</strong><p className="muted">{revision.author} · {new Date(revision.ts * 1000).toLocaleString()}</p></div>
         <div className="settings-actions">
-          <Button disabled={!raw.data || working} onClick={() => { void open("view", revision); }}>View</Button>
-          <Button disabled={!raw.data || working} onClick={() => { void open("diff", revision); }}>Diff</Button>
-          <Button disabled={!raw.data || working} onClick={() => { void open("restore", revision); }}>Restore…</Button>
+          <Button variant="ghost" disabled={!raw.data || working} onClick={() => { void open("view", revision); }}>View</Button>
+          <Button variant="ghost" disabled={!raw.data || working} onClick={() => { void open("diff", revision); }}>Diff</Button>
+          <Button variant="ghost" disabled={!raw.data || working} onClick={() => { void open("restore", revision); }}>Restore…</Button>
         </div>
       </div>)}</div>
       {(revisions.data?.revisions.length ?? 0) > count && <div><Button onClick={() => setCount((value) => value + 20)}>Show more revisions</Button></div>}
     </section>
     <Dialog open={!!view} wide title={view ? `${view.action === "restore" ? "Restore" : view.action === "diff" ? "Diff for" : "View"} revision #${view.revision.id}` : ""}
       onClose={() => { if (!working) setView(undefined); }}
-      footer={view?.action === "restore" && <Button className="danger" busy={working} onClick={async () => {
+      footer={view?.action === "restore" && <Button variant="destructive" busy={working} onClick={async () => {
         if (working) return;
         setWorking(true);
         const result = await api.post<Save>(endpoint(`revision/${view.revision.id}/restore`), { base_hash: view.hash });

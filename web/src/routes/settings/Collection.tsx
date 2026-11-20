@@ -1,3 +1,4 @@
+import { CardHeader } from "../../ui/Card.tsx";
 import { useEffect, useRef, useState, useId, type ReactNode } from "react";
 import { api, editingSessionRequired, getSession, refreshEditingSession } from "../../api/session.ts";
 import { useRoute } from "../../app/router.ts";
@@ -93,9 +94,7 @@ export function Collection(props: Props) {
   const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session) { setFailure(undefined); void refresh(); } else setFailure({ kind: "sign_in", status: 401, message: editingSessionRequired }); }); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
-      <header className="board-heading"><h2>{title}</h2>
-        <Button ref={add} variant="primary" onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>
-      </header>
+      <CardHeader title={title} action={<Button ref={add} variant={kind === "channel" ? "outline" : "default"} onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>} />
       {!removing && feedback}
       {entries.length === 0 && <p className="muted">No entries yet.</p>}
       <div className="settings-list">{entries.map((item, index) => {
@@ -108,12 +107,12 @@ export function Collection(props: Props) {
             {item.enabled !== undefined && <Switch label="Enabled" checked={item.enabled} busy={busy} disabled={item.locked}
               onChange={(enabled) => { void run({ action: "edit", id: item.id, item: props.body?.({ enabled }, item.item) ?? { enabled } }); }} />}
             {reorder && <>
-              <Button aria-label={`Move ${name} up`} disabled={busy || index === 0} onClick={() => move(index, -1)}>↑</Button>
-              <Button aria-label={`Move ${name} down`} disabled={busy || index === entries.length - 1} onClick={() => move(index, 1)}>↓</Button>
+              <Button variant="ghost" size="icon" aria-label={`Move ${name} up`} disabled={busy || index === 0} onClick={() => move(index, -1)}>↑</Button>
+              <Button variant="ghost" size="icon" aria-label={`Move ${name} down`} disabled={busy || index === entries.length - 1} onClick={() => move(index, 1)}>↓</Button>
             </>}
             {extra?.(item)}
-            <Button aria-label={`Edit ${name}`} disabled={item.locked || busy} onClick={() => setSearch({ add: null, edit: `${kind}:${item.id}` })}>Edit</Button>
-            <Button className="danger" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving({ entry: item, hash }); }}>Delete</Button>
+            <Button variant="ghost" aria-label={`Edit ${name}`} disabled={item.locked || busy} onClick={() => setSearch({ add: null, edit: `${kind}:${item.id}` })}>Edit</Button>
+            <Button variant="ghost" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving({ entry: item, hash }); }}>Delete</Button>
           </div>
         </div>;
       })}</div>
@@ -122,7 +121,7 @@ export function Collection(props: Props) {
     {selected && selected.id !== null && !editEntry && <Note kind="warn" action={<Button onClick={close}>Close</Button>}>This entry no longer exists.</Note>}
     <Dialog open={!!removing} title={`Delete ${kind}?`} onClose={() => { if (!busy) setRemoving(undefined); }}
       footer={<><Button onClick={() => setRemoving(undefined)} disabled={busy}>Cancel</Button>
-        <Button className="danger" busy={busy} onClick={() => { if (removing) void run({ action: "delete", id: removing.entry.id }); }}>Delete</Button></>}>
+        <Button variant="destructive" busy={busy} onClick={() => { if (removing) void run({ action: "delete", id: removing.entry.id }); }}>Delete</Button></>}>
       <p>Delete {String(removing?.entry.item.name ?? removing?.entry.item.pattern ?? removing?.entry.id ?? "")}?</p>
       {feedback}
     </Dialog>
@@ -228,7 +227,7 @@ function Edit({ props, entry, close, focus }: { props: Props; entry?: Entry; clo
         }
       }}>Fetch now</Button>}
       {props.afterSave && <Button busy={busy} onClick={() => { void save(true); }}>{props.afterSave.label}</Button>}
-      <Button type="submit" variant="primary" form={formId} busy={busy} disabled={base.entry?.locked}>{rename ? "Rename and update rules" : "Save"}</Button>
+      <Button type="submit" variant="default" form={formId} busy={busy} disabled={base.entry?.locked}>{rename ? "Rename and update rules" : "Save"}</Button>
     </>}>
     <form id={formId} className="settings-form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <Controls fields={fields} input={input} base={base.entry?.item ?? {}} errors={errors} onChange={(values) => { setInput(values); setRename(false); }} />

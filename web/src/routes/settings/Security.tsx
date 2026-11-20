@@ -8,8 +8,8 @@ export default function Security() {
   const { data, failure, load } = useSettings<{ recent_logins: Login[] }>("security");
   return <>
     <div className="settings-actions">
-      <a className="btn" href="/app/account">Account and password</a>
-      {user?.role === "owner" && <a className="btn" href="/app/settings/users">Manage users</a>}
+      <a className="btn btn-link" href="/app/account">Account and password</a>
+      {user?.role === "owner" && <a className="btn btn-link" href="/app/settings/users">Manage users</a>}
     </div>
     <Sessions />
     <section className="settings-section">

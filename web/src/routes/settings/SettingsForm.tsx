@@ -1,3 +1,4 @@
+import { Card, CardHeader } from "../../ui/Card.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, editingSessionRequired, refreshEditingSession } from "../../api/session.ts";
 import { navigate } from "../../app/router.ts";
@@ -100,21 +101,21 @@ export function SettingsForm({ title, path, fields, snapshot, reload, encode, re
     setFailure(undefined);
     setErrors({});
   }
-  return <section className="settings-section">
-    <h2>{title}</h2>
+  return <Card className="settings-section">
+    <CardHeader title={title} />
     <form className={wide ? "settings-form settings-wide" : "settings-form"} noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}>
       {renderDetails?.(input, dirty)}
       <Controls fields={fields} input={input} base={snapshot.values} errors={errors} onChange={(values) => setDraft({ base, input: values })} />
       <FailureNote failure={failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session?.user) void save(); else setFailure({ kind: "sign_in", status: 401, message: editingSessionRequired }); }); }} rebase={() => { void rebase(); }} />
       {warnings.map((warning) => <Note key={warning} kind="warn">{warning}</Note>)}
       <div className="settings-actions">
-        <Button type="submit" variant="primary" disabled={!dirty} busy={busy}>Save</Button>
         {dirty && <Button disabled={busy} onClick={() => { setDraft(undefined); setFailure(undefined); setErrors({}); }}>Discard changes</Button>}
         {renderActions?.(input, busy, (values) => setDraft({ base, input: values }))}
+        <Button type="submit" variant="default" disabled={!dirty} busy={busy}>Save</Button>
       </div>
     </form>
     <Dialog open={destination !== undefined} testId="settings-leave" title="Discard unsaved changes?"
       onClose={() => setDestination(undefined)}
-      footer={<><Button onClick={() => setDestination(undefined)}>Keep editing</Button><Button disabled={busy} onClick={discardAndLeave}>Discard and leave</Button></>} />
-  </section>;
+      footer={<><Button onClick={() => setDestination(undefined)}>Keep editing</Button><Button variant="destructive" disabled={busy} onClick={discardAndLeave}>Discard and leave</Button></>} />
+  </Card>;
 }

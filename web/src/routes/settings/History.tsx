@@ -47,12 +47,12 @@ export default function HistorySettings() {
         </dl> : <p>The history database is unavailable.</p>}
         <div className="settings-actions">
           <a className="btn" href={endpoint("history/export")} download>Export snapshot (JSON)</a>
-          <Button className="danger" onClick={() => { setPhrase(""); setProblem(undefined); setConfirm(true); }}>Clear history…</Button>
+          <Button variant="ghost" onClick={() => { setPhrase(""); setProblem(undefined); setConfirm(true); }}>Clear history…</Button>
         </div>
       </section>
     </>}
     <Dialog open={confirm} title="Clear history?" onClose={() => { if (!busy) setConfirm(false); }}
-      footer={<Button className="danger" disabled={phrase !== "clear history"} busy={busy} onClick={async () => {
+      footer={<Button variant="destructive" disabled={phrase !== "clear history"} busy={busy} onClick={async () => {
         if (busy || phrase !== "clear history") return;
         setBusy(true);
         const result = await api.post(endpoint("history/clear"));

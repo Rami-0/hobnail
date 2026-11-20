@@ -1,3 +1,4 @@
+import { Badge } from "../../ui/Badge.tsx";
 import { useCallback, useEffect, useState } from "react";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
@@ -105,39 +106,40 @@ export default function Users() {
   }[edit.kind]);
   const closeLink = () => { setLink(""); setCopied(false); setError(""); };
   return <section className="settings-section" data-testid="settings-users">
-    <h2>Users</h2>
+    <h2>Accounts</h2>
     {failure && <Note kind="bad">{failure}</Note>}
     <div className="settings-list">{users.map((user) => {
       const granted = [...(user.scope_targets?.boards ?? []), ...(user.scope_targets?.integrations ?? [])];
       return <div className="settings-row" key={user.id} data-testid="user-row" data-user-id={user.id}>
         <div><h3>{user.name}</h3>
-          <p><span className="settings-role">{user.role}</span> · {user.disabled ? "Disabled" : "Active"}</p>
+          <p><Badge className="settings-role" variant="secondary">{user.role}</Badge>{" "}<Badge variant={user.disabled ? "outline" : "success"}>{user.disabled ? "Disabled" : "Active"}</Badge></p>
           <p>{user.scopes ? granted.map((target) => target.name).join(", ") || "No boards or integrations" : "Everything"}</p>
           {user.role === "owner" && <p className="muted">The owner account is protected. Its role and access are permanent, and it cannot be disabled or deleted.</p>}
         </div>
         {user.role !== "owner" && <div className="settings-actions">
-          <Button onClick={() => open({ kind: "role", user })}>Change role</Button>
-          <Button onClick={() => open({ kind: "scopes", user })}>Edit access</Button>
-          <Button onClick={() => open({ kind: "disabled", user })}>{user.disabled ? "Enable" : "Disable"}</Button>
-          <Button onClick={() => open({ kind: "sign-out", user })}>Force sign-out</Button>
-          <Button className="danger" onClick={() => open({ kind: "delete", user })}>Delete</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "role", user })}>Change role</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "scopes", user })}>Edit access</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "disabled", user })}>{user.disabled ? "Enable" : "Disable"}</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "sign-out", user })}>Force sign-out</Button>
+          <Button variant="ghost" onClick={() => open({ kind: "delete", user })}>Delete</Button>
         </div>}
       </div>;
     })}</div>
-    <header className="board-heading"><h2>Invitations</h2><Button variant="primary" data-testid="invite-create" onClick={() => open({ kind: "invite" })}>Create invitation</Button></header>
+    <header className="board-heading"><h2>Invitations</h2><Button variant="default" data-testid="invite-create" onClick={() => open({ kind: "invite" })}>Create invitation</Button></header>
     <div className="settings-list">{invites.map((invite) => {
       const status = inviteStatus(invite);
       return <div className="settings-row" key={invite.id} data-testid="invite-row">
-        <div><span className="settings-role">{invite.role}</span> · {status}
+        <div><Badge className="settings-role" variant="secondary">{invite.role}</Badge>{" "}<Badge>{status}</Badge>
           <p className="muted">Expires {new Date(invite.expires * 1000).toLocaleString()}</p>
         </div>
-        {status === "Pending" && <Button onClick={() => open({ kind: "revoke", invite })}>Revoke</Button>}
+        {status === "Pending" && <Button variant="ghost" onClick={() => open({ kind: "revoke", invite })}>Revoke</Button>}
       </div>;
     })}</div>
     <Dialog open={edit !== null} title={title ?? ""} onClose={() => { if (!busy) setEdit(null); }}
       guard={() => edit?.kind === "invite" ? role !== "viewer" || scopes !== null
         : !!edit && "user" in edit && (role !== edit.user.role || scopes !== edit.user.scopes)}
-      footer={<Button type="submit" form="manage-user" variant="primary" busy={busy}>{title}</Button>}>
+      cancelLabel="Cancel" footer={<Button type="submit" form="manage-user"
+        variant={edit?.kind === "delete" || edit?.kind === "revoke" || edit?.kind === "sign-out" ? "destructive" : "default"} busy={busy}>{title}</Button>}>
       {edit && <form id="manage-user" className="settings-form" onSubmit={async (event) => {
         event.preventDefault();
         if (busy) return;
@@ -161,7 +163,7 @@ export default function Users() {
       </form>}
     </Dialog>
     <Dialog open={!!link} title="Invitation link" onClose={() => { if (copied) closeLink(); }}
-      footer={<><Button onClick={closeLink}>Done</Button><Button variant="primary" onClick={async () => {
+      footer={<><Button onClick={closeLink}>Done</Button><Button variant="default" onClick={async () => {
         try { await navigator.clipboard.writeText(link); setCopied(true); }
         catch { setError("Select the link and copy it manually."); }
       }}>Copy link</Button></>}>
