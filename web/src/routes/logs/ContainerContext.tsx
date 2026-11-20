@@ -1,3 +1,4 @@
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { useBootstrap, useContainers } from "../../live/index.ts";
 import { rowLink, viewerHost } from "../../format/index.ts";
 import { TabNav } from "../../ui/TabNav.tsx";
@@ -12,14 +13,16 @@ export function ContainerContext({ name, query }: { name: string; query: string 
   const open = row ? rowLink(row, viewerHost(location.hostname)) : null;
   const root = `/app/containers/${encodeURIComponent(name)}`;
   return <div className="log-container-context">
-    <header className="log-container-head" data-testid="log-container-head">
-      <ServiceIcon name={row?.icon ?? null} label={row?.title ?? name} />
-      <div><h1>{row && <StatusDot dot={row.dot} />}{row?.title ?? name}</h1><p className="mono muted">{row?.title !== name && `${name} · `}{row?.image}{row && ` · ${row.label}`}</p></div>
-      {open && <a className="btn" href={open} target="_blank" rel="noopener noreferrer">Open</a>}
-      {admin && <a className="btn ghost" href={`${root}?edit=override`}>Edit</a>}
-      <a href={paneHref(query, [name], location.hash, true)}>Side by side</a>
-    </header>
+    <PageHeader className="log-container-head" testId="log-container-head"
+      icon={<ServiceIcon name={row?.icon ?? null} label={row?.title ?? name} />}
+      title={<>{row && <StatusDot dot={row.dot} />} {row?.title ?? name}</>}
+      description={<p className="mono">{row?.title !== name && `${name} · `}{row?.image}{row && ` · ${row.label}`}</p>}
+      actions={<>
+        {open && <a className="btn btn-link" href={open} target="_blank" rel="noopener noreferrer">Open</a>}
+        {admin && <a className="btn btn-ghost" href={`${root}?edit=override`}>Edit</a>}
+        <a className="btn btn-link" href={paneHref(query, [name], location.hash, true)}>Side by side</a>
+      </>}
+      tabs={<TabNav layout="container" label="Container sections" items={tabs(name, query).filter((tab) => tab.id !== "processes" || admin)} current="logs" testId="ctr-tabs" />} />
     {live.data?.docker_error && <p className="banner warn" role="alert">Docker is unreachable. Logs cannot be read right now. {live.data.docker_error}</p>}
-    <TabNav layout="container" label="Container sections" items={tabs(name, query).filter((tab) => tab.id !== "processes" || admin)} current="logs" testId="ctr-tabs" />
   </div>;
 }

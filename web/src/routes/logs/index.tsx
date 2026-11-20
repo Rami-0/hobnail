@@ -1,3 +1,5 @@
+import { Badge } from "../../ui/Badge.tsx";
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { LayersIcon, SearchIcon, ScrollTextIcon } from "lucide-react";
 import { useRead } from "../../live/read.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -48,12 +50,12 @@ function Pane({ title, query, picker, options, range, target, close, stack }: {
     try { await copyLogText(text); setCopied(link ? "Link copied" : "Line copied"); } catch { setCopied("Copy unavailable; select the line text to copy."); }
   };
   return <section className="log-pane" data-testid="log-pane" data-state={status.state}>
-    <header className="log-pane-head"><strong>{stack ? title : <a href={logsHref(title)}>{title}</a>}</strong><output>{status.state}</output>{project && !stack && <a href={`/app/stacks/${encodeURIComponent(project.name)}/logs`}>Stack</a>}{close && <a href={close} aria-label={`Close ${title}`}>Close</a>}</header>
+    <header className="log-pane-head"><strong>{stack ? title : <a href={logsHref(title)}>{title}</a>}</strong><Badge variant={status.state === "live" ? "success" : status.state === "paused" || status.state.includes("retrying") ? "warning" : status.state === "error" ? "destructive" : "secondary"}>{status.state}</Badge>{project && !stack && <a href={`/app/stacks/${encodeURIComponent(project.name)}/logs`}>Stack</a>}{close && <a href={close} aria-label={`Close ${title}`}>Close</a>}</header>
     {stack && <details className="log-members"><summary>Containers merged by time (up to 24)</summary>{picker.groups.find((g) => g.project && g.name === title)?.containers.toSorted((a, b) => a.name.localeCompare(b.name)).slice(0, 24).map((container) => <a key={container.name} href={logsHref(container.name)}>{container.name}</a>)}</details>}
     {status.message && <p className="log-note" role="status">{status.message}</p>}
-    <div className="log-pane-tools"><Button className="sm" onClick={() => controller.current?.loadOlder()} data-testid="log-older">Load older lines</Button>
+    <div className="log-pane-tools"><Button size="sm" variant="ghost" onClick={() => controller.current?.loadOlder()} data-testid="log-older">Load older lines</Button>
       <span>{status.count.toLocaleString()} / {picker.ring.toLocaleString()} lines{options.paused && status.waiting > 0 ? ` · ${status.waiting} waiting` : ""}</span>
-      {options.search && <><output data-testid="log-matches">{status.current}/{status.matches}</output><Button className="sm" onClick={() => controller.current?.step(-1)} aria-label="Older match">↑</Button><Button className="sm" onClick={() => controller.current?.step(1)} aria-label="Newer match">↓</Button></>}
+      {options.search && <><output data-testid="log-matches">{status.current}/{status.matches}</output><Button size="sm" variant="ghost" onClick={() => controller.current?.step(-1)} aria-label="Older match">↑</Button><Button size="sm" variant="ghost" onClick={() => controller.current?.step(1)} aria-label="Newer match">↓</Button></>}
     </div>
     {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- The log region handles line selection and End. */}
     <div ref={box} className="log-body" data-testid="log-body" tabIndex={0} role="region" aria-label={`Logs of ${title}`} />
@@ -63,7 +65,7 @@ function Pane({ title, query, picker, options, range, target, close, stack }: {
     {selected && <div className="log-actions" role="group" aria-label="Line actions" onKeyDown={(e) => {
       if (e.key === "Escape") { e.stopPropagation(); controller.current?.clearSelection(); box.current?.focus(); }
       if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); controller.current?.moveSelected(e.key === "ArrowUp" ? -1 : 1); }
-    }}><Button className="sm" ref={copy} onClick={() => void copyText(false)}>Copy line</Button><Button className="sm" onClick={() => void copyText(true)}>Copy link</Button><output>{copied}</output></div>}
+    }}><Button size="sm" variant="ghost" ref={copy} onClick={() => void copyText(false)}>Copy line</Button><Button size="sm" variant="ghost" onClick={() => void copyText(true)}>Copy link</Button><output>{copied}</output></div>}
     <footer className="log-pane-foot">{Object.entries(levelNames).map(([l, label]) => <span key={l}>{label} {status.counts[l] ?? 0}</span>)}</footer>
   </section>;
 }
@@ -73,6 +75,7 @@ function Picker({ data }: { data: LogsPicker }) {
   const groups = data.groups.map((g) => ({ ...g, containers: g.containers.filter((c) => terms.every((t) => `${g.title} ${c.title} ${c.name} ${c.search}`.toLowerCase().includes(t))) })).filter((g) => g.containers.length);
   const total = data.groups.reduce((n, g) => n + g.containers.length, 0), shown = groups.reduce((n, g) => n + g.containers.length, 0);
   return <div className="page logs-page lpick" data-testid="logs-picker">
+    <PageHeader title="Logs" description="Choose a container, a stack, or up to four containers to view side by side." />
     <div className="lpick-bar">
       <div className="lpick-f" role="search">
         <div className="search-in">
@@ -83,12 +86,12 @@ function Picker({ data }: { data: LogsPicker }) {
         </div>
       </div>
       <output className="lpick-n muted">{shown === total ? total : shown + " of " + total} containers</output>
-      <Button variant="primary" icon={<ScrollTextIcon aria-hidden="true" />} disabled={selected.length < 2}
+      <Button variant="default" leadingIcon={<ScrollTextIcon aria-hidden="true" />} disabled={selected.length < 2}
         onClick={() => setSearch({ c: selected.join(","), sel: null, q: null })}>
         Side by side{selected.length > 0 ? " · " + selected.length : ""}
       </Button>
     </div>
-    <p className="muted lpick-hint">{selected.length === 4 ? "Four at a time: untick one to choose another." : "A name opens its logs. Tick two to four to see them side by side (on a phone they stack)."}</p>
+    {selected.length === 4 && <p className="muted lpick-hint">Four selected. Untick a container to choose another.</p>}
     {!shown && <p>No containers match.</p>}
     {groups.map((g) => <section className="lpick-g" key={g.name}>
       <h2 className="lpick-h">
@@ -168,20 +171,23 @@ export default function LogsPage() {
   const download = new URLSearchParams(stack ? { stack } : { c: panes.join(",") });
   if (!range) download.set("tail", String(picker.ring));
   const filters = [..."ewido"].filter((l) => !levels.includes(l)).length + Number(show !== "all") + Number(!!range);
-  return <div className="page logs-page" data-testid="logs-viewer"><nav className="crumb"><a href="/app/logs">Logs</a><span> / {stack ?? (panes.length === 1 ? panes[0] : "Side by side")}</span></nav>
-    {route.route.name === "container_logs" && <ContainerContext name={route.route.ctr} query={route.query} />}
+  return <div className="page logs-page" data-testid="logs-viewer"><nav className="crumb" aria-label="Breadcrumb"><a href="/app/logs">Logs</a></nav>
+    {route.route.name === "container_logs" ? <ContainerContext name={route.route.ctr} query={route.query} /> :
+      <PageHeader title={stack ?? (panes.length === 1 ? panes[0] : "Side by side")} />}
     {(missing.length > 0 || (stack !== null && !stackExists)) && <p className="banner warn" role="alert">Not found: {missing.join(", ") || stack}</p>}
     <div className="log-toolbar"><div className="log-search"><TextInput ref={input} type="search" data-testid="filter" aria-label="Search logs" aria-invalid={!!matcher(search, regex, sensitive).error} title={matcher(search, regex, sensitive).error ?? undefined} placeholder="Search logs" value={search} onChange={(e) => setSearch({ search: e.target.value }, { replace: true })} onKeyDown={(e) => {
       if (e.key === "Enter") { e.preventDefault(); window.dispatchEvent(new CustomEvent("rh:logs-step", { detail: e.shiftKey ? 1 : -1 })); }
       if (e.key === "Escape") { e.stopPropagation(); setSearch({ search: null }, { replace: true }); }
-    }} /><Button className="sm" aria-label="Regular expression" aria-pressed={regex} onClick={() => { setRegex(!regex); setSearch({ re: !regex ? "1" : null }, { replace: true }); }}>.*</Button><Button className="sm" aria-label="Match case" aria-pressed={sensitive} onClick={() => setSearch({ case: sensitive ? null : "1" }, { replace: true })}>Aa</Button></div>
+    }} /><Button size="sm" variant="ghost" aria-label="Regular expression" aria-pressed={regex} onClick={() => { setRegex(!regex); setSearch({ re: !regex ? "1" : null }, { replace: true }); }}>.*</Button><Button size="sm" variant="ghost" aria-label="Match case" aria-pressed={sensitive} onClick={() => setSearch({ case: sensitive ? null : "1" }, { replace: true })}>Aa</Button></div>
     <Button className="log-filters" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>Filters {filters || ""}</Button>
     <div className={`log-filter-controls ${expanded ? "is-open" : ""}`}>
       <Select label="Show" value={show} onChange={(v) => setSearch({ show: v === "all" ? null : v }, { replace: true })} options={[{ value: "all", label: "All lines" }, { value: "0", label: "Only matching" }, ...[1, 3, 10].map((n) => ({ value: String(n), label: `Matching ±${n} lines` }))]} />
-      <div className="log-levels">{Object.entries(levelNames).map(([l, label]) => <Button key={l} className="sm" aria-label={`Show ${label.toLowerCase()} lines`} aria-pressed={levels.includes(l)} onClick={() => setSearch({ levels: levels.includes(l) ? levels.replace(l, "") || "-" : levels.replace("-", "") + l }, { replace: true })}>{label}<span className="log-level-count">{Object.values(paneCounts).reduce((total, counts) => total + (counts[l] ?? 0), 0)}</span></Button>)}</div>
+      <div className="log-levels seg" role="group" aria-label="Log levels">{Object.entries(levelNames).map(([l, label]) => <Button key={l} size="sm" variant="ghost" aria-label={`Show ${label.toLowerCase()} lines`} aria-pressed={levels.includes(l)} onClick={() => setSearch({ levels: levels.includes(l) ? levels.replace(l, "") || "-" : levels.replace("-", "") + l }, { replace: true })}>{label}<span className="log-level-count">{Object.values(paneCounts).reduce((total, counts) => total + (counts[l] ?? 0), 0)}</span></Button>)}</div>
       <Select label="Range" value={range} onChange={(v) => { if (v === "custom") setPreviousRange(rangeQuery); setSearch({ range: v, since: null, until: null, from: null, to: null }, { replace: true }); }} options={[{ value: "", label: "Live" }, { value: "15m", label: "15 min" }, { value: "1h", label: "1 h" }, { value: "6h", label: "6 h" }, { value: "24h", label: "24 h" }, { value: "start", label: "Since start" }, { value: "custom", label: "Custom" }]} />
-      <Button className="sm" aria-pressed={wrap} onClick={() => { setWrap(!wrap); savePref("wrap", !wrap); }}>Wrap</Button><Button className="sm" aria-pressed={time} onClick={() => { setTime(!time); savePref("time", !time); }}>Time</Button><Button className="sm" aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? "Resume" : "Pause"}</Button>
-      <a className="btn sm" href={`/api/logs/download?${download}${rangeQuery}`} download title="Download the entire selected range without search or level filters">Download</a>
+      <div className="log-view-options">
+      <Button size="sm" variant="ghost" aria-pressed={wrap} onClick={() => { setWrap(!wrap); savePref("wrap", !wrap); }}>Wrap</Button><Button size="sm" variant="ghost" aria-pressed={time} onClick={() => { setTime(!time); savePref("time", !time); }}>Time</Button><Button size="sm" variant="ghost" aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? "Resume" : "Pause"}</Button>
+      <a className="btn btn-sm btn-link" href={`/api/logs/download?${download}${rangeQuery}`} download title="Download the entire selected range without search or level filters">Download</a>
+      </div>
     </div></div>
     {linked.regexFromLink && !regex && <p className="log-note">Search from the link is plain text. Turn on .* to use it as a regular expression.</p>}
     {range === "custom" && <form className="log-custom" onSubmit={(e) => { e.preventDefault(); const f = from ? new Date(from).getTime() / 1000 : null, t = to ? new Date(to).getTime() / 1000 : null;
