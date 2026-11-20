@@ -76,7 +76,7 @@ function Picker({ data }: { data: LogsPicker }) {
   const total = data.groups.reduce((n, g) => n + g.containers.length, 0), shown = groups.reduce((n, g) => n + g.containers.length, 0);
   return <div className="page logs-page lpick" data-testid="logs-picker">
     <PageHeader title="Logs" description="Choose a container, a stack, or up to four containers to view side by side." />
-    <div className="lpick-bar">
+    <div className="logs-picker-toolbar">
       <div className="lpick-f" role="search">
         <div className="search-in">
           <SearchIcon aria-hidden="true" />
