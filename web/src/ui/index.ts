@@ -17,3 +17,4 @@ export { Toaster } from "./Toaster.tsx";
 
 export { Select, type SelectProps, type SelectOption } from "./Select.tsx";
 export { Switch, type SwitchProps } from "./Switch.tsx";
+export { Checkbox } from "./Checkbox.tsx";
