@@ -5,10 +5,10 @@ const worst = (row: number[], side: number) => {
   return Math.max(Math.max(...row) / ratio, ratio / Math.min(...row));
 };
 
-function squarify(weights: number[]): Box[] {
-  const factor = 360 * 180 / sum(weights);
+function squarify(weights: number[], areaWidth: number, areaHeight: number): Box[] {
+  const factor = areaWidth * areaHeight / sum(weights);
   const areas = weights.map((n) => n * factor);
-  let [x, y, width, height] = [0, 0, 360, 180];
+  let [x, y, width, height] = [0, 0, areaWidth, areaHeight];
   const boxes: Box[] = [];
   for (let i = 0; i < areas.length;) {
     const side = Math.min(width, height);
@@ -29,14 +29,17 @@ function squarify(weights: number[]): Box[] {
   return boxes;
 }
 
-/** Expect descending positive weights. Fold boxes too small for a phone into the final tile. */
-export function treemap(weights: number[]) {
+/**
+ * Lay out descending positive weights in a `width` × `height` pixel area.
+ * Boxes smaller than `min` (room for a name and a size) fold into a final "others" tile.
+ */
+export function treemap(weights: number[], width: number, height: number, min: [number, number]) {
   let shown = Math.min(weights.length, 18);
   let boxes: Box[];
   do {
     const tail = sum(weights.slice(shown));
-    boxes = squarify(weights.slice(0, shown).concat(tail > 0 ? [tail] : []));
-    if (boxes.every(([, , w, h]) => w >= 58 && h >= 24)) break;
+    boxes = squarify(weights.slice(0, shown).concat(tail > 0 ? [tail] : []), width, height);
+    if (boxes.every(([, , w, h]) => w >= min[0] && h >= min[1])) break;
   } while (shown-- > 0);
   return { boxes, shown: Math.max(0, shown) };
 }

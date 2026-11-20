@@ -1,14 +1,19 @@
 .overview-probe { display: block; color: var(--text-2); }
 .overview-widget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr)); gap: 1rem; }
-.overview-map { display:block;width:100%;height:232px;background:var(--surface-2);border-radius:8px; }
 .overview-consumers{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
 @container (max-width:860px){.overview-consumers{grid-template-columns:1fr}}
 .ov .panel-h .more{display:inline-flex;align-items:center;margin-left:auto;gap:4px;font-size:var(--fs-xs);color:var(--text-3)}
 .ov .panel-h .more svg{width:13px;height:13px}
-.overview-map rect { fill: var(--surface-2); stroke: var(--border); }
-.overview-map a:nth-child(odd) rect { fill: var(--raised); }
-.overview-map a:focus-visible rect { stroke: var(--ring); stroke-width: 3; }
-.overview-map text { fill: var(--text); font-size: 12px; }
+/* Memory treemap: tiles placed over a measured box; --c is the stack colour, gutters come from tile padding. */
+.res-mem{display:flex;flex-direction:column}
+.mm-sum{margin:-4px 0 12px;color:var(--text-3)}
+.mm-sum b{color:var(--text)}
+.mm{position:relative;flex:1;min-height:260px;margin:-3px}
+.mm-t{position:absolute;padding:3px;--c:var(--line)}
+.mm-a{display:flex;flex-direction:column;height:100%;padding:10px 12px;overflow:hidden;white-space:nowrap;border-radius:var(--r-sm);color:var(--text-2);background:color-mix(in oklab,var(--c) 24%,var(--surface))}
+.mm-a:hover{filter:brightness(1.15);text-decoration:none}
+.mm-n{font-family:var(--mono);color:var(--text);overflow:hidden;text-overflow:ellipsis;padding-right:2em}
+.mm-l{position:absolute;top:12px;right:12px;color:var(--text-3)}
 
 .ov .pulse{padding:0}
 .sec{display:grid;gap:10px;min-width:0}

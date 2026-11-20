@@ -15,7 +15,7 @@ import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { ChartPlaceholder, HealthStrip, Meter } from "../../ui/Sparkline.tsx";
 import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import { SEEN, overviewPath, readSeen } from "./request.ts";
-import { treemap } from "./treemap.ts";
+import { MemoryMap } from "./MemoryMap.tsx";
 import "../history/history.css";
 import "./overview.css";
 
@@ -80,11 +80,10 @@ export default function Overview() {
   const names = new Set(rows.map((r) => r.name));
   const consumers = (rows.length ? rows : overview?.consumers ?? []).map((r) => {
     const s = stats.get(r.name);
-    return { name: r.name, title: r.title, cpu: s?.cpu_pct ?? r.cpu_pct, mem: s?.mem_bytes ?? r.mem_bytes };
+    return { name: r.name, title: r.title, stack: "stack" in r && typeof r.stack === "string" ? r.stack : "", cpu: s?.cpu_pct ?? r.cpu_pct, mem: s?.mem_bytes ?? r.mem_bytes };
   });
   const top = consumers.filter((r) => r.cpu !== null).toSorted((a, b) => (b.cpu ?? 0) - (a.cpu ?? 0)).slice(0, 8);
-  const memory = consumers.filter((r) => (r.mem ?? 0) > 0).toSorted((a, b) => (b.mem ?? 0) - (a.mem ?? 0));
-  const map = treemap(memory.map((r) => r.mem ?? 0));
+  const memory = consumers.flatMap((r) => r.mem ? [{ ...r, mem: r.mem }] : []).toSorted((a, b) => b.mem - a.mem);
   const running = groups.reduce((n, g) => n + g.running, 0);
   const stopped = groups.reduce((n, g) => n + g.stopped, 0);
   const problems = rows.filter((r) => r.attention !== null).length;
@@ -156,18 +155,8 @@ export default function Overview() {
       {!!overview.hour.length && <HostCharts overview={overview} recording={boot.features.history} />}
     </section>}
     {boot?.features.stats && <section className="overview-consumers" aria-label="Where resources go">
-        <div className="panel"><div className="panel-h"><h2>Memory by container</h2><a className="more" href="/app/containers?sort=mem">All <ArrowRightIcon aria-hidden="true" /></a></div>{!map.boxes.length ? <p>No memory samples yet.</p> :
-          <svg className="overview-map" viewBox="0 0 360 180" aria-label="Memory usage treemap">
-            {map.boxes.map(([x, y, width, height], i) => {
-              const row = i < map.shown ? memory[i] : null;
-              const label = row?.title ?? `+${memory.length - map.shown} others`;
-              return <a key={row?.name ?? "others"} href={row ? containerHref(row.name) : "/app/containers?sort=mem"} aria-label={row ? `${label}, ${bytes(row.mem ?? 0)}` : label}>
-                <rect x={x} y={y} width={width} height={height} />
-                <text x={x + 5} y={y + 16}>{label.slice(0, Math.max(4, Math.floor((width - 8) / 7)))}</text>
-                <title>{row ? `${label} · ${bytes(row.mem ?? 0)}` : label}</title>
-              </a>;
-            })}
-          </svg>}</div>
+        <div className="panel res-mem"><div className="panel-h"><h2>Memory by container</h2><a className="more" href="/app/containers?sort=mem">All <ArrowRightIcon aria-hidden="true" /></a></div>
+          {memory.length ? <MemoryMap rows={memory} /> : <p>No memory samples yet.</p>}</div>
         <div className="panel res-cpu"><div className="panel-h"><h2>Top CPU</h2><a className="more" href="/app/containers?sort=cpu">All <ArrowRightIcon aria-hidden="true" /></a></div>{!top.length && <p>No CPU samples yet.</p>}<ul className="history-events">{top.map((r) => <li key={r.name}>
           <a href={containerHref(r.name)}>{r.title}</a> · {pct(r.cpu)}
           <Meter value={r.cpu ?? 0} max={Math.max(100, top[0]?.cpu ?? 0)} label={`${r.title} CPU`} />
