@@ -15,6 +15,7 @@
 
 /* ---- toolbar ---- */
 .ct search.bar{display:flex}
+.ct .seg>[data-state]{padding-inline:var(--s-2);gap:var(--s-1)}
 .ct .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .ct .search-in{position:relative;flex:0 1 320px;min-width:min(100%,240px);max-width:320px}
 .ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
@@ -126,6 +127,5 @@ tbody.none td{padding:0}
 @media (pointer:coarse),(max-width:640px){
  .port{margin-block:2px}
  .grp-t{height:44px}
- :is(.ct,.cd) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
 }
 .ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}

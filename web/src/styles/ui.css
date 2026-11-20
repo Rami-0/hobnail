@@ -77,10 +77,12 @@ textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:
 .cb{display:inline-flex;align-items:center;gap:8px;min-height:var(--hit);font-size:var(--fs-sm);color:var(--text);cursor:pointer}
 .grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s-4) var(--s-5)}
 @media (max-width:699px){.grid-2{grid-template-columns:minmax(0,1fr)}}
-/* switch: a checkbox with role=switch */
-.sw{display:inline-flex;padding:0;appearance:none;-webkit-appearance:none;position:relative;flex:none;width:36px;height:20px;margin:0;border-radius:var(--r-pill);border:1px solid var(--ctl-border);background:var(--field);cursor:pointer;transition:background-color var(--dur-2) var(--ease-out)}
-.sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--text-2);transition:transform var(--dur-2) var(--ease-out)}
-.sw[data-checked]{background:var(--primary);border-color:var(--primary)}
+/* The track is separate from the responsive hit area. */
+.sw{position:relative;flex:none;width:36px;height:var(--hit);min-height:24px;padding:0;border:0;border-radius:var(--r-pill);background:none;cursor:pointer}
+.sw::before,.sw::after{content:"";position:absolute;top:50%;translate:0 -50%;border-radius:var(--r-pill)}
+.sw::before{left:50%;translate:-50% -50%;width:36px;height:20px;border:1px solid var(--input);background:var(--muted);transition:background-color var(--dur-2)}
+.sw::after{left:calc(50% - 15px);width:14px;height:14px;background:var(--muted-foreground);transition:transform var(--dur-2)}
+.sw[data-checked]::before{background:var(--primary);border-color:var(--primary)}
 .sw[data-checked]::after{transform:translateX(16px);background:var(--primary-foreground)}
 .cb:has(:disabled){opacity:.55;cursor:not-allowed}
 .checkbox{display:inline-grid;place-items:center;flex:none;width:var(--hit);height:var(--hit);padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--primary-foreground);cursor:inherit;position:relative}
@@ -91,11 +93,7 @@ textarea.in{height:auto;min-height:88px;padding:8px 10px;line-height:1.5;resize:
 .sw[aria-busy=true]{cursor:progress}
 .sw[aria-busy=true]::after{animation:sw-wait .8s var(--ease-io) infinite alternate}
 @keyframes sw-wait{to{opacity:.45}}
-@media (pointer:coarse),(max-width:699px){
- /* the switch keeps its look inside a 44 px box (transparent border) */
- .sw{width:52px;height:44px;border:13px solid transparent;border-width:13px 9px;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--ctl-border)}
- .sw[data-checked]{box-shadow:none}
-}
+@media (pointer:coarse),(max-width:700px){.sw{width:var(--hit)}}
 
 /* ---- notes: a message in a panel or dialog not tied to one field ---- */
 .note{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-sm);color:var(--text-2)}
@@ -266,7 +264,7 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--ring)}
 /* Keep pending notifications out of the active modal's focus and reading order. */
 body:has(.dlg[data-open]) .toasts{visibility:hidden}
 /* Text actions outside prose use the same real hit box as icon actions. */
-.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row,.overview-counts)>a,.page>a,.panel>a,.overview-strips>a,.log-pane-head>a,.log-pane-tools a,.crumb a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row,.overview-counts,.sec-h,.foot-line)>a,.page>a,.panel>a,.overview-strips>a,.log-pane-head>a,.log-pane-tools a,.crumb a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 .page summary{min-height:var(--hit);line-height:var(--hit)}
 
 /* Reserve chart grid layout before its lazy implementation arrives. */

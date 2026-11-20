@@ -245,12 +245,12 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
       if (mounted) startTransition(() => setWidth(measured));
       else { plotMounts.add(mount); schedulePlotMount(); }
     });
-    // The figure reserves space. Mount the SVG only when its canvas is visible.
+    // Mount just before the canvas enters view, including below a wrapped phone header.
     const near = new IntersectionObserver(([entry]) => {
       if (!entry?.isIntersecting) return;
       near.disconnect();
       size.observe(canvas);
-    });
+    }, { rootMargin: "160px 0px" });
     near.observe(canvas);
     return () => { near.disconnect(); size.disconnect(); plotMounts.delete(mount); };
   }, [hasValues]);
