@@ -59,11 +59,6 @@ function* files(dir) {
   }
 }
 
-// Existing hot-path controls have bespoke styling. Catch additions as the
-// remaining controls migrate to wrappers.
-const nativeControls = new Map([
-  ["src/routes/containers/index.tsx", 6],
-]);
 const problems = [];
 for (const file of files(src)) {
   const rel = relative(root, file).split(sep).join("/");
@@ -74,7 +69,7 @@ for (const file of files(src)) {
   }
   if (/\.[jt]sx$/.test(rel) && !rel.startsWith("src/ui/")) {
     const count = [...text.matchAll(/<(?:button|input|select|textarea|dialog)(?:\s|>)/g)].length;
-    if (count > (nativeControls.get(rel) ?? 0)) problems.push(`${rel}: use interactive controls from src/ui/`);
+    if (count > 0) problems.push(`${rel}: use interactive controls from src/ui/`);
   }
   const lines = text.split("\n");
   lines.forEach((line, i) => {

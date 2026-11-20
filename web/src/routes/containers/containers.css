@@ -4,23 +4,8 @@
 :is(.ct,.cd) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
 :is(.ct,.cd) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
 :is(.ct,.cd) .ra .btn.sm{gap:6px}
-:is(.ct,.cd) fieldset.seg{margin:0;min-inline-size:0}
-:is(.ct,.cd) .seg{display:inline-flex;padding:2px;gap:2px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--field)}
-:is(.ct,.cd) .seg>:is(a,button){display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:0;border-radius:4px;background:none;color:var(--text-3);font-size:.8929rem;font-weight:500;white-space:nowrap;cursor:pointer;text-decoration:none}
-:is(.ct,.cd) .seg>:is(a,button):hover{color:var(--text)}
-:is(.ct,.cd) .seg>:is([aria-current],[aria-pressed=true]){background:var(--surface-2);color:var(--text);box-shadow:0 0 0 1px var(--ctl-border)}
-:is(.ct,.cd) .seg svg{width:14px;height:14px}
-:is(.ct,.cd) .seg .n{font:.7857rem var(--mono);color:var(--text-3)}
-:is(.ct,.cd) .st-l{font-size:calc(12.5rem/14);color:var(--text-2)}
-:is(.ct,.cd) .st-l.warn{color:var(--warn-fg)}
-:is(.ct,.cd) .st-l.bad{color:var(--bad-fg);font-weight:600}
-:is(.ct,.cd) .st-l.off{color:var(--text-3)}
 :is(.ct,.cd) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
 :is(.ct,.cd) .mono.img{color:var(--text-2)}
-:is(.ct,.cd) .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
-:is(.ct,.cd) .tbl th{height:32px;padding:0 10px;text-align:left;font-size:var(--fs-micro);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--line);white-space:nowrap}
-:is(.ct,.cd) .tbl td{height:var(--row);padding:0 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-:is(.ct,.cd) .tbl tbody tr:last-child td{border-bottom-color:transparent}
 .port{display:inline-block;height:max(24px,var(--hit));min-width:var(--hit);text-align:center;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/calc(max(24px,var(--hit)) - 2px) var(--mono);color:var(--accent-fg);white-space:nowrap}
 .port:hover{border-color:var(--accent);text-decoration:none}
 .port.local{color:var(--text-3);border-style:dashed}
@@ -29,14 +14,11 @@
 .port.more{color:var(--text-3)}
 
 /* ---- toolbar ---- */
-.ct{display:grid;gap:var(--s-3)}
 .ct search.bar{display:flex}
 .ct .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .ct .search-in{position:relative;flex:0 1 320px;min-width:min(100%,240px);max-width:320px}
 .ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
-.ct .search-in input{width:100%;height:var(--ctl-h);padding:0 10px 0 30px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);font-size:var(--fs-input)}
-.ct .search-in input:focus{border-color:var(--accent)}
-.ct .bar select{height:var(--ctl-h);padding:0 8px;max-width:220px;border:1px solid var(--ctl-border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font-size:var(--fs-input)}
+.ct .search-in input{padding-left:32px}
 .ct .sortctl{display:none;gap:4px;align-items:center}
 .ctbl-loading{padding:var(--s-4)}
 
@@ -46,7 +28,7 @@
 .ctbl .c-name{width:auto}
 .ctbl .c-stack{width:90px}
 .ctbl .c-image{width:160px}
-.ctbl .c-state{width:90px}
+.ctbl .c-state{width:116px}
 .ctbl .c-up{width:72px}
 .ctbl .c-hist{width:110px}
 .ctbl .c-hist .hstrip{width:100%}
@@ -57,7 +39,7 @@
 .ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
 .ctbl caption b{color:var(--text);font-weight:600}
 .ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
-.ctbl .sort-b{display:flex;width:100%;min-height:32px;align-items:center;gap:3px;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
+.ctbl .sort-b{display:flex;width:100%;height:var(--ctl-h-sm);justify-content:flex-start;gap:3px;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
 .ctbl .sort-b:hover{color:var(--text)}
 .ctbl .sort-i{width:12px;height:12px}
 .ctbl .sort-i.off{opacity:0}
@@ -65,7 +47,6 @@
 .ctbl th[aria-sort=ascending],.ctbl th[aria-sort=descending]{color:var(--text)}
 .ctbl th.c-num{text-align:right}
 .ctbl th.c-num .sort-b{justify-content:flex-end}
-.ctbl .row:hover td,.ctbl .row.kfocus td{background:var(--surface-2)}
 .ctbl .row td:first-child{padding-left:14px}
 .c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
@@ -96,7 +77,7 @@
 .row.stopped .c-image .img{color:var(--text-3)}
 .grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
 tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
-.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 6px;border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:calc(12.5rem/14);font-weight:600;text-align:left;contain:inline-size}
+.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:var(--ctl-h-sm);justify-content:flex-start;padding:0 var(--s-2);border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:calc(12.5rem/14);font-weight:600;text-align:left;contain:inline-size}
 .grp-t:hover{background:var(--tint)}
 .grp-t .chev{width:14px;height:14px;color:var(--text-3);transition:transform var(--dur-2)}
 .grp.closed .grp-t .chev{transform:rotate(-90deg)}
@@ -148,4 +129,3 @@ tbody.none td{padding:0}
  :is(.ct,.cd) .seg>:is(a,button){height:40px;min-width:44px;justify-content:center}
 }
 .ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
-@media(pointer:coarse),(max-width:699px){.ct .seg>:is(a,button){height:44px}.ct .sortctl .btn{min-width:44px}}

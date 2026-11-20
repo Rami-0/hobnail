@@ -1,3 +1,6 @@
+import { Badge, statusBadge } from "../../ui/Badge.tsx";
+import { TextInput } from "../../ui/Field.tsx";
+import { PageHeader } from "../../ui/PageHeader.tsx";
 // /app/containers: the dense, filterable, sortable table of every container
 //
 // The URL holds the view (q, state, stack, sort, dir, group; replaced, not
@@ -393,26 +396,25 @@ export default function ContainersPage() {
   }
 
   const chip = (label: string, f: StateFilter, n: number) => (
-    <button
+    <Button variant="ghost"
       type="button"
       data-state={f || "all"}
       aria-pressed={view.state === f}
       onClick={() => setView((v) => ({ ...v, state: f }))}
     >
       {label} <span className="n num">{n}</span>
-    </button>
+    </Button>
   );
 
   return (
     <div className="page wide ctr-page ct">
-      <h1 className="sr">Containers</h1>
+      <PageHeader title="Containers" description="Search and group containers, and check their current state and resource usage." />
       <search className="bar">
         <div className="search-in">
           <SearchIcon aria-hidden="true" />
-          <input
+          <TextInput
             ref={filterRef}
             type="search"
-            className="in"
             data-testid="filter"
             value={qText}
             onChange={(e) => {
@@ -472,7 +474,7 @@ export default function ContainersPage() {
             options={SORTS.map((s) => ({ value: s.key, label: `Sort: ${s.label}` }))}
           />
           <Button
-            className="icon"
+            size="icon" variant="ghost"
             data-testid="sort-dir"
             aria-label={desc ? "Descending; switch to ascending" : "Ascending; switch to descending"}
             icon={desc ? <ArrowDownIcon aria-hidden="true" /> : <ArrowUpIcon aria-hidden="true" />}
@@ -481,14 +483,14 @@ export default function ContainersPage() {
         </div>
         <fieldset className="seg" data-testid="grouping">
           <legend className="sr">Layout</legend>
-          <button type="button" data-group="stack" aria-pressed={grouped} onClick={() => setView((v) => ({ ...v, group: "stack" }))}>
+          <Button variant="ghost" type="button" data-group="stack" aria-pressed={grouped} onClick={() => setView((v) => ({ ...v, group: "stack" }))}>
             <LayersIcon aria-hidden="true" />
             <span>Stacks</span>
-          </button>
-          <button type="button" data-group="flat" aria-pressed={!grouped} onClick={() => setView((v) => ({ ...v, group: "flat" }))}>
+          </Button>
+          <Button variant="ghost" type="button" data-group="flat" aria-pressed={!grouped} onClick={() => setView((v) => ({ ...v, group: "flat" }))}>
             <ListIcon aria-hidden="true" />
             <span>Flat</span>
-          </button>
+          </Button>
         </fieldset>
       </search>
       {body}
@@ -513,14 +515,14 @@ function SortTh({
   const desc = isDesc(view);
   return (
     <th className={cls} scope="col" data-sort={k} aria-sort={on ? (desc ? "descending" : "ascending") : "none"}>
-      <button type="button" className="sort-b" onClick={() => setView((v) => sortBy(v, k))}>
+      <Button variant="ghost" type="button" className="sort-b" onClick={() => setView((v) => sortBy(v, k))}>
         {label}
         {on && desc ? (
           <ArrowDownIcon className="sort-i" aria-hidden="true" />
         ) : (
           <ArrowUpIcon className={on ? "sort-i" : "sort-i off"} aria-hidden="true" />
         )}
-      </button>
+      </Button>
     </th>
   );
 }
@@ -567,7 +569,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
     <tbody className={closed ? "grp closed" : "grp"}>
       <tr className="grp-h" data-testid="group" data-stack={g.name}>
         <th colSpan={9} scope="rowgroup">
-          <button
+          <Button variant="ghost"
             type="button"
             className="grp-t"
             aria-expanded={!closed}
@@ -586,7 +588,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
                 <HealthStrip codes={strip} label={g.title} step={stripStep} />
               </span>
             )}
-          </button>
+          </Button>
         </th>
       </tr>
       {!closed &&
@@ -650,7 +652,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
           <span className="nm-t">{r.title}</span>
           {r.title !== r.name && <span className="sub mono">{r.name}</span>}
         </a>
-        {r.restarts > 0 && <span className="pill warn">{r.restarts}× exit/1h</span>}
+        {r.restarts > 0 && <Badge variant="warning">{r.restarts}× exit/1h</Badge>}
       </td>
       <td className="c-stack" data-l="Stack">
         <a href={`/app/containers?stack=${encodeURIComponent(r.stack)}`}>{r.stack}</a>
@@ -661,7 +663,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
         </span>
       </td>
       <td className="c-state" data-l="State" title={statusText(r, now)}>
-        <span className={`st-l ${r.dot}`}>{r.label}</span>
+        <Badge variant={statusBadge(r.dot)}>{r.label}</Badge>
         {r.exit_code !== null && r.exit_code !== 0 && (
           <>
             {" "}

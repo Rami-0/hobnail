@@ -288,3 +288,11 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .card-footer{justify-content:flex-end;padding-top:var(--s-3);border-top:1px solid var(--border)}
 .separator{margin:var(--s-2) 0;border:0;border-top:1px solid var(--border)}
 .tooltip{padding:var(--s-1) var(--s-2);border-radius:var(--r-sm);background:var(--primary);color:var(--primary-foreground);font-size:var(--fs-xs);box-shadow:var(--shadow-sm)}
+
+/* Compact table density with explicit numeric alignment. */
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+.tbl :is(th,td){height:var(--row);padding:0 var(--s-3);text-align:left;border-bottom:1px solid var(--border)}
+.tbl th{height:var(--ctl-h);color:var(--muted-foreground);font-size:var(--fs-xs);font-weight:500;white-space:nowrap}
+.tbl tr:last-child td{border-bottom-color:transparent}
+.tbl tbody tr:hover td{background:var(--muted)}
+.tbl :is(th,td):is(.num,.c-num){text-align:right;font-variant-numeric:tabular-nums}
