@@ -1,3 +1,5 @@
+import { PageHeader } from "../ui/PageHeader.tsx";
+import { Skeleton } from "../ui/Skeleton.tsx";
 // Route -> page, inside the shell (which marks #root[data-ready="1"] once
 // it is drawn with a known session; the browser checks wait for it).
 // The Containers and container pages are lazy chunks (their default
@@ -66,9 +68,9 @@ function Loading() {
     <div className="page" aria-busy="true">
       <div className="sk-rows">
         <output className="sr">Loading…</output>
-        <span className="sk" />
-        <span className="sk" />
-        <span className="sk" />
+        <Skeleton />
+        <Skeleton />
+        <Skeleton />
         {/* The fonts the shell and the table use, laid out in this cheap
             first frame, so their first use does not land in a later, larger one. */}
         <span className="sr" aria-hidden="true">
@@ -125,7 +127,7 @@ export function App() {
   }
   if (!s.session?.user) {
     if (s.session && route.name === "settings") return <main className="page narrow" id="main">
-      <h1>Settings</h1>
+      <PageHeader title="Settings" />
       <Banner kind="warn" testId="settings-locked" action={<SignInPrompt retry={() => window.location.reload()} />}>
         Sign in to access Settings.
       </Banner>

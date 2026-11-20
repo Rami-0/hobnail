@@ -234,7 +234,7 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
     case "stale":
       actions = (
         <>
-          <Button variant="primary" className="sm" data-testid="reload-keep" busy={busy} onClick={() => void reloadKeep()}>
+          <Button variant="outline" size="sm" data-testid="reload-keep" busy={busy} onClick={() => void reloadKeep()}>
             Reload and keep my input
           </Button>
           <Button className="sm" data-testid="discard" onClick={onClosed}>
@@ -302,7 +302,7 @@ export function EditDialog({ open, name, title, onClosed, onSaved }: EditDialogP
           >
             Cancel
           </Button>
-          <Button ref={saveRef} type="submit" form={formId} variant="primary" busy={busy} disabled={stuck || phase !== "ready"} data-testid="save">
+          <Button ref={saveRef} type="submit" form={formId} variant="default" busy={busy} disabled={stuck || phase !== "ready"} data-testid="save">
             Save
           </Button>
         </>
