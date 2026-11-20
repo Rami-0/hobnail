@@ -152,7 +152,7 @@ export default function Notifications({ editorOnly }: { editorOnly?: boolean }) 
   return <>
     <FailureNote failure={failure} retry={() => { void load(); }} />
     {data && <>
-      <Collection kind="channel" title="Notification channels" path="channels" fields={channelFields} hash={data.hash}
+      <Collection secondaryAction kind="channel" title="Notification channels" path="channels" fields={channelFields} hash={data.hash}
         entries={channels(data)} editorOnly={editorOnly} renameKey="name" body={channelBody} create={newChannel} afterSave={saveAndTest}
         renameRules={(id) => data.rules.filter((rule) => Array.isArray(rule.item.channels) && rule.item.channels.includes(id)).map((rule) => String(rule.id))}
         row={channelDetails}

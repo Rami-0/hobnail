@@ -33,6 +33,7 @@ type Props = Snapshot & {
   renameKey?: string;
   renameRules?: (id: Entry["id"]) => string[];
   editorOnly?: boolean;
+  secondaryAction?: boolean;
 };
 
 export function Collection(props: Props) {
@@ -94,7 +95,7 @@ export function Collection(props: Props) {
   const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session) { setFailure(undefined); void refresh(); } else setFailure({ kind: "sign_in", status: 401, message: editingSessionRequired }); }); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
-      <CardHeader title={title} action={<Button ref={add} variant={kind === "channel" ? "outline" : "default"} onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>} />
+      <CardHeader title={title} action={<Button ref={add} variant={props.secondaryAction ? "outline" : "default"} onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>} />
       {!removing && feedback}
       {entries.length === 0 && <p className="muted">No entries yet.</p>}
       <div className="settings-list">{entries.map((item, index) => {

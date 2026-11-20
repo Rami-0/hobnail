@@ -67,7 +67,7 @@ export default function Containers() {
   return <>
     <FailureNote failure={failure} retry={() => { void load(); }} />
     {data && <>
-      <Collection kind="pattern" title="Hidden containers" path="docker" fields={patternFields} entries={patterns(data)}
+      <Collection secondaryAction kind="pattern" title="Hidden containers" path="docker" fields={patternFields} entries={patterns(data)}
         hash={data.hash} refresh={refresh(patterns)} renderDetails={(input) => <PatternMatches pattern={String(input.pattern ?? "")} names={names} />} />
       <Collection kind="group" title="Groups" path="groups" fields={groupFields} entries={groups(data)}
         hash={data.hash} reorder body={(patch, input) => ({ name: input.name, ...patch })} refresh={refresh(groups)} />
