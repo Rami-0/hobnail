@@ -1,3 +1,4 @@
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { ActivityIcon, ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, ClockIcon, CpuIcon, HardDriveIcon, MemoryStickIcon, ScrollTextIcon, ThermometerIcon } from "lucide-react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
@@ -101,15 +102,11 @@ export default function Overview() {
   const extraProblems = Math.max(0, problems - overview.attention.length);
   const cleanStops = rows.filter((row) => row.state !== "running" && row.attention === null).length;
   return <div className="page ov" data-testid="overview">
-    <div className="ov-head">
-      <div className="ov-hi">
-        <h1 className="display">{overview.greeting ?? "Hello"}</h1>
-        {seen > 0 && now - seen >= 300 && <p className="since">Since you last looked (<RelativeTime at={seen} />) · {overview.starts_since} starts · {overview.crashes_since} crashes · {overview.alerts_since} alerts</p>}
-      </div>
-      <div className="ov-meta"><span className="ov-clock num">{clock}</span><span className="upd">updated <RelativeTime at={overview.now} /></span></div>
-    </div>
+    <PageHeader title={overview.greeting ?? "Hello"}
+      description={seen > 0 && now - seen >= 300 ? <p className="since">Since you last looked (<RelativeTime at={seen} />) · {overview.starts_since} starts · {overview.crashes_since} crashes · {overview.alerts_since} alerts</p> : undefined}
+      actions={<div className="ov-meta"><span className="ov-clock num">{clock}</span><span className="upd">Updated <RelativeTime at={overview.now} /></span></div>} />
     {error && <p role="alert">{error}</p>}
-    <section className="panel primary pulse" aria-label="Status">
+    <section className="panel pulse" aria-label="Status">
       <section className="hs" aria-label="Container health">
         {health.map(({ value, label, href, hot }) => (
           <a key={label} href={href} className={["hs-cell", hot && "hot", value === 0 && "zero"].filter(Boolean).join(" ")}>
