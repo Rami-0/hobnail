@@ -2,7 +2,7 @@
 //! with request and response shapes, is in the module docs of `settings`.
 
 use bytes::Bytes;
-use hyper::{HeaderMap, Method, Response, StatusCode};
+use hyper::{Method, Response, StatusCode};
 use serde_json::{json, Map, Value as J};
 use std::sync::Arc;
 
@@ -21,9 +21,8 @@ pub struct Call {
     pub method: Method,
     /// Path segments after `/api/settings/`, percent-decoded.
     pub segs: Vec<String>,
-    pub headers: HeaderMap,
+    pub session: crate::auth::Session,
     pub body: Bytes,
-    pub user: String,
 }
 
 pub fn respond(status: StatusCode, v: &J) -> Response<Body> {
@@ -69,20 +68,16 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     let segs: Vec<&str> = call.segs.iter().map(String::as_str).collect();
     let get = call.method == Method::GET || call.method == Method::HEAD;
     let post = call.method == Method::POST;
-    let user = call.user.as_str();
+    let user = call.session.account.name.as_str();
     let json = Reply::Json;
     Ok(match (get, post, segs.as_slice()) {
-        // ---- overview
-        (true, _, ["meta"]) => json(meta(state, user)?),
-        (true, _, ["env"]) => json(env_vars(state)?),
-
         // ---- config file, revisions
         (true, _, ["config"]) => json(raw_get(state)?),
         (_, true, ["config"]) => {
             let r: ops::RawReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |_| {
+            json(store::edit(state, &r.base_hash, user, |current| {
                 Ok(store::Draft {
-                    text: r.text.clone(),
+                    text: restore_channel_fields(&current.text, &r.text)?,
                     note: "raw edit".into(),
                     kind: "config.saved",
                     fields: ops::RAW_FIELDS,
@@ -131,9 +126,13 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
         // whole list rewrote keys the caller never showed (`columns`).
         (_, true, ["docker"]) => {
             let r: CollectionReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::exclude_action(c, &r).and_then(ops::precheck)
-            })?)
+            json(store::edit_with_undo(
+                state,
+                &r.base_hash,
+                user,
+                r.action == ops::Action::Delete,
+                |c| ops::exclude_action(c, &r).and_then(ops::precheck),
+            )?)
         }
         (_, true, ["groups"]) => json(list_post(state, call, &ops::GROUPS)?),
         (_, true, ["containers", "override"]) => {
@@ -172,7 +171,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             let out = crate::widgets::run(&w, &policy).await;
             json(json!({
                 "ok": out.error.is_none(),
-                "html": out.html,
                 "values": out.values,
                 "error": out.error,
                 "duration_ms": out.duration_ms,
@@ -185,13 +183,22 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
             })?)
         }
 
+        (_, true, ["undo-delete"]) => {
+            let r: ops::NameReq = body(call)?;
+            json(store::undo(state, user, &r.name)?)
+        }
+
         // ---- notifications
         (true, _, ["notifications"]) => json(notifications_get(state)?),
         (_, true, ["channels"]) => {
             let r: CollectionReq = body(call)?;
-            json(store::edit(state, &r.base_hash, user, |c| {
-                ops::channel_action(c, &r).and_then(ops::precheck)
-            })?)
+            json(store::edit_with_undo(
+                state,
+                &r.base_hash,
+                user,
+                r.action == ops::Action::Delete,
+                |c| ops::channel_action(c, &r).and_then(ops::precheck),
+            )?)
         }
         (_, true, ["channels", "test"]) => {
             let r: ops::NameReq = body(call)?;
@@ -230,19 +237,6 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
 
         // ---- security
         (true, _, ["security"]) => json(security_get(state)),
-        (_, true, ["security", "password"]) => {
-            let r: ops::PasswordReq = body(call)?;
-            if r.new.is_empty() || r.new.len() > 1024 {
-                return Err(ApiError::invalid("Use 8 to 1024 bytes.", Some("new"), None));
-            }
-            crate::auth::change_password(state, &r.current, &r.new).map_err(password_error)?;
-            json(json!({"ok": true}))
-        }
-        (_, true, ["security", "sign-out-others"]) => {
-            crate::auth::sign_out_others(state, &call.headers);
-            json(json!({"ok": true}))
-        }
-
         (false, false, _) => {
             return Err(ApiError::new(
                 StatusCode::METHOD_NOT_ALLOWED,
@@ -253,32 +247,16 @@ async fn dispatch(state: &Arc<AppState>, call: &Call) -> Result<Reply, ApiError>
     })
 }
 
-/// A refused password change on the field it is about (422), in plain
-/// words; anything else (no password set, too many attempts) stays a 400.
-fn password_error(e: String) -> ApiError {
-    let field = if e.contains("current password") {
-        Some("current")
-    } else if e.starts_with("the password must") {
-        Some("new")
-    } else {
-        None
-    };
-    let mut c = e.chars();
-    let msg = c
-        .next()
-        .map(|f| f.to_uppercase().chain(c).collect::<String>() + ".")
-        .unwrap_or_default();
-    match field {
-        Some(f) => ApiError::invalid(&msg, Some(f), None),
-        None => ApiError::bad_request(msg),
-    }
-}
-
+/// Apply one collection action with revision and undo metadata.
 fn list_post(state: &AppState, call: &Call, spec: &ops::ListSpec) -> Result<J, ApiError> {
     let r: CollectionReq = body(call)?;
-    store::edit(state, &r.base_hash, &call.user, |c| {
-        ops::list_action(c, spec, &r).and_then(ops::precheck)
-    })
+    store::edit_with_undo(
+        state,
+        &r.base_hash,
+        &call.session.account.name,
+        r.action == ops::Action::Delete,
+        |c| ops::list_action(c, spec, &r).and_then(ops::precheck),
+    )
 }
 
 fn rev_id(s: &str) -> Result<i64, ApiError> {
@@ -298,28 +276,107 @@ fn get_json(d: &toml_edit::DocumentMut, key: &str) -> J {
     d.get(key).map(doc::item_json).unwrap_or(J::Null)
 }
 
-fn meta(state: &AppState, user: &str) -> Result<J, ApiError> {
-    let cur = store::read_current(state)?;
-    let snap = state.config.snapshot();
-    Ok(json!({
-        "user": user,
-        "hash": cur.hash,
-        "path": state.config.path().display().to_string(),
-        "exists": cur.exists,
-        "bytes": cur.text.len(),
-        "load_error": snap.error,
-        "db_enabled": state.db.is_enabled(),
-        "password_set": crate::auth::password_is_set(state),
-        "limits": {"body_bytes": MAX_BODY, "css_bytes": MAX_CSS},
-    }))
+const CHANNEL_PLAIN_FIELDS: &[&str] =
+    &["url", "headers", "body", "api_base", "token", "webhook_url"];
+const CHANNEL_VALUE_HIDDEN: &str = "<set on host>";
+
+fn channel_tables(doc: &mut toml_edit::DocumentMut) -> Option<&mut dyn toml_edit::TableLike> {
+    doc.get_mut("channels")
+        .and_then(toml_edit::Item::as_table_like_mut)
+}
+
+/// Keep the config editable while preventing inline channel credentials from
+/// entering the settings response. TOML that cannot be parsed cannot be redacted safely.
+fn redact_channel_fields(text: &str) -> Option<String> {
+    let mut doc = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let Some(channels) = channel_tables(&mut doc) else {
+        return Some(text.into());
+    };
+    let mut changed = false;
+    for (_, channel) in channels.iter_mut() {
+        if let Some(table) = channel.as_table_like_mut() {
+            for &key in CHANNEL_PLAIN_FIELDS {
+                if table.contains_key(key) {
+                    table.insert(key, toml_edit::value(CHANNEL_VALUE_HIDDEN));
+                    changed = true;
+                }
+            }
+        }
+    }
+    Some(if changed {
+        doc.to_string()
+    } else {
+        text.into()
+    })
+}
+
+fn restore_channel_fields(original: &str, edited: &str) -> Result<String, ApiError> {
+    if !edited.contains(CHANNEL_VALUE_HIDDEN) {
+        return Ok(edited.into());
+    }
+    let (Ok(mut original), Ok(mut edited_doc)) = (
+        original.parse::<toml_edit::DocumentMut>(),
+        edited.parse::<toml_edit::DocumentMut>(),
+    ) else {
+        return Ok(edited.into());
+    };
+    let (Some(original), Some(channels)) = (
+        channel_tables(&mut original),
+        channel_tables(&mut edited_doc),
+    ) else {
+        return Ok(edited.into());
+    };
+    for (name, channel) in channels.iter_mut() {
+        let Some(saved) = original
+            .get(name.get())
+            .and_then(toml_edit::Item::as_table_like)
+        else {
+            continue;
+        };
+        let Some(table) = channel.as_table_like_mut() else {
+            continue;
+        };
+        let keeps_payload = ["headers", "body"].iter().any(|key| {
+            table.get(key).and_then(toml_edit::Item::as_str) == Some(CHANNEL_VALUE_HIDDEN)
+                && saved.contains_key(key)
+        });
+        for &key in CHANNEL_PLAIN_FIELDS {
+            if table.get(key).and_then(toml_edit::Item::as_str) == Some(CHANNEL_VALUE_HIDDEN) {
+                if let Some(value) = saved.get(key) {
+                    table.insert(key, value.clone());
+                }
+            }
+        }
+        if keeps_payload
+            && ["url", "url_env", "url_file"].iter().any(|key| {
+                table.get(key).and_then(toml_edit::Item::as_str)
+                    != saved.get(key).and_then(toml_edit::Item::as_str)
+            })
+        {
+            return Err(ApiError::denied(super::guard::Denied(format!(
+                "refused: channel {:?} would send hidden values to a new destination; {}",
+                name.get(),
+                super::guard::SECRET_BINDING_RULE
+            ))));
+        }
+    }
+    Ok(edited_doc.to_string())
 }
 
 fn raw_get(state: &AppState) -> Result<J, ApiError> {
     let cur = store::read_current(state)?;
-    let check = validate_report(&cur.text, None, &store::secrets_dir(state));
+    let text = redact_channel_fields(&cur.text);
+    let check = if text.is_none() {
+        json!({"ok": false, "error": "Invalid TOML. Repair the config file on the host to recover its contents."})
+    } else if text.as_deref() == Some(&cur.text) {
+        validate_report(&cur.text, None, &store::secrets_dir(state))
+    } else {
+        let valid = store::validate(&cur.text, &[]).is_ok();
+        json!({"ok": valid, "error": (!valid).then_some("The config contains invalid values. Check the file on the host.")})
+    };
     Ok(json!({
         "hash": cur.hash,
-        "text": cur.text,
+        "text": text.unwrap_or_default(),
         "exists": cur.exists,
         "bytes": cur.text.len(),
         "path": state.config.path().display().to_string(),
@@ -345,7 +402,12 @@ fn validate_report(text: &str, old: Option<&str>, secrets_dir: &std::path::Path)
 
 fn validate_text(state: &AppState, text: &str) -> Result<J, ApiError> {
     let cur = store::read_current(state)?;
-    let mut v = validate_report(text, Some(&cur.text), &store::secrets_dir(state));
+    let mut v = match restore_channel_fields(&cur.text, text) {
+        Ok(restored) => validate_report(&restored, Some(&cur.text), &store::secrets_dir(state)),
+        Err(error) => {
+            json!({"ok": false, "error": error.body["error"], "locked": true, "line": null, "col": null})
+        }
+    };
     v["hash"] = J::String(cur.hash);
     Ok(v)
 }
@@ -376,7 +438,7 @@ fn revision(state: &AppState, id: &str) -> Result<J, ApiError> {
         "id": id,
         "meta": meta,
         "hash": doc::sha256_hex(text.as_bytes()),
-        "text": text,
+        "text": redact_channel_fields(&text).unwrap_or_default(),
     }))
 }
 
@@ -387,7 +449,11 @@ fn revision_diff(state: &AppState, id: &str) -> Result<J, ApiError> {
         .revision_text(id)
         .ok_or_else(|| ApiError::not_found(format!("no revision #{id}")))?;
     let cur = store::read_current(state)?;
-    diff_json(&cur.text, &text, id)
+    let current = redact_channel_fields(&cur.text)
+        .ok_or_else(|| ApiError::bad_request("current TOML is invalid"))?;
+    let revision = redact_channel_fields(&text)
+        .ok_or_else(|| ApiError::bad_request("revision TOML is invalid"))?;
+    diff_json(&current, &revision, id)
 }
 
 /// Diff from the current file to revision `id` ("what restoring changes").
@@ -565,16 +631,24 @@ fn notifications_get(state: &AppState) -> Result<J, ApiError> {
     let status = state.alerts.lock().unwrap().channels.clone();
     let mut channels = Vec::new();
     if let J::Object(m) = get_json(&d, "channels") {
-        for (name, item) in m {
+        for (name, mut item) in m {
             let mut warnings = Vec::new();
             if item.get("url").is_some() {
                 warnings.push("url is stored in the config file as plain text; use url_env if it contains a token");
+            }
+            let mut secrets = secret_refs(&item);
+            if let Some(fields) = item.as_object_mut() {
+                for &key in CHANNEL_PLAIN_FIELDS {
+                    if fields.remove(key).is_some() {
+                        secrets.push(json!({"field": key, "kind": "plain", "set": true}));
+                    }
+                }
             }
             channels.push(json!({
                 "id": name,
                 "type": item.get("type"),
                 "item": item,
-                "secrets": secret_refs(&item),
+                "secrets": secrets,
                 "warnings": warnings,
                 "status": status.get(&name).and_then(|s| serde_json::to_value(s).ok()),
             }));
@@ -585,42 +659,6 @@ fn notifications_get(state: &AppState) -> Result<J, ApiError> {
         .map(|item| json!({"id": item.get("name"), "item": item}))
         .collect();
     Ok(json!({"hash": cur.hash, "channels": channels, "rules": rules}))
-}
-
-/// Env vars referenced by channels and widget headers: names and set/not set.
-fn env_vars(state: &AppState) -> Result<J, ApiError> {
-    let (cur, d) = load(state)?;
-    let mut vars: std::collections::BTreeMap<String, Vec<String>> = Default::default();
-    if let J::Object(m) = get_json(&d, "channels") {
-        for (name, item) in m {
-            for r in secret_refs(&item) {
-                if let (Some(n), Some(f)) = (r["name"].as_str(), r["field"].as_str()) {
-                    vars.entry(n.into())
-                        .or_default()
-                        .push(format!("channel {name}: {f}"));
-                }
-            }
-        }
-    }
-    for item in list_items(&d, "widgets") {
-        let id = item
-            .get("id")
-            .and_then(J::as_str)
-            .unwrap_or("?")
-            .to_string();
-        for r in secret_refs(&json!({"headers_env": item.get("headers_env")})) {
-            if let (Some(n), Some(f)) = (r["name"].as_str(), r["field"].as_str()) {
-                vars.entry(n.into())
-                    .or_default()
-                    .push(format!("widget {id}: {f}"));
-            }
-        }
-    }
-    let list: Vec<J> = vars
-        .into_iter()
-        .map(|(name, used_by)| json!({"name": name, "set": env_set(&name), "used_by": used_by}))
-        .collect();
-    Ok(json!({"hash": cur.hash, "vars": list}))
 }
 
 async fn channel_test(state: &AppState, name: &str) -> Result<J, ApiError> {
@@ -652,16 +690,7 @@ fn css_path(state: &AppState) -> std::path::PathBuf {
     state.env.data_dir.join(CSS_FILE)
 }
 
-/// The saved custom.css and its hash (the `base_hash` of a save), for the
-/// Appearance page.
-pub fn css_current(state: &AppState) -> Result<(String, String), ApiError> {
-    let v = css_get(state)?;
-    Ok((
-        v["css"].as_str().unwrap_or("").to_string(),
-        v["hash"].as_str().unwrap_or("").to_string(),
-    ))
-}
-
+/// Read the saved custom.css and the hash required when saving it.
 fn css_get(state: &AppState) -> Result<J, ApiError> {
     let css = match std::fs::read(css_path(state)) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),

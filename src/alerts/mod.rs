@@ -153,7 +153,7 @@ const DEFAULT_RECOVERY: &str =
 
 // ---------------------------------------------------------------- status
 
-/// Status shown on the page and in /api/state.
+/// Current alert incidents and channel health.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Status {
     /// Enabled rules.

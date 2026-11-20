@@ -5,7 +5,10 @@ Two ways, same file: **Settings in the app** (signed in) or editing
 edits it losslessly (your comments and ordering survive) and keeps every save
 as a revision. See [features/settings.md](features/settings.md).
 
-Everything is optional. **With no config file at all** the page lists every
+The TOML file is optional. Accounts, boards, layout, integrations, dashboard
+settings and setup drafts live in SQLite, not in TOML. A new board is empty;
+discovery supplies suggestions, with no automatic All containers board.
+Login is required. **With no config file at all** the Containers page lists every
 container, grouped by compose project, with running/stopped state, health,
 published ports and links, plus CPU, memory, disk, network, temperature and
 uptime. The file holds only overrides and additions. Edit it and save: the page
@@ -110,7 +113,7 @@ remote = true    # fetch missing dashboard-icons from the CDN once, then serve f
 # auto = true    # guess icons from image names
 ```
 
-Theming: every color, size and font is a CSS variable (see `static/app.css`).
+Theming: every color, size and font is a CSS variable (see `web/src/styles/tokens.css`).
 Put overrides in `data/custom.css`; it is loaded last and re-read on every page
 load. Example:
 
@@ -125,9 +128,18 @@ load. Example:
 allow_hosts = ["192.168.1.10", "127.0.0.1", "*.example.com"]   # empty = any host
 ```
 
-Applies to widgets, HTTP checks, icon fetches and notifications.
+Applies to widgets, HTTP checks, icon fetches, notifications and integration
+tests. It matches hostnames (not URL paths). Integration connection tests check
+all resolved addresses and connect using those checked addresses. With no list,
+LAN addresses are allowed but loopback/link-local/metadata, multicast, reserved
+and selected translation addresses are refused. Explicit matching hosts are the
+host operator override; see [integrations](features/integrations.md). Tests stop
+at redirects and trust public certificate roots only; no certificate pinning.
 
 Widgets, notification channels, `[history]` and `[logs]` are configured in
 the same file: see [features/widgets.md](features/widgets.md),
 [features/notifications.md](features/notifications.md),
 [features/history.md](features/history.md) and [features/logs.md](features/logs.md).
+
+`[logs] require_login` is accepted for old files but is a no-op: every log
+endpoint requires a session, regardless of that value.

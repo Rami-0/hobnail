@@ -1,0 +1,7 @@
+
+> hobnail-web@0.0.1 check
+> tsc -p tsconfig.json --noEmit && oxlint --deny-warnings src scripts && node scripts/guard.mjs
+
+Found 0 warnings and 0 errors.
+Finished in 785ms on 136 files with 231 rules using 4 threads.
+guard: ok

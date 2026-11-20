@@ -2,7 +2,7 @@
 //! deployed config (comments, a command widget, two alert rules).
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::BodyExt;
 use hyper::{HeaderMap, Method, StatusCode};
 use serde_json::{json, Value as J};
 use std::path::PathBuf;
@@ -69,16 +69,27 @@ async fn call(st: &Arc<AppState>, method: Method, path: &str, body: Option<J>) -
         .filter(|s| !s.is_empty())
         .map(String::from)
         .collect();
+    let token = "ab".repeat(32);
+    let now = crate::auth::now_s();
+    let hash = crate::auth::sha256_hex(token.as_bytes());
+    if st.db.account_session(&hash, now).is_none() {
+        assert!(st.db.create_session(&hash, now, now + 60));
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        hyper::header::COOKIE,
+        format!("rh_session={token}").parse().unwrap(),
+    );
+    let session = crate::auth::request_session(st, &headers).unwrap();
     let resp = api::handle(
         st,
         api::Call {
             method,
             segs,
-            headers: HeaderMap::new(),
+            session,
             body: body
                 .map(|b| Bytes::from(serde_json::to_vec(&b).unwrap()))
                 .unwrap_or_default(),
-            user: "admin".into(),
         },
     )
     .await;
@@ -892,37 +903,6 @@ async fn raw_editor_guard_and_allowed_cases() {
 // ------------------------------------------------------------ pipeline
 
 #[tokio::test]
-async fn unauthenticated_requests_are_refused() {
-    let (dir, st) = state_with(Some(FIXTURE));
-    for path in [
-        "/api/settings/config",
-        "/api/settings/general",
-        "/api/settings/widgets",
-        "/api/settings/notifications",
-        "/api/settings/env",
-        "/api/settings/revisions",
-        "/api/settings/security",
-        "/api/settings/nope",
-    ] {
-        let req = hyper::Request::get(path)
-            .body(Full::new(Bytes::new()))
-            .unwrap();
-        let resp = super::route(&st, req).await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{path}");
-        let body = resp.into_body().collect().await.unwrap().to_bytes();
-        assert!(!String::from_utf8_lossy(&body).contains("homelab"));
-    }
-    // Writes are refused by the auth guard as well (defense in depth).
-    let body = json!({"base_hash": hash(FIXTURE), "page": {"title": "x"}}).to_string();
-    let req = hyper::Request::post("/api/settings/general")
-        .body(Full::new(Bytes::from(body)))
-        .unwrap();
-    let resp = super::route(&st, req).await;
-    assert!(resp.status() == StatusCode::FORBIDDEN || resp.status() == StatusCode::UNAUTHORIZED);
-    assert_eq!(file(&dir), FIXTURE);
-}
-
-#[tokio::test]
 async fn invalid_input_is_never_written() {
     let (dir, st) = state_with(Some(FIXTURE));
     let h = hash(FIXTURE);
@@ -1095,34 +1075,6 @@ fn plain_words_and_the_key_at_a_column() {
     assert_eq!(ops::key_before(inline, col), Some("name"));
     assert_eq!(ops::key_before("no equals here", 5), None);
     assert_eq!(ops::key_before("= 1", 3), None);
-}
-
-/// Change password: a wrong current password or a short new one is a 422
-/// on that field; the password itself is never echoed.
-#[tokio::test]
-async fn password_errors_land_on_their_field() {
-    let (_dir, st) = state_with(Some(FIXTURE));
-    assert!(st.db.is_enabled(), "this test needs the history database");
-    crate::auth::set_password_for_tests(&st.db, "old password 1");
-    let (s, b) = post(
-        &st,
-        "security/password",
-        json!({"current": "not it at all", "new": "new password 1"}),
-    )
-    .await;
-    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
-    assert_eq!(b["field"], "current");
-    assert_eq!(b["error"], "The current password is wrong.");
-    assert!(!b.to_string().contains("not it at all"));
-    let (s, b) = post(
-        &st,
-        "security/password",
-        json!({"current": "old password 1", "new": "short"}),
-    )
-    .await;
-    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{b}");
-    assert_eq!(b["field"], "new");
-    assert!(!b.to_string().contains("short\""), "{b}");
 }
 
 #[tokio::test]
@@ -1312,10 +1264,6 @@ async fn gets_show_env_names_never_values() {
         .find(|c| c["id"] == "tg")
         .unwrap();
     assert_eq!(tg["secrets"][0]["set"], false);
-    let (_, e) = get(&st, "env").await;
-    assert!(!e.to_string().contains("super-secret-value"));
-    assert_eq!(e["vars"].as_array().unwrap().len(), 2);
-
     let (s, w) = get(&st, "widgets").await;
     assert_eq!(s, StatusCode::OK, "{w}");
     let procs = w["widgets"]
@@ -1351,7 +1299,6 @@ async fn gets_return_hash_and_values() {
         "notifications",
         "history",
         "config",
-        "meta",
     ] {
         let (s, b) = get(&st, path).await;
         assert_eq!(s, StatusCode::OK, "{path}: {b}");
@@ -2621,4 +2568,55 @@ fn switches_off_then_on_give_back_the_file() {
     // Already on: nothing changes.
     let t = "[system]\nenabled = true\n";
     assert_eq!(sys(t, true), t);
+}
+
+#[tokio::test]
+async fn settings_hide_inline_channel_values_and_undo_preserves_them() {
+    let config = "[channels.hook]\ntype = \"webhook\"\nurl = \"https://example.com/SECRET-URL\"\nbody = '{\"message\":\"SECRET-BODY\"}'\nheaders = { Authorization = \"SECRET-HEADER\" }\n";
+    let (dir, st) = state_with(Some(config));
+    for path in ["notifications", "config"] {
+        let (status, data) = get(&st, path).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {data}");
+        assert!(!data.to_string().contains("SECRET-"), "{path}: {data}");
+    }
+    let (_, raw) = get(&st, "config").await;
+    let moved = raw["text"].as_str().unwrap().replace(
+        "url = \"<set on host>\"",
+        "url = \"https://other.example/path\"",
+    );
+    let (status, problem) = post(
+        &st,
+        "config",
+        json!({"base_hash": raw["hash"], "text": moved}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(file(&dir), config);
+    let (status, saved) = post(&st, "config", json!({
+        "base_hash": raw["hash"], "text": format!("{}\n[page]\ntitle = \"New title\"\n", raw["text"].as_str().unwrap())
+    })).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let original = file(&dir);
+    let (status, removed) = post(
+        &st,
+        "channels",
+        json!({
+            "base_hash": saved["hash"], "action": "delete", "id": "hook"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    let token = removed["undo_token"].as_str().unwrap();
+    let (status, restored) = post(&st, "undo-delete", json!({"name": token})).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(file(&dir), original);
+    assert!(
+        original.contains("SECRET-URL")
+            && original.contains("SECRET-HEADER")
+            && original.contains("SECRET-BODY")
+    );
+    assert_eq!(
+        post(&st, "undo-delete", json!({"name": token})).await.0,
+        StatusCode::CONFLICT
+    );
 }

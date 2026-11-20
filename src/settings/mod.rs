@@ -9,11 +9,8 @@
 //!
 //! # Access
 //!
-//! Every endpoint needs a signed-in user. Writes already passed
-//! `auth::require_write` (session + `X-RH-CSRF` + same Origin) in
-//! `http::server::route`; `route` checks it again (defense in depth). GETs
-//! are not covered by the central guard, so `route` answers 401 without a
-//! session.
+//! The central HTTP router requires an Admin session for reads and writes.
+//! Writes also require a CSRF token and a same-origin Origin or Referer.
 //!
 //! # Conventions
 //!
@@ -35,54 +32,61 @@ mod doc;
 mod guard;
 mod notify;
 mod ops;
-mod store;
+pub(crate) mod store;
 #[cfg(test)]
 mod tests;
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::{Method, Request, Response};
 use std::sync::Arc;
 
 use crate::http::server::Body;
 
 use crate::state::AppState;
-/// custom.css for the Appearance page: the saved text and hash, its size
-/// limit, and the retired token names it sets.
-pub(crate) use api::{css_current, MAX_CSS};
-/// The file as JSON (the values exactly as written, for form values).
-pub(crate) use doc::{item_json, parse as parse_doc_text};
-pub(crate) use ops::css_token_warnings;
-/// The config file on disk with its hash, for the Settings pages that render
-/// their lists on the server (`ui::settings::disk`): the same bytes and hash
-/// the save pipeline checks `base_hash` against.
-pub(crate) use store::read_current;
 
-/// Everything under `/api/settings/`. Generic over the body so tests can
-/// call it with a `Full<Bytes>`; the server passes `Incoming`.
-pub async fn route<B>(state: &Arc<AppState>, req: Request<B>) -> Response<Body>
-where
-    B: hyper::body::Body<Data = Bytes>,
-    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
+/// Recognize settings reads before applying the Admin gate.
+pub(crate) fn handles_read(path: &str) -> bool {
+    let Some(segs) = segments(path) else {
+        return false;
+    };
+    let segs: Vec<_> = segs.iter().map(String::as_str).collect();
+    matches!(
+        segs.as_slice(),
+        ["general"
+            | "containers"
+            | "bookmarks"
+            | "widgets"
+            | "notifications"
+            | "appearance"
+            | "history"
+            | "config"
+            | "revisions"
+            | "security"]
+            | ["revision", _]
+            | ["revision", _, "diff"]
+            | ["history", "export"]
+    )
+}
+
+fn segments(path: &str) -> Option<Vec<String>> {
+    Some(
+        path.strip_prefix("/api/settings/")?
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(percent_decode)
+            .collect(),
+    )
+}
+
+/// Dispatch a settings request after the shared access check.
+pub(crate) async fn route(
+    state: &Arc<AppState>,
+    req: Request<hyper::body::Incoming>,
+    session: crate::auth::Session,
+) -> Response<Body> {
     let (parts, body) = req.into_parts();
     let read = parts.method == Method::GET || parts.method == Method::HEAD;
-    let user = if read {
-        match crate::auth::current_user(state, &parts.headers) {
-            Some(u) => u,
-            None => {
-                return api::error(store::ApiError::new(
-                    StatusCode::UNAUTHORIZED,
-                    "sign in required",
-                ))
-            }
-        }
-    } else {
-        match crate::auth::require_write(state, &parts.headers) {
-            Ok(u) => u,
-            Err(d) => return d.response(),
-        }
-    };
     let declared = parts
         .headers
         .get(hyper::header::CONTENT_LENGTH)
@@ -108,21 +112,14 @@ where
             }
         }
     };
-    let path = parts.uri.path();
-    let rest = path.strip_prefix("/api/settings").unwrap_or(path);
-    let segs: Vec<String> = rest
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(percent_decode)
-        .collect();
+    let segs = segments(parts.uri.path()).expect("settings path");
     api::handle(
         state,
         api::Call {
             method: parts.method,
             segs,
-            headers: parts.headers,
+            session,
             body,
-            user,
         },
     )
     .await

@@ -16,19 +16,17 @@ config at all. The Docker events stream keeps the list current within ~0.3 s.
   for compose projects), on Overview's "Needs attention", "Top CPU" and
   "Recent events" rows, on Host, History and Alerts rows, and in Settings ›
   Containers and groups. The container page's Logs tab is the viewer.
-- Why a container is red is one click from Overview: its "Needs attention"
-  row says "unhealthy for 41 min" (and, signed in, the failing check's first
-  line) and opens the container, whose "Why is this red?" note says since
-  when, how many checks in a row and, signed in, shows the probe output and
-  the last five checks. Signed out, probe output never reaches a page, a
-  fragment or the live updates. The since-time comes from the newest stored
-  health event, clamped to the container's start (and to any later start
-  event): the recorder stores a health event only when it differs from the
-  last one for that name, so a container recreated under the same name would
-  otherwise show the old one's "unhealthy for 2h".
+- Why a container is red is one click from Overview. Admin/Owner can see
+  probe diagnostics and recent health checks; Viewers never receive them.
+  Since-times are clamped to the current container start.
 - Overrides (config or Settings → Containers and groups): name, group, icon,
   url, description, hide, order; `[docker] exclude` globs; `[[groups]]`.
   `size` is still accepted and offered ("Card size") but has no effect: there
   is no card grid.
 - Labels on containers: `hobnail.hide`, `.name`, `.group`, `.icon`, `.url`
   (the older `rust-homepage.*` labels still work; `hobnail.*` wins).
+
+The React inventory is `/app/containers`; data requires login and respects
+account scopes. Scoped accounts see only containers targeted by granted boards.
+Discovery does not populate new boards automatically. Inspect environment
+values and process commands require Admin/Owner.

@@ -1,6 +1,6 @@
 # Design v2: UI, history and in-app settings
 
-Status: **implemented** (V1 to V4, 2026-11-14). Written as the spec after M0 to
+Status: **implemented; updated for the React port** (V1 to V4, 2026-11-14). Written as the spec after M0 to
 M5; where the implementation showed the spec was wrong or incomplete, the text
 below was fixed and the change is listed in section 9. It is the contract the
 implementation work is built against. When the code and this file disagree, fix
@@ -22,20 +22,20 @@ hierarchy, and no memory: the page only knew "now". Three things change:
    only way to change anything.
 
 The hard constraints from `GOALS.md` still apply: tiny RAM, tiny image, one static
-binary, no Node, no frontend build step, nothing leaves the machine unless the user
+binary, no Node at run time, nothing leaves the machine unless the user
 configured it.
 
 ## 1. Decisions
 
 | Topic | Decision | Reason |
 |---|---|---|
-| UI technology | Server-rendered `maud` + hand-written CSS + ~15 KB of vanilla JS. **No** Leptos/Dioxus/Yew, no Tailwind, no chart library. | WASM UI frameworks ship a 0.5 to 2 MB bundle and a heavy toolchain, and they do not fix a design problem. Pages already render in under a millisecond. |
-| Charts | Inline SVG, drawn on the server from database series. | Zero JS dependency, works with the existing SSE swap, a few hundred bytes per chart. |
-| Icons | One inline SVG sprite of ~30 hand-picked line icons. | No icon font, no CDN. |
+| UI technology | React 19, TypeScript, Vite; UI SDK, Lucide and Recharts; hand-written CSS on §11 tokens. No Tailwind or WASM. | One embedded client and same-origin Rust API. |
+| Charts | Drawn in the browser from JSON series; Recharts for full charts, plain SVG for small graphics. | Lazy chart code. |
+| Icons | Lucide React, imported per icon. Opt-in dashboard-icons for service icons. | No icon font or CDN requirement. |
 | Fonts | System stacks only, `tabular-nums` for every number. | Works offline, no download. |
 | Database | SQLite via `rusqlite` (bundled), WAL mode, page cache capped at 2 MiB. | Range queries and rollups are exactly what it is good at. Costs about 1 MB of binary. |
 | Config editing | Lossless edits with `toml_edit` (keeps comments, order, unknown keys), validated with the existing `config::parse` before every write. | A form save must never destroy the user's hand-written comments. |
-| Auth | **Viewing stays open** (network-level, as today). **Any write needs a login.** | See section 6. An editor that anyone on the LAN can use is a remote-code-execution hole in this container. |
+| Auth | Application data requires named-account login; Owner/Admin/Viewer and optional board/integration scopes. | See section 6. |
 | Command widgets | Can only be created or changed **in the file**, never from the app. | They run shell commands. The app shows them read-only with a lock icon. |
 
 ## 2. Visual language
@@ -89,8 +89,8 @@ tabs, empty state, loading skeleton, inline chart with hover read-out.
 
 ## 3. Layout and pages
 
-Server-rendered full pages; navigation is plain links (fast enough that a SPA
-buys nothing). The existing SSE channel keeps swapping fragments for live data.
+One client-rendered application with real URLs for pages and dialogs. The SSE
+channel carries JSON events, with topics following mounted views.
 
 **Shell**
 - **Sidebar** (240 px): title and logo, nav (Overview, Containers, History,
@@ -145,8 +145,12 @@ cost is measured in `docs/measurements.md`). Interval is configurable
 | `ctr_samples` | per container name: cpu %, memory bytes | 6 h at 15 s | same rollups |
 | `events` | docker lifecycle (start, stop, die with exit code, oom, health change), alert fired/resolved/delivery failed, config saved/restored, login ok/failed, app start | n/a | kept 180 d, capped at 100k rows |
 | `config_revisions` | full config text, author, note, time | n/a | newest 200 kept |
-| `sessions` | hash of the session token, created, expires | n/a | pruned when expired |
-| `kv` | small settings (password hash, schema extras) | n/a | n/a |
+| `sessions` | user ID, hash of token, public revocation ID, created, expires | n/a | pruned when expired |
+| `kv` | small legacy settings and migration metadata | n/a | n/a |
+| `users`, `access_grants`, `invites` | accounts, board/integration grants and single-use invitations | durable | none |
+| `boards`, `board_items` | versioned sections, items and responsive layout | durable | none |
+| `integrations` | HTTP connection metadata and write-only origin-bound credentials | durable | none |
+| `settings`, `drafts` | dashboard settings and per-user setup/edit drafts | durable | none |
 
 Containers are keyed by **name** (ids change on every recreate). A maintenance job
 runs hourly: roll up, prune, `PRAGMA optimize`; weekly `incremental_vacuum`.
@@ -155,7 +159,7 @@ runs hourly: roll up, prune, `PRAGMA optimize`; weekly `incremental_vacuum`.
 containers). Idle RAM with the DB and sampler running: under 8 MiB (target remains
 15). If a number misses, say so in `docs/measurements.md`.
 
-**Read API (JSON, no auth, same open model as the page)**
+**Read API (JSON, authenticated; see [api.md](api.md) for roles and scopes)**
 
 - `GET /api/history/system?metric=cpu&range=24h`
 - `GET /api/history/container/<name>?metric=mem&range=6h`
@@ -180,7 +184,7 @@ here. Environment settings (listen address, data dir, socket path) stay in compo
 | Appearance | Theme, `custom.css` editor with live preview (no density setting: there is no config key for it yet) |
 | History and data | Retention, sample interval, database size and row counts, export a snapshot, clear history |
 | Config file | Raw TOML editor with validation as you type (error with line and column), **Revisions** (list, diff against current, restore) |
-| Security | Change password, sign out other sessions, recent logins |
+| Security | Recent logins and account links; password and session management on `/app/account` |
 
 **Editing rules**
 - Edits go through `toml_edit`: comments, ordering and unknown keys survive.
@@ -190,59 +194,58 @@ here. Environment settings (listen address, data dir, socket path) stay in compo
 - If the file changed on disk since the form was loaded (content hash mismatch),
   refuse and ask to reload, so a hand edit is never silently overwritten.
 - An invalid result is never written. The field that failed is highlighted.
-- Secrets are never shown or stored by the app. Forms hold an env var name.
+- Secrets are never returned by the app. Config forms hold env-var names or
+  file paths; browser-entered integration secrets live in SQLite with their
+  bound origin, outside config revisions.
 - Restoring a revision creates a new revision; nothing is deleted from history.
 - Every change is an event in the timeline ("config saved by admin: widgets").
 
 ## 6. Security model
 
-The old model (no login) was acceptable because nothing could be changed from the
-browser. Once the app can write config, that stops being true, because a
-`command` widget runs shell commands inside this container, which has the Docker
-socket. So:
+Application data requires login; the React shell, assets, health probe,
+session probe and credential-entry endpoints are public exceptions. The route
+table and scope gate in `src/api/access.rs` are enforced before dispatch.
 
 | Rule | Detail |
 |---|---|
-| Viewing | Open to anyone who can reach the port (LAN and tailnet only; not `0.0.0.0` on the host). Unchanged. |
-| Any write | Requires a valid session. All `POST`/`PUT`/`DELETE` routes check it; there is no unauthenticated write route. |
-| First-run | No password is set until the owner runs `docker exec -it hobnail /hobnail set-password` (reads from the TTY without echo, or from stdin when piped). Until then `/settings` shows how to do this and nothing is writable. No web "claim" form, so nobody can race the owner. |
-| Password storage | PBKDF2-HMAC-SHA256 (`ring`, already compiled in via rustls), at least 600,000 iterations, random salt, constant-time compare. Hash in the `kv` table. Never logged. |
-| Sessions | 32 random bytes, only the SHA-256 is stored. Cookie `rh_session`: `HttpOnly; SameSite=Strict; Path=/; Max-Age=7d`, revocable. The server-side expiry slides; the browser cookie keeps its 7-day `Max-Age` unless a page calls `auth::refresh_cookie`. (`Secure` cannot be set over plain HTTP; the tailnet is already encrypted by WireGuard.) |
-| CSRF | `SameSite=Strict` **and** a required `X-RH-CSRF` header on every write **and** `Origin`/`Host` check. |
-| Brute force | Per-IP and global back-off after failed logins (1 s, 2 s, 4 s ... capped at 60 s), failed logins logged as events. Clients that already signed in successfully since the app started skip the *global* back-off (they keep their per-IP one), so a stranger cannot lock the owner out with one wrong guess a minute. |
-| Command widgets | Cannot be created, edited or enabled from the app. The editor refuses a raw-config save that adds or changes a `command` widget, or sets `enabled = true` on one, unless it already existed identically. They are managed in the file. |
-| Secrets (bound) | The app uses secrets but can never read them. A new `*_file` path from the app must be inside `{data_dir}/secrets/` (also after resolving symlinks; a denylist missed `/host/proc/self/environ`). A widget or webhook with secret headers, and a Telegram channel with a custom `api_base`, cannot get a new destination or new secret references from the app unless that exact pair is already in the file; the widget preview follows the same rule. |
-| Login history | `auth.*` events (failed logins carry the client IP) are returned by `/api/events` and shown on pages only to a signed-in session. |
-| `allow_hosts` | Editable (signed in), with a warning that widening it enables outbound requests to more hosts. |
-| Output | The app never prints secrets: not in pages, JSON, logs or revisions (revisions store the config, which only ever holds env var names). |
-| Enforcement | One gate in `http::server::route`: every non-`GET`/`HEAD` request must pass `auth::require_write` before reaching any module (only `POST /api/login` is exempt and checks `Origin` itself). Tested end to end for every write route in `src/http/gate_tests.rs`. |
+| Accounts | One Owner plus invited Admin and Viewer accounts. Only the Owner manages users, roles, invitations and scopes. |
+| First-run | The first visitor to `/app` sets the owner username and password in the browser. `hobnail set-password [username]` is optional host recovery. A migrated legacy-password database locks browser claims until host recovery. |
+| Password storage | Salted argon2id in SQLite, 19,456 KiB, two passes, one lane. One shared hashing lock bounds concurrency and can return 429. |
+| Sessions | 32 random bytes, only SHA-256 stored. HttpOnly, SameSite=Strict, Path=/, seven-day sliding expiry and cookie renewal; revocable. No Secure cookie flag with the plain-HTTP default. |
+| Roles | Viewer reads and manages their account. Admin edits settings. Owner also manages accounts; the sole Owner cannot be deleted, disabled or demoted. |
+| Scopes | Owner grants boards/integrations. Scoped accounts see containers via granted boards only; host-wide pages are refused. Scoped Admin edits are restricted to granted boards/integrations; no global Settings or entity creation/deletion. |
+| Writes | Matching Origin (or Referer) and Host on every write; authenticated writes require X-RH-CSRF, obtained through GET /api/v1/session. Credential entry checks origin without an existing session. |
+| Host guard | Unknown hostnames return 421; IP literals, localhost, RH_HOSTNAME and RH_ALLOWED_HOSTS globs are accepted. Health is exempt. |
+| Brute force | Per-peer-IP and global failed-login back-off, exponential to 60 s; five free global failures. Separate per-account password-change limiter. Proxy clients share the proxy peer IP. |
+| Command widgets | File-only: cannot be added, edited, enabled or converted from browser forms or raw config. Deletion is allowed. |
+| Config secrets | New file references must resolve inside data/secrets. Secret-bearing destination/reference pairs must already exist in the host file. Preview uses the same guards. Inline channel fields are redacted from Settings, raw config, revisions and diffs; an invalid config must be repaired on the host before the raw editor can show it. |
+| Integration secrets | Write-only SQLite credentials bound to the normalized origin; sent only there. Changing origin requires a new credential or clearing it. Paths are not part of the binding. |
+| Viewer output | No configuration, credential values, integration paths, environment values, process commands or probe diagnostics; auth events are administrative. Streams recheck sessions and grants. |
+| Outbound requests | http.allow_hosts is host policy. Integration tests additionally reject restricted addresses unless explicitly allowed, stop at redirects and trust public certificate roots only. No pinning yet. |
 
 ## 7. Module contract (so parallel work merges cleanly)
 
 New code lives in new files wherever possible.
 
 ```
-src/db/mod.rs      Db handle, schema, migrations, record_* / queries, maintain()    (storage work)
-src/db/api.rs      JSON read API handlers: /api/history/*, /api/events               (storage work)
-src/auth.rs        password hash, sessions, rate limit, set-password CLI, login API  (storage work)
-src/ui/shell.rs    page shell: sidebar, top bar, palette, icon sprite                (UI work)
-src/ui/pages/*.rs  overview, containers, container detail, history, alerts, login    (UI work)
-src/ui/chart.rs    SVG sparkline and line chart from a series                        (UI work)
-src/settings/*.rs  toml_edit patching, revisions, settings API                       (settings work)
-src/ui/settings/*  settings pages                                                    (settings work)
-static/*.css|js    new design system                                                 (UI work)
+web/                React client, UI wrappers, charts, routes and unit/browser checks
+src/api/            versioned JSON contracts, access gate, boards/integrations/accounts
+src/read_model/     presentation data shared by API handlers
+src/http/assets.rs  embedded raw/gzip client, cache and CSP headers
+src/db/             SQLite history, accounts, dashboard data and migrations
+src/auth.rs         argon2id, sessions, rate limits and recovery CLI
+src/settings/       lossless TOML editing, guards, revisions and legacy JSON API
 ```
 
-`AppState` gets `pub db: Arc<db::Db>`. `db::Db` is a synchronous handle (internal
+`AppState` holds `pub db: Arc<db::Db>`. `db::Db` is a synchronous handle (internal
 mutex around one connection). Async callers wrap read queries in
 `tokio::task::spawn_blocking`; the sampler's 15 s batch write is small enough to
-run inline. The public API is fixed in `src/db/mod.rs` (signatures only until the
-storage work lands). The UI must compile and render against the stub, showing an
-empty chart state, and fill in once the real implementation is merged.
+run inline. Database operations serialize through this handle; API handlers expose typed JSON
+read models rather than rendering HTML templates.
 
 ## 8. Quality bar and how it is checked
 
-- `cargo fmt --check`, `clippy -D warnings`, `cargo test` gate every build (as now).
+- `scripts/cargo.sh fmt --check`, `clippy -D warnings`, `test`, plus client type, lint, unit and bundle-size checks gate every build (as now).
 - Unit tests: rollups and retention, series downsampling, password hash and
   session expiry, rate limit, `toml_edit` patches that preserve comments, config
   validation refusing bad input, the `command` widget guard, CSRF rejection.
@@ -252,6 +255,14 @@ empty chart state, and fill in once the real implementation is merged.
   page load, and the cost of the 15 s sampler. Record in `docs/measurements.md`.
 
 ## 9. Corrections after implementation
+
+Historical v2 implementation ledger: current security and client contracts
+are in sections 1, 6 and 7 and the feature pages. Old paths and behavior in
+this table are retained to explain earlier measurements.
+
+Historical v2 implementation ledger. Current security and client behavior are
+in sections 1, 6 and 7 and the feature guides; old asset references below are
+retained to explain earlier measurements.
 
 | Where | Spec said | Built / why |
 |---|---|---|
@@ -264,14 +275,14 @@ empty chart state, and fill in once the real implementation is merged.
 | §6 secrets | env var names only | Plus the secrets-directory allowlist and destination binding (see the §6 table). Found by security review. |
 | §6 brute force | global back-off | Exempts clients that already signed in (see §6). |
 | §3 `page.columns`, group `columns`/`layout` | (v1 options) | No effect in the v2 table; `layout = "list"` makes the flat table the default. |
-| §7 assets | one CSS/JS bundle | The main CSS is inlined in every page; settings pages load `/static/settings.css` and `/static/settings.js` separately so other pages do not carry them. |
+| Historical §7 assets (superseded by React) | one CSS/JS bundle | The main CSS was inlined in every page; settings pages load `/static/settings.css` and `/static/settings.js` separately so other pages do not carry them. |
 | §1 JS size | ~15 KB | `app.js` is ~30 KB (palette, live table patching, charts hover, drawer/rail). Recorded as missed in `docs/measurements.md`. |
 
 ## 10. Design system v3 (Wave 1 design pass)
 
 > **Partly superseded by §11** (ux-pass). Still valid: panel hierarchy, calm
 > zeros, health strips, charts, keyboard, alarm tab. Replaced: Type (§11.3),
-> Motion (§11.2), Themes (§11.2: Ember retired), Installable (§11.12: no
+> Motion (§11.2), Themes (§11.2: Ember retained by the owner), Installable (§11.12: no
 > offline page), the teal accent.
 
 From the Wave 1 design review. The
@@ -329,28 +340,23 @@ built until the owner says yes to it.
 A static prototype of the components and two composed screens was built and
 screenshotted outside the repository (the ux-pass scratch area). Its
 `proto.css` and `proto.js` are written as they should ship: the part between
-`SHIP` and `END SHIP` is what wave 1 lifts into `static/app.css` and
-`static/app.js`; the rest is prototype scaffolding. A behaviour script checks
+`SHIP` and `END SHIP` historically supplied the retired UI; the current
+client styles live in `web/src/styles/`; the rest is prototype scaffolding. A behaviour script checks
 every rule marked "checked" below (70 checks).
 
 ### 11.1 Rules that hold everywhere
 
-- No framework, library, build step, web font or CDN. Platform first
-  (`<dialog>`, `popover`, View Transitions, `@starting-style`), each with a
-  stated fallback (§11.6, §11.8 and the per-feature notes).
-- **Every page works with JavaScript blocked.** Every dialog trigger is a real
-  link (`?add=bookmark`, `?edit=bookmark:3`) to a server-rendered page holding
-  the same form, filled. Writes still need JavaScript, because the write
-  guards (`src/settings/guard.rs`, `auth::require_write`: session, `X-RH-CSRF`
-  header, same origin) stay exactly as they are and a plain form cannot send
-  a header. So: forms carry `method="post"`; submit buttons are rendered
-  `disabled` and enabled by the script (`data-ready`); with the script blocked
-  the form shows its values and a note "Saving needs JavaScript". A password
-  or any other value can never end up in a URL (ROB-15). Login keeps its
-  plain form post (exempt from the CSRF header today).
-- **Nothing a signed-out visitor receives carries settings data.** Dialogs,
-  `data-item` JSON, widget URLs, environment-variable names and any form
-  value are rendered only for a session (§11.14).
+- No web font or CDN requirement. React, UI SDK, Lucide and Recharts are
+  the client libraries; additions need a measured bundle cost. UI SDK packages
+  are pinned exactly to 0.1.0-beta.10 (2026-11-18), the owner's sole seven-day
+  age exception; all primitives are wrapped in `web/src/ui/`. Other npm
+  dependencies use min-release-age=7 and ignore-scripts; new crates use the
+  same seven-day policy.
+- **The application needs JavaScript.** The noscript message names the health
+  probe, JSON API and authenticated log download that still answer.
+- **No anonymous or Viewer response carries administrative settings data.**
+  Configuration, secret references and form values require Admin/Owner.
+  The shared access gate applies equally to JSON and streams (§6).
 - One primary action per view. Status is never colour alone: a word, a shape
   or an icon always goes with it. The accent is never a status colour (brand
   Accent and Error have the same luminance, A11Y-17).
@@ -596,14 +602,14 @@ runs the primary (checked).
 
 | Rule | Detail |
 |---|---|
-| The URL is the dialog | Triggers are links (`[data-dlg=<id>]`, `href="?add=bookmark"`, `?edit=bookmark:3`; `data-item` holds the row's values, `data-key` its identity). Opening pushes the current page's URL with that `add=` / `edit=` parameter. A page loaded with the parameter opens the dialog on load (a reload, a shared link, and **Ctrl/⌘/middle click, which opens a new tab whose page opens the same dialog**; checked). Without the script the same URL is the server-rendered form page. Closing removes the parameter: `history.back()` for an entry we pushed, `replaceState` for one we landed on. |
+| The URL is the dialog | Triggers are links (`href="?add=bookmark"`, `?edit=bookmark:3`; React holds row values and identity). Opening pushes the current page's URL with that `add=` / `edit=` parameter. A page loaded with the parameter opens the dialog on load (a reload, a shared link, and **Ctrl/⌘/middle click, which opens a new tab whose page opens the same dialog**; checked). The React router opens the same dialog at that URL; JavaScript is required. Closing removes the parameter: `history.back()` for an entry we pushed, `replaceState` for one we landed on. |
 | Opening | Scales in from 97 % with a slight offset toward the trigger, over `--dur-3`, with `@starting-style`. Focus goes to the first editable field, or the field named by `data-focus`, or the first focusable item of the body. Tab stays inside (native modal). |
 | One at a time | Opening another dialog while one has unsaved input shows the guard instead and opens nothing; from a clean dialog it switches and reuses the history entry with `replaceState` (checked). |
 | Close | Esc, ×, Cancel, a backdrop click (press and release outside the box), **a native close request (`cancel` event, e.g. `requestClose()` or the Android back gesture)** and Back all go through one path: with unsaved input they show the guard, focused on "Keep editing", and Back re-pushes the dialog's URL. A `close` listener clears the state, the history entry and returns focus whatever closed it. "Unsaved" means the values differ from what was loaded (SET-04, SET-58). Esc is ignored by the form dialog while another modal (the confirm) is on top (checked). |
 | Enter | Enter in a single-line field submits with the primary; Ctrl/⌘ Enter submits from a textarea or a list (SET-31). |
 | Save | Validate (§11.5); then busy (§11.4), the body `inert`, Cancel and × disabled (SET-09). Where `inert` is missing the body stays interactive, and a second submit is ignored while busy. |
-| Success | The dialog closes, a toast says what happened ("Added “Wiki” · revision #67"), the list behind updates in place (the server re-renders the list fragment, §11.14) and the new or changed row flashes once (SET-10). Focus returns to the trigger; when the trigger was re-rendered, to the element with the same `data-key` (the edited row's link; checked, SET-08). Saves that change the chrome (title, theme) update it (SET-25). |
-| Server errors | 422: on the field. 409 stale file: a note with "Reload and keep my input" (fetch the new hash, keep every value) and "Discard my input" (SET-15, SET-16, SET-65). 401 session gone: a note with "Sign in", which opens `/login` in a new tab; when that tab is done the user presses Save again and the script first **re-fetches the current page with a same-origin GET and reads the new `<meta name="rh-csrf">`** (the token is derived from the session, so a new login means a new token), then retries. No new token route (SET-17). 403 locked: a note with the lock sentence. Network error: a note, input kept. **When the answer is a note only, focus moves to the note** (checked). |
+| Success | The dialog closes, a toast says what happened ("Added “Wiki” · revision #67"), the list behind updates in place (the client refetches authenticated JSON) and the new or changed row flashes once (SET-10). Focus returns to the trigger; when the trigger was re-rendered, to the element with the same `data-key` (the edited row's link; checked, SET-08). Saves that change the chrome (title, theme) update it (SET-25). |
+| Server errors | 422: on the field. 409 stale file: a note with "Reload and keep my input" (fetch the new hash, keep every value) and "Discard my input" (SET-15, SET-16, SET-65). 401 session gone: a note with "Sign in", which opens `/app/login` in a new tab; when that tab is done the user presses Save again and the script first **asks `GET /api/v1/session` for the new token**, then retries. 403 locked: a note with the lock sentence. Network error: a note, input kept. **When the answer is a note only, focus moves to the note** (checked). |
 | Stays open | Actions that save and then show a result keep the dialog open in edit mode and put the result in the dialog note, never a toast: "Save and send test" (channel), "Fetch now" (widget). |
 
 **Fields per dialog.** No field of today's forms disappears by accident. The
@@ -744,7 +750,7 @@ says so first (SET-53). Esc and the backdrop cancel only the confirm.
 - **History**: the timeline follows the chart range and zoom, pages back,
   shows clock times, rows link to their subject and logs at that moment;
   a chart marker highlights its row (LG-43, LG-44, LG-47, LG-48).
-- **Settings**: `/settings` without the index (SET-22); signed out, only the
+- **Settings**: `/app/settings` without the index (SET-22); signed out, only the
   lock panel (SET-21).
 - **Command palette**: "Logs: X" ranks directly under X; actions for the top
   tasks (Add bookmark, Add widget, Add channel, Add alert rule, Edit X) and one
@@ -833,13 +839,13 @@ is what gets built instead.
 | Y9 | Theme button opens a two-click menu instead of a one-click cycle | A cycle of five is blind and up to four clicks (NAV-41) | Keep the cycle (1 to 4 clicks); [show the theme name in a toast after each step] |
 | Y10 | Fold treemap tiles too small for a name into "+N others" | Tiny tiles cannot carry a name or a logs icon (OV-09) | Slivers without labels stay; their logs are 2 clicks either way |
 | Y11 | Hide the Settings tab strip when signed out (lock panel only) | Nine links that all lead to the same lock panel (SET-21) | Nine dead-end links signed out |
-| Y12 | A config change no longer reloads other open pages; they patch what changed | Reloads lose log search, filters, scroll, input (LG-03) | The reload stays; [it at least never reloads a page with unsaved input or a logs page] |
-| Y13 | Reorder moves behind "Reorder" / ⋯ → Reorder… (3 clicks for one step, n + 2 for n steps, one revision) instead of 1-click arrows that each save | One revision per arrangement and a cancellable draft (SET-42) | Arrows stay at 1 click per step and one revision per step; SET-42 stays open |
+| Y12 | Config changes refetch affected data without document reload | Preserves logs, input, focus and scroll | Implemented in the React live layer. |
+| Y13 | Board edit mode uses a private draft, explicit Save and Cancel | One board-document write per editing session (D17) | Legacy config collection arrows still save per click. |
 | Y14 | Channel test only after saving ("Save and send test") | No new server route; reuses the existing save and `channels/test` | QA SET-52 asked for a test before saving: that needs a new `channels/test` variant taking a draft, under the same guards and the secret-binding rule of the widget preview |
 | Y15 | Channels and rules can be added and edited from the Alerts page as well as Settings | The page that shows alerts is where people act on them (LG-57); 3-click counts depend on it | Channel and rule tasks stay 5 or more clicks via Settings |
 | Y16 | Undo after delete restores the revision before the delete (refused like any write if the file changed since) | Deletes are cheap to reverse; revisions exist | No undo; the confirm is the only safety |
 | Y17 | `/settings` opens the last used tab (the script rewrites the nav link; the server opens General) | Saves a click on repeat visits | `/settings` always opens General |
-| Y18 | Settings lists and form values rendered by the server (§11.14) | No-JS pages, no empty forms while loading (ROB-11, SET-18) | Lists stay JS-rendered from JSON; the no-JS dialog page shows an empty form with a note |
+| Y18 | Superseded by React: lists and values come from authenticated Settings JSON | No Settings data for Viewers | JavaScript required (D6). |
 | Y19 | "Fetch now" shows the raw upstream response so fields can be picked from it (SET-46) | Finding paths without another tool | **Not designed.** The preview keeps returning `html` and `values` only (`src/settings/api.rs`): no response body reaches the browser. Showing it is a widening of what the app reveals and needs its own decision |
 | Y20 | Retire the old token names, keeping aliases (§11.2) | Clear names in the contract | Without aliases an existing `custom.css` breaks |
 | Y21 | Single-control settings save on change (Default theme, System tiles, Recording on/off, rule on/off) | A switch with its own Save does nothing until Save (SET-50) | Keep a Save per section |
@@ -855,18 +861,20 @@ section 11 that says otherwise.**
   rename and names the rules that refer to the old one.
 - **Y9 no:** the theme button keeps its one-click cycle and shows the name of
   the theme it switched to. Change the theme: 1 click per step.
-- **Y12 partly:** a config change still reloads other open pages, but never a
-  logs page and never a page with unsaved input.
-- **Y13 no:** the one-click reorder arrows stay, one revision per step. SET-42
-  is deferred. The reorder dialog is not built.
+- **Y12 superseded by React:** open views refetch changed data; nothing reloads.
+- **Y13 superseded for boards by D17:** draft, Save and Cancel. Legacy config
+  collection arrows still save one revision per step.
 - **Y19 no:** the preview keeps returning `html` and `values` only. SET-46
   stays open.
 - **Budget:** idle RAM is the budget that matters most. The binary and image
   may grow (up to the 20 MB image target in GOALS.md) when that buys function.
 
-### 11.14 Server changes
+### 11.14 Server changes (historical, superseded by the JSON API)
 
-Every server-rendered addition or new GET variant this design needs. "Session"
+The following table records the retired UI contract, not current routes.
+Those pages and fragments were deleted in M4; `/` returns 404 with a link
+to `/app`, no redirects or RH_UI switch. The old UI is on `rust-only`.
+Every server-rendered addition or new GET variant this design needed. "Session"
 means: rendered only for a valid session; without one the page renders as
 today for a visitor (lock panel or no control) and **no settings data of any
 kind** (widget URLs, environment-variable names, channel or rule settings,
@@ -918,7 +926,7 @@ phase) every inlined CSS byte is paid on every page.
   a container page the override dialog (3.3 KB).
 - **Per-row `data-item` JSON**: ≈ 200 bytes per bookmark row, 0.3 to 1 KB per
   widget, channel or rule row; signed in only.
-- **Server-rendered form pages and lists** (Y18) go into the binary as maud
+- **Historical, superseded in M4:** server-rendered form pages and lists (Y18) went into the binary as maud
   code: estimated 15 to 30 KB of binary for the nine tabs' forms and lists,
   most of which replaces markup that is already there; to be measured in
   wave 2.

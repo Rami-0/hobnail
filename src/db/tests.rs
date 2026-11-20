@@ -572,7 +572,7 @@ fn event_cap_and_filters() {
     assert_eq!(open_end.len(), 10);
     // The bounded query walks the rowid (no index on `ts`, and no new one
     // without a migration): SQLite's plan says so. A History window is
-    // therefore still read with the paged loop (`ui::pages::history::scan`).
+    // therefore still read with the paged loop in `api::history`.
     let plan: Vec<String> = db.with(Vec::new(), |i| {
         let mut st = i.conn.prepare(
             "EXPLAIN QUERY PLAN SELECT id FROM events WHERE ts >= 1 AND ts <= 2 ORDER BY id DESC LIMIT 5",
@@ -641,35 +641,32 @@ fn docker_events_are_recorded() {
 fn sessions() {
     let db = Db::open_in_memory().unwrap();
     assert!(db.create_session("h1", 100, 200));
-    assert!(db.touch_session("h1", 150, 210), "valid");
-    // Moved by < 60 s: no write.
-    assert_eq!(
-        count(&db, "SELECT expires FROM sessions WHERE token_hash = 'h1'"),
-        200
-    );
-    assert!(db.touch_session("h1", 150, 400));
-    assert_eq!(
-        count(&db, "SELECT expires FROM sessions WHERE token_hash = 'h1'"),
-        400,
-        "slid"
-    );
-    assert!(!db.touch_session("h1", 400, 900), "expired at 400");
-    assert!(!db.touch_session("nope", 1, 2));
+    assert!(db.account_session("h1", 150).is_some(), "valid");
+    assert_eq!(db.slide_session("h1", 150, 210), None);
+    assert_eq!(db.slide_session("h1", 150, 4000), Some(4000));
+    assert_eq!(db.slide_session("h1", 151, 4001), None);
+    let max_age = 100 + 30 * 86_400;
+    assert_eq!(db.slide_session("h1", 152, max_age + 100), Some(max_age));
+    assert!(db.session_is_valid("h1", max_age - 1));
+    assert!(!db.session_is_valid("h1", max_age));
+    assert!(db.account_session("h1", max_age).is_none());
+    assert_eq!(db.slide_session("h1", max_age, max_age + 3600), None);
+    assert!(db.account_session("nope", 1).is_none());
     db.create_session("h2", 100, 1000);
     db.create_session("h3", 100, 1000);
-    db.delete_sessions_except(Some("h2"));
-    assert!(db.touch_session("h2", 101, 101));
-    assert!(!db.touch_session("h3", 101, 101));
+    db.sign_out_other_sessions(1, "h2", None).unwrap();
+    assert!(db.account_session("h2", 101).is_some());
+    assert!(db.account_session("h3", 101).is_none());
     db.delete_session("h2");
-    assert!(!db.touch_session("h2", 101, 101));
+    assert!(db.account_session("h2", 101).is_none());
     // At most MAX_SESSIONS are kept; the oldest go.
     for n in 0..30 {
         db.create_session(&format!("s{n}"), 1000 + n, 9999);
     }
     assert_eq!(db.session_count(1100), MAX_SESSIONS as u64);
-    assert!(!db.touch_session("s0", 1100, 1100));
-    assert!(db.touch_session("s29", 1100, 1100));
-    db.delete_sessions_except(None);
+    assert!(db.account_session("s0", 1100).is_none());
+    assert!(db.account_session("s29", 1100).is_some());
+    db.sign_out_other_sessions(1, "", None).unwrap();
     assert_eq!(db.session_count(0), 0);
 }
 
@@ -712,7 +709,7 @@ fn clear_history_keeps_settings() {
     assert_eq!(st.revisions, 1);
     assert_eq!(st.oldest_ts, None);
     assert_eq!(db.kv_get("auth.password").as_deref(), Some("h"));
-    assert!(db.touch_session("s", T0 + 1, T0 + 1));
+    assert!(db.account_session("s", T0 + 1).is_some());
     // Recording works again afterwards.
     db.record_containers(T0 + 5000, &[("a", &c)]);
     assert_eq!(
@@ -833,12 +830,18 @@ fn api_events() {
     let body = api::answer(&db, "/api/events", "kind=auth.", T0, true).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["events"][0]["subject"], "admin");
-    // Anonymous viewers never see auth.* events (failed logins carry IPs).
+    db.record_event(T0 + 10, "config.save", "info", "admin", "change note");
+    db.record_event(T0 + 11, "history.clear", "info", "admin", "change note");
+    // Audit events are only visible to administrators.
     let body = api::answer(&db, "/api/events", "kind=auth.", T0, false).unwrap();
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["events"].as_array().unwrap().len(), 0);
     let body = api::answer(&db, "/api/events", "limit=500", T0, false).unwrap();
-    assert!(!body.contains("\"auth."), "{body}");
+    for prefix in ["auth.", "config.", "history."] {
+        assert!(!body.contains(prefix), "{body}");
+    }
+    let admin = api::answer(&db, "/api/events", "limit=500", T0, true).unwrap();
+    assert!(admin.contains("config.save") && admin.contains("history.clear"));
 }
 
 #[test]
@@ -976,7 +979,7 @@ fn upgrade_from_v5_adds_event_indexes() {
     }
     let db = Db::open(&path).unwrap();
     db.with((), |i| {
-        assert_eq!(schema::version(&i.conn).unwrap(), 6);
+        assert_eq!(schema::version(&i.conn).unwrap(), schema::MIGRATIONS.len());
         let idx: Vec<String> = i
             .conn
             .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'events' ORDER BY name")?

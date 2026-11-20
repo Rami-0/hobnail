@@ -12,7 +12,7 @@ use crate::state::AppState;
 const TICK: Duration = Duration::from_secs(1);
 const STATS_EVERY: Duration = Duration::from_secs(5);
 
-/// Watch the config file; push a page reload to viewers when it changes.
+/// Watch the configuration file and notify live clients after a change.
 pub async fn config_watcher(state: Arc<AppState>) {
     let mut iv = tokio::time::interval(Duration::from_secs(2));
     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -49,7 +49,7 @@ pub async fn run(state: Arc<AppState>) {
         }
 
         let unix_now = crate::util::unix_now();
-        for w in cfg.widgets.iter() {
+        for w in cfg.widgets.iter().filter(|_| state.widget_viewers() > 0) {
             let due = {
                 let cache = state.widgets.lock().unwrap();
                 cache
@@ -59,10 +59,16 @@ pub async fn run(state: Arc<AppState>) {
             if !due || !in_flight.lock().unwrap().insert(w.id.clone()) {
                 continue;
             }
-            let (st, w, fl) = (state.clone(), w.clone(), in_flight.clone());
+            let (st, w, fl, run_config) =
+                (state.clone(), w.clone(), in_flight.clone(), cfg.clone());
             tokio::spawn(async move {
-                let out = crate::widgets::run(&w, &st.config.current().http).await;
-                st.widgets.lock().unwrap().insert(w.id.clone(), out);
+                let out = crate::widgets::run(&w, &run_config.http).await;
+                {
+                    let mut cache = st.widgets.lock().unwrap();
+                    if Arc::ptr_eq(&run_config, &st.config.current()) {
+                        cache.insert(w.id.clone(), out);
+                    }
+                }
                 fl.lock().unwrap().remove(&w.id);
                 st.changed(&format!("w-{}", w.id));
             });

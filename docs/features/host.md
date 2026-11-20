@@ -1,4 +1,4 @@
-# Host page (`/host`)
+# Host page (`/app/host`)
 
 Everything the kernel reports about this machine, from the read-only host
 `/proc` and `/sys` mounts. Live numbers refresh every 3 s while the tab is
@@ -18,7 +18,7 @@ history charts move and zoom like the History page: "Earlier", "Zoom in",
   container `veth` links hidden.
 - **Sensors:** every hwmon temperature and fan with high/critical limits.
 - **Who is using the host:** CPU and RAM by container (top 10) and the top 15
-  processes mapped to their container. Process command lines need a sign-in. A container's name
+  processes mapped to their container. Process command lines require Admin/Owner. A container's name
   opens it; a logs icon beside it opens its logs, only for containers whose
   logs may be read (never for an excluded one).
 
@@ -33,3 +33,7 @@ the page): S.M.A.R.T. (needs raw access to the disks under `/dev`; drive
 temperatures appear under Sensors when the kernel exposes them), GPU busy %
 on Intel and NVIDIA (needs perf or device access), systemd failed units
 (needs the system D-Bus socket).
+
+The page and its host topic require login and unrestricted access. Scoped
+accounts cannot read host-wide data. The host topic is released on leaving
+the page; open disclosures and focus survive JSON updates.

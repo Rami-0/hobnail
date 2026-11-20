@@ -11,8 +11,7 @@
 //! bucket, downsampling), `maintain` (rollups, retention, vacuum), `sampler`
 //! (the 15 s task), `api` (JSON read API).
 
-#![allow(dead_code)] // parts of the API are only used by the UI/settings work
-
+pub(crate) mod accounts;
 pub mod api;
 pub mod ctrx;
 mod hostx;
@@ -179,10 +178,9 @@ pub struct EventFilter {
     pub before_id: Option<i64>,
     /// 0 means the default of 50. Capped at 500.
     pub limit: usize,
-    /// Leave out `kind`s starting with this. Anonymous viewers get
-    /// `auth.` excluded: login history (with client IPs) is not dashboard
-    /// data. See [`EventFilter::for_viewer`].
-    pub exclude_kind_prefix: Option<String>,
+    pub hide_auth_events: bool,
+    /// Hide private audit events from viewers.
+    pub hide_audit_events: bool,
     /// Only events with `ts >= since` / `ts <= until` (unix seconds).
     /// Served by the `events_ts` index (schema v6), so a window reads only
     /// its own rows however long the table is.
@@ -191,12 +189,9 @@ pub struct EventFilter {
 }
 
 impl EventFilter {
-    /// Apply what a viewer may see: without a session, `auth.*` events are
-    /// hidden (failed logins carry the client IP).
-    pub fn for_viewer(mut self, signed_in: bool) -> Self {
-        if !signed_in {
-            self.exclude_kind_prefix = Some("auth.".into());
-        }
+    /// Audit events may include account details and configuration changes.
+    pub fn for_admin(mut self, admin: bool) -> Self {
+        self.hide_audit_events = !admin;
         self
     }
 }
@@ -249,11 +244,10 @@ pub const EVENTS_KEEP_SECS: i64 = 180 * 86_400;
 pub const EVENTS_MAX: i64 = 100_000;
 /// Config revisions kept (newest).
 pub const REVISIONS_KEEP: i64 = 200;
-/// Concurrent sessions kept (the oldest are dropped past this).
+/// Concurrent sessions kept per account (the oldest are dropped past this).
 const MAX_SESSIONS: i64 = 20;
 /// A sliding session expiry is only written when it moves by at least this
 /// much, so a busy page does not turn every request into a write.
-const SLIDE_MIN_SECS: i64 = 60;
 /// The event cap is enforced on insert every this many events (and hourly).
 const CAP_EVERY: u32 = 1000;
 const MAX_TEXT: usize = 2 * 1024 * 1024;
@@ -265,6 +259,7 @@ pub(crate) const SYS_COLS: [&str; 8] = [
 ];
 
 impl SysMetric {
+    #[cfg(test)]
     pub const ALL: [SysMetric; 8] = [
         Self::Cpu,
         Self::Load1,
@@ -317,6 +312,27 @@ fn clip(s: &str, max: usize) -> &str {
 pub struct Db {
     inner: Option<Mutex<Inner>>,
     path: Option<PathBuf>,
+}
+
+impl Db {
+    pub(crate) fn dashboard<T, E>(
+        &self,
+        operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<rusqlite::Error>,
+    {
+        let mut inner = self
+            .inner
+            .as_ref()
+            .ok_or(rusqlite::Error::InvalidQuery)?
+            .lock()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let tx = inner.conn.transaction()?;
+        let result = operation(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
 }
 
 pub(crate) struct Inner {
@@ -472,6 +488,7 @@ impl Db {
         Ok(db)
     }
 
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
         Self::init(conn, None)
@@ -766,14 +783,11 @@ impl Db {
                     args.len()
                 ));
             }
-            if let Some(k) = f.exclude_kind_prefix.as_ref().filter(|k| !k.is_empty()) {
-                args.push((k.chars().count() as i64).into());
-                args.push(k.clone().into());
-                sql.push_str(&format!(
-                    " AND substr(kind, 1, ?{}) != ?{}",
-                    args.len() - 1,
-                    args.len()
-                ));
+            if f.hide_auth_events || f.hide_audit_events {
+                sql.push_str(" AND kind NOT GLOB 'auth.*'");
+            }
+            if f.hide_audit_events {
+                sql.push_str(" AND kind NOT GLOB 'config.*' AND kind NOT GLOB 'history.*'");
             }
             if let Some(b) = f.before_id {
                 args.push(b.into());
@@ -804,6 +818,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     /// The newest event id with `ts <= t`, or `None` when every event is
     /// newer: one seek on `events_ts`, so a History window far in the past
     /// starts its scan at the window. Ids and timestamps both grow; among
@@ -887,51 +902,6 @@ impl Db {
 
     // ---- sessions and small settings (used by auth) ----
 
-    /// `token_hash` is the hex SHA-256 of the cookie value. Also drops expired
-    /// sessions and keeps at most `MAX_SESSIONS`.
-    pub fn create_session(&self, token_hash: &str, now: i64, expires: i64) -> bool {
-        self.with(false, |i| {
-            let tx = i.conn.transaction()?;
-            tx.execute(
-                "INSERT OR REPLACE INTO sessions (token_hash, created, expires) VALUES (?1, ?2, ?3)",
-                params![token_hash, now, expires],
-            )?;
-            tx.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
-            tx.execute(
-                "DELETE FROM sessions WHERE token_hash IN
-                 (SELECT token_hash FROM sessions ORDER BY created DESC, expires DESC
-                  LIMIT -1 OFFSET ?1)",
-                [MAX_SESSIONS],
-            )?;
-            tx.commit()?;
-            Ok(true)
-        })
-    }
-
-    /// True if the session exists and has not expired; if so, slides its expiry to
-    /// `new_expires`.
-    ///
-    /// The write only happens when it moves the expiry by at least a minute,
-    /// so the sliding window costs at most one write a minute per session.
-    pub fn touch_session(&self, token_hash: &str, now: i64, new_expires: i64) -> bool {
-        self.with(false, |i| {
-            let cur: Option<i64> = i
-                .conn
-                .prepare("SELECT expires FROM sessions WHERE token_hash = ?1")?
-                .query_row([token_hash], |r| r.get(0))
-                .optional()?;
-            let Some(cur) = cur.filter(|&e| e > now) else {
-                return Ok(false);
-            };
-            if new_expires >= cur + SLIDE_MIN_SECS {
-                i.conn
-                    .prepare("UPDATE sessions SET expires = ?1 WHERE token_hash = ?2")?
-                    .execute(params![new_expires, token_hash])?;
-            }
-            Ok(true)
-        })
-    }
-
     pub fn delete_session(&self, token_hash: &str) {
         self.with((), |i| {
             i.conn
@@ -941,17 +911,7 @@ impl Db {
         });
     }
 
-    /// Sign out everywhere except `keep` (a token hash), or everywhere if `None`.
-    pub fn delete_sessions_except(&self, keep: Option<&str>) {
-        self.with((), |i| {
-            i.conn.execute(
-                "DELETE FROM sessions WHERE token_hash != ?1",
-                [keep.unwrap_or("")],
-            )?;
-            Ok(())
-        });
-    }
-
+    #[cfg(test)]
     /// Number of sessions that have not expired.
     pub fn session_count(&self, now: i64) -> u64 {
         self.with(0, |i| {
@@ -965,10 +925,12 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn kv_get(&self, key: &str) -> Option<String> {
         self.with(None, |i| i.kv_get(key))
     }
 
+    #[cfg(test)]
     pub fn kv_set(&self, key: &str, value: &str) -> bool {
         self.with(false, |i| {
             Inner::kv_set(&i.conn, key, value)?;
@@ -976,18 +938,7 @@ impl Db {
         })
     }
 
-    /// Store a new password hash under `key` and delete every session, in
-    /// one transaction.
-    pub fn replace_password(&self, key: &str, hash: &str) -> bool {
-        self.with(false, |i| {
-            let tx = i.conn.transaction()?;
-            Inner::kv_set(&tx, key, hash)?;
-            tx.execute("DELETE FROM sessions", [])?;
-            tx.commit()?;
-            Ok(true)
-        })
-    }
-
+    #[cfg(test)]
     pub fn kv_delete(&self, key: &str) {
         self.with((), |i| {
             i.conn.execute("DELETE FROM kv WHERE key = ?1", [key])?;

@@ -249,15 +249,13 @@ value = "{{size | bytes}} <{{missing}}>"
     assert_eq!(o.values["_status"], json!(200));
     assert_eq!(o.values["_ok"], json!(true));
     assert!(o.values["_ms"].is_u64());
-    let html = o.html.unwrap();
-    assert!(
-        html.contains(r#"<div class="tile-value w-value">PASS</div>"#),
-        "{html}"
-    );
-    assert!(html.contains("<dt>N</dt><dd>1,234,567</dd>"), "{html}");
-    assert!(
-        html.contains("<dd>1.5 GiB &lt;—&gt;</dd>"),
-        "escaped: {html}"
+    assert_eq!(o.display.headline.as_deref(), Some("PASS"));
+    assert_eq!(
+        o.display.rows,
+        [
+            ("N".into(), "1,234,567".into()),
+            ("Size".into(), "1.5 GiB <—>".into())
+        ]
     );
     assert!(o.fetched_at > 0);
 }
@@ -271,13 +269,17 @@ async fn custom_api_default_rows_and_raw() {
         "/ok",
         "[widgets.fields]\nzeta = \"n\"\nalpha = \"status\"\n",
     );
-    let html = go(&w).await.html.unwrap();
-    let (z, a) = (html.find("zeta").unwrap(), html.find("alpha").unwrap());
-    assert!(a < z, "{html}");
-    assert!(html.contains("<dd>1234567</dd>"));
-    // No fields: the raw JSON.
-    let html = go(&api(port, "/ok", "")).await.html.unwrap();
-    assert!(html.contains("<pre class=\"w-text\">{&quot;"), "{html}");
+    let body = go(&w).await.display;
+    assert_eq!(
+        body.rows,
+        [
+            ("alpha".into(), "pass".into()),
+            ("zeta".into(), "1234567".into())
+        ]
+    );
+    let body = go(&api(port, "/ok", "")).await.display;
+    let raw: Value = serde_json::from_str(body.text.as_deref().unwrap()).unwrap();
+    assert_eq!(raw["status"], "pass");
 }
 
 #[tokio::test]
@@ -312,7 +314,7 @@ async fn custom_api_http_errors() {
     assert_eq!(o.error.as_deref(), Some("HTTP 500 Internal Server Error"));
     assert_eq!(o.values["_status"], json!(500));
     assert_eq!(o.values["_ok"], json!(false));
-    assert!(o.html.is_none());
+    assert!(o.display.text.is_none() && o.display.headline.is_none() && o.display.rows.is_empty());
     let o = go(&api(port, "/401", "")).await;
     assert_eq!(o.error.as_deref(), Some("HTTP 401 Unauthorized"));
 }
@@ -331,18 +333,14 @@ async fn custom_api_text_output() {
     let port = server().await;
     let o = go(&api(port, "/text", "output = \"text\"")).await;
     assert_eq!(o.values["_text"], json!("hello <world>"));
-    let html = o.html.unwrap();
-    assert!(
-        html.contains("<pre class=\"w-text\">hello &lt;world&gt;</pre>"),
-        "{html}"
-    );
+    assert_eq!(o.display.text.as_deref(), Some("hello <world>"));
     let o = go(&api(
         port,
         "/text",
         "output = \"text\"\ntemplate = \"{{_text | upper}}\"",
     ))
     .await;
-    assert!(o.html.unwrap().contains("HELLO &lt;WORLD&gt;"));
+    assert_eq!(o.display.headline.as_deref(), Some("HELLO <WORLD>"));
 }
 
 #[tokio::test]
@@ -441,7 +439,7 @@ async fn custom_api_secret_headers_never_come_back() {
         file.display()
     );
     let leaks = |o: &WidgetOutput| {
-        let all = format!("{:?} {:?} {:?}", o.values, o.html, o.error);
+        let all = format!("{:?} {:?} {:?}", o.values, o.display, o.error);
         ["r3fl3ct-me", "tok-", "quoted"]
             .iter()
             .filter(|s| all.contains(*s))
@@ -508,7 +506,7 @@ async fn command_json() {
     assert_eq!(o.error, None, "{o:?}");
     assert_eq!(o.values["a"], json!(1));
     assert_eq!(o.values["_status"], json!(0));
-    assert!(o.html.unwrap().contains(">1-x<"));
+    assert_eq!(o.display.headline.as_deref(), Some("1-x"));
 }
 
 #[tokio::test]
@@ -549,10 +547,7 @@ async fn command_nonzero_exit() {
 async fn command_text_output_and_env() {
     let o = go(&cmd("echo hello; echo world", "output = \"text\"")).await;
     assert_eq!(o.values["_text"], json!("hello\nworld"));
-    assert!(o
-        .html
-        .unwrap()
-        .contains("<pre class=\"w-text\">hello\nworld</pre>"));
+    assert_eq!(o.display.text.as_deref(), Some("hello\nworld"));
 
     let o = go(&cmd(
         r#"printf '{"home":"%s","foo":"%s","path":"%s"}' "$HOME" "$FOO" "$PATH""#,
@@ -663,4 +658,11 @@ async fn example_command_runs() {
     let o = go(&w).await;
     assert_eq!(o.error, None, "{o:?}");
     assert!(o.values["procs"].as_u64().unwrap() > 0);
+}
+
+#[test]
+fn widget_links_reject_network_path_references() {
+    assert!(safe_link("/local"));
+    assert!(!safe_link("//evil.example"));
+    assert!(!safe_link(r"/\evil.example"));
 }

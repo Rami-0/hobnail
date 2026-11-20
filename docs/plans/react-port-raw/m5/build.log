@@ -1,0 +1,723 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 3.48kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.9s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#3 resolve docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+#4 DONE 0.0s
+
+#5 [internal] load metadata for docker.io/library/rust:1.100-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb
+#5 DONE 0.0s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 353B done
+#6 DONE 0.0s
+
+#7 [build  1/10] FROM docker.io/library/rust:1.100-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb
+#7 resolve docker.io/library/rust:1.100-alpine@sha256:de1e0058543a81ed7b046629167db587c67a94bdf37cce14eb27f0ec83baaffb 0.1s done
+#7 DONE 0.1s
+
+#8 [web 1/6] FROM docker.io/library/node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
+#8 resolve docker.io/library/node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 0.1s done
+#8 DONE 0.1s
+
+#9 [internal] load build context
+#9 transferring context: 25.12kB 0.0s done
+#9 DONE 0.0s
+
+#10 [build  3/10] WORKDIR /src
+#10 CACHED
+
+#11 [build  2/10] RUN apk add --no-cache musl-dev busybox-static && rustup component add rustfmt clippy
+#11 CACHED
+
+#12 [build  4/10] COPY Cargo.toml Cargo.lock build.rs ./
+#12 CACHED
+
+#13 [web 2/6] WORKDIR /web
+#13 CACHED
+
+#14 [web 5/6] COPY web/ ./
+#14 CACHED
+
+#15 [web 3/6] COPY web/package.json web/package-lock.json web/.npmrc ./
+#15 CACHED
+
+#16 [web 4/6] RUN --mount=type=cache,id=hobnail-npm,target=/root/.npm npm ci --ignore-scripts
+#16 CACHED
+
+#17 [web 6/6] RUN npm run check && npm run test && npm run build && npm run size
+#17 CACHED
+
+#18 [build  5/10] COPY src ./src
+#18 DONE 0.1s
+
+#19 [build  6/10] COPY docs/api.md ./docs/api.md
+#19 DONE 0.1s
+
+#20 [build  7/10] COPY web/src/api/gen ./web/src/api/gen
+#20 DONE 0.2s
+
+#21 [build  8/10] COPY web/src/format/fixtures.json ./web/src/format/fixtures.json
+#21 DONE 0.1s
+
+#22 [build  9/10] COPY --from=web /web/dist ./web/dist
+#22 DONE 0.3s
+
+#23 [build 10/10] RUN --mount=type=cache,id=rh-cargo-registry,target=/usr/local/cargo/registry     --mount=type=cache,id=rh-target,target=/target,sharing=locked     export RH_CONTENT_HASH="$(find src web/dist web/src/api/gen web/src/format/fixtures.json build.rs Cargo.toml Cargo.lock -type f         | LC_ALL=C sort | while IFS= read -r f; do printf '%s\n' "$f"; sha256sum < "$f"; done         | sha256sum | cut -c1-64)"  && echo "content hash $RH_CONTENT_HASH"  && cargo fmt --check  && cargo clippy --locked --all-targets -- -D warnings  && cargo test --locked  && cargo build --locked --release  && v="$(/target/release/hobnail version)" && echo "$v"  && case "$v" in *"(b93b92e "*"content $RH_CONTENT_HASH") ;;       *) echo "stale binary: expected sha b93b92e and content $RH_CONTENT_HASH" >&2; exit 1 ;; esac  && mkdir -p /rootfs/bin /rootfs/tmp  && cp /target/release/hobnail /rootfs/hobnail  && cp /bin/busybox.static /rootfs/bin/busybox  && ln -s busybox /rootfs/bin/sh
+#23 0.510 content hash 93da0f7f50edb275af333c569d9641b4981b4aa3e63f06c70fd72a87d34b3196
+#23 2.077    Compiling hobnail v0.0.1 (/src)
+#23 7.522     Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.97s
+#23 7.743    Compiling hobnail v0.0.1 (/src)
+#23 50.08     Finished `test` profile [unoptimized + debuginfo] target(s) in 42.52s
+#23 50.10      Running unittests src/main.rs (/target/debug/build/hobnail/a0555490bdb619b2/out/hobnail-a0555490bdb619b2)
+#23 50.10 
+#23 50.10 running 382 tests
+#23 50.10 test alerts::channels::slack_tests::slack_text_is_escaped ... ok
+#23 50.10 test alerts::channels::tests::missing_secret_is_misconfigured ... ok
+#23 50.10 test alerts::channels::tests::inline_webhook_values_are_scrubbed_from_diagnostics ... ok
+#23 50.10 test alerts::channels::tests::payloads ... ok
+#23 50.10 test alerts::engine::tests::cooldown_suppresses_then_fires_after_it ... ok
+#23 50.10 test alerts::channels::tests::validation ... ok
+#23 50.10 test alerts::engine::tests::flapping_faster_than_for_sends_nothing ... ok
+#23 50.10 test alerts::engine::tests::dedupe_one_alert_per_incident ... ok
+#23 50.10 test alerts::engine::tests::flapping_sends_one_pair_per_cooldown ... ok
+#23 50.10 test alerts::engine::tests::for_must_hold_continuously ... ok
+#23 50.10 test alerts::engine::tests::ok_subjects_leave_no_state ... ok
+#23 50.10 test alerts::engine::tests::pending_timer_requests_ticks ... ok
+#23 50.10 test alerts::engine::tests::prune_drops_removed_rules_and_idle_entries ... ok
+#23 50.10 test alerts::engine::tests::persistence_round_trip ... ok
+#23 50.10 test alerts::engine::tests::recovery_sent_once ... ok
+#23 50.10 test alerts::engine::tests::removed_subject_resolves_with_removed ... ok
+#23 50.10 test alerts::engine::tests::suppressed_incident_requests_ticks ... ok
+#23 50.10 test alerts::engine::tests::removed_while_suppressed_sends_nothing ... ok
+#23 50.10 test alerts::rules::tests::container_conditions ... ok
+#23 50.10 test alerts::rules::tests::exit_nonzero_ignores_clean_exits ... ok
+#23 50.10 test alerts::engine::tests::suppressed_incident_still_open_after_cooldown_is_notified ... ok
+#23 50.10 test alerts::rules::tests::numbers ... ok
+#23 50.10 test alerts::rules::tests::http_consecutive_failures ... ok
+#23 50.10 test alerts::rules::tests::restart_loop_counts_dies_in_window ... ok
+#23 50.11 test alerts::rules::tests::unusable_snapshot_is_no_data ... ok
+#23 50.11 test alerts::rules::tests::host_thresholds ... ok
+#23 50.11 test alerts::template::tests::checks_names ... ok
+#23 50.11 test alerts::rules::tests::log_match_validation_and_eval ... ok
+#23 50.11 test alerts::template::tests::json_escapes_values ... ok
+#23 50.11 test alerts::template::tests::renders_and_keeps_unknown ... ok
+#23 50.11 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 1)"}
+#23 50.11 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert recovered","rule":"down","subject":"odoo","state":"removed"}
+#23 50.11 test alerts::rules::tests::widget_values ... ok
+#23 50.11 test alerts::tests::docker_outage_neither_fires_nor_resolves ... ok
+#23 50.11 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-alerts-http-694/config.toml","generation":"1","exists":"true"}
+#23 50.11 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-alerts-failing-694/config.toml","generation":"1","exists":"true"}
+#23 50.11 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-alerts-e2e-694/config.toml","generation":"1","exists":"true"}
+#23 50.11 test alerts::tests::example_config_parses ... ok
+#23 50.11 test alerts::tests::messages_use_templates ... ok
+#23 50.14 test alerts::tests::notify_test_cli ... ok
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert recovered","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"notification failed, will retry","channel":"a","error":"HTTP 500: down"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"giving up on a notification","channel":"b","attempts":"0"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"giving up on a notification","channel":"a","attempts":"0"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"giving up on a notification","channel":"b","attempts":"0"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.14 test alerts::tests::queue_retries_then_gives_up ... ok
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 1)"}
+#23 50.14 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"alerts state file is corrupt, starting fresh","path":"/tmp/rh-alerts-statefile-694/alerts-state.json","error":"key must be a string at line 1 column 2"}
+#23 50.16 test alerts::tests::state_file_round_trip_and_corruption ... ok
+#23 50.16 test alerts::tests::telegram_error_never_contains_the_token ... ok
+#23 50.16 test alerts::tests::validation_errors_name_the_rule_or_channel ... ok
+#23 50.16 test alerts::tests::widget_rule_needs_an_existing_widget ... ok
+#23 50.16 test api::access::tests::api_reference_matches_route_table ... ok
+#23 50.16 test api::access::tests::captures ... ok
+#23 50.17 test api::access::tests::literal_routes ... ok
+#23 50.18 test api::access::tests::scope_checks_distinguish_empty_scopes_and_unrestricted_access ... ok
+#23 50.18 test api::access::tests::table_is_well_formed ... ok
+#23 50.20 test api::boards::tests::board_validation_checks_ids_links_spans_and_targets ... ok
+#23 50.20 test api::container_facts::tests::parses_and_sorts_top ... ok
+#23 50.20 test api::container_facts::tests::parses_inspect_fixture ... ok
+#23 50.20 test api::container_facts::tests::rule_matching_uses_include_and_exclude_globs ... ok
+#23 50.20 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-0/config.toml","generation":"1","exists":"true"}
+#23 50.21 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"history database open","path":"/tmp/rh-alerts-http-694/hobnail.db"}
+#23 50.21 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"site","subject":"http://127.0.0.1:42153/fail/health","state":"down: HTTP 500"}
+#23 50.23 test alerts::tests::http_rule_fires_and_recovers ... ok
+#23 50.23 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-1/config.toml","generation":"1","exists":"true"}
+#23 50.25 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"history database open","path":"/tmp/rh-alerts-failing-694/hobnail.db"}
+#23 50.25 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.25 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"history database open","path":"/tmp/rh-alerts-e2e-694/hobnail.db"}
+#23 50.26 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"alert firing","rule":"down","subject":"odoo","state":"stopped (exit 137)"}
+#23 50.26 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"notification failed, will retry","channel":"missing","error":"misconfigured: environment variable RH_TEST_SURELY_UNSET_694 is not set"}
+#23 50.26 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-0/hobnail.db"}
+#23 50.27 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-2/config.toml","generation":"1","exists":"true"}
+#23 50.30 {"ts":"2026-11-19T05:05:32Z","level":"warn","msg":"notification failed, will retry","channel":"tg","error":"HTTP 500: mock failure"}
+#23 50.32 test alerts::tests::failing_and_misconfigured_channels_are_visible_and_secret_free ... ok
+#23 50.32 test api::container_facts::tests::viewer_inspect_hides_commands_health_and_env_values ... ok
+#23 50.32 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-1/hobnail.db"}
+#23 50.32 test api::container_facts::tests::why_is_this_red ... ok
+#23 50.32 test api::error::tests::field_is_sent_when_set ... ok
+#23 50.32 test api::error::tests::method_not_allowed_lists_allow ... ok
+#23 50.32 test api::error::tests::shape_headers_and_codes ... ok
+#23 50.33 test api::history_window::tests::cumulative_counts_become_days ... ok
+#23 50.33 test api::history_window::tests::short_windows_snap_to_five_minutes ... ok
+#23 50.33 test api::history_window::tests::zoom_window ... ok
+#23 50.33 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-3/config.toml","generation":"1","exists":"true"}
+#23 50.33 {"ts":"2026-11-19T05:05:32Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-4/config.toml","generation":"1","exists":"true"}
+#23 50.36 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-2/hobnail.db"}
+#23 50.43 test api::container_facts::tests::unhealthy_since_never_predates_a_recreated_container ... ok
+#23 50.51 test api::tests::fixtures_cover_the_hard_cases ... ok
+#23 50.53 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-3/hobnail.db"}
+#23 50.53 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-4/hobnail.db"}
+#23 50.55 test api::tests::format_fixtures_match_the_committed_file ... ok
+#23 50.55 test api::tests::list_rows_say_what_the_cards_say ... ok
+#23 50.55 test api::tests::started_at_from_docker_status ... ok
+#23 50.55 test api::tests::stream_topics ... ok
+#23 50.55 test api::tests::window_query ... ok
+#23 50.56 test api::logs::tests::includes_stopped_but_never_hidden_excluded_or_invalid_names ... ok
+#23 50.57 test api::types_tests::typescript_types_match_the_committed_files ... ok
+#23 50.57 test api::widgets::tests::bounds_widget_values_without_changing_small_types ... ok
+#23 50.58 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"config loaded","path":"/tmp/rh-alerts-e2e-694/config.toml","generation":"1","exists":"true"}
+#23 50.65 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"history database open","path":"/tmp/rh-alerts-e2e-694/hobnail.db"}
+#23 50.66 test api::container_facts::tests::unhealthy_since_survives_many_restarts ... ok
+#23 50.66 test auth::tests::cookie_format ... ok
+#23 50.66 test auth::tests::csrf_is_derived_from_the_session ... ok
+#23 50.66 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-5/config.toml","generation":"1","exists":"true"}
+#23 50.71 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-5/hobnail.db"}
+#23 50.82 test api::types_tests::generated_files_are_standalone_typescript ... ok
+#23 50.82 test auth::tests::origin_parsing ... ok
+#23 50.82 test auth::tests::password_changes_back_off_independently_per_account ... ok
+#23 50.82 test auth::tests::rate_limit_backoff_sequence_and_cap ... ok
+#23 50.85 test auth::tests::rate_limit_global ... ok
+#23 50.85 test config::tests::empty_config_is_valid ... ok
+#23 50.85 test config::tests::history_section ... ok
+#23 50.85 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"config loaded","path":"/tmp/rh-cfg-694/config.toml","generation":"1","exists":"false"}
+#23 50.85 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"config loaded","path":"/tmp/rh-cfg-694/config.toml","generation":"2","exists":"true"}
+#23 50.85 {"ts":"2026-11-19T05:05:33Z","level":"warn","msg":"config invalid, keeping last good config","error":"/tmp/rh-cfg-694/config.toml:2:9: string values must be quoted, expected literal string"}
+#23 50.85 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"config loaded","path":"/tmp/rh-cfg-694/config.toml","generation":"3","exists":"true"}
+#23 50.85 test config::tests::hot_reload_keeps_last_good ... ok
+#23 50.85 test config::tests::overrides_parse ... ok
+#23 50.85 test config::tests::retired_link_templates_still_load ... ok
+#23 50.85 test config::tests::semantic_error ... ok
+#23 50.85 test config::tests::syntax_error_has_line_and_column ... ok
+#23 50.85 test config::tests::unknown_field_is_an_error ... ok
+#23 50.88 test db::accounts::tests::frequent_logins_do_not_evict_other_users ... ok
+#23 50.90 test db::accounts::tests::invites_expire_and_can_be_consumed_or_revoked_only_once ... ok
+#23 50.92 test db::accounts::tests::password_reset_disable_and_deletion_revoke_only_the_target_sessions ... ok
+#23 50.92 test db::ctrx::tests::parses_cgroup_files_from_a_directory ... ok
+#23 50.92 test db::ctrx::tests::parses_net_dev_of_a_pid_without_loopback ... ok
+#23 50.92 test db::ctrx::tests::rates_come_from_previous_counters ... ok
+#23 50.95 test db::ctrx::tests::records_queries_and_rolls_up ... ok
+#23 50.98 {"ts":"2026-11-19T05:05:33Z","level":"info","msg":"alert recovered","rule":"down","subject":"odoo","state":"recovered"}
+#23 51.12 test db::hostx::tests::record_query_roll_prune ... ok
+#23 51.12 test db::hostx::tests::scales ... ok
+#23 51.14 test db::logcounts::tests::clear_history_also_clears_counts ... ok
+#23 51.14 test db::logcounts::tests::disabled_db_is_a_no_op ... ok
+#23 51.15 test db::logcounts::tests::record_rollup_query_prune ... ok
+#23 51.17 test db::schema::tests::account_migration_discards_credentials_and_preserves_other_settings ... ok
+#23 51.19 test db::schema::tests::boards_start_empty_and_integration_secrets_are_origin_bound ... ok
+#23 51.19 test db::strips::tests::disabled_db_is_empty_and_cache_is_shared ... ok
+#23 51.21 test db::strips::tests::presence_events_and_unknown ... ok
+#23 51.23 test db::strips::tests::unhealthy_spans_until_healthy ... ok
+#23 51.25 test db::tests::api_events ... ok
+#23 51.27 test db::tests::api_series_and_errors ... ok
+#23 51.31 test db::tests::averages_are_weighted_by_sample_count ... ok
+#23 51.32 {"ts":"2026-11-19T05:05:33Z","level":"error","msg":"history database unavailable, running without history","path":"/proc/definitely/not/here.db","error":"open /proc/definitely/not/here.db: unable to open database file: /proc/definitely/not/here.db"}
+#23 51.32 test db::tests::bad_path_fails_cleanly ... ok
+#23 51.34 test db::tests::clear_history_keeps_settings ... ok
+#23 51.34 test db::tests::disabled_db_is_inert ... ok
+#23 51.36 test db::tests::docker_events_are_recorded ... ok
+#23 51.65 test alerts::tests::container_down_and_recovery_reach_every_channel_once ... ok
+#23 51.71 test auth::tests::login_rejects_unknown_accounts_and_throttles_failures ... ok
+#23 51.79 test db::tests::event_cap_and_filters ... ok
+#23 51.82 test db::tests::event_reads_use_the_v6_indexes ... ok
+#23 51.85 test db::tests::event_id_at_or_before_seeks_by_id ... ok
+#23 51.88 test db::tests::gaps_stay_gaps ... ok
+#23 51.90 test db::tests::latest_containers_returns_newest_sample_per_name ... ok
+#23 51.92 test db::tests::maintain_runs_at_most_hourly ... ok
+#23 51.99 test db::tests::every_metric_and_range_queries ... ok
+#23 51.99 test db::tests::query_parsing ... ok
+#23 52.01 test db::tests::record_and_read_system_series ... ok
+#23 52.02 test db::tests::release_memory_keeps_reads_working ... ok
+#23 52.07 test db::tests::migrations_are_idempotent_and_pragmas_set ... ok
+#23 52.10 test db::tests::retention ... ok
+#23 52.14 test db::tests::rename_reuses_legacy_database_without_losing_password_or_history ... ok
+#23 52.15 test db::tests::revisions_and_kv ... ok
+#23 52.17 test db::tests::rollups_avg_max_and_stitching ... ok
+#23 52.19 test db::tests::stats_counts ... ok
+#23 52.19 test db::tests::sessions ... ok
+#23 52.20 test db::tests::unrolled_raw_is_never_pruned ... ok
+#23 52.31 test db::tests::upgrade_from_v5_adds_event_indexes ... ok
+#23 52.31 test docker::tests::bad_json_is_an_error ... ok
+#23 52.31 test docker::tests::cgroupfs_layout_fallback ... ok
+#23 52.32 test docker::tests::dedupes_v4_v6_any ... ok
+#23 52.32 test docker::tests::die_tracker_keeps_last_hour ... ok
+#23 52.32 test docker::tests::events_filter_is_urlencoded ... ok
+#23 52.32 test docker::tests::health_and_exit_code_from_status ... ok
+#23 52.32 test docker::tests::ipv6_only_any_is_kept ... ok
+#23 52.32 test docker::tests::line_buffer_handles_split_frames ... ok
+#23 52.32 test docker::tests::parses_container_list ... ok
+#23 52.32 test docker::tests::parses_events ... ok
+#23 52.33 test docker::tests::sampler_counter_reset_reprimes ... ok
+#23 52.33 test docker::tests::sampler_rates_and_memory ... ok
+#23 52.33 test docker::tests::sampler_skips_missing_and_drops_gone ... ok
+#23 52.33 test docker::tests::stat_parsing ... ok
+#23 52.33 test docker::tests::stopped_unhealthy_starting ... ok
+#23 52.35 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history maintenance was slow","ms":"542"}
+#23 52.40 test db::tests::downsampling_keeps_every_range_under_400_points ... ok
+#23 52.40 test host::tests::diskstats_and_filter ... ok
+#23 52.40 test host::tests::hwmon_discovery ... ok
+#23 52.40 test host::tests::meminfo_and_vmstat ... ok
+#23 52.40 test host::tests::mounts_filtering ... ok
+#23 52.40 test host::tests::net_dev_errors_drops ... ok
+#23 52.40 test host::tests::pressure_lines ... ok
+#23 52.40 test host::tests::proc_stat_and_cgroup ... ok
+#23 52.40 test host::tests::stat_per_core ... ok
+#23 52.40 test http::assets::tests::accept_encoding ... ok
+#23 52.40 test http::assets::tests::document_headers_and_deep_links ... ok
+#23 52.40 test http::assets::tests::hashed_asset_encoding_and_cache_headers ... ok
+#23 52.40 test http::assets::tests::head_has_length_and_no_body ... ok
+#23 52.40 test http::assets::tests::not_built_is_503_for_the_document_and_404_for_assets ... ok
+#23 52.40 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-6/config.toml","generation":"1","exists":"true"}
+#23 52.46 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-6/hobnail.db"}
+#23 52.46 test db::tests::upgrade_from_v1 ... ok
+#23 52.46 test http::assets::tests::synthetic_table_is_sorted_like_build_rs_output ... ok
+#23 52.47 test http::assets::tests::unknown_assets_and_traversal_are_404_not_the_document ... ok
+#23 52.47 test http::client::integration_policy_tests::restrict_special_destinations_but_allow_private_services ... ok
+#23 52.47 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-7/config.toml","generation":"1","exists":"true"}
+#23 52.50 test http::assets::tests::real_socket_app_and_assets ... ok
+#23 52.50 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-alarm-694-0/config.toml","generation":"1","exists":"true"}
+#23 52.55 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-7/hobnail.db"}
+#23 52.59 test host::tests::collector_rates ... ok
+#23 52.59 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-8/config.toml","generation":"1","exists":"true"}
+#23 52.59 test http::gate_tests::a_plain_form_post_is_refused_and_leaks_nothing ... ok
+#23 52.59 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-api-alarm-694-0/hobnail.db"}
+#23 52.59 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-9/config.toml","generation":"1","exists":"true"}
+#23 52.67 test http::gate_tests::alarm_requires_a_viewer_and_counts_only_visible_problems ... ok
+#23 52.68 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-window-694-1/config.toml","generation":"1","exists":"true"}
+#23 52.70 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-8/hobnail.db"}
+#23 52.72 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-9/hobnail.db"}
+#23 52.74 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-api-window-694-1/hobnail.db"}
+#23 52.77 test http::gate_tests::anonymous_known_handlers_require_a_session_but_unknown_reads_are_404 ... ok
+#23 52.77 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-10/config.toml","generation":"1","exists":"true"}
+#23 52.88 test http::gate_tests::api_v1_access_table_walked_as_a_visitor ... ok
+#23 52.88 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-signed-694-2/config.toml","generation":"1","exists":"true"}
+#23 52.89 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-10/hobnail.db"}
+#23 52.89 test http::gate_tests::api_v1_container_window_and_names ... ok
+#23 52.89 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-11/config.toml","generation":"1","exists":"true"}
+#23 52.94 test http::gate_tests::api_v1_errors_are_json_and_no_store ... ok
+#23 52.94 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-12/config.toml","generation":"1","exists":"true"}
+#23 52.97 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-api-signed-694-2/hobnail.db"}
+#23 52.99 {"ts":"2026-11-19T05:05:35Z","level":"warn","msg":"config invalid, keeping last good config","error":"/tmp/rh-api-signed-694-2/config.toml:32:1: unknown field `bogus_key`, expected one of `title`, `greeting`, `columns`, `layout`, `theme`, `search_url`, `show_stopped`, `show_stats`"}
+#23 52.99 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-11/hobnail.db"}
+#23 53.08 test http::gate_tests::api_v1_refuses_a_foreign_host ... ok
+#23 53.08 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-12/hobnail.db"}
+#23 53.08 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-stream-694-3/config.toml","generation":"1","exists":"true"}
+#23 53.09 test http::gate_tests::api_v1_reads_with_a_session_add_probe_checks_and_config_error ... ok
+#23 53.09 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-topics-694-4/config.toml","generation":"1","exists":"true"}
+#23 53.14 test http::gate_tests::api_v1_session_reports_the_session_and_never_a_token_without_one ... ok
+#23 53.14 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-13/config.toml","generation":"1","exists":"true"}
+#23 53.18 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-api-topics-694-4/hobnail.db"}
+#23 53.18 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-api-stream-694-3/hobnail.db"}
+#23 53.21 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-13/hobnail.db"}
+#23 53.25 test http::gate_tests::api_v1_write_origin_and_referer ... ok
+#23 53.25 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-14/config.toml","generation":"1","exists":"true"}
+#23 53.28 {"ts":"2026-11-19T05:05:35Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-14/hobnail.db"}
+#23 53.48 test auth::tests::argon2id_hashes_are_salted_and_verifiable ... ok
+#23 53.48 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-15/config.toml","generation":"1","exists":"true"}
+#23 53.52 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-15/hobnail.db"}
+#23 53.56 test http::gate_tests::dashboard_tests::board_and_integration_creates_enforce_capacity ... ok
+#23 53.56 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-16/config.toml","generation":"1","exists":"true"}
+#23 53.60 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-16/hobnail.db"}
+#23 53.98 test http::gate_tests::concurrent_owner_onboarding_issues_one_session ... ok
+#23 53.98 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-17/config.toml","generation":"1","exists":"true"}
+#23 53.98 test http::gate_tests::api_v1_stream_topics_and_head ... ok
+#23 53.98 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-18/config.toml","generation":"1","exists":"true"}
+#23 53.99 test http::gate_tests::api_v1_stream_events_and_viewer_count ... ok
+#23 53.99 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-19/config.toml","generation":"1","exists":"true"}
+#23 54.06 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-17/hobnail.db"}
+#23 54.08 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-19/hobnail.db"}
+#23 54.08 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-18/hobnail.db"}
+#23 54.11 test http::gate_tests::dashboard_tests::dashboard_icons_use_the_authenticated_existing_cache ... ok
+#23 54.12 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-20/config.toml","generation":"1","exists":"true"}
+#23 54.17 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-20/hobnail.db"}
+#23 54.22 test http::gate_tests::dashboard_tests::deleting_targets_revokes_pending_invites_and_refreshes_boards ... ok
+#23 54.22 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-21/config.toml","generation":"1","exists":"true"}
+#23 54.26 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-21/hobnail.db"}
+#23 54.30 test http::gate_tests::dashboard_tests::disabled_integration_cannot_send_its_credential ... ok
+#23 54.30 {"ts":"2026-11-19T05:05:36Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-22/config.toml","generation":"1","exists":"true"}
+#23 54.38 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-22/hobnail.db"}
+#23 54.38 test http::gate_tests::dashboard_tests::board_save_is_atomic_and_drafts_are_private_and_pruned ... ok
+#23 54.42 test http::gate_tests::dashboard_tests::integration_test_reports_public_root_failure ... ok
+#23 54.42 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-23/config.toml","generation":"1","exists":"true"}
+#23 54.43 test http::gate_tests::dashboard_tests::outbound_client_checks_origin_before_connecting ... ok
+#23 54.44 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-24/config.toml","generation":"1","exists":"true"}
+#23 54.47 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-23/hobnail.db"}
+#23 54.50 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-24/hobnail.db"}
+#23 54.92 test http::gate_tests::dashboard_tests::connection_verdict_enforces_outbound_policy ... ok
+#23 54.92 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-25/config.toml","generation":"1","exists":"true"}
+#23 54.97 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-25/hobnail.db"}
+#23 54.97 {"ts":"2026-11-19T05:05:37Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-25/config.toml","generation":"2","exists":"true"}
+#23 55.74 test http::gate_tests::dashboard_tests::scoped_board_edits_cannot_introduce_targets_or_reuse_foreign_ids ... ok
+#23 55.74 {"ts":"2026-11-19T05:05:38Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-26/config.toml","generation":"1","exists":"true"}
+#23 55.87 {"ts":"2026-11-19T05:05:38Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-26/hobnail.db"}
+#23 56.33 test http::gate_tests::dashboard_tests::scoped_widget_subscriptions_only_count_when_a_widget_is_visible ... ok
+#23 56.33 {"ts":"2026-11-19T05:05:38Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-27/config.toml","generation":"1","exists":"true"}
+#23 56.38 test http::gate_tests::dashboard_tests::dashboard_route_and_stream_scopes_and_settings ... ok
+#23 56.39 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-invite-roles-inspect-694-5/config.toml","generation":"1","exists":"true"}
+#23 56.43 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-27/hobnail.db"}
+#23 56.44 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-api-invite-roles-inspect-694-5/hobnail.db"}
+#23 56.76 test http::gate_tests::every_write_needs_session_csrf_and_same_origin ... ok
+#23 56.77 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-28/config.toml","generation":"1","exists":"true"}
+#23 56.89 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-28/hobnail.db"}
+#23 57.04 test http::gate_tests::legacy_reads_require_a_session_and_public_assets_do_not ... ok
+#23 57.04 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-29/config.toml","generation":"1","exists":"true"}
+#23 57.14 test http::gate_tests::dashboard_tests::scoped_viewers_only_read_containers_on_their_boards ... ok
+#23 57.15 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-30/config.toml","generation":"1","exists":"true"}
+#23 57.16 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-29/hobnail.db"}
+#23 57.22 test http::gate_tests::locked_onboarding_requires_console_recovery ... ok
+#23 57.22 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-31/config.toml","generation":"1","exists":"true"}
+#23 57.26 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-30/hobnail.db"}
+#23 57.26 test http::gate_tests::dashboard_tests::stolen_admin_session_cannot_read_or_retarget_a_secret ... ok
+#23 57.27 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-32/config.toml","generation":"1","exists":"true"}
+#23 57.30 test http::gate_tests::login_refuses_foreign_origin_and_form_credentials ... ok
+#23 57.30 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-33/config.toml","generation":"1","exists":"true"}
+#23 57.33 {"ts":"2026-11-19T05:05:39Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-31/hobnail.db"}
+#23 57.39 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-32/hobnail.db"}
+#23 57.41 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-33/hobnail.db"}
+#23 57.43 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-34/config.toml","generation":"1","exists":"true"}
+#23 57.45 test http::gate_tests::nothing_is_writable_before_a_password_is_set ... ok
+#23 57.46 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-privacy-694-6/config.toml","generation":"1","exists":"true"}
+#23 57.53 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-34/hobnail.db"}
+#23 57.57 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-api-privacy-694-6/hobnail.db"}
+#23 57.62 test http::gate_tests::password_change_failures_are_field_specific_and_secret_free ... ok
+#23 57.62 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-35/config.toml","generation":"1","exists":"true"}
+#23 57.69 test http::gate_tests::protected_views_still_hide_excluded_containers ... ok
+#23 57.69 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-36/config.toml","generation":"1","exists":"true"}
+#23 57.76 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-35/hobnail.db"}
+#23 57.77 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-36/hobnail.db"}
+#23 57.78 test http::gate_tests::public_credential_writes_require_same_origin_and_known_host ... ok
+#23 57.78 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-37/config.toml","generation":"1","exists":"true"}
+#23 57.85 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-37/hobnail.db"}
+#23 57.88 test http::gate_tests::session_distinguishes_unavailable_database_from_fresh_installation ... ok
+#23 57.88 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-38/config.toml","generation":"1","exists":"true"}
+#23 57.89 test http::gate_tests::retired_routes_are_gone_with_or_without_a_session ... ok
+#23 57.89 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-39/config.toml","generation":"1","exists":"true"}
+#23 57.95 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-38/hobnail.db"}
+#23 58.00 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-39/hobnail.db"}
+#23 58.00 test http::gate_tests::session_renewal_sets_a_cookie_once_per_slide ... ok
+#23 58.00 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-40/config.toml","generation":"1","exists":"true"}
+#23 58.11 test http::gate_tests::settings_json_values_and_hashes_require_an_admin_session ... ok
+#23 58.11 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-40/hobnail.db"}
+#23 58.11 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-api-viewer-694-7/config.toml","generation":"1","exists":"true"}
+#23 58.16 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"history database open","path":"/tmp/rh-api-viewer-694-7/hobnail.db"}
+#23 58.19 {"ts":"2026-11-19T05:05:40Z","level":"warn","msg":"config invalid, keeping last good config","error":"/tmp/rh-api-viewer-694-7/config.toml:32:1: unknown field `bogus_key`, expected one of `title`, `greeting`, `columns`, `layout`, `theme`, `search_url`, `show_stopped`, `show_stats`"}
+#23 58.19 test http::gate_tests::settings_reads_need_a_session ... ok
+#23 58.19 test http::icons::tests::auto_icons ... ok
+#23 58.20 test http::icons::tests::miss_cache_expires_entries_and_limits_size ... ok
+#23 58.20 test http::pwa::tests::icons_are_pngs ... ok
+#23 58.21 test http::pwa::tests::manifest_is_valid_json_and_escapes ... ok
+#23 58.21 test http::query::tests::query_roundtrip ... ok
+#23 58.21 test http::server::tests::host_allowlist ... ok
+#23 58.21 test http::server::tests::sse_multiline ... ok
+#23 58.21 test logs::client::tests::inspect_reply ... ok
+#23 58.21 test logs::client::tests::names ... ok
+#23 58.21 test logs::client::tests::query_paths ... ok
+#23 58.21 test logs::frame::tests::ansi_is_stripped ... ok
+#23 58.21 test logs::frame::tests::empty_frames_and_empty_lines ... ok
+#23 58.21 test logs::frame::tests::huge_frame_is_capped_and_marked ... ok
+#23 58.22 test logs::frame::tests::invalid_utf8_is_lossy_never_a_panic ... ok
+#23 58.22 test logs::frame::tests::multiplexed_frames_split_at_every_byte ... ok
+#23 58.22 test logs::frame::tests::non_multiplexed_stream_falls_back_to_raw ... ok
+#23 58.22 test logs::frame::tests::timestamps ... ok
+#23 58.22 test logs::frame::tests::tty_is_raw_with_crlf ... ok
+#23 58.22 test logs::level::tests::json_levels ... ok
+#23 58.22 test logs::level::tests::logfmt_levels ... ok
+#23 58.22 test logs::level::tests::prefixes ... ok
+#23 58.22 test logs::level::tests::prose_is_not_a_level ... ok
+#23 58.22 test logs::matcher::tests::basics ... ok
+#23 58.23 test logs::matcher::tests::classes_and_escapes ... ok
+#23 58.23 test logs::matcher::tests::errors_are_messages ... ok
+#23 58.26 test logs::matcher::tests::no_catastrophic_backtracking ... ok
+#23 58.26 test logs::tail::cap_tests::take_capped_says_when_it_dropped_lines ... ok
+#23 58.26 test logs::tests::closed_window_is_cut_by_the_server ... ok
+#23 58.26 {"ts":"2026-11-19T05:05:40Z","level":"info","msg":"config loaded","path":"/tmp/rh-logs-cap-694/config.toml","generation":"1","exists":"true"}
+#23 58.38 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-logs-cap-694/hobnail.db"}
+#23 58.39 test http::gate_tests::viewer_cannot_read_administrative_details ... ok
+#23 58.39 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-logs-dl-694/config.toml","generation":"1","exists":"true"}
+#23 58.43 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-logs-dl-694/hobnail.db"}
+#23 58.51 test logs::tests::download_streams_text_with_disposition ... ok
+#23 58.51 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-41/config.toml","generation":"1","exists":"true"}
+#23 58.56 test logs::tests::closed_window_stops_at_the_cap ... ok
+#23 58.56 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-42/config.toml","generation":"1","exists":"true"}
+#23 58.59 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-41/hobnail.db"}
+#23 58.61 test http::gate_tests::password_change_preserves_only_the_callers_session ... ok
+#23 58.62 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-43/config.toml","generation":"1","exists":"true"}
+#23 58.62 test logs::tests::hidden_and_excluded_containers_have_no_logs ... ok
+#23 58.62 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-logs-missing-694/config.toml","generation":"1","exists":"true"}
+#23 58.69 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-42/hobnail.db"}
+#23 58.69 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-43/hobnail.db"}
+#23 58.69 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-logs-missing-694/hobnail.db"}
+#23 58.72 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-ui-694-44/config.toml","generation":"1","exists":"true"}
+#23 58.74 test logs::tests::scoped_stack_limit_applies_after_visibility ... ok
+#23 58.75 test logs::tests::stream_reports_missing_container_and_bad_request ... ok
+#23 58.75 test logs::watch::tests::matches_in_window ... ok
+#23 58.75 test logs::watch::tests::minute_counts_flush_on_rollover ... ok
+#23 58.75 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-logs-sse-694/config.toml","generation":"1","exists":"true"}
+#23 58.75 test logs::watch::tests::plan_caps_and_prioritises_alerts ... ok
+#23 58.75 test logs::watch::tests::watch_by_glob_and_stack ... ok
+#23 58.76 test mock::tests::records_and_replies ... ok
+#23 58.76 test mock::tests::redacts_tokens ... ok
+#23 58.76 test read_model::tests::all_hidden_group_disappears ... ok
+#23 58.76 test read_model::tests::alphabetical_is_case_insensitive ... ok
+#23 58.76 test read_model::tests::attention_reasons ... ok
+#23 58.76 test read_model::tests::bookmarks ... ok
+#23 58.76 test read_model::tests::card_for_finds_hidden_containers ... ok
+#23 58.77 test read_model::tests::configured_group_order_and_options ... ok
+#23 58.77 test read_model::tests::docker_disabled_shows_only_bookmarks ... ok
+#23 58.77 test read_model::tests::empty_config_groups_by_project ... ok
+#23 58.77 test read_model::tests::group_precedence ... ok
+#23 58.77 test read_model::tests::hiding ... ok
+#23 58.77 test read_model::tests::legacy_labels_keep_working_and_hobnail_labels_take_priority ... ok
+#23 58.77 test read_model::tests::links_any_address_uses_page_host ... ok
+#23 58.78 test read_model::tests::links_prefer_page_host_then_non_loopback ... ok
+#23 58.78 test read_model::tests::loopback_only_is_local_badge ... ok
+#23 58.78 test read_model::tests::main_link_precedence ... ok
+#23 58.78 test read_model::tests::names_icons_order_size ... ok
+#23 58.78 test read_model::tests::non_http_and_https_ports ... ok
+#23 58.78 test read_model::tests::plain_ports_say_their_protocol ... ok
+#23 58.78 test read_model::tests::restart_badge_from_die_times ... ok
+#23 58.79 test read_model::tests::stack_and_labels_are_set ... ok
+#23 58.79 test read_model::tests::state_text_strips_health ... ok
+#23 58.80 test read_model::tests::stats_line ... ok
+#23 58.80 test read_model::tests::status_dots ... ok
+#23 58.80 test read_model::tests::stopped_is_grey_not_red ... ok
+#23 58.80 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-0/config.toml","generation":"1","exists":"true"}
+#23 58.81 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-logs-sse-694/hobnail.db"}
+#23 58.81 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-ui-694-44/hobnail.db"}
+#23 58.84 test logs::tests::legacy_require_login_setting_still_parses ... ok
+#23 58.85 test settings::tests::a_patch_without_the_secret_keys_cannot_move_a_bound_destination ... ok
+#23 58.87 test settings::tests::alert_rules_add_edit_delete ... ok
+#23 58.87 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-0/hobnail.db"}
+#23 58.88 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 58.88 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-0/config.toml","generation":"2","exists":"true"}
+#23 58.89 test settings::tests::an_edit_keeps_every_key_it_does_not_send ... ok
+#23 58.89 test settings::tests::bookmark_url_check_skips_an_unchanged_url_on_edit ... ok
+#23 58.89 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config saved from the app","note":"general","user":"admin"}
+#23 58.89 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-0/config.toml","generation":"3","exists":"true"}
+#23 58.91 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"custom.css saved from the app","user":"admin"}
+#23 58.91 test settings::tests::a_crlf_file_stays_crlf ... ok
+#23 58.91 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-1/config.toml","generation":"1","exists":"true"}
+#23 58.94 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-2/config.toml","generation":"1","exists":"true"}
+#23 58.94 test settings::tests::bookmarks_add_edit_reorder_delete ... ok
+#23 58.96 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-1/hobnail.db"}
+#23 58.96 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-3/config.toml","generation":"1","exists":"true"}
+#23 59.03 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-3/hobnail.db"}
+#23 59.03 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-2/hobnail.db"}
+#23 59.03 test logs::tests::stream_tails_and_stops_after_disconnect ... ok
+#23 59.04 test settings::tests::bound_destinations_are_refused_through_the_api_too ... ok
+#23 59.06 test settings::tests::channel_test_needs_a_saved_channel ... ok
+#23 59.06 test settings::tests::css_warnings_name_the_new_token ... ok
+#23 59.06 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-4/config.toml","generation":"1","exists":"true"}
+#23 59.06 test settings::tests::container_overrides_quote_names_and_bulk_edit ... ok
+#23 59.07 test settings::tests::deleting_the_first_widget_keeps_the_section_comment ... ok
+#23 59.08 test settings::tests::deleting_what_a_rule_uses_names_the_rules ... ok
+#23 59.09 test settings::tests::diff_endpoint_caps_input ... ok
+#23 59.12 test settings::tests::channels_take_env_names_never_values ... ok
+#23 59.12 test settings::tests::diff_hunks ... ok
+#23 59.16 test settings::tests::diff_is_correct_and_minimal ... ok
+#23 59.17 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-5/config.toml","generation":"1","exists":"true"}
+#23 59.18 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-4/hobnail.db"}
+#23 59.19 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"custom.css saved from the app","user":"admin"}
+#23 59.23 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-5/hobnail.db"}
+#23 59.24 test settings::tests::custom_css_editor ... ok
+#23 59.25 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config saved from the app","note":"containers: hide b","user":"admin"}
+#23 59.25 test settings::tests::diff_falls_back_when_too_different ... ok
+#23 59.25 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-5/config.toml","generation":"2","exists":"true"}
+#23 59.25 test settings::tests::env_var_names ... ok
+#23 59.25 test settings::tests::error_splitting_and_fields ... ok
+#23 59.25 test settings::tests::exclude_patterns_follow_a_multi_line_array ... ok
+#23 59.26 test settings::tests::exclude_patterns_one_at_a_time ... ok
+#23 59.26 test settings::tests::entry_checks_are_said_in_the_forms_words ... ok
+#23 59.26 test settings::tests::fixture_round_trips_and_is_valid ... ok
+#23 59.27 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config saved from the app","note":"groups: edited g","user":"admin"}
+#23 59.27 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-5/config.toml","generation":"3","exists":"true"}
+#23 59.27 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-6/config.toml","generation":"1","exists":"true"}
+#23 59.27 {"ts":"2026-11-19T05:05:41Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-7/config.toml","generation":"1","exists":"true"}
+#23 59.27 test settings::tests::docker_and_groups_routes_take_one_entry_or_the_whole_list ... ok
+#23 59.27 {"ts":"2026-11-19T05:05:41Z","level":"warn","msg":"config invalid, keeping last good config","error":"/tmp/rh-settings-694-8/config.toml:1:6: unclosed table, expected `]`"}
+#23 59.39 test http::gate_tests::invite_roles_and_account_management ... ok
+#23 59.39 test settings::tests::general_and_override_check_links_and_lengths_on_their_fields ... ok
+#23 59.39 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-6/hobnail.db"}
+#23 59.39 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-7/hobnail.db"}
+#23 59.40 test settings::tests::general_edit_changes_one_line_and_keeps_comments ... ok
+#23 59.40 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-9/config.toml","generation":"1","exists":"true"}
+#23 59.41 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-8/hobnail.db"}
+#23 59.45 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 59.45 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-8/config.toml","generation":"1","exists":"true"}
+#23 59.45 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-9/hobnail.db"}
+#23 59.48 test settings::tests::form_errors_name_their_field_in_plain_words ... ok
+#23 59.48 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-10/config.toml","generation":"1","exists":"true"}
+#23 59.48 test settings::tests::form_tabs_refuse_a_broken_file ... ok
+#23 59.49 test settings::tests::groups_one_at_a_time_keep_what_the_form_does_not_show ... ok
+#23 59.49 test settings::tests::guard_binds_secrets_to_their_destination ... ok
+#23 59.50 test settings::tests::guard_matrix ... ok
+#23 59.50 test settings::tests::guard_secret_files_are_allowlisted_to_data_secrets ... ok
+#23 59.50 test settings::tests::guard_secret_location_resolves_symlinks ... ok
+#23 59.50 test settings::tests::hash_is_sha256_hex ... ok
+#23 59.50 test settings::tests::history_section_is_patched_generically ... ok
+#23 59.50 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-11/config.toml","generation":"1","exists":"true"}
+#23 59.51 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"widgets: reordered","user":"admin"}
+#23 59.51 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-6/config.toml","generation":"2","exists":"true"}
+#23 59.54 test settings::tests::gets_return_hash_and_values ... ok
+#23 59.54 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-12/config.toml","generation":"1","exists":"true"}
+#23 59.55 test settings::tests::form_api_never_touches_command_widgets ... ok
+#23 59.55 test settings::tests::log_match_rules_can_be_added_from_the_form ... ok
+#23 59.56 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-13/config.toml","generation":"1","exists":"false"}
+#23 59.71 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-11/hobnail.db"}
+#23 59.71 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-10/hobnail.db"}
+#23 59.72 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history cleared from the app","user":"admin"}
+#23 59.72 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-12/hobnail.db"}
+#23 59.75 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-13/hobnail.db"}
+#23 59.78 test settings::tests::history_writes_go_through_the_validator ... ok
+#23 59.78 test settings::tests::gets_show_env_names_never_values ... {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"bookmarks: added GitHub","user":"admin"}
+#23 59.79 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-13/config.toml","generation":"2","exists":"true"}
+#23 59.79 ok
+#23 59.79 test settings::tests::percent_decoding ... ok
+#23 59.79 test settings::tests::plain_words_and_the_key_at_a_column ... ok
+#23 59.79 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-14/config.toml","generation":"1","exists":"true"}
+#23 59.79 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-15/config.toml","generation":"1","exists":"true"}
+#23 59.82 test settings::tests::missing_config_file_can_be_created ... ok
+#23 59.83 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-16/config.toml","generation":"1","exists":"true"}
+#23 59.83 test settings::tests::invalid_input_is_never_written ... ok
+#23 59.84 test settings::tests::renaming_a_widget_moves_the_rules_that_watch_it ... ok
+#23 59.84 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-17/config.toml","generation":"1","exists":"true"}
+#23 60.00 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-17/hobnail.db"}
+#23 60.00 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-15/hobnail.db"}
+#23 60.00 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-14/hobnail.db"}
+#23 60.00 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-16/hobnail.db"}
+#23 60.04 test settings::tests::preview_respects_allow_hosts ... ok
+#23 60.04 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-18/config.toml","generation":"1","exists":"true"}
+#23 60.06 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 60.06 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-16/config.toml","generation":"2","exists":"true"}
+#23 60.07 test settings::tests::restoring_a_revision_with_another_command_widget_is_refused ... ok
+#23 60.08 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-19/config.toml","generation":"1","exists":"true"}
+#23 60.08 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-20/config.toml","generation":"1","exists":"true"}
+#23 60.10 test settings::tests::raw_save_with_a_secret_warns_but_saves ... ok
+#23 60.10 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-21/config.toml","generation":"1","exists":"true"}
+#23 60.19 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-18/hobnail.db"}
+#23 60.21 test settings::tests::revision_endpoints_without_a_database ... ok
+#23 60.21 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-22/config.toml","generation":"1","exists":"true"}
+#23 60.22 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-19/hobnail.db"}
+#23 60.22 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-20/hobnail.db"}
+#23 60.22 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-21/hobnail.db"}
+#23 60.26 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"general","user":"admin"}
+#23 60.26 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-21/config.toml","generation":"2","exists":"true"}
+#23 60.27 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-22/hobnail.db"}
+#23 60.28 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"general","user":"admin"}
+#23 60.29 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-19/config.toml","generation":"2","exists":"true"}
+#23 60.32 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 60.32 test settings::tests::save_is_atomic_keeps_mode_and_reloads ... ok
+#23 60.33 test settings::tests::secret_value_warnings ... ok
+#23 60.33 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-15/config.toml","generation":"2","exists":"true"}
+#23 60.33 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-23/config.toml","generation":"1","exists":"true"}
+#23 60.34 {"ts":"2026-11-19T05:05:42Z","level":"info","msg":"custom.css saved from the app","user":"admin"}
+#23 60.37 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config saved from the app","note":"restored #1","user":"admin"}
+#23 60.37 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-19/config.toml","generation":"3","exists":"true"}
+#23 60.41 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 60.42 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-15/config.toml","generation":"3","exists":"true"}
+#23 60.42 test settings::tests::revisions_record_restore_and_diff ... ok
+#23 60.43 test settings::tests::shapes_reject_unknown_fields_and_bad_types ... ok
+#23 60.43 test settings::tests::saving_custom_css_reports_old_token_names ... ok
+#23 60.43 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-24/config.toml","generation":"1","exists":"true"}
+#23 60.46 test settings::tests::switches_off_then_on_give_back_the_file ... ok
+#23 60.46 test settings::tests::system_toggle ... ok
+#23 60.46 test settings::tests::unchanged_value_keeps_its_formatting_and_trailing_comment ... ok
+#23 60.47 test settings::tests::widget_add_writes_tables_after_the_last_widget ... ok
+#23 60.47 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-23/hobnail.db"}
+#23 60.48 test settings::tests::widget_edit_patches_in_place ... ok
+#23 60.48 test settings::tests::widget_field_errors_land_on_the_fields_list ... ok
+#23 60.49 test settings::tests::widget_reorder_moves_entries_with_their_comments ... ok
+#23 60.53 test settings::tests::write_atomic_failure_leaves_target_and_no_temp ... ok
+#23 60.53 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config saved from the app","note":"raw edit","user":"admin"}
+#23 60.53 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-23/config.toml","generation":"2","exists":"true"}
+#23 60.53 test settings::tests::raw_editor_guard_and_allowed_cases ... ok
+#23 60.53 test system::tests::disk_percent_like_df ... ok
+#23 60.54 test system::tests::counter_reset_gives_no_rate ... ok
+#23 60.54 test system::tests::explicit_iface_and_busiest_fallback ... ok
+#23 60.54 test system::tests::missing_everything_is_not_a_panic ... ok
+#23 60.54 test system::tests::parses_cpu ... ok
+#23 60.54 test system::tests::parses_meminfo ... ok{"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config saved from the app","note":"notifications: deleted channel hook","user":"admin"}
+#23 60.54 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-23/config.toml","generation":"3","exists":"true"}
+#23 60.55 
+#23 60.55 test system::tests::parses_route_and_dev ... ok
+#23 60.55 test system::tests::small_parsers ... ok
+#23 60.57 test system::tests::temperature_fallbacks ... ok
+#23 60.57 test util::tests::durations ... ok
+#23 60.57 test util::tests::globs ... ok
+#23 60.57 test util::tests::humans ... ok
+#23 60.57 test util::tests::utc_format ... ok
+#23 60.57 test widgets::path::tests::evaluates ... ok
+#23 60.57 test widgets::path::tests::rejects_bad_paths ... ok
+#23 60.57 test widgets::plain_error_tests::describes_connection_failures ... ok
+#23 60.57 test widgets::template::tests::names ... ok
+#23 60.57 test widgets::template::tests::parse_errors ... ok
+#23 60.57 test widgets::template::tests::renders_and_filters ... ok
+#23 60.57 test widgets::template::tests::thousands ... ok
+#23 60.57 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"history database open","path":"/tmp/rh-settings-694-24/hobnail.db"}
+#23 60.58 test widgets::tests::command_disabled_by_default ... ok
+#23 60.58 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config saved from the app","note":"undid settings deletion","user":"admin"}
+#23 60.58 {"ts":"2026-11-19T05:05:43Z","level":"info","msg":"config loaded","path":"/tmp/rh-settings-694-23/config.toml","generation":"4","exists":"true"}
+#23 60.59 test system::tests::first_sample_then_rates ... ok
+#23 60.60 test widgets::tests::command_json ... ok
+#23 60.60 test widgets::tests::command_errors ... ok
+#23 60.60 test widgets::tests::command_nonzero_exit ... ok
+#23 60.61 test widgets::tests::command_text_output_and_env ... ok
+#23 60.61 test widgets::tests::custom_api_allow_hosts ... ok
+#23 60.61 test widgets::tests::custom_api_bad_json ... ok
+#23 60.61 test settings::tests::settings_hide_inline_channel_values_and_undo_preserves_them ... ok
+#23 60.61 test widgets::tests::custom_api_connection_refused ... ok
+#23 60.62 test widgets::tests::custom_api_http_errors ... ok
+#23 60.62 test widgets::tests::custom_api_default_rows_and_raw ... ok
+#23 60.62 test settings::tests::stale_hash_is_refused ... ok
+#23 60.62 test widgets::tests::custom_api_ok ... ok
+#23 60.62 test widgets::tests::custom_api_secret_headers_and_body ... ok
+#23 60.63 test widgets::tests::custom_api_text_output ... ok
+#23 60.63 test widgets::tests::custom_api_secret_headers_never_come_back ... ok
+#23 60.63 test widgets::tests::custom_api_status_not_ok ... ok
+#23 60.63 test widgets::tests::example_config_parses ... ok
+#23 60.64 test widgets::tests::scrub_replaces_each_form_of_a_secret ... ok
+#23 60.64 test widgets::tests::example_command_runs ... ok
+#23 60.64 test widgets::tests::widget_links_reject_network_path_references ... ok
+#23 60.64 test widgets::tests::validation_errors ... ok
+#23 60.91 test widgets::tests::command_timeout_kills ... ok
+#23 60.93 test widgets::tests::custom_api_timeout ... ok
+#23 60.93 
+#23 60.93 test result: ok. 382 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.83s
+#23 60.93 
+#23 61.39    Compiling hobnail v0.0.1 (/src)
+#23 225.3     Finished `release` profile [optimized] target(s) in 2m 44s
+#23 225.3 hobnail 0.0.1 (b93b92e built unknown) content 93da0f7f50edb275af333c569d9641b4981b4aa3e63f06c70fd72a87d34b3196
+#23 DONE 225.4s
+
+#24 [stage-2 1/1] COPY --from=build /rootfs/ /
+#24 DONE 0.0s
+
+#25 exporting to image
+#25 exporting layers
+#25 exporting layers 0.8s done
+#25 exporting manifest sha256:dc4ebaccb54065d039111a9861f080191b4937fed47b3a4082986104e066b744 0.0s done
+#25 exporting config sha256:a9af30c8cf3d4da894acc9d936453ee873fc6e94e56669535a43be38d123b90b 0.0s done
+#25 exporting attestation manifest sha256:2864f35be4a70e05c6dce3a2811b6a566de815bdf0495d392455733a7af9aa10 0.0s done
+#25 exporting manifest list sha256:14897f701f9943b39f37182cb9eeaf7b9c19beda34e66312de6664b86bac466f 0.0s done
+#25 naming to docker.io/library/hobnail-rp:m5
+#25 naming to docker.io/library/hobnail-rp:m5 done
+#25 unpacking to docker.io/library/hobnail-rp:m5
+#25 unpacking to docker.io/library/hobnail-rp:m5 0.2s done
+#25 DONE 1.2s

@@ -1,0 +1,365 @@
+{
+  "results": [
+    {
+      "width": 1440,
+      "route": "/app/overview",
+      "controls": 412,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers",
+      "controls": 815,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001?tab=overview",
+      "controls": 379,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001?tab=metrics",
+      "controls": 386,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001?tab=inspect",
+      "controls": 368,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001?tab=events",
+      "controls": 374,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001?tab=processes",
+      "controls": 374,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/host",
+      "controls": 394,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/history",
+      "controls": 394,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/alerts",
+      "controls": 364,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/logs",
+      "controls": 674,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/containers/svc001/logs",
+      "controls": 392,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/stacks/stack01/logs",
+      "controls": 383,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/logs?c=svc001,svc002,svc003,svc005",
+      "controls": 411,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/boards/6c1e2ff05eed90115430644abff46802",
+      "controls": 361,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/boards/6c1e2ff05eed90115430644abff46802 edit",
+      "controls": 375,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/general",
+      "controls": 377,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/containers",
+      "controls": 676,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/bookmarks",
+      "controls": 372,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/widgets",
+      "controls": 373,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/notifications",
+      "controls": 373,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/appearance",
+      "controls": 375,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/history",
+      "controls": 376,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/config",
+      "controls": 435,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/security",
+      "controls": 376,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/boards",
+      "controls": 378,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/integrations",
+      "controls": 372,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/settings/users",
+      "controls": 382,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/account",
+      "controls": 366,
+      "problems": []
+    },
+    {
+      "width": 1440,
+      "route": "/app/login",
+      "controls": 3,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/overview",
+      "controls": 60,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers",
+      "controls": 568,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001?tab=overview",
+      "controls": 28,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001?tab=metrics",
+      "controls": 34,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001?tab=inspect",
+      "controls": 18,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001?tab=events",
+      "controls": 24,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001?tab=processes",
+      "controls": 24,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/host",
+      "controls": 42,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/history",
+      "controls": 42,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/alerts",
+      "controls": 14,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/logs",
+      "controls": 324,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/containers/svc001/logs",
+      "controls": 30,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/stacks/stack01/logs",
+      "controls": 17,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/logs?c=svc001,svc002,svc003,svc005",
+      "controls": 47,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/boards/6c1e2ff05eed90115430644abff46802",
+      "controls": 11,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/boards/6c1e2ff05eed90115430644abff46802 edit",
+      "controls": 25,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/general",
+      "controls": 27,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/containers",
+      "controls": 326,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/bookmarks",
+      "controls": 22,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/widgets",
+      "controls": 23,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/notifications",
+      "controls": 23,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/appearance",
+      "controls": 25,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/history",
+      "controls": 26,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/config",
+      "controls": 85,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/security",
+      "controls": 26,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/boards",
+      "controls": 28,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/integrations",
+      "controls": 22,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/settings/users",
+      "controls": 32,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/account",
+      "controls": 16,
+      "problems": []
+    },
+    {
+      "width": 390,
+      "route": "/app/login",
+      "controls": 3,
+      "problems": []
+    }
+  ],
+  "failures": []
+}

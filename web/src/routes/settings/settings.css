@@ -1,0 +1,26 @@
+.page.set{max-width:1240px;grid-template-columns:200px minmax(0,1fr);align-items:start;gap:var(--s-6)}
+.set>.page-header{grid-column:1/-1}
+.set-nav{position:sticky;top:calc(var(--top-h) + var(--s-6));border:0}
+.set-nav ul{list-style:none;margin:0;padding:0;display:grid}
+.set-nav .tab{justify-content:flex-start;width:100%;padding-inline:var(--s-2);height:var(--ctl-h)}
+.set-main{display:grid;gap:var(--s-6);min-width:0}
+.page.set.locked{grid-template-columns:minmax(0,1fr);max-width:860px}
+@media (max-width:900px){
+ .page.set{grid-template-columns:minmax(0,1fr);gap:var(--s-4)}
+ .set-nav{position:static;border-bottom:1px solid var(--border)}
+ .set-nav ul{display:flex;width:max-content}
+}
+.settings-section{display:grid;gap:var(--s-4);min-width:0}.settings-section>header p{margin-top:var(--s-2)}.settings-list{display:grid;gap:var(--s-3)}.settings-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:var(--s-3);padding:var(--s-4);background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);overflow-wrap:anywhere}.settings-row>div{min-width:0}.settings-actions{display:flex;flex-wrap:wrap;gap:var(--s-2)}.settings-page .board-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--s-3);flex-wrap:wrap}
+.settings-form{display:grid;gap:var(--s-3);max-width:42rem;min-width:0}
+.settings-role{text-transform:capitalize}
+.settings-code{width:100%;min-width:0;resize:vertical;white-space:pre-wrap;overflow-wrap:anywhere}
+.settings-form fieldset{min-width:0}
+.settings-section pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.settings-wide{max-width:none}
+.settings-path{overflow-wrap:anywhere}
+.settings-row:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+@media (max-width:699px){.settings-section .btn,.settings-form .btn{min-height:var(--ctl-h)}}
+.settings-pair{display:grid;grid-template-columns:1fr 1fr auto;gap:var(--s-2);align-items:end}
+@media (max-width:519px){.settings-pair{grid-template-columns:1fr}}
+.settings-section>.sel{justify-self:start}
+.settings-row .settings-actions{gap:var(--s-1)}

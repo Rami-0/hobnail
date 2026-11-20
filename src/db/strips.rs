@@ -25,27 +25,6 @@ pub enum Cell {
     Bad,
 }
 
-impl Cell {
-    pub fn class(self) -> &'static str {
-        match self {
-            Cell::Unknown => "u",
-            Cell::Off => "f",
-            Cell::Ok => "o",
-            Cell::Warn => "w",
-            Cell::Bad => "b",
-        }
-    }
-    pub fn word(self) -> &'static str {
-        match self {
-            Cell::Unknown => "no data",
-            Cell::Off => "not running",
-            Cell::Ok => "running",
-            Cell::Warn => "restarted",
-            Cell::Bad => "problem",
-        }
-    }
-}
-
 /// One container's strip.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Strip {
@@ -115,16 +94,6 @@ const TTL: i64 = 30;
 
 type Key = (usize, i64, usize, i64);
 static CACHE: Mutex<Option<(Key, i64, Arc<Strips>)>> = Mutex::new(None);
-
-/// The newest strips computed by any page (for live fragments that have no
-/// database handle, such as the sidebar tree).
-pub fn last() -> Option<Arc<Strips>> {
-    CACHE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|c| c.2.clone())
-}
 
 impl super::Db {
     /// Cached `health_strips_uncached`: at most one computation per window
@@ -404,7 +373,6 @@ mod tests {
         let s = db.health_strips(1_800_000_000, 96, 900);
         assert_eq!(s.buckets(), 96);
         assert!(s.by_name.is_empty());
-        assert!(last().is_some());
         assert_eq!(db.latest_cpu(0), None);
     }
 

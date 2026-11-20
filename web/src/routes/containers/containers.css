@@ -1,0 +1,131 @@
+/* Table and shared container details. At 640 px and below, rows stack and
+   skip layout and paint while off screen (content-visibility). */
+:is(.ct,.cd) :is(img,span).icon{width:20px;height:20px;border-radius:5px;flex:none;object-fit:contain}
+:is(.ct,.cd) .icon.avatar{display:inline-flex;align-items:center;justify-content:center;font-size:.7857rem;font-weight:700;color:#fff;background:hsl(var(--h) 45% 30%)}
+:is(.ct,.cd) .ra{display:flex;align-items:center;justify-content:flex-end;gap:var(--s-1)}
+:is(.ct,.cd) .ra .btn.sm{gap:6px}
+:is(.ct,.cd) .exit{font-size:var(--fs-micro);padding:0 4px;border-radius:3px;background:var(--surface-2);color:var(--text-2)}
+:is(.ct,.cd) .mono.img{color:var(--text-2)}
+.port{display:inline-block;height:max(24px,var(--hit));min-width:var(--hit);text-align:center;padding:0 6px;margin-right:4px;border:1px solid var(--ctl-border);border-radius:4px;font:var(--fs-xs)/calc(max(24px,var(--hit)) - 2px) var(--mono);color:var(--accent-fg);white-space:nowrap}
+.port:hover{border-color:var(--input);text-decoration:none}
+.port.local{color:var(--text-3);border-style:dashed}
+.port.local small,.port.plain small{font-size:calc(10rem/14);font-family:var(--font)}
+.port.plain{color:var(--text-2)}
+.port.more{color:var(--text-3)}
+
+/* ---- toolbar ---- */
+.ct search.bar{display:flex}
+.ct .seg>[data-state]{padding-inline:var(--s-2);gap:var(--s-1)}
+.ct .bar{min-width:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.ct .search-in{position:relative;flex:0 1 320px;min-width:min(100%,240px);max-width:320px}
+.ct .search-in>svg{position:absolute;left:10px;top:calc((var(--ctl-h) - 14px)/2);color:var(--text-3);width:14px;height:14px;pointer-events:none}
+.ct .search-in input{padding-left:32px}
+.ct .sortctl{display:none;gap:4px;align-items:center}
+.ctbl-loading{padding:var(--s-4)}
+
+/* ---- table ---- */
+.ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.ctbl{table-layout:fixed}
+.ctbl .c-name{width:auto}
+.ctbl .c-stack{width:90px}
+.ctbl .c-image{width:160px}
+.ctbl .c-state{width:116px}
+.ctbl .c-up{width:72px}
+.ctbl .c-hist{width:110px}
+.ctbl .c-hist .hstrip{width:100%}
+.ctbl .c-num:not(.c-up){width:110px}
+.ctbl .c-ports{width:168px}
+.ctbl .c-act{width:64px}
+.ctbl .c-num .cell-spark{width:30px;margin-left:4px}
+.ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
+.ctbl caption b{color:var(--text);font-weight:600}
+.ctbl thead th{position:sticky;top:var(--top-h);z-index:2;background:var(--surface)}
+.ctbl .sort-b{display:flex;width:100%;height:var(--ctl-h-sm);justify-content:flex-start;gap:3px;padding:0;border:0;background:none;color:inherit;font:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer}
+.ctbl .sort-b:hover{color:var(--text)}
+.ctbl .sort-i{width:12px;height:12px}
+.ctbl .sort-i.off{opacity:0}
+.ctbl .sort-b:hover .sort-i.off{opacity:.6}
+.ctbl th[aria-sort=ascending],.ctbl th[aria-sort=descending]{color:var(--text)}
+.ctbl th.c-num{text-align:right}
+.ctbl th.c-num .sort-b{justify-content:flex-end}
+.ctbl .row td:first-child{padding-left:14px}
+.c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-name>.dot{margin-right:9px;vertical-align:1px}
+.c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
+.c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
+.c-name .nm-t{white-space:nowrap}
+.c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
+.c-name .badge{margin-left:8px}
+.c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-stack a{color:var(--text-2)}
+.ctbl.grouped .c-stack{display:none}
+.c-image{width:18%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-image .img{font-size:var(--fs-xs)}
+.c-state{width:1%;white-space:nowrap}
+.c-up{width:80px}
+.c-num{width:124px;text-align:right;white-space:nowrap}
+.c-num .num{font:calc(12.5rem/14) var(--mono);display:inline-block;min-width:62px}
+/* A live number changes in a box of its own size: the table is not laid out again (size containment). */
+.ctbl .c-num .num{width:62px;height:1.45em;line-height:1.45em;vertical-align:middle;contain:size;text-align:right;white-space:nowrap}
+.ctbl .c-num .cell-spark{contain:size}
+.c-num .cell-spark{display:inline-block;width:40px;height:14px;margin-left:8px;vertical-align:-2px}
+.c-up .num{min-width:0}
+.c-ports{width:1%;white-space:nowrap}
+.c-act{width:112px;text-align:right;white-space:nowrap}
+
+.c-hist .hstrip{width:120px;height:12px}
+.row.stopped .nm{color:var(--text-2)}
+.row.stopped .c-image .img{color:var(--text-3)}
+.grp-h th{height:34px;padding:0 6px;background:var(--bg-side);border-bottom:1px solid var(--line);text-transform:none;letter-spacing:0;position:static}
+tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
+.grp-t{display:flex;align-items:center;gap:8px;width:100%;height:var(--ctl-h-sm);justify-content:flex-start;padding:0 var(--s-2);border:0;border-radius:var(--r-sm);background:none;cursor:pointer;color:var(--text);font-size:calc(12.5rem/14);font-weight:600;text-align:left;contain:inline-size}
+.grp-t:hover{background:var(--tint)}
+.grp-t .chev{width:14px;height:14px;color:var(--text-3);transition:transform var(--dur-2)}
+.grp.closed .grp-t .chev{transform:rotate(-90deg)}
+.grp-n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grp-t>svg,.grp-t .cnt{flex:none}
+.grp-t .cnt{font:500 var(--fs-micro) var(--mono);color:var(--text-3)}
+.grp-strip{flex:0 1 200px;margin-left:auto;min-width:40px}
+.grp-strip .hstrip{height:8px}
+tbody.none td{padding:0}
+/* rows still to come (index.tsx Waiting): their height, so nothing moves when they arrive */
+.ctbl tr.row-wait td{height:calc(var(--n) * var(--row));padding:0;border:0}
+@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
+@media (max-width:900px){.c-num .cell-spark{display:none}.c-num{width:80px}.ctbl .c-ports,.ctbl .c-hist{display:none}}
+
+/* ---- phones: stacked rows, a sort control in the toolbar ---- */
+@media (max-width:640px){
+ .ct .seg{overflow-x:auto;max-width:100%}
+ .ct .search-in{max-width:none;flex-basis:100%}
+ .ct .sortctl{display:flex}
+ .ctbl,.ctbl tbody{display:block}
+ .ctbl thead{display:none}
+ .ctbl caption{display:block}
+ .ctbl tr.row{display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--line);content-visibility:auto;contain-intrinsic-size:auto 130px}
+ .ctbl tr.row td{display:block;height:auto;padding:0;border:0;width:auto;max-width:none;background:none!important}
+ .ctbl tr.row td.c-name{flex:1 1 60%;min-width:0;padding:0!important}
+ .ctbl tr.row td.c-act{order:2}
+ .ctbl tr.row td:is(.c-stack,.c-state,.c-num,.c-ports){order:3;font-size:var(--fs-xs)}
+ .ctbl.grouped tr.row td.c-stack{display:none}
+ .ctbl tr.row td.c-ports{display:block;flex-basis:100%}
+ .ctbl tr.row td.c-ports:empty{display:none}
+ .ctbl tr.row td.c-image{display:none}
+ .ctbl tr.row td.c-num{text-align:left}
+ .ctbl tr.row td.c-num::before{content:attr(data-l) " ";color:var(--text-3);font-size:var(--fs-micro)}
+ .c-num .num{min-width:0}
+ .ctbl .c-num .num{width:auto;height:auto;contain:none;text-align:left}
+ .ctbl tr.row td.c-num{min-width:0}
+ .ctbl tr.row td.c-hist{display:block;order:4;flex-basis:100%;width:auto}
+ .ctbl tr.row td.c-hist:empty{display:none}
+ .c-hist .hstrip{width:100%;height:5px;opacity:.85}
+ .ctbl tr.grp-h{display:block}
+ .ctbl tr.grp-h th{display:block;height:auto}
+ .ctbl tbody.none tr,.ctbl tbody.none td{display:block}
+ .ctbl tr.row-wait,.ctbl tr.row-wait td{display:block}
+ .ctbl tr.row-wait{height:calc(var(--n) * 130px)}.ctbl tr.row-wait td{display:none}
+}
+@media (pointer:coarse),(max-width:640px){
+ .port{margin-block:2px}
+ .grp-t{height:44px}
+}
+.ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}

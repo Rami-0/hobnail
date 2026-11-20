@@ -38,13 +38,15 @@ Server behaviour behind this (`/api/settings/channels`, `/api/settings/alerts`):
   request leaves out; `null` removes one. So the form never sends header
   values, a body, `api_base` or `chat_id_env`, and they stay as they are.
 
-Secrets live in `secrets.env` next to the compose file or in files under
-`data/secrets/`; the config and the app only hold environment variable
-**names** and file paths (Settings shows set / not set or file found / no
-file, never the value). From the app you can add Slack, Telegram (default API
-host) and webhook channels whose secret comes from an env var or a file, and
-webhooks with a plain URL; a custom Telegram `api_base`, `chat_id_env`, webhook
-headers or a body template can only be set in the file. Fired / resolved /
+Channel secrets normally come from env vars or host-managed files. Existing
+inline channel values are redacted from Settings responses, raw config,
+revision text and diffs; saves preserve the hidden values. If a config is
+invalid, repair it on the host before the raw editor shows it: the server
+cannot safely redact unparseable text. Browser-entered integration tokens are
+a separate SQLite origin-bound store, not notification channel secret files.
+From Settings, Admin/Owner can add env/file-backed channels and plain webhook
+URLs. Advanced host-file fields remain preserved without exposing their values.
+Fired / resolved /
 failed deliveries and test sends are in the history database and on the
 Alerts page.
 
@@ -58,13 +60,12 @@ the Notifications tab's channel and rule lists with their dialogs: "Add
 channel", "Add rule", "Send test" per channel, the rule on/off switches,
 edit and delete; a firing incident's rule name opens that rule's dialog and
 a "Not delivered" row in the log opens its channel's dialog.
-They are the same lists, dialogs and script as in Settings
-(read from `/settings/notifications?frag=list`, saved through the same
-routes and guards); `/alerts?add=channel`, `?edit=rule:<name>` and so on open
-the dialog, or show the form without JavaScript. Signed out the page shows
-only what it always did: rule and channel names, kinds, what a rule watches
-and delivery state, never env-variable names, URLs of channels or form
-values. The read-only rules table states thresholds with their unit
+They use the same React lists and dialogs as Settings, reading authenticated
+`/api/settings/notifications`. `/app/alerts?add=channel`, `?edit=rule:<name>`
+and similar parameters open the dialog. Login is required; unrestricted
+Viewers see redacted read-only rules and channel summaries. Scoped accounts
+cannot read host-wide Alerts. Only Admin/Owner gets editing controls.
+The read-only rules table states thresholds with their unit
 ("memory above 90%") and the timing ("fires after 30 s · repeats after
 15 min"). Delivery counts are notifications, not attempts: "Undelivered" is
 what waits for a retry ("1 queued") or was given up, with the failed
@@ -198,8 +199,7 @@ Template variables: `{{rule}}`, `{{subject}}` (container name, URL,
 (firing / recovery / test), `{{title}}` and, in webhook bodies,
 `{{message}}`.
 
-Secrets come only from environment variables or files and are never
-logged or rendered. Channels obey `[http] allow_hosts`. State lives in
+Secret values are never logged or returned in ordinary client payloads. Channels obey `[http] allow_hosts`. State lives in
 `{data_dir}/alerts-state.json`. Test a channel with
 `hobnail notify-test <channel>`.
 

@@ -1,0 +1,10 @@
+image=hobnail-rp:m5
+image_id=sha256:14897f701f9943b39f37182cb9eeaf7b9c19beda34e66312de6664b86bac466f
+profile=app
+label=warm cache
+config=none (empty)
+date=2026-11-19T05:19:35Z
+host=4 CPUs, 7.2 GiB, kernel 7.0.0-38-generic, Docker 29.5.2
+phases=startup 10s/100ms idle 90s/500ms load 60s/500ms x (1 10 25) after 60s/500ms
+healthcheck=1
+healthz_ms=446

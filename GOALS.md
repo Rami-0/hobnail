@@ -4,15 +4,13 @@ A small, fast, hackable home-server dashboard written in Rust. It should replace
 the current Homepage (gethomepage) container, which idles at ~112 MiB and needs a
 watchdog script to keep `services.yaml` in sync with Docker.
 
-Status: **M0 to M5, v2 (V1 to V4), v3 wave 1 and the UX pass are built**: a Dozzle-style UI,
-logs in the app, a host page, a history database and settings inside the app behind a
-login. The UX pass closed 253 of the 267 findings in [docs/qa/QA.md](docs/qa/QA.md); the
-other 14 are deferred there with a reason. M6 (cutover) waits for the owner. The
-spec is [docs/DESIGN.md](docs/DESIGN.md); sections 9 to 11 below are its goals. The
-agreed next direction, a React client served by the same Rust server, is recorded in
-[docs/decisions/react-client-and-dashboard.md](docs/decisions/react-client-and-dashboard.md)
-and not started. Numbers marked *(baseline)* were measured on this host on 2026-11-14 with
-`docker stats --no-stream` (host: 7.2 GiB RAM).
+Status: the React client at `/app` is the only UI. The old UI is preserved on
+`rust-only`; its URLs have no compatibility handlers. Browser owner setup,
+invited accounts, boards and generic HTTP integration connection tests are built.
+Provider integrations and the full guided setup sequence are not built yet.
+The spec is [docs/DESIGN.md](docs/DESIGN.md); current measurements are in
+[the React results](docs/plans/react-port-phase-2-5.md). The table below records
+the historical 2026-11-17 measurements, not the React deployment.
 
 ## 1. Resource usage (the headline goal)
 
@@ -47,23 +45,21 @@ How to hold ourselves to it:
 
 ## 2. Customizability
 
-- **Config as a TOML file** (decided, see "Decisions made"). Layout, overrides,
-  widgets and alert rules live in one place, and it can be put in git.
-- **High-level, not exhaustive.** This is the opposite of Homepage's `services.yaml`,
-  where every card is written by hand. With an empty config the page must already
-  be useful: every container is discovered, grouped by compose project, given an
-  icon and a link from its published ports, and shown with its state. The config
-  file holds only *overrides and additions*: rename a card, pin one to a group,
-  hide one, set an icon, add a bookmark, add a widget. A 10-line config should
-  give a good page, and nothing should ever have to be listed just to appear.
+- **Config as a TOML file** (decided, see "Decisions made"). Overrides, widgets and alert rules live in the file. Boards, layout,
+  integrations, dashboard settings and setup drafts live in SQLite.
+- **Discovery supplies suggestions.** Containers are discovered and remain
+  available on the Containers page according to account scopes. New boards are
+  empty; the owner chooses their contents. There is no automatic All containers
+  board. The config file holds overrides and additions.
 - **Hot reload.** Editing the config updates the page without restarting the
   container. A broken edit keeps the last good config and shows a clear error with
   the file and line, instead of a blank page.
-- **Layout control:** groups, per-group columns, ordering, collapsible groups,
-  sizes for cards, and the choice between card grid and compact list.
+- **Layout control:** boards, sections, order and responsive item spans,
+  arranged in Settings and edit mode and saved in SQLite. Save and Cancel
+  commit or discard one editing session; private drafts support recovery.
 - **Theming:** all colors, spacing and fonts come from CSS variables. Ship dark and
   light, follow the OS setting, and allow a user `custom.css` that is loaded last.
-- **Icons:** local files, built-in set, and a dashboard-icons name lookup. Fetched
+- **Icons:** local files, built-in set, and a dashboard-icons name lookup. Remote lookup is opt-in (`[icons] remote = true`). Fetched
   icons are cached on disk so the page works with no internet.
 - **No required rebuild** to change anything above.
 
@@ -77,8 +73,7 @@ How to hold ourselves to it:
   wins over the automatic result.
 - Opt-in and opt-out through container labels. Accept the existing
   `homepage.*` labels where practical, so migration is cheap.
-- Show live per-container CPU and memory, and link out to Dozzle for logs and
-  Beszel for history instead of re-implementing them.
+- Show live per-container CPU and memory, with logs and history inside the app.
 - Never write to Docker. No start, stop or remove in v1. Read the compose file
   as text for display only, if we add that.
 
@@ -92,7 +87,7 @@ CPU, memory, disk, network, temperature, host uptime.
 The model follows Glance: a set of built-in widget types, plus a few generic
 ones that let anyone build their own without writing Rust.
 
-Widget types, easiest first. We start with 1 and 2, and add the rest over time:
+Widget types: 1 and 2 are built. Items 3–6 are the clearly marked not-built-yet list:
 1. **Custom API widget (v1).** URL, optional headers, a path expression to pull
    fields out of the JSON response, and a small template that renders them. This
    covers most self-hosted APIs (Beszel, Mailpit, Odoo health, Tailscale) with
@@ -111,8 +106,10 @@ Rules for every widget:
 - Each widget has its own timeout and refresh interval, set in the config.
 - **One failing widget never breaks the page.** It shows an error state and the
   rest of the page keeps working.
-- Secrets (API tokens) come from environment variables or files, never from the
-  config file, and are never written to logs.
+- Widget/channel secrets should use env vars or host-managed files. Existing
+  inline channel secrets are redacted from Settings responses, including raw
+  text, revisions and diffs. Integration credentials entered in the browser
+  are write-only in SQLite and origin-bound, never returned or logged.
 - Outgoing HTTP can be restricted to an allow-list of hosts.
 
 ## 5. Notifications and alerts
@@ -142,8 +139,9 @@ look.
 - **Routing.** Each rule names its channels, so noisy things go to one place
   and serious things to another.
 - **Messages are templates** with the container, service, value and time available.
-- **Secrets** (bot tokens, webhook URLs) come from environment variables or files,
-  never from the config, and are never logged.
+- **Secrets** (bot tokens, webhook URLs) normally use env vars or host-managed
+  files. Legacy inline channel values are redacted from Settings responses;
+  an invalid file must be repaired on the host before raw editing is available.
 - **Test from the CLI:** a command that sends a test message to a channel, so a
   new channel can be verified without breaking something.
 - **Survives restarts.** Keep a tiny state file so a restart does not re-send
@@ -157,7 +155,9 @@ look.
   Dozzle does), never `0.0.0.0` by default.
 - Notification channels send data out, so each one is explicit in the config and
   nothing is sent anywhere by default.
-- Optional authentication: a single shared token or basic auth to start with.
+- Login required for application data. One Owner invites Admin and Viewer
+  accounts and can scope them to boards and integrations. The first visitor
+  sets the owner password in the browser; passwords use salted argon2id.
 - The Docker socket is mounted read-only, and the docs recommend a socket proxy.
 - Custom command widgets and cross-host fetches are off unless explicitly enabled.
 - No telemetry, and no calls to the internet at runtime beyond what the user
@@ -165,8 +165,8 @@ look.
 
 ## 7. Experience
 
-- Server-rendered HTML with a small amount of JavaScript for live updates (SSE or
-  htmx-style partial updates). No build step for the frontend, and no Node.
+- A React client built with Vite and embedded in the Rust binary. Node runs
+  only at build time. Live updates are JSON over SSE. The app needs JavaScript.
 - Works well on a phone.
 - Keyboard quick-launch: press `/`, type a service name, press Enter.
 - Honest status: a card is green only when a check says it is healthy, and a
@@ -203,10 +203,13 @@ widgets, notification channels and rules, appearance, retention.
   validated before they are written. An invalid edit is never saved.
 - Every save is a revision in the database: list, diff, restore.
 - A raw TOML editor stays available for power users.
-- **Writes require a login.** Viewing stays open. The password is set from the
-  console (`set-password`), so nobody can claim an unprotected instance.
+- **All data requires login.** First use opens owner setup at `/app`.
+  `hobnail set-password [username]` is optional host recovery; legacy-password
+  databases require that recovery before browser onboarding can proceed.
 - `command` widgets are never editable from the app.
-- Secrets are never shown or stored by the app; forms hold env var names.
+- Config forms use env-var names or file paths. Browser-entered integration
+  credentials are write-only in SQLite, bound to their origin, and never
+  returned. Changing the origin requires entering the credential again.
 - Details: [docs/DESIGN.md](docs/DESIGN.md) sections 5 and 6.
 
 ## 11. UI design
@@ -215,10 +218,10 @@ The first UI looked like Homepage: pale cards in a grid, one big tile per
 container, no hierarchy. v2 follows Dozzle's layout language instead.
 
 - Sidebar with a stack tree, a command palette (`Ctrl/⌘ K`), dense sortable
-  tables, dark first with a light theme, tabular numbers, charts as inline SVG.
+  tables, dark first with a light theme, tabular numbers, charts drawn in the browser (Recharts; small graphics as SVG).
 - Pages: Overview, Containers, Container detail, History, Alerts, Settings.
 - Works from 390 px to wide desktop; keyboard reachable; WCAG AA contrast.
-- Server-rendered, no JS framework, no WASM, no chart library.
+- React 19, TypeScript, Vite, UI SDK and Lucide; no WASM or server-side JavaScript.
 - Details and tokens: [docs/DESIGN.md](docs/DESIGN.md) sections 1 to 3.
 
 ## Non-goals (for now)
@@ -230,11 +233,13 @@ container, no hierarchy. v2 follows Dozzle's layout language instead.
   Beszel.
 - Starting, stopping or deploying containers. That is what Dockge and Arcane
   did, and we don't want the socket write access.
-- Log viewing and long-term metrics. Dozzle and Beszel own those.
-- Multi-user accounts, roles and OIDC.
+- OIDC. Named accounts and roles are built.
 - Multi-host Docker aggregation in v1.
 
 ## Milestones
+
+The tables below retain the original Rust-UI roadmap. React port results and
+remaining acceptance misses are recorded separately in the linked M5 report.
 
 Each milestone ends with the measurements from section 1 recorded.
 
@@ -252,7 +257,7 @@ v2 (see [docs/DESIGN.md](docs/DESIGN.md)):
 
 | # | Milestone | Done when |
 |---|---|---|
-| V1 | Storage | History database records host and container samples and events, rollups and retention work, `/api/history/*` and `/api/events` answer, login and sessions work (`set-password`). |
+| V1 | Storage | History database records host and container samples and events, rollups and retention work, `/api/history/*` and `/api/events` answer, login and sessions work (historical console setup, replaced by browser setup). |
 | V2 | New UI | Shell, Overview, Containers, Container detail, History, Alerts and Login in the new design, checked in a browser at 1440, 900 and 390 px, dark and light. |
 | V3 | Settings | Every tab in DESIGN.md section 5 works, edits keep comments, each save is a revision, `command` widgets are protected. |
 | V4 | Polish and measure | Docs updated, measurements redone (RAM, DB size, sampler cost), M6 checklist refreshed. |
@@ -265,7 +270,7 @@ v3: make it the one tool you keep open.
 | W2 | Breadth | Endpoint and uptime monitors, alert rule builder with silences, images/volumes/networks/disk pages, read-only compose view with drift. |
 | W3 | Reach and control | Owner decides on container actions; arrangeable Overview and pages; Glance-style widgets; Prometheus `/metrics`; multi-host design note. |
 
-Budgets for v3 are in the plan (idle 8 MiB or less, image 12 MB or less).
+Budgets for v3 are in the plan (idle 8 MiB or less, image 13 MB or less after old UI removal).
 
 Until M6, it runs **alongside** Homepage on a different port. Homepage stays
 untouched. Idle RAM is measured at every milestone, and M4 specifically checks the
@@ -282,26 +287,20 @@ cost of always-on alert checks.
 
 ## Decisions we still have to make
 
-- ~~D3. Auth.~~ **Decided for v2:** viewing stays open, writes need a login
-  (DESIGN.md section 6).
+- ~~D3. Auth.~~ **Replaced by React D12/D13/D18:** one Owner plus invited
+  Admin/Viewer accounts; application data requires a session (DESIGN.md §6).
 - **D4. Label compatibility.** Reuse Homepage's `homepage.*` labels for easy
   migration, or define our own, cleaner set?
 - ~~D5. Name.~~ **Decided:** Hobnail. Binary, image and container: `hobnail`.
 - ~~D6. Alert state.~~ The state file stays for now. The database now holds the
   alert *log*; moving open-incident state into it is optional later.
 
-## Starting technology (to be confirmed by measurement)
+## Current technology
 
-Not a commitment. Each choice must prove itself against the numbers in section 1.
-
-- `axum` + `tokio` (small fixed worker count) for the server.
-- `bollard` for the Docker API.
-- `serde` with `toml` for config, `notify` for hot reload.
-- A small HTTP client for the custom API widget and for sending notifications. Compare
-  `reqwest` against a lighter option such as `ureq` or `hyper` directly, because
-  TLS and the client are likely the largest RAM and size cost.
-- `maud` or `askama` for HTML templates.
-- Read `/proc` and `/sys` directly for host stats rather than pull in a large crate.
-- Watch the allocator: a musl static build is small but its default allocator can
-  use more memory than expected, so compare against `mimalloc`.
-- Build with a multi-stage Dockerfile into a `scratch` or distroless image.
+Hyper with a single-threaded Tokio runtime; Docker HTTP reads; serde and TOML;
+SQLite; rustls with public roots; a React client embedded as raw and gzip assets.
+UI SDK (`@ui-sdk/react`, `@ui-sdk/core`) is pinned exactly to 0.1.0-beta.10,
+published 2026-11-18, under the owner's sole exception to the seven-day rule.
+All interactive primitives are wrapped in `web/src/ui/`. Other npm packages
+use `min-release-age=7` and `ignore-scripts`; new Rust crates use the same age
+rule. No additional runtime process is needed.

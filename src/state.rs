@@ -1,7 +1,7 @@
 //! Process-wide state shared by the server, the refresh loop and background
 //! tasks. Locks are std (short critical sections, never held across .await).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -92,8 +92,8 @@ impl Env {
 pub struct AppState {
     pub build: BuildInfo,
     pub env: Env,
-    pub started_unix: u64,
     pub config: ConfigStore,
+    pub(crate) settings_undo: Mutex<Option<crate::settings::store::Undo>>,
     /// Latest container list. The docker task publishes, everyone else reads
     /// (`borrow()`) or waits for changes (`subscribe()`).
     pub containers: watch::Sender<Arc<Snapshot>>,
@@ -104,15 +104,17 @@ pub struct AppState {
     pub db: Arc<crate::db::Db>,
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
+    pub password_limiter: Mutex<crate::auth::PasswordLimiter>,
+    pub integration_tests: Mutex<HashMap<i64, VecDeque<std::time::Instant>>>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
-    /// Set while a password check runs (one at a time; see `auth::login_route`).
-    pub login_verifying: std::sync::atomic::AtomicBool,
-    /// Fragment ids that changed ("groups", "sys", "w-<id>", "alerts") or
-    /// "reload". Each SSE connection re-renders what it receives.
+    /// Serializes password hashing and verification to bound peak memory.
+    pub login_verifying: Mutex<()>,
+    /// Internal notifications for JSON stream topics and config changes.
     pub events: broadcast::Sender<Arc<str>>,
     /// Woken when the first viewer connects.
     pub wake: Notify,
     viewers: AtomicUsize,
+    widget_viewers: AtomicUsize,
 }
 
 impl AppState {
@@ -124,8 +126,8 @@ impl AppState {
         let db = Arc::new(crate::db::open_or_disabled(&crate::db::path_for(&env)));
         Arc::new(Self {
             build: BuildInfo::current(),
-            started_unix: crate::util::unix_now(),
             config,
+            settings_undo: Mutex::new(None),
             containers,
             container_stats: Mutex::new((
                 crate::docker::StatsSampler::new(&env.host_sys),
@@ -138,11 +140,14 @@ impl AppState {
             widgets: Mutex::new(HashMap::new()),
             db,
             alerts: Mutex::new(Default::default()),
+            password_limiter: Mutex::new(Default::default()),
+            integration_tests: Mutex::new(HashMap::new()),
             login_limiter: Mutex::new(Default::default()),
-            login_verifying: std::sync::atomic::AtomicBool::new(false),
+            login_verifying: Mutex::new(()),
             events,
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),
+            widget_viewers: AtomicUsize::new(0),
             env,
         })
     }
@@ -157,7 +162,7 @@ impl AppState {
         self.changed("groups");
     }
 
-    /// Tell connected viewers that a fragment changed.
+    /// Notify live subscribers that data changed.
     pub fn changed(&self, id: &str) {
         let _ = self.events.send(Arc::from(id));
     }
@@ -166,23 +171,43 @@ impl AppState {
         self.viewers.load(Ordering::Relaxed)
     }
 
-    pub fn viewer_guard(self: &Arc<Self>) -> ViewerGuard {
+    pub fn widget_viewers(&self) -> usize {
+        self.widget_viewers.load(Ordering::Relaxed)
+    }
+
+    pub fn viewer_guard(self: &Arc<Self>, widgets: bool) -> ViewerGuard {
+        if widgets {
+            self.widget_viewers.fetch_add(1, Ordering::Relaxed);
+        }
         if self.viewers.fetch_add(1, Ordering::Relaxed) == 0 {
             self.wake.notify_one();
         }
-        ViewerGuard(self.clone())
-    }
-
-    pub fn uptime_secs(&self) -> u64 {
-        crate::util::unix_now().saturating_sub(self.started_unix)
+        ViewerGuard(self.clone(), widgets)
     }
 }
 
 /// Counts a connected live viewer for as long as it is alive.
-pub struct ViewerGuard(Arc<AppState>);
+pub struct ViewerGuard(Arc<AppState>, bool);
+
+impl ViewerGuard {
+    pub fn set_widgets(&mut self, widgets: bool) {
+        if widgets == self.1 {
+            return;
+        }
+        if widgets {
+            self.0.widget_viewers.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
+        }
+        self.1 = widgets;
+    }
+}
 
 impl Drop for ViewerGuard {
     fn drop(&mut self) {
+        if self.1 {
+            self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
+        }
         self.0.viewers.fetch_sub(1, Ordering::Relaxed);
     }
 }

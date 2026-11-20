@@ -1,0 +1,91 @@
+ok   1440x900 dark: boots: #root[data-ready="1"]
+ok   1440x900 dark: index.html carries the Content-Security-Policy header
+ok   1440x900 dark: at least one script loaded (14)
+ok   1440x900 dark: at least one stylesheet loaded (1)
+ok   1440x900 dark: every stylesheet is text/css and every script text/javascript
+ok   1440x900 dark: styles applied (1 sheets, --bg = #1d1210, body rgb(29, 18, 16))
+ok   1440x900 dark: fresh instance opens owner onboarding
+ok   1440x900 dark: onboarding signs in the owner
+ok   1440x900 dark: signed-out navigation opens the login form
+ok   1440x900 dark: a wrong password shows [data-testid="login-error"]
+ok   1440x900 dark: and stays on /app/login
+ok   1440x900 dark: the password field can be cleared
+ok   1440x900 dark: signed in: [data-testid="user"] shows admin
+ok   1440x900 dark: and leaves the login page
+ok   1440x900 dark: GET /api/v1/session: user admin with a csrf token
+ok   1440x900 dark: signing out returns to the login form
+ok   1440x900 dark: GET /api/v1/session after sign-out: user null, csrf null
+ok   1440x900 dark: no CSP violation (0)
+ok   1440x900 dark: no uncaught exception (0)
+ok   1440x900 dark: no console error (0)
+ok   1440x900 dark: no unexpected failed request or HTTP >= 400 (0)
+       allowed: POST /api/login -> 401 (the wrong password)
+       allowed: log: Failed to load resource: the server responded with a status of 401 (Unauthorized) /api/login
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,system,alerts: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,system: net::ERR_ABORTED
+ok   1440x900 light: boots: #root[data-ready="1"]
+ok   1440x900 light: index.html carries the Content-Security-Policy header
+ok   1440x900 light: at least one script loaded (14)
+ok   1440x900 light: at least one stylesheet loaded (1)
+ok   1440x900 light: every stylesheet is text/css and every script text/javascript
+ok   1440x900 light: styles applied (1 sheets, --bg = #faf0ea, body rgb(250, 240, 234))
+ok   1440x900 light: signed-out navigation opens the login form
+ok   1440x900 light: signed in: [data-testid="user"] shows admin
+ok   1440x900 light: and leaves the login page
+ok   1440x900 light: GET /api/v1/session: user admin with a csrf token
+ok   1440x900 light: signing out returns to the login form
+ok   1440x900 light: GET /api/v1/session after sign-out: user null, csrf null
+ok   1440x900 light: no CSP violation (0)
+ok   1440x900 light: no uncaught exception (0)
+ok   1440x900 light: no console error (0)
+ok   1440x900 light: no unexpected failed request or HTTP >= 400 (0)
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,system,alerts: net::ERR_ABORTED
+ok   390x844 dark: boots: #root[data-ready="1"]
+ok   390x844 dark: index.html carries the Content-Security-Policy header
+ok   390x844 dark: at least one script loaded (14)
+ok   390x844 dark: at least one stylesheet loaded (1)
+ok   390x844 dark: every stylesheet is text/css and every script text/javascript
+ok   390x844 dark: styles applied (1 sheets, --bg = #1d1210, body rgb(29, 18, 16))
+ok   390x844 dark: signed-out navigation opens the login form
+ok   390x844 dark: signed in: [data-testid="user"] shows admin
+ok   390x844 dark: and leaves the login page
+ok   390x844 dark: GET /api/v1/session: user admin with a csrf token
+ok   390x844 dark: signing out returns to the login form
+ok   390x844 dark: GET /api/v1/session after sign-out: user null, csrf null
+ok   390x844 dark: no CSP violation (0)
+ok   390x844 dark: no uncaught exception (0)
+ok   390x844 dark: no console error (0)
+ok   390x844 dark: no unexpected failed request or HTTP >= 400 (0)
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,alerts: net::ERR_ABORTED
+ok   390x844 light: boots: #root[data-ready="1"]
+ok   390x844 light: index.html carries the Content-Security-Policy header
+ok   390x844 light: at least one script loaded (14)
+ok   390x844 light: at least one stylesheet loaded (1)
+ok   390x844 light: every stylesheet is text/css and every script text/javascript
+ok   390x844 light: styles applied (1 sheets, --bg = #faf0ea, body rgb(250, 240, 234))
+ok   390x844 light: signed-out navigation opens the login form
+ok   390x844 light: signed in: [data-testid="user"] shows admin
+ok   390x844 light: and leaves the login page
+ok   390x844 light: GET /api/v1/session: user admin with a csrf token
+ok   390x844 light: signing out returns to the login form
+ok   390x844 light: GET /api/v1/session after sign-out: user null, csrf null
+ok   390x844 light: no CSP violation (0)
+ok   390x844 light: no uncaught exception (0)
+ok   390x844 light: no console error (0)
+ok   390x844 light: no unexpected failed request or HTTP >= 400 (0)
+       note: cancelled: GET /api/v1/stream?topics=containers,stats: net::ERR_ABORTED
+       note: cancelled: GET /api/v1/stream?topics=containers,stats,alerts: net::ERR_ABORTED
+
+| pass | CSP | console errors | exceptions | failed requests |
+|---|---|---|---|---|
+| 1440x900 dark | 0 | 0 | 0 | 0 |
+| 1440x900 light | 0 | 0 | 0 | 0 |
+| 390x844 dark | 0 | 0 | 0 | 0 |
+| 390x844 light | 0 | 0 | 0 | 0 |
+
+screenshots: /out
+all checks passed
+e2e: exit 0; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-app

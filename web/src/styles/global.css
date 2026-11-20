@@ -1,0 +1,22 @@
+/* Global styles. The SDK layer sits below the unlayered app rules. The app
+   entry imports this stylesheet and @ui-sdk/core/web.css. */
+@layer ui-sdk;
+
+@import "./tokens.css";
+@import "./ui.css";
+@import "./shell.css";
+
+/* ---- sign-in and setup ---- */
+.login{width:100%;max-width:420px;margin:clamp(24px,8vh,96px) auto 0;padding:var(--s-6)}
+.login .page-heading{align-items:flex-start;flex-direction:column}
+.login h1{font-size:var(--fs-value)}
+.login .page-heading>svg{width:36px;height:36px;padding:var(--s-2);background:var(--muted);border:1px solid var(--border);border-radius:var(--r)}
+.login form,.login-acts{display:grid;gap:var(--s-4)}
+.login-acts{gap:var(--s-1)}
+.form-msg{font-size:var(--fs-sm);color:var(--danger)}
+
+/* ---- booting and no-JavaScript ---- */
+.boot{display:grid;place-items:center;min-height:100vh;color:var(--text-3);font-size:var(--fs-sm)}
+.nojs{max-width:640px;margin:10vh auto;padding:0 16px;display:grid;gap:12px;line-height:var(--lh)}
+.nojs h1{font:650 var(--fs-h2)/var(--lh-tight) var(--font)}
+.nojs ul{margin:0;padding-left:1.2em}

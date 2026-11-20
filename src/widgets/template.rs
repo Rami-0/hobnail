@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 pub const MISSING: &str = "—";
 /// Longest text we put on the page for one value.
-const MAX_TEXT: usize = 300;
+pub(crate) const MAX_TEXT: usize = 300;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Filter {

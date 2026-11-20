@@ -1,15 +1,14 @@
 # Settings in the app
 
-`/settings`, signed in (see [login.md](login.md)). Tabs: General, Containers and
-groups, Bookmarks, Widgets, Notifications, Appearance, History and data, Config
-file, Security. `/settings` itself is the General tab (there is no index page);
-the Settings links point at the tab this browser used last (the script
-remembers it; without it they open General). On a phone the tab strip fades
-at the edge that has more tabs behind it. Signed out (or before
-`set-password`), every tab shows only a lock panel: no tab strip, no config
-data. The bookmark and widget dialogs also open from "Add" on the Overview,
-and the channel and rule lists also sit on the Alerts page (signed in only;
-see [notifications.md](notifications.md)).
+`/app/settings`, Admin or Owner (see [login.md](login.md)). Tabs include
+General, Containers and groups, Bookmarks, Widgets, Notifications, Appearance,
+History and data, Config file, Security, Boards and Integrations; Users is
+Owner-only. Scoped Admins can edit granted boards and integrations only.
+The Settings link remembers this browser's last tab. Signed-out users see
+sign-in; Viewers receive no configuration. Bookmark/widget dialogs also open
+on Overview and notification dialogs on Alerts for unrestricted Admin/Owner.
+Boards and integrations use SQLite, independently of TOML revisions; see
+[boards.md](boards.md) and [integrations.md](integrations.md).
 
 **How a save works** (`src/settings/`): load the file and its SHA-256 →
 patch with `toml_edit` (comments, order, blank lines and unknown keys survive)
@@ -32,6 +31,9 @@ atomically (temp file + rename, same mode) → add a revision → record a
   "raw edit", "restored #12"); hand edits show up as "on disk" revisions. Diff
   any revision against the current file; restore creates a new revision.
 - **Raw editor:** validate-as-you-type (debounced), errors highlighted by line.
+  Inline channel secrets are redacted in raw text, revisions and diffs and
+  preserved on save. If config parsing fails, repair the file on the host
+  before the editor can show it safely.
 - **Errors on the field, in plain words:** a form's 422 names the field that
   caused it ("Use a duration like 30s or 5m.", "Use a whole number.", "Use a
   link that starts with http:// or https://.") and carries no config-file line;
@@ -45,15 +47,12 @@ atomically (temp file + rename, same mode) → add a revision → record a
   `?edit=rule:disk-full`, `?edit=widget:mailpit`, `?add=exclude`,
   `?edit=group:media`, `?edit=override:grafana`), so a reload or a link opens
   the same dialog. "Edit" on a container page (signed in) opens its override
-  dialog (`?name=<container>` still works). Esc, ×, Cancel or the backdrop
+  dialog at `?edit=override`. Esc, ×, Cancel or the backdrop
   close it, and ask first when something was typed. Enter saves (Ctrl+Enter
   from any field); the button shows progress; the list behind updates in
   place and the changed row flashes.
-- Lists and form values are rendered by the server, for a session only.
-  `GET /settings/<tab>?frag=list` serves the lists again for those updates
-  (Bookmarks, Widgets, Notifications, Containers and groups; the database
-  figures on History and data; the revisions on Config file; 401 without a
-  session). Signed out nothing of it is in the page.
+- Lists and form values come from `GET /api/settings/*`, Admin/Owner only,
+  `no-store`; there are no HTML fragment routes.
 - No staged lists: every add, edit and delete saves when confirmed, also for
   Hidden containers and Groups (each with Undo where it deletes).
 - Delete asks in one confirm dialog; the message after it has **Undo**, which
@@ -78,7 +77,7 @@ atomically (temp file + rename, same mode) → add a revision → record a
   on gives back the file as it was; a key or table with a comment stays and
   is set to `true`.
 - Settings with several fields that stay on the page (General, Sample
-  interval, custom.css, the raw editor, Change password) use the same submit
+  interval, custom.css, the raw editor, Account password) use the same submit
   path: every error at once on its field, a busy Save, only the changed
   fields sent, "No changes" when nothing changed, and a conflict note in the
   form with "Reload and keep my input" (which goes on only when nothing the
@@ -92,14 +91,8 @@ atomically (temp file + rename, same mode) → add a revision → record a
   Session expired: sign in in a new tab, then save again; the input stays.
   A switch, an arrow or the bulk bar whose save meets an expired session is
   put back and shows the same banner with "Sign in (new tab)".
-- **Without JavaScript** every page still shows its values, but nothing can be
-  saved: writes need the `X-RH-CSRF` header, which a plain form cannot send.
-  Every form is `method="post"` (so no value, a password least of all, can end
-  up in a URL), its save button is disabled, and a note says why (also while
-  the script is still loading, or if it failed to load). Settings pages are
-  served `Cache-Control: no-store`, as is every page or fragment rendered
-  with a session (the Overview and Alerts carry Settings dialogs). A plain form
-  post that reaches the server anyway is refused by the write guard.
+- The React application requires JavaScript. Authenticated writes use the
+  session token from `GET /api/v1/session`; no plain-form write fallback.
 - One toast system for the whole app: at most three, dismissible, above the
   phone's bottom bar, never over an open dialog (the dialog's note is used).
 
@@ -135,7 +128,7 @@ atomically (temp file + rename, same mode) → add a revision → record a
   Description, Hide, Order, Card size; "Remove overrides…" asks and offers
   Undo). A group's Icon and a container's Card size are saved, but the
   current pages do not draw them. Search and "Only with overrides" filter
-  the list (without JavaScript they are shown disabled); the bulk bar (Set
+  the list ; the bulk bar (Set
   group, Hide, Show, Remove overrides…, Clear selection) stays in view and
   each action is one revision with Undo. A pattern is added the way the `exclude` array is written (one per
   line with the same indentation when it is multi-line), deleting one takes
@@ -166,7 +159,5 @@ atomically (temp file + rename, same mode) → add a revision → record a
   the script loads in place; a save or restore goes back to the first page),
   View (with "Open in the editor") and Diff in a dialog, Restore after a
   confirm.
-- *Security:* change password (at least 8 characters; signs out every
-  session, this one too; all problems shown at
-  once, a wrong current password on its field, passwords never trimmed), sign
-  out other sessions (asks first), recent logins.
+- *Security:* recent authentication events and account links. Password and
+  session management live on `/app/account`; password changes revoke sessions.

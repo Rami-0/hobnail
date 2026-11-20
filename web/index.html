@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#09090b" />
+    <!-- UI SDK uses constructed style sheets under the document CSP. -->
+    <meta property="csp-nonce" />
+    <title>Hobnail</title>
+    <link rel="icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- No inline script or style anywhere in this document: the server sends
+         `script-src 'self'; style-src 'self'`. The theme is applied by the
+         entry module (src/app/theme.ts explains the first-paint limit). -->
+    <link rel="preload" href="/api/v1/session" as="fetch" crossorigin="anonymous" />
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div class="nojs">
+        <h1>Hobnail needs JavaScript here</h1>
+        <p>Enable JavaScript to use the dashboard.</p>
+        <ul>
+          <li><a href="/healthz">/healthz</a> checks server health.</li>
+          <li>The JSON API is available under <code>/api/v1/</code>.</li>
+          <li>With a session cookie, <code>/api/logs/download?c=NAME</code> downloads plain-text logs.</li>
+        </ul>
+      </div>
+    </noscript>
+  </body>
+</html>

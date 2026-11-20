@@ -1,0 +1,99 @@
+ok !!document.querySelector("form")
+ok onboard or sign in through the browser
+ok !!document.querySelector('[data-testid="board-create"]')
+ok !!document.querySelector('[data-testid="board-form"]')
+ok create board closes form
+ok !!document.querySelector('[data-testid="board-empty"]')
+ok a new board is empty
+ok edit mode opens
+ok !!document.querySelector('[data-testid="board-picker"]')
+ok link picker closes
+ok removing the last item restores focus to Add item
+ok Cancel discards layout changes
+ok Cancel deletes server draft
+ok edit mode opens
+ok !!document.querySelector('[data-testid="board-picker"]')
+ok link picker closes
+ok !!document.querySelector('[data-testid="board-picker"]')
+ok link picker closes
+ok Alt+Down moves an item and restores focus
+ok Shift+Right resizes the moved item
+ok suggestions include discovered containers
+ok !!!document.querySelector('[data-testid="board-picker"]')
+ok pointer drop at section end preserves order and focus
+ok Save exits edit mode
+ok Save sends exactly one board PUT
+ok reload preserves saved items
+ok edit mode opens
+ok draft saved to server
+ok unsaved navigation asks before leaving
+ok Keep editing preserves local work
+ok reload offers server draft
+ok dismiss draft prompt without discarding
+ok Edit offers the preserved draft again
+ok draft resumes
+ok document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")
+ok create a separate Admin editing session
+ok second session saves a board version
+ok a real 409 exposes conflict choices and disables Save
+ok stale draft survives a reload after conflict
+ok recovered stale draft requires explicit rebase
+ok explicit rebase enables Save
+ok rebased board saves
+ok rebase preserves the other session's addition
+ok 1440 dark: board has no sideways scroll
+ok edit mode opens
+ok 1440 dark: editor has no sideways scroll
+ok !!document.querySelector('[data-testid="board-edit"]')
+ok 1440 light: board has no sideways scroll
+ok edit mode opens
+ok 1440 light: editor has no sideways scroll
+ok !!document.querySelector('[data-testid="board-edit"]')
+ok 390 dark: board has no sideways scroll
+ok dark: an 80-character section title wraps on mobile
+ok edit mode opens
+ok minimum mobile span is editable
+ok dark: one-column editor controls fit without sideways scroll
+ok 390 dark: editor has no sideways scroll
+ok !!document.querySelector('[data-testid="board-edit"]')
+ok 390 light: board has no sideways scroll
+ok light: an 80-character section title wraps on mobile
+ok edit mode opens
+ok minimum mobile span is editable
+ok light: one-column editor controls fit without sideways scroll
+ok 390 light: editor has no sideways scroll
+ok !!document.querySelector('[data-testid="board-edit"]')
+ok !!document.querySelector('[data-testid="integration-create"]')
+ok !!document.querySelector('[data-testid="integration-form"]')
+ok HTTP credential warning is shown before save
+ok integration saves
+ok credential never appears in integration list response
+ok credential does not remain in DOM after Save
+ok !!document.querySelector('[data-testid="integration-form"]')
+ok edit credential is never prefilled
+ok origin change requires entering credential again
+ok server enforces origin binding on secret field
+ok connection test displays verdict class and message
+ok !!document.querySelector('[data-testid="integration-form"]')
+ok same-origin integration update saves without reentering the credential
+ok changing integration configuration invalidates the old test verdict
+ok same-origin update retains the saved credential
+ok create scoped Viewer invite
+ok !!document.querySelector('[data-testid="board"]')
+ok Viewer sees no board edit controls
+ok Viewer writes return 403
+ok Viewer integration scope filters results
+ok Viewer board navigation is scope-filtered
+ok fixture includes both granted and excluded containers
+ok scoped Viewer navigation shows only the granted board and no Settings
+ok !!document.querySelector('[data-testid="row"]')
+ok scoped Viewer container list shows exactly the board containers
+ok scoped Viewer sidebar tree shows exactly the board containers
+ok document.querySelector("main h1")?.textContent === "No such page"
+ok out-of-scope board renders not found without edit controls
+ok zero CSP violations (0)
+ok zero console errors (0)
+ok zero uncaught exceptions (0)
+ok zero unexpected HTTP/network failures (0)
+97 checks; 0 failures; screenshots and log data: /out
+e2e: exit 0; output dir /tmp/claude-1000/-home-dev-projects-rust-homepage/b1d6dc1b-01ae-438b-8462-73d11eda49a6/scratchpad/m5/check-board

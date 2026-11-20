@@ -1,28 +1,27 @@
 # Logs in the app
 
 Code: `src/logs/`, `src/db/logcounts.rs`,
-`static/logs.js`, `static/logs.css`.
+`web/src/routes/logs/`, `web/src/styles/logs.css`.
 
 ## Pages
 
 | Route | What |
 |---|---|
-| `/containers/<name>/logs` | One container: the container's **Logs tab** (its header and tabs above the viewer; `?tab=logs` on the detail page lands here too). Stopped containers show their last lines under a "stopped" banner. Under the viewer: error and warning counts (collapsed) over the range the detail page had (`?range=`; the tabs keep it). |
-| `/stacks/<project>/logs` | Every container of a compose project (the first 24 by name), merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). Only compose projects have one (a config group has no stack logs). |
-| `/logs` | Every container the dashboard lists, stopped ones too even with `[page] show_stopped = false` (hidden and excluded ones never), grouped by stack, each name one click from its logs; a filter box (`?q=` on the server, as-you-type with the script; Enter opens the first match), "Whole stack" for compose projects, and ticks for side by side (two to four; at four the other boxes are off). The filter and the ticks are separate forms: without the script Enter in the filter only filters. Coming back to the page recounts the ticks. |
-| `/logs?c=a,b` | Split view, 1 to 4 containers side by side (stacked on phones). Every pane is named, links to the container's own logs (and its stack, for a compose project) and has a close button (in place with the script; without it, a link to the view without that pane). "Add" opens the list with the shown ones ticked. The breadcrumb leads back to `/logs`. Names that are not shown containers (gone, hidden, excluded or mistyped) are named in a "Not found" banner and never tailed; more than four are named too. |
-| `/logs?sel=a,b` | The list with these ticked ("Add", and "side by side" under a container's log). `/logs?go=1` (the list's own form) with nothing ticked shows the list with "Tick one to four containers first." |
+| `/app/containers/<name>/logs` | One container: the container's **Logs tab** (its header and tabs above the viewer; `?tab=logs` on the detail page lands here too). Stopped containers show their last lines under a "stopped" banner. Under the viewer: error and warning counts (collapsed) over the range the detail page had (`?range=`; the tabs keep it). |
+| `/app/stacks/<project>/logs` | Every container of a compose project (the first 24 by name), merged by timestamp; each line has a color chip per container (stable hue from the name, `<project>-` prefix dropped). Only compose projects have one (a config group has no stack logs). |
+| `/app/logs` | Every container the dashboard lists, stopped ones too even with `[page] show_stopped = false` (hidden and excluded ones never), grouped by stack, each name one click from its logs; a filter box (`?q=`, as-you-type; Enter opens the first match), "Whole stack" for compose projects, and ticks for side by side (two to four; at four the other boxes are off). Coming back to the page recounts the ticks. |
+| `/app/logs?c=a,b` | Split view, 1 to 4 containers side by side (stacked on phones). Every pane is named, links to the container's own logs (and its stack, for a compose project) and has a close button (updates the split view in place). "Add" opens the list with the shown ones ticked. The breadcrumb leads back to `/app/logs`. Names that are not shown containers (gone, hidden, excluded or mistyped) are named in a "Not found" banner and never tailed; more than four are named too. |
+| `/app/logs?sel=a,b` | The list with these ticked ("Add", and "side by side" under a container's log). `/app/logs?go=1` (the list's own form) with nothing ticked shows the list with "Tick one to four containers first." |
 
 The Logs nav item is current on every logs page. Logs are one click from
 every place a container is named: "Logs" in the Containers table, a logs icon
 on sidebar items (and stacks that are compose projects), Overview ("Needs
 attention", "Top CPU", "Recent events": at that moment), Host, History,
 Alerts and Settings › Containers and groups; only for containers whose logs
-may be read (`logs::tailable`: an excluded container gets no logs link
-anywhere, the public Host page included). From the keyboard, `l` opens the
-logs of the focused row or of the open container and `g` `l` opens `/logs`;
-the command palette has a "Logs: <name>" row under each container. Access is unchanged: all of these
-pages and `/api/logs/*` need a session unless `require_login = false`. On
+may be read (`logs::tailable`: excluded containers get no logs link). From the keyboard, `l` opens the
+logs of the focused row or of the open container and `g` `l` opens `/app/logs`;
+the command palette has a "Logs: <name>" row under each container. All logs pages and `/api/logs/*` require login; `[logs] require_login` is
+accepted but has no effect. Account scopes restrict the available containers. On
 touch screens these icons are 44 px and their rows grow to fit, so no hit
 area reaches into another row or onto the row's own link.
 
@@ -37,14 +36,13 @@ bottom 24 px, "Jump to latest" or End starts it again; the pill counts new
 lines meanwhile. Scrolled up, the reader stays on the same line when heights
 change (Wrap, Time, a filter, a resize): the pane remembers the first line in
 view on each scroll and puts it back after layout (the browser's own scroll
-anchoring is off in the pane; the script does it). `scripts/logs-check.mjs` checks all of this in a real
+anchoring is off in the pane; the script does it). `web/e2e/logs-check.mjs` checks all of this in a real
 browser (1440 and 390 px, Wrap on and off, single, stack and side by side;
 slow wheels and real touch drags) and reports the page's CPU while following,
 with the default tail and with a full ring.
 
-A config change reloads other open pages, but never a logs page, the `/logs` list included (it keeps its
-search, filters, pause, range and scroll), nor does coming back to a logs tab
-that was hidden for a while.
+A config change refetches affected data without reloading; logs retain their
+search, filters, pause, range and scroll.
 
 **Toolbar.** One row: the search (with its match counter and older / newer
 buttons, `.*` and `Aa`), then "Show" (all lines, only matching, or matching
@@ -93,8 +91,8 @@ the server reads at once shows the first ones and says so. Keys: `/` search, `En
 `End` jumps to the latest; in a pane, `Enter` picks a line. Download says what it
 downloads (the whole range, without the search and level filters).
 
-Log text reaches the DOM only through `textContent` (a test fails if `logs.js`
-contains `innerHTML`). Highlighting uses the CSS Custom Highlight API on lines in view,
+Log text reaches the DOM as text nodes; the client guard rejects
+`dangerouslySetInnerHTML` and HTML string sinks. Highlighting uses the CSS Custom Highlight API on lines in view,
 so it never rewrites the DOM.
 
 ## API (GET only)
@@ -116,7 +114,7 @@ so it never rewrites the DOM.
 - `/api/logs/status`: background tails (watched, over cap, the cap, rules whose pattern
   did not compile, lines seen, open viewer streams).
 
-Without a session (and `require_login = true`) all four answer `401`.
+Without a session all four answer `401`.
 
 Docker calls: `GET /containers/{name}/json` (TTY? running? started?) and
 `GET /containers/{id}/logs?follow=…&stdout=1&stderr=1&timestamps=1&tail=…&since=…`.
@@ -174,17 +172,14 @@ Alert messages carry the count, never log text.
 
 ```toml
 [logs]
-require_login = true    # default; false makes logs as open as the rest of the page
+require_login = true    # accepted legacy key; no-op, login is always required
 count = []              # container globs tailed in the background for level counts
 max_watched = 20        # most background tails
 ring = 5000             # lines kept per pane in the browser (1000..50000)
 tail = 500              # lines loaded when a page opens (100..5000)
 ```
 
-**Logs need a login by default** (fail closed, after a security review):
-container logs often contain secrets (tokens in URLs, connection strings,
-emails). Until a password is set with `set-password` the logs pages explain
-how to unlock them. Set `require_login = false` to make logs as open as the
-rest of the dashboard. Containers hidden or excluded by the owner
-(`hide`, `hobnail.hide`, `[docker] exclude`) cannot be tailed at all,
-and names that are not shown containers never reach Docker.
+**Logs always require login.** Container logs can contain secrets. Complete
+browser owner setup on a fresh database; legacy-password upgrades need host
+recovery. Hidden/excluded containers and containers outside granted boards
+cannot be tailed. Requests recheck grants while streaming.

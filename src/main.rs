@@ -5,11 +5,12 @@
 //!   healthcheck            GET /healthz on the first RH_LISTEN address (for Docker)
 //!   check-config [path]    validate a config file and exit
 //!   notify-test <channel>  send a test notification to a configured channel
-//!   set-password           set the login password (TTY without echo, or stdin)
+//!   set-password [name]    recover the owner account (password from TTY or stdin)
 //!   mock-receiver [addr]   local fake webhook/Slack/Telegram receiver for tests
 //!   version
 
 mod alerts;
+mod api;
 mod auth;
 mod config;
 mod db;
@@ -21,11 +22,12 @@ mod log;
 mod logs;
 mod mock;
 mod model;
-mod render;
+mod read_model;
 mod settings;
 mod state;
 mod system;
-mod ui;
+#[cfg(test)]
+mod testutil;
 mod util;
 mod widgets;
 
@@ -51,16 +53,22 @@ fn main() {
         "healthcheck" => rt.block_on(healthcheck()),
         "check-config" => check_config(rest),
         "notify-test" => rt.block_on(alerts::cli_notify_test(rest)),
-        "set-password" => auth::cli_set_password(),
+        "set-password" => auth::cli_set_password(rest),
         "mock-receiver" => rt.block_on(mock::run(rest)),
         "version" | "--version" | "-V" => {
             let b = state::BuildInfo::current();
-            println!("hobnail {} ({} built {})", b.version, b.sha, b.time);
+            println!(
+                "hobnail {} ({} built {}) content {}",
+                b.version,
+                b.sha,
+                b.time,
+                api::CONTENT_HASH
+            );
             0
         }
         _ => {
             eprintln!(
-                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password | mock-receiver [addr] | version]"
+                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password [username] | mock-receiver [addr] | version]"
             );
             2
         }

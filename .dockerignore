@@ -6,3 +6,13 @@ deploy
 scripts
 *.md
 .claude
+# The web stage builds the embedded UI. Rust supplies the PWA icons from src/http/pwa.
+web/node_modules
+web/dist
+web/*.tsbuildinfo
+# Browser tests run outside the image build (scripts/e2e.sh).
+web/e2e
+
+# Rust API reference drift test input.
+!docs/
+!docs/api.md

@@ -1,0 +1,195 @@
+/* The shell: sidebar with
+   the stack tree, rail and drawer, top bar with vitals, phone bottom bar,
+   the "live updates stopped" pill. Above
+   1100 px the sidebar is in the page (`:root[data-side=rail]` collapses
+   it), 700 to 1100 px it is a rail that opens over the page, under 700 px
+   a drawer (`:root.side-open`). */
+
+#root{min-height:100vh}
+.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);min-height:100vh}
+
+/* ---- sidebar ---- */
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;min-width:0;background:var(--bg-side);border-right:1px solid var(--line);z-index:var(--z-side);will-change:transform}
+/* (will-change: the sidebar is its own layer, so a live number elsewhere does not repaint the 150-item tree) */
+.side-head{display:flex;align-items:center;gap:8px;height:var(--top-h);padding:0 var(--s-3) 0 var(--s-4);border-bottom:1px solid var(--line);flex:none}
+.brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1;color:var(--text);font-weight:650;font-size:calc(15rem/14)}
+.brand:hover{text-decoration:none}
+.logo{width:24px;height:24px;flex:none}
+.brand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
+.brand-site{display:block;overflow:hidden;text-overflow:ellipsis;font-size:calc(10rem/14);font-weight:500;color:var(--text-3);margin-top:2px}
+.nav{display:grid;gap:2px;padding:var(--s-2);flex:none}
+.nav-item{position:relative;display:flex;align-items:center;gap:10px;width:100%;height:var(--ctl-h-sm);padding:0 10px;border:0;border-radius:var(--r-sm);background:none;color:var(--text-2);font:500 var(--fs-body)/1 var(--font);text-align:left;cursor:pointer}
+.nav-item svg{width:16px;height:16px;flex:none}
+.nav-item:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
+.nav-item[aria-current=page]{background:var(--surface-2);color:var(--text);font-weight:600}
+.nav-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-sep{padding:10px 10px 4px}
+.nav-badge{min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--bad);color:var(--on-bad);font-size:calc(11rem/14);font-weight:700;line-height:18px;text-align:center}
+.tree-wrap{display:flex;flex-direction:column;min-height:0;flex:1;border-top:1px solid var(--line);padding-top:10px}
+.tree-head{display:flex;align-items:center;justify-content:space-between;padding:0 16px 6px}
+.tree-cnt{font:calc(12rem/14) var(--mono);color:var(--text-3)}
+.tree-cnt b{color:var(--text-2);font-weight:600}
+.tree-filter{position:relative;margin:0 10px 6px}
+.tree-filter svg{position:absolute;left:8px;top:50%;translate:0 -50%;pointer-events:none;color:var(--text-3);width:14px;height:14px}
+.tree-filter input{width:100%;height:var(--ctl-h-sm);padding-left:28px}
+/* positioned: the visually hidden text of items far down the scrolled tree
+   stays inside it and never stretches the page (ROB-03) */
+.tree{position:relative;overflow-y:auto;overscroll-behavior:contain;padding:0 6px 12px;flex:1;scrollbar-width:thin}
+.tree-note{padding:6px 10px;font-size:calc(12rem/14);color:var(--text-3);display:flex;gap:6px;align-items:center}
+.tree-note svg{width:14px;height:14px;flex:none}
+.tree-note.bad{color:var(--bad-fg)}
+.stack>summary{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 4px;border-radius:var(--r-sm);cursor:pointer;list-style:none;color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600;user-select:none}
+.stack>summary::-webkit-details-marker{display:none}
+.stack>summary:hover{background:var(--surface-2);color:var(--text)}
+.stack>summary .chev{width:12px;height:12px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-io)}
+.stack[open]>summary .chev{transform:rotate(90deg)}
+.stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:underline}
+.stack .cnt{font:calc(11rem/14) var(--mono);color:var(--text-3)}
+.stack .cnt:not(.all-up){color:var(--text-2)}
+.stack>summary .hstrip{flex:none;width:44px;height:6px;opacity:.9}
+.stack ul{list-style:none;margin:0 0 4px;padding:0}
+.ctr{display:flex;align-items:center;gap:2px}
+.ctr>a:first-child{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:26px;padding:0 8px 0 24px;border-radius:var(--r-sm);color:var(--text-2);font:calc(12.5rem/14) var(--mono)}
+.ctr>a:first-child:hover{background:var(--surface-2);color:var(--text);text-decoration:none}
+.ctr>a[aria-current=page]{background:var(--surface-2);color:var(--text);font-weight:600}
+.ctr .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctr.stopped>a:first-child{color:var(--text-3)}
+/* the logs action of a tree item and of a stack: visible at rest (NAV-07) */
+.tree .ia.logs{width:26px;height:26px}
+.tree .ia.logs svg{width:14px;height:14px}
+.stack summary .ia.logs{width:24px;height:24px;margin:0 -2px}
+.side-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:calc(11rem/14);color:var(--text-3);flex:none}
+.side-foot code{font-size:calc(11rem/14);color:var(--text-3)}
+.live{display:flex;align-items:center;gap:6px}
+.keys-btn{display:inline-flex;color:var(--text-3)}
+.keys-btn svg{width:15px;height:15px}
+.keys-btn:hover{color:var(--text)}
+.ver{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scrim{display:none}
+.icon-btn.side-close{display:none}
+@media (max-width:1100px){
+ .side-open .scrim{display:block;position:fixed;inset:0;background:var(--scrim);z-index:25;transition:opacity var(--dur-3) var(--ease-out)}
+ @starting-style{.side-open .scrim{opacity:0}}
+ .side-open .icon-btn.side-close{display:inline-flex;margin-left:auto}
+ .side-open .rail-toggle{display:none}
+}
+
+/* ---- rail: collapsed sidebar (remembered) and the default from 700 to 1100 px ---- */
+@media (min-width:1101px){:root[data-side=rail]{--side-w:56px}}
+@media (min-width:700px) and (max-width:1100px){:root{--side-w:56px}}
+/* NAV-27: in the rail the labels stay for screen readers and show as a
+   styled tooltip on hover and focus; "Stacks" expands the sidebar */
+.rail-only{display:none}
+@media (min-width:1101px){
+ :root[data-side=rail] .rail-only{display:flex}
+ :root[data-side=rail] .nav-label,:root[data-side=rail] .nav-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ :root[data-side=rail] [data-rtip]:is(:hover,:focus-visible)::after{content:attr(data-rtip);position:absolute;left:calc(100% + 10px);top:50%;translate:0 -50%;z-index:5;padding:3px 8px;border-radius:var(--r-xs);background:var(--text);color:var(--bg);font:500 var(--fs-xs)/1.4 var(--font);white-space:nowrap;pointer-events:none}
+ :root[data-side=rail] .brand-name,:root[data-side=rail] .tree-wrap,:root[data-side=rail] .ver{display:none}
+ :root[data-side=rail] .side-head{flex-direction:column;justify-content:center;height:auto;padding:12px 0;gap:10px}
+ :root[data-side=rail] .brand{flex:none}
+ :root[data-side=rail] .nav-item{justify-content:center;padding:0}
+ :root[data-side=rail] .nav-badge{position:absolute;top:0;right:2px;min-width:14px;height:14px;line-height:14px;font-size:calc(9rem/14);padding:0 3px}
+ :root[data-side=rail] .rail-toggle{transform:scaleX(-1)}
+ :root[data-side=rail] .side-foot{flex-direction:column;justify-content:center;padding:8px 0}
+ :root[data-side=rail] .live-t{display:none}
+}
+@media (min-width:700px) and (max-width:1100px){
+ :root:not(.side-open) .rail-only{display:flex}
+ :root:not(.side-open) .nav-label,:root:not(.side-open) .nav-sep{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ :root:not(.side-open) [data-rtip]:is(:hover,:focus-visible)::after{content:attr(data-rtip);position:absolute;left:calc(100% + 10px);top:50%;translate:0 -50%;z-index:5;padding:3px 8px;border-radius:var(--r-xs);background:var(--text);color:var(--bg);font:500 var(--fs-xs)/1.4 var(--font);white-space:nowrap;pointer-events:none}
+ :root:not(.side-open) .brand-name,:root:not(.side-open) .tree-wrap,:root:not(.side-open) .ver,:root:not(.side-open) .live-t{display:none}
+ :root:not(.side-open) .side-head{flex-direction:column;justify-content:center;height:auto;padding:12px 0;gap:10px}
+ :root:not(.side-open) .brand{flex:none}
+ :root:not(.side-open) .nav-item{justify-content:center;padding:0}
+ :root:not(.side-open) .nav-badge{position:absolute;top:0;right:2px;min-width:14px;height:14px;line-height:14px;font-size:calc(9rem/14);padding:0 3px}
+ :root:not(.side-open) .side-foot{flex-direction:column;justify-content:center;padding:8px 0}
+ .side-open .side{position:fixed;left:0;top:0;width:260px;box-shadow:var(--shadow-2)}
+ /* NAV-21: the page keeps its column while the sidebar is open over it */
+ .col{grid-column:2}
+}
+@media (max-width:699px){
+ .app{grid-template-columns:minmax(0,1fr)}
+ .side{position:fixed;left:0;top:0;width:min(280px,86vw);transform:translateX(-102%);transition:transform var(--dur-2) var(--ease-in),visibility 0s linear var(--dur-2);box-shadow:none;visibility:hidden}
+ .side-open .side{transform:none;box-shadow:var(--shadow-2);visibility:visible;transition:transform var(--dur-3) var(--ease-out)}
+ /* The closed drawer's stack tree is not laid out at all (150 items at
+    load, and again with every change of the list); it is when it opens. */
+ :root:not(.side-open) .side .tree{content-visibility:hidden}
+ .rail-toggle{display:none}
+ .side-foot .keys-btn{display:none}
+}
+
+/* ---- top bar ---- */
+.col{min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:0;z-index:var(--z-top);display:flex;align-items:center;gap:10px;height:var(--top-h);padding:0 var(--page-pad);background:var(--bg);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.crumb>a{flex:none;display:inline-flex;align-items:center;min-height:var(--hit)}
+.crumb .title{min-width:0}
+.crumbs{flex:1;min-width:0;display:flex;align-items:center}
+.title{font-size:1.0714rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.title.mono{font-size:1rem}
+.crumb{display:flex;align-items:center;gap:6px;min-width:0;font-size:1.0714rem}
+.crumb>a{color:var(--text-3);white-space:nowrap}
+.crumb>svg{color:var(--text-3);width:14px;height:14px}
+.top .cmd{display:flex;align-items:center;gap:8px;width:clamp(150px,22vw,280px);padding:0 var(--s-2) 0 var(--s-3);color:var(--muted-foreground);font-weight:400;flex:none}
+.top .cmd:hover{border-color:var(--text-3);color:var(--text-2)}
+.top .cmd>svg{width:16px;height:16px}
+.cmd-t{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmd-k{flex:none}
+@media (max-width:1000px){.top .cmd{width:var(--ctl-h);padding:0;justify-content:center;border-color:transparent;background:none}.cmd-t,.cmd-k{display:none}}
+.vitals{display:flex;gap:4px;contain:layout paint}
+.chip{display:grid;grid-template-columns:auto auto;grid-template-rows:auto 3px;align-items:baseline;column-gap:6px;height:32px;padding:4px 8px 3px;border-radius:var(--r-sm);color:var(--text-2);min-width:76px;transition:background-color var(--dur-1) var(--ease-out)}
+.chip:hover{background:var(--surface-2);text-decoration:none}
+.chip-l{font-size:calc(10rem/14);font-weight:600;letter-spacing:.06em;color:var(--text-3)}
+.chip b{font:600 calc(13rem/14) var(--font);letter-spacing:-.01em;color:var(--text);text-align:right;white-space:nowrap}
+.chip.warn b{color:var(--warn-fg)}.chip.bad b{color:var(--bad-fg)}
+.chip .spark{grid-column:1/-1;width:100%;height:10px;align-self:end}
+@media (max-width:899px){.vitals .chip:nth-child(3){display:none}}
+/* NAV-73: only in an installed app (no browser reload there) */
+.pwa-reload{display:none!important}
+@media (display-mode:standalone){.pwa-reload{display:inline-flex!important}}
+.acct{position:relative;display:flex;align-items:center;gap:var(--s-2);min-width:0}
+.account-avatar{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--secondary);color:var(--foreground);font:600 var(--fs-xs)/1 var(--font)}
+main{padding:var(--page-pad) var(--page-pad) 48px;min-width:0;outline:none}
+main>.banner{max-width:var(--page-max);margin:0 auto 16px}
+.page{max-width:var(--page-max);margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s-4);container-type:inline-size}
+.page.narrow{max-width:760px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s-4);min-width:0}
+@media (max-width:699px){
+ .top{gap:var(--s-1);padding-inline:var(--page-pad) var(--s-2)}
+ .vitals{display:none}
+ main{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+}
+
+/* ---- phone bottom bar ---- */
+.bbar{display:none}
+@media (max-width:699px){
+ .bbar{position:fixed;left:0;right:0;bottom:0;z-index:22;display:grid;grid-template-columns:repeat(5,1fr);padding:4px 4px calc(4px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--bg-side) 92%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+ .bb-i{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;border:0;border-radius:8px;background:none;color:var(--text-3);font:500 calc(10.5rem/14) var(--font);cursor:pointer}
+ .bb-i svg{width:20px;height:20px}
+ .bb-i[aria-current=page]{background:var(--muted);color:var(--foreground);font-weight:600}
+ .bb-i:hover{text-decoration:none;color:var(--text)}
+ .bb-n{position:absolute;top:4px;left:calc(50% + 6px);min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--bad);color:var(--on-bad);font-size:calc(10rem/14);line-height:16px;text-align:center}
+}
+
+/* ---- live updates stopped (ROB-13): a pill at the bottom, clicks go through ---- */
+.live-off{position:fixed;inset:auto 12px calc(12px + env(safe-area-inset-bottom)) 12px;z-index:var(--z-toast);width:fit-content;max-width:min(560px,calc(100vw - 24px));margin-inline:auto;display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid color-mix(in srgb,var(--warn) 60%,var(--border));border-radius:var(--r);background:var(--raised);box-shadow:var(--shadow-2);font-size:var(--fs-xs);line-height:1.4;color:var(--text);pointer-events:none;
+ transition:opacity var(--dur-2) var(--ease-out),transform var(--dur-2) var(--ease-out)}
+@starting-style{.live-off{opacity:0;transform:translateY(6px)}}
+@media (max-width:699px){.live-off{bottom:calc(72px + env(safe-area-inset-bottom))}}
+.live-off .dot{flex:none;background:var(--warn)}
+
+/* ---- motion ---- */
+.nav-item,.ctr>a:first-child,.icon-btn,.chip,.bb-i,.stack>summary,.menu-item{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+
+/* ---- 44 px targets on touch and phones (A11Y-18) ---- */
+@media (pointer:coarse),(max-width:699px){
+ .tree .ia.logs,.stack summary .ia.logs{width:44px;height:44px;margin:0}
+ .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px}
+ .nav-item,.tree-filter input{height:44px}
+ .tree-filter input{font-size:var(--fs-input)}
+ .ctr>a:first-child,.stack>summary{height:44px}
+}
+/* Compact text actions retain a keyboard and pointer target. */
+a.stack-name,.side-foot .keys-btn{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+
+.btn.keys-btn{width:var(--ia);height:var(--ia);min-width:0;padding:0}

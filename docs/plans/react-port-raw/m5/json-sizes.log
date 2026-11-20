@@ -1,0 +1,77 @@
+path,status,raw_B,gzip9_B
+/api/v1/containers,200,63725,6596
+/api/v1/strips,200,33170,611
+/api/v1/overview,200,14216,3596
+/api/v1/history?range=24h,200,990,321
+/api/v1/boards/8f4c0563c9f318a200488c07190b414f,200,12547,1757
+{
+  "stream_status": 200,
+  "seconds": 12,
+  "events": [
+    {
+      "event": "hello",
+      "raw": 123,
+      "gzip9": 124
+    },
+    {
+      "event": "system",
+      "raw": 373,
+      "gzip9": 270
+    },
+    {
+      "event": "host",
+      "raw": 3603,
+      "gzip9": 1085
+    },
+    {
+      "event": "system",
+      "raw": 373,
+      "gzip9": 271
+    },
+    {
+      "event": "host",
+      "raw": 3585,
+      "gzip9": 1079
+    },
+    {
+      "event": "stats",
+      "raw": 8937,
+      "gzip9": 2495
+    },
+    {
+      "event": "system",
+      "raw": 374,
+      "gzip9": 267
+    },
+    {
+      "event": "host",
+      "raw": 3604,
+      "gzip9": 1095
+    },
+    {
+      "event": "system",
+      "raw": 374,
+      "gzip9": 269
+    },
+    {
+      "event": "stats",
+      "raw": 8920,
+      "gzip9": 2479
+    },
+    {
+      "event": "host",
+      "raw": 3570,
+      "gzip9": 1060
+    },
+    {
+      "event": "system",
+      "raw": 374,
+      "gzip9": 270
+    },
+    {
+      "event": "host",
+      "raw": 3559,
+      "gzip9": 1063
+    }
+  ]
+}

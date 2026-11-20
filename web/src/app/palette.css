@@ -1,0 +1,7 @@
+.dlg:has(.palette-input){width:min(620px,calc(100vw - 32px))}
+.palette-results{max-height:55vh;overflow:auto;min-width:0}
+.palette-results .btn{width:100%;height:auto;min-height:var(--ctl-h);justify-content:flex-start;flex-wrap:wrap;white-space:normal;text-align:left;overflow-wrap:anywhere;padding:var(--s-2)}
+.palette-results .btn[aria-selected=true]{background:var(--accent);color:var(--foreground)}
+.palette-results small{color:var(--muted-foreground)}
+.palette-results small:last-child{margin-inline-start:auto}
+@media(max-width:699px){.dlg:has(.palette-input){width:100%}}

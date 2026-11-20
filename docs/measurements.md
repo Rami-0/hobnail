@@ -1,8 +1,31 @@
 # Measurements
 
-Targets and baselines come from [GOALS.md](../GOALS.md) section 1. Re-run with
-`scripts/measure.sh` (it restarts only the `hobnail` container). Host:
-Test host: 4 cores, 7.2 GiB RAM, Docker 29.5.2, cgroup v2.
+Current React measurements: [Phase 2–5 results](plans/react-port-phase-2-5.md).
+The older tables below are historical and refer to deleted UI paths and tools.
+Do not use `scripts/measure.sh` against a running production instance for this
+method; use a throwaway instance on ports 3395–3399.
+
+## React measurement method
+
+One application container, no memory limit, fresh data/config and warm image
+cache. `scripts/bench-mem.sh` records cgroup v2 memory.current, working set
+(current minus inactive_file), memory.peak and anon/file/kernel/socket samples,
+plus phase-end RssAnon/RssFile, CPU, request errors and latency. Startup uses
+100 ms samples for ten seconds; idle ninety seconds, 1/10/25 authenticated
+clients sixty seconds each, after-load sixty seconds, all at 500 ms. Login
+hashing is measured separately. Browser, build tools and Docker daemon are
+excluded from application RAM. Shared cache attribution limits comparisons;
+warm-cache results are not cold-cache evidence.
+
+Clients request JSON API, JSON SSE and embedded assets. Record sample counts,
+medians and maxima, not a single Docker stats reading. Report binary bytes,
+Docker image display size and compressed content separately. MiB = 2^20 B;
+MB = 10^6 B; bundle KB = 10^3 B. Browser checks use the built image and 150 fake
+containers at desktop and phone 4× CPU, twice, with cold browser caches. Report
+LCP, load/live tasks, INP and CLS by route; preserve misses. See the results
+for commands, image commit, raw evidence, caps and limitations.
+
+## Historical measurements (before the React port)
 
 **How each number is taken**
 
@@ -346,3 +369,19 @@ the same image on copies of the same databases; ms):
 >
 > The cold-start target means the binary: the container figure is runc and
 > Docker networking before `main()` runs, which the app cannot change.
+
+## React port, phases 0 and 1 (2026-11-18)
+
+Full results, method and raw samples: [plans/react-port-phase-0-1.md](plans/react-port-phase-0-1.md)
+and [plans/react-port-raw/](plans/react-port-raw/). Not deployed; throwaway
+containers on 127.0.0.1, warm cache, the test instance's config, fresh database.
+
+| Metric | main `680a339` | React port phase 1 |
+|---|---|---|
+| Release binary | 6,633,904 B | 7,780,784 B |
+| Image (`docker images`) | 11.6 MB | 13.3 MB (both UIs ship) |
+| `memory.current` max at 1 / 10 / 25 clients | 6.01 / 6.55 / 7.51 MiB | 3.41 / 3.90 / 4.55 MiB (JSON API); differences are page-cache attribution, RssAnon equal |
+| `memory.peak`, whole run | 8.84 MiB | 6.29 MiB |
+| Client first route | 227.5 KB uncompressed | 105.5 KB gzip |
+| 150-row table, phone 4×: longest load task | 1,791 to 1,838 ms | 151 to 169 ms (trace), 169 to 220 ms (long-task observer) |
+| 150-row table, phone 4×: live update | 159 to 204 ms | 27 to 32 ms |

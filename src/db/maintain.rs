@@ -176,6 +176,7 @@ pub(super) fn prune(i: &mut Inner, now: i64) -> rusqlite::Result<()> {
             [],
         )?;
         tx.execute("DELETE FROM events WHERE ts < ?1", [now - EVENTS_KEEP_SECS])?;
+        tx.execute("DELETE FROM drafts WHERE updated < ?1", [now - WEEK])?;
         tx.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
         tx.commit()?;
     }

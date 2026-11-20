@@ -1,0 +1,191 @@
+
+> hobnail-web@0.0.1 build
+> vite build && node scripts/compress.mjs
+
+vite v8.3.7 building client environment for production...
+transforming...
+✓ 2759 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/assets/search-worker-B5Paj1wr.js                 0.62 kB
+dist/index.html                                       2.59 kB │ gzip:  0.96 kB
+dist/assets/Palette-D4ScbimI.css                      0.39 kB │ gzip:  0.26 kB
+dist/assets/history-Dlkw40-6.css                      0.45 kB │ gzip:  0.28 kB
+dist/assets/host-BUbc8QtP.css                         0.62 kB │ gzip:  0.34 kB
+dist/assets/overview-Bn4RnX6U.css                     0.94 kB │ gzip:  0.43 kB
+dist/assets/settings-DktKE8Cv.css                     1.37 kB │ gzip:  0.52 kB
+dist/assets/board-Di-mSvph.css                        2.96 kB │ gzip:  0.88 kB
+dist/assets/RechartsUsage-CC9LOCIs.css                3.00 kB │ gzip:  1.05 kB
+dist/assets/logs-C7iCcirE.css                         5.55 kB │ gzip:  1.71 kB
+dist/assets/container-gV5Acizf.css                    6.21 kB │ gzip:  1.86 kB
+dist/assets/containers-DIOiKCIT.css                   9.29 kB │ gzip:  2.54 kB
+dist/assets/web-DupGL4Wj.css                         65.56 kB │ gzip: 12.58 kB
+dist/assets/index-0Y5ftNI3.js                         0.04 kB │ gzip:  0.06 kB
+dist/assets/history-BRBLfKut.js                       0.09 kB │ gzip:  0.11 kB
+dist/assets/settings-Dq18O-bI.js                      0.09 kB │ gzip:  0.11 kB
+dist/assets/sides-Ce7I_LlF.js                         0.25 kB │ gzip:  0.19 kB
+dist/assets/bookmarks-HIjuKMXL.js                     0.27 kB │ gzip:  0.22 kB
+dist/assets/env-i8CXn8sH.js                           0.36 kB │ gzip:  0.26 kB
+dist/assets/RelativeTime-C4TN0sAR.js                  0.41 kB │ gzip:  0.29 kB
+dist/assets/layers-B7tDtED_.js                        0.56 kB │ gzip:  0.36 kB
+dist/assets/forms-DU4HvGk8.js                         0.77 kB │ gzip:  0.45 kB
+dist/assets/rolldown-runtime-CNOWq4Kh.js              0.81 kB │ gzip:  0.47 kB
+dist/assets/events-B2Bcfi6U.js                        0.88 kB │ gzip:  0.47 kB
+dist/assets/WidgetContent-Dzg06snL.js                 0.92 kB │ gzip:  0.51 kB
+dist/assets/announce-BaDTwOl2.js                      0.94 kB │ gzip:  0.56 kB
+dist/assets/shortcut-slot-Cs7WM6Rv.js                 1.00 kB │ gzip:  0.58 kB
+dist/assets/Bookmarks-BRwpcWsu.js                     1.01 kB │ gzip:  0.58 kB
+dist/assets/read-DszbDfUj.js                          1.04 kB │ gzip:  0.58 kB
+dist/assets/button-dp3fTQDb.js                        1.13 kB │ gzip:  0.61 kB
+dist/assets/parts-GyezLEtB.js                         1.14 kB │ gzip:  0.67 kB
+dist/assets/TabNav-CRIRui1C.js                        1.15 kB │ gzip:  0.68 kB
+dist/assets/General-BS7yNxbg.js                       1.17 kB │ gzip:  0.66 kB
+dist/assets/triangle-exclamation-point-Bxrvyj48.js    1.26 kB │ gzip:  0.56 kB
+dist/assets/Security-8lIEN2kZ.js                      1.38 kB │ gzip:  0.65 kB
+dist/assets/keyboard-HHPkxq8T.js                      1.56 kB │ gzip:  0.74 kB
+dist/assets/preload-helper-Dp5Bp1yV.js                2.09 kB │ gzip:  1.06 kB
+dist/assets/shortcuts-B26-QLIQ.js                     2.33 kB │ gzip:  1.27 kB
+dist/assets/events-BCX97W3_.js                        2.34 kB │ gzip:  1.19 kB
+dist/assets/Shortcuts-DSdpKul5.js                     2.73 kB │ gzip:  1.05 kB
+dist/assets/live-DqPGC3QO.js                          2.73 kB │ gzip:  1.26 kB
+dist/assets/children-CYU4CyM7.js                      2.95 kB │ gzip:  1.45 kB
+dist/assets/SettingsForm-DILsZIp3.js                  3.32 kB │ gzip:  1.56 kB
+dist/assets/History-CSQqn_iB.js                       3.37 kB │ gzip:  1.41 kB
+dist/assets/pointer-BBzP2ZJc.js                       3.51 kB │ gzip:  1.44 kB
+dist/assets/typeahead-D5O04iSg.js                     3.54 kB │ gzip:  1.78 kB
+dist/assets/createLucideIcon-CRbusLLJ.js              3.66 kB │ gzip:  1.67 kB
+dist/assets/format-CF5Z1gM7.js                        4.09 kB │ gzip:  1.86 kB
+dist/assets/Widgets-DmWyKGaL.js                       4.23 kB │ gzip:  1.93 kB
+dist/assets/Appearance-KEv8dnBm.js                    4.56 kB │ gzip:  2.11 kB
+dist/assets/session-7ttDCFor.js                       4.58 kB │ gzip:  1.95 kB
+dist/assets/account-B5ciHFge.js                       4.62 kB │ gzip:  1.85 kB
+dist/assets/Switch-BUS2Y8uf.js                        4.72 kB │ gzip:  1.89 kB
+dist/assets/Config-DF2qPR0g.js                        4.74 kB │ gzip:  1.90 kB
+dist/assets/history-1HslwQfM.js                       5.06 kB │ gzip:  2.22 kB
+dist/assets/Containers-DUvRjNnR.js                    5.37 kB │ gzip:  2.22 kB
+dist/assets/Palette-yNr_pyGY.js                       5.83 kB │ gzip:  2.80 kB
+dist/assets/containers-C9ZYqLk9.js                    6.17 kB │ gzip:  2.49 kB
+dist/assets/alerts-Y0bxH_1U.js                        6.29 kB │ gzip:  2.29 kB
+dist/assets/shared-Biha3iLl.js                        6.40 kB │ gzip:  2.81 kB
+dist/assets/board-J3Sjea6r.js                         6.89 kB │ gzip:  2.83 kB
+dist/assets/host-Odp2i3mJ.js                          6.90 kB │ gzip:  2.70 kB
+dist/assets/Users-BuWt-_Z_.js                         7.21 kB │ gzip:  2.71 kB
+dist/assets/Collection-BchEO3Dq.js                    7.67 kB │ gzip:  3.15 kB
+dist/assets/react-CdlCbvX4.js                         7.87 kB │ gzip:  3.01 kB
+dist/assets/Notifications-C6FCuCAV.js                 7.91 kB │ gzip:  3.01 kB
+dist/assets/Button-DwrunF04.js                        8.54 kB │ gzip:  3.41 kB
+dist/assets/Tabs-ExaiD3g4.js                         10.04 kB │ gzip:  3.72 kB
+dist/assets/app-runtime-DLsVIt_d.js                  10.75 kB │ gzip:  4.31 kB
+dist/assets/EditDialog-BARi-kyo.js                   10.89 kB │ gzip:  4.40 kB
+dist/assets/overview-D7rpB5gY.js                     11.38 kB │ gzip:  4.29 kB
+dist/assets/Editor-e7wlhjy2.js                       12.38 kB │ gzip:  4.36 kB
+dist/assets/Dialog-B3uVPhtz.js                       14.20 kB │ gzip:  5.52 kB
+dist/assets/settings-DDwTshO5.js                     14.47 kB │ gzip:  4.68 kB
+dist/assets/containers-CNkSD3_X.js                   18.26 kB │ gzip:  6.55 kB
+dist/assets/container-BG7CEc1s.js                    18.34 kB │ gzip:  6.17 kB
+dist/assets/Field-7RUjToNA.js                        18.63 kB │ gzip:  6.86 kB
+dist/assets/Toaster-B_zV1Cvv.js                      22.56 kB │ gzip:  8.90 kB
+dist/assets/modal-attribute-BP04ZJUB.js              26.15 kB │ gzip: 10.38 kB
+dist/assets/use-primitive-BWYySHcm.js                27.65 kB │ gzip: 11.16 kB
+dist/assets/MenuImpl-GkuM2KrT.js                     30.40 kB │ gzip: 10.14 kB
+dist/assets/popup-C1bZqKLS.js                        33.72 kB │ gzip: 12.95 kB
+dist/assets/sheet-presentation-DyhvGWRA.js           37.48 kB │ gzip: 13.61 kB
+dist/assets/logs-CLb8lUjJ.js                         43.12 kB │ gzip: 14.46 kB
+dist/assets/Select-Cai2KDVa.js                       43.29 kB │ gzip: 15.49 kB
+dist/assets/charts-vendor-C6Pdu-IP.js               100.38 kB │ gzip: 25.74 kB
+dist/assets/charts-vendor-BhgI_-Ol.js               133.28 kB │ gzip: 37.92 kB
+dist/assets/RechartsUsage-Cv9abRUt.js               150.91 kB │ gzip: 51.70 kB
+dist/assets/web-fgg0mksI.js                         285.47 kB │ gzip: 91.12 kB
+
+✓ built in 1.62s
+file                                                 raw       gzip
+assets/account-B5ciHFge.js                          4622       1844
+assets/alerts-Y0bxH_1U.js                           6298       2291
+assets/announce-BaDTwOl2.js                          941        569
+assets/app-runtime-DLsVIt_d.js                     10756       4290
+assets/Appearance-KEv8dnBm.js                       4566       2109
+assets/board-Di-mSvph.css                           2965        881
+assets/board-J3Sjea6r.js                            6892       2830
+assets/Bookmarks-BRwpcWsu.js                        1019        581
+assets/bookmarks-HIjuKMXL.js                         272        225
+assets/button-dp3fTQDb.js                           1134        613
+assets/Button-DwrunF04.js                           8542       3401
+assets/charts-vendor-BhgI_-Ol.js                  133285      37551
+assets/charts-vendor-C6Pdu-IP.js                  100385      25497
+assets/children-CYU4CyM7.js                         2959       1447
+assets/Collection-BchEO3Dq.js                       7672       3151
+assets/Config-DF2qPR0g.js                           4745       1891
+assets/container-BG7CEc1s.js                       18346       6159
+assets/container-gV5Acizf.css                       6219       1864
+assets/containers-C9ZYqLk9.js                       6176       2481
+assets/containers-CNkSD3_X.js                      18269       6518
+assets/containers-DIOiKCIT.css                      9290       2519
+assets/Containers-DUvRjNnR.js                       5375       2215
+assets/createLucideIcon-CRbusLLJ.js                 3663       1670
+assets/Dialog-B3uVPhtz.js                          14208       5488
+assets/EditDialog-BARi-kyo.js                      10890       4391
+assets/Editor-e7wlhjy2.js                          12380       4350
+assets/env-i8CXn8sH.js                               364        263
+assets/events-B2Bcfi6U.js                            888        473
+assets/events-BCX97W3_.js                           2349       1187
+assets/Field-7RUjToNA.js                           18630       6818
+assets/format-CF5Z1gM7.js                           4094       1866
+assets/forms-DU4HvGk8.js                             777        452
+assets/General-BS7yNxbg.js                          1175        665
+assets/history-1HslwQfM.js                          5065       2220
+assets/history-BRBLfKut.js                            98   kept raw
+assets/History-CSQqn_iB.js                          3376       1405
+assets/history-Dlkw40-6.css                          457        285
+assets/host-BUbc8QtP.css                             621        342
+assets/host-Odp2i3mJ.js                             6904       2698
+assets/index-0Y5ftNI3.js                              42   kept raw
+assets/keyboard-HHPkxq8T.js                         1565        747
+assets/layers-B7tDtED_.js                            562        366
+assets/live-DqPGC3QO.js                             2733       1260
+assets/logs-C7iCcirE.css                            5553       1706
+assets/logs-CLb8lUjJ.js                            43129      14342
+assets/MenuImpl-GkuM2KrT.js                        30408      10082
+assets/modal-attribute-BP04ZJUB.js                 26151      10307
+assets/Notifications-C6FCuCAV.js                    7917       3014
+assets/overview-Bn4RnX6U.css                         941        433
+assets/overview-D7rpB5gY.js                        11386       4287
+assets/Palette-D4ScbimI.css                          392        261
+assets/Palette-yNr_pyGY.js                          5830       2795
+assets/parts-GyezLEtB.js                            1145        673
+assets/pointer-BBzP2ZJc.js                          3519       1441
+assets/popup-C1bZqKLS.js                           33727      12833
+assets/preload-helper-Dp5Bp1yV.js                   2094       1068
+assets/react-CdlCbvX4.js                            7876       3011
+assets/read-DszbDfUj.js                             1047        584
+assets/RechartsUsage-CC9LOCIs.css                   3008       1050
+assets/RechartsUsage-Cv9abRUt.js                  150919      51137
+assets/RelativeTime-C4TN0sAR.js                      410        295
+assets/rolldown-runtime-CNOWq4Kh.js                  817        477
+assets/search-worker-B5Paj1wr.js                     628        385
+assets/Security-8lIEN2kZ.js                         1383        654
+assets/Select-Cai2KDVa.js                          43297      15309
+assets/session-7ttDCFor.js                          4587       1957
+assets/settings-DDwTshO5.js                        14470       4664
+assets/settings-DktKE8Cv.css                        1372        521
+assets/settings-Dq18O-bI.js                           98   kept raw
+assets/SettingsForm-DILsZIp3.js                     3328       1560
+assets/shared-Biha3iLl.js                           6408       2800
+assets/sheet-presentation-DyhvGWRA.js              37481      13491
+assets/shortcut-slot-Cs7WM6Rv.js                    1007        581
+assets/shortcuts-B26-QLIQ.js                        2339       1268
+assets/Shortcuts-DSdpKul5.js                        2733       1056
+assets/sides-Ce7I_LlF.js                             257        198
+assets/Switch-BUS2Y8uf.js                           4728       1892
+assets/TabNav-CRIRui1C.js                           1155        686
+assets/Tabs-ExaiD3g4.js                            10042       3711
+assets/Toaster-B_zV1Cvv.js                         22564       8844
+assets/triangle-exclamation-point-Bxrvyj48.js       1266        568
+assets/typeahead-D5O04iSg.js                        3540       1781
+assets/use-primitive-BWYySHcm.js                   27655      11057
+assets/Users-BuWt-_Z_.js                            7215       2711
+assets/web-DupGL4Wj.css                            65569      12460
+assets/web-fgg0mksI.js                            285476      90060
+assets/WidgetContent-Dzg06snL.js                     928        512
+assets/Widgets-DmWyKGaL.js                          4234       1935
+index.html                                          2591        965
+total                                            1344189     449533  (89 files)

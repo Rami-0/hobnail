@@ -13,7 +13,6 @@ use std::time::Instant;
 use super::parse::{self, CpuTimes, DiskIo, IfKind, Mem, NetDev, Psi, Sensor, VmStat};
 
 /// CPU time split in percent of the time window (of all cores for the
-/// total, of one core for a per-core entry).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct CpuSplit {
     pub user: f64,
@@ -155,12 +154,6 @@ impl Collector {
             prev: None,
             disk_facts: HashMap::new(),
         }
-    }
-
-    /// Age of the previous reading, if any.
-    #[allow(dead_code)]
-    pub fn age(&self) -> Option<f64> {
-        self.prev.as_ref().map(|r| r.at.elapsed().as_secs_f64())
     }
 
     pub fn collect(&mut self) -> Host {
@@ -420,10 +413,8 @@ pub struct ProcReport {
     pub top: Vec<ProcRow>,
     /// `(container id or None for the host, cpu %, rss, processes)`, by CPU.
     pub groups: Vec<(Option<String>, f64, u64, usize)>,
-    pub total: usize,
     /// CPU % is an average since each process started (first scan).
     pub lifetime: bool,
-    pub scan_ms: f64,
 }
 
 pub struct ProcScan {
@@ -454,11 +445,6 @@ impl ProcScan {
             hz: if hz > 0 { hz as f64 } else { 100.0 },
             page: if page > 0 { page as u64 } else { 4096 },
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn age(&self) -> Option<f64> {
-        self.prev_at.map(|t| t.elapsed().as_secs_f64())
     }
 
     /// Walk every pid. `uptime` (s) gives lifetime averages on the first
@@ -554,7 +540,6 @@ impl ProcScan {
             }
         }
         groups.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.2.cmp(&a.2)));
-        let total = rows.len();
         rows.sort_by(|a, b| b.cpu.total_cmp(&a.cpu).then(b.rss.cmp(&a.rss)));
         rows.truncate(top_n);
         for r in &mut rows {
@@ -568,9 +553,7 @@ impl ProcScan {
         ProcReport {
             top: rows,
             groups,
-            total,
             lifetime: dt.is_none(),
-            scan_ms: t0.elapsed().as_secs_f64() * 1000.0,
         }
     }
 }

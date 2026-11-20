@@ -139,6 +139,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     /// Row count of the extra host tables (raw + rollups).
     pub fn hostx_rows(&self) -> u64 {
         self.with(0, |i| {
@@ -150,11 +151,13 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     /// Force the rollup and pruning now (tests, `clear`).
     pub fn hostx_maintain_now(&self, now: i64) {
         self.with((), |i| hostx_maintain(i, now, true));
     }
 
+    #[cfg(test)]
     /// Drop every extra host series (part of "clear history").
     pub fn hostx_clear(&self) {
         self.with((), |i| {

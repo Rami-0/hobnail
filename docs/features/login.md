@@ -1,54 +1,60 @@
 # Login and security
 
-**Viewing is open** to anyone who can reach the port (publish it only on
-addresses you trust: see [install.md](../install.md)). **Every change needs a
-login**, and until a password exists the app is read-only.
+Application data requires login. Open `/app` on first run and set the owner
+username and password in the browser (at least eight characters). The first
+visitor claims ownership; publish the instance only on trusted addresses during
+setup. No console step is required for a fresh database.
 
-Why: once the browser can write `config.toml`, anyone on the network could add
-a `command` widget, which runs shell commands inside a container that has the
-Docker socket — effectively root on the host. So writes are locked until you set
-a password **on the host**:
+Sign in with username and password. The client returns to the requested `/app`
+path; foreign origins, protocol-relative paths, backslashes and control
+characters are refused. The application needs JavaScript.
 
-```sh
-docker exec -it hobnail /hobnail set-password      # asks twice, no echo
-echo 'a long passphrase' | docker exec -i hobnail /hobnail set-password
-```
+The Owner invites Admin and Viewer accounts, assigns roles and grants board
+and integration scopes in Settings → Users. An unrestricted Admin edits normal
+settings; a Viewer reads data and manages their own account. Scoped Admins can
+edit granted boards/integrations, but cannot create/delete them or edit global
+settings. Scoped accounts see containers only through granted boards; host-wide
+Overview, Host, History, Widgets, Bookmarks and Alerts reads are refused.
+An empty scope grants nothing; an unrestricted account has no scope restriction.
 
-There is no web "set the first password" form, so nobody can claim the instance
-before you. Setting a password signs out every session. Minimum 8 characters.
+The Account page changes a password using the current password, lists sessions,
+and revokes one or all other sessions. Password changes revoke sessions,
+including the current one. The Owner can disable users, change scopes/roles,
+sign them out and delete invited users; the sole Owner cannot be demoted,
+disabled or deleted. Invitations are single-use, expire, and can be revoked.
 
 **How it is enforced**
 
-- One gate in the router: every request other than `GET`/`HEAD` must carry a
-  valid session cookie, the `X-RH-CSRF` header and a same-origin `Origin`
-  (or `Referer`). Only `POST /api/login` is exempt (it checks `Origin` itself).
-  Tested end to end for every write route (`src/http/gate_tests.rs`).
-- Requests whose `Host` header is not an IP address, `localhost`, the host
-  name or a name in `RH_ALLOWED_HOSTS` are refused with 421 (DNS rebinding);
-  `/healthz` is exempt.
-- Password: PBKDF2-HMAC-SHA256, 600,000 iterations, random salt, stored only as
-  a hash in the database.
-- Session: 32 random bytes in an `HttpOnly; SameSite=Strict` cookie for 7 days;
-  only its SHA-256 is stored; revocable (sign out, sign out others, password
-  change).
-- Brute force: per-IP and global back-off after failed logins (1 s, 2 s, 4 s …
-  up to 60 s). Clients that already signed in since start skip the global part,
-  so a stranger cannot lock you out.
-- Redirect after login (`?next=`): only same-origin paths; control characters
-  (including TAB), spaces, `//`, backslashes and other origins are refused, on
-  the server and in the browser.
-- `command` widgets can never be added, changed or enabled from the app; secrets
-  are never shown, and a secret cannot be pointed at a new host from the app
-  (see [settings.md](settings.md)).
-- Login history (with IPs of failed attempts) is visible only when signed in.
-- Settings forms never send a value in a URL: they post, and without
-  JavaScript their save buttons are disabled (the write guard needs a header a
-  plain form cannot send). A wrong current password in Settings › Security
-  counts against the same back-off as a failed login.
-- After signing in again in another tab, an open Settings page picks up the
-  new session's CSRF token by reloading itself in the background (a same-origin
-  GET of the page), so unsaved input survives an expired session.
+- The shared route gate in `src/api/access.rs` checks roles and scopes before
+  dispatch. [The API reference](../api.md) lists exceptions for credential
+  entry and public shell/assets/health probes.
+- Every write requires an Origin (or Referer) matching Host. Authenticated
+  writes additionally require `X-RH-CSRF`. `GET /api/v1/session`, `no-store`,
+  supplies the token only for a valid cookie; retrying after sign-in preserves
+  unsaved input without reloading the document.
+- Unknown Host names return 421. IP literals, localhost, `RH_HOSTNAME` and
+  `RH_ALLOWED_HOSTS` globs are accepted; `/healthz` is exempt.
+- Passwords are salted argon2id hashes in SQLite: 19,456 KiB memory, two passes,
+  one lane. Each hash temporarily allocates about 19 MiB. A shared argon2 lock
+  bounds concurrency; a simultaneous credential request can return 429.
+- Sessions use 32 random bytes; only their SHA-256 is stored. The cookie is
+  `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`. Database expiry and cookie
+  slide on authenticated responses. The cookie has no `Secure` flag with the
+  plain-HTTP default. Use an encrypted access path for credentials.
+- Failed logins use per-peer-IP and global exponential back-off (1, 2, 4 …
+  60 seconds; five global failures are free). The limiter uses the connection
+  peer, so users behind one proxy share its IP. Password changes have separate
+  per-account back-off. The client displays the retry countdown.
+- Viewers never receive configuration, secrets, integration URL paths, container
+  environment values, process commands or probe diagnostics. Authentication
+  events are administrative data. Streams recheck session validity and grants.
+- Command widgets remain file-only. Config secret references stay destination
+  bound; integration credentials are write-only and origin-bound in SQLite.
 
-**Not covered:** the cookie cannot be `Secure` over plain HTTP. Sign in over an
-encrypted path (a VPN such as Tailscale, or a TLS reverse proxy), not over a
-plain LAN address. Single user (`admin`); no roles.
+**Recovery and upgrades**
+
+`hobnail set-password [username]` is optional recovery on the host (TTY without
+echo, or stdin), not first-run setup. It recovers the owner and revokes sessions.
+A database migrated from the legacy shared-password model is locked against
+browser ownership claims: the old password is discarded and host recovery is
+required. Keep a pre-upgrade database copy; migrations only move forward.
