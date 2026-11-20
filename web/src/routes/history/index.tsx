@@ -1,3 +1,5 @@
+import { PageHeader } from "../../ui/PageHeader.tsx";
+import { Checkbox } from "../../ui/Checkbox.tsx";
 import { eventLabel } from "../container/events.ts";
 import { lazy, memo, Suspense, useEffect } from "react";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
@@ -33,7 +35,7 @@ export default function History() {
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   const steps = data ? windowSteps(data.from, data.to, data.now) : null;
   return <div className="page" data-testid="history">
-    <p className="page-sub">Host metrics and incidents from the local history database</p>
+    <PageHeader title="History" description="Host metrics and incidents from the local history database." />
     <div className="toolbar hist-bar">
       <nav className="seg" aria-label="Range">
         {RANGES.map((r) => {
@@ -44,12 +46,12 @@ export default function History() {
         })}
       </nav>
       {steps && <nav className="zoom-nav" aria-label="Move or zoom the window">
-        {(["earlier", "in", "out", "later"] as const).map((key, index) => <Button className="sm" key={key}
+        {(["earlier", "in", "out", "later"] as const).map((key, index) => <Button variant="ghost" size="sm" key={key}
           disabled={!steps[key]} onClick={() => { if (steps[key]) setSearch(steps[key]); }}>{["‹ Earlier", "Zoom in", "Zoom out", "Later ›"][index]}</Button>)}
       </nav>}
-      <Button className="tgl" disabled={!!data && data.to - data.from > 86400} aria-pressed={search.get("cmp") === "1"}
-        onClick={() => setSearch({ cmp: search.get("cmp") === "1" ? null : "1" })}><i className="tgl-box" aria-hidden="true" /> Compare with yesterday</Button>
-      {zoomed ? <Button className="sm" onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button> :
+      <Checkbox label="Compare with yesterday" disabled={!!data && data.to - data.from > 86400}
+        checked={search.get("cmp") === "1"} onChange={(on) => setSearch({ cmp: on ? "1" : null })} />
+      {zoomed ? <Button variant="ghost" size="sm" onClick={() => setSearch({ from: null, to: null, before: null })}>Reset zoom</Button> :
         <span className="hint muted">Drag across a chart to zoom in</span>}
     </div>
     {error && <p role="alert">{error}</p>}
@@ -65,7 +67,7 @@ export default function History() {
       </section>
       <section className="panel history-block" id="events" aria-label="Incident timeline">
         <div className="panel-h"><h2>Incident timeline</h2></div>
-        <div className="toolbar history-controls">
+        <div className="history-controls seg" role="group" aria-label="Incident severity">
           {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
         </div>
         {data.events.length === 0 && !extra && <p>No matching events in this window.</p>}
