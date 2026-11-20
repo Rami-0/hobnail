@@ -1,3 +1,6 @@
+import { Badge } from "../../ui/Badge.tsx";
+import { CardHeader } from "../../ui/Card.tsx";
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { lazy, Suspense } from "react";
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
@@ -26,20 +29,22 @@ export default function Alerts() {
   const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   if (boot?.scoped) return <p className="page">Alerts are unavailable with board-scoped access.</p>;
   return <div className="page" data-testid="alerts">
+    <PageHeader title="Alerts" description="Monitor active incidents and manage notification rules."
+      actions={admin && <Button variant="default" onClick={() => setSearch({ add: "rule", edit: null })}>Add rule</Button>} />
     {admin && (search.has("add") || search.has("edit")) && <Suspense fallback={<p role="status">Loading editor…</p>}><Notifications editorOnly /></Suspense>}
     {error && <p role="alert">{error}</p>}
     {!data ? !error && <p role="status">Loading alerts…</p> : <>
       <section className={data.firing.length ? "alerts bad" : "alerts"} aria-label="Firing now">
         <header className="alerts-head">
-          <h2 className="tile-title">Alerts</h2>
-          <span className="alerts-sum"><span className={data.firing.length ? "dot bad" : "dot ok"} aria-hidden="true" />
+          <h2>Active alerts</h2>
+          <Badge className="alerts-sum" variant={data.firing.length ? "destructive" : "success"}><span className={data.firing.length ? "dot bad" : "dot ok"} aria-hidden="true" />
             {data.firing.length ? data.firing.length + " firing" : "No alerts firing"}
-          </span>
+          </Badge>
           <span className="alerts-counts muted">{data.rules.length} rules · {data.channels.length} channels</span>
         </header>
         {data.firing.length ? <ul className="incidents">{data.firing.map((incident) => <li key={`${incident.rule}:${incident.subject}`} data-testid="row" className="incident">
           <strong className="inc-subject"><a href={incident.href}>{incident.subject}</a></strong>{" "}
-          <span className="inc-state">{incident.state}</span><span className="inc-rule">{incident.rule}</span>
+          <Badge variant="destructive">{incident.state}</Badge><span className="inc-rule">{incident.rule}</span>
           <span className="inc-since"><RelativeTime at={incident.since} /></span>
           {incident.container && names.has(incident.subject) && <> · <a href={logsHref(incident.subject, incident.since)}>Logs</a></>}
           {!incident.notified && <span className="muted"> · Notification pending or suppressed</span>}
@@ -47,26 +52,25 @@ export default function Alerts() {
       </section>
       <section className="panel history-block">
         <div className="panel-h"><h2>Rules</h2></div>
-        {admin && <Button onClick={() => setSearch({ add: "rule", edit: null })}>Add rule</Button>}
         {data.rules.length ? <ul className="history-events">{data.rules.map((rule) => <li key={rule.name}>
           <strong>{rule.name}</strong> · {rule.kind} · {rule.summary}{!!rule.channels.length && <> · {rule.channels.join(", ")}</>}
-          {admin && <Button className="sm" aria-label={`Edit ${rule.name}`} onClick={() => setSearch({ add: null, edit: `rule:${rule.name}` })}>Edit</Button>}
+          {admin && <Button variant="ghost" size="sm" aria-label={`Edit ${rule.name}`} onClick={() => setSearch({ add: null, edit: `rule:${rule.name}` })}>Edit</Button>}
         </li>)}</ul> : <p>No alert rules configured.</p>}
       </section>
       <section className="panel history-block">
-        <div className="panel-h"><h2>Notification channels</h2></div>
-        {admin && <Button onClick={() => setSearch({ add: "channel", edit: null })}>Add channel</Button>}
+        <CardHeader title="Notification channels"
+          action={admin && <Button variant="outline" onClick={() => setSearch({ add: "channel", edit: null })}>Add channel</Button>} />
         {data.channels.length ? <ul className="history-events">{data.channels.map((channel) => <li key={channel.name}>
           <strong>{channel.name}</strong> · {channel.kind} · {channel.status}
           {channel.last_success !== null && <> · Last sent <RelativeTime at={channel.last_success} /></>}
           {channel.last_failure !== null && <> · Last failure <RelativeTime at={channel.last_failure} /></>}
           {channel.pending > 0 && <> · {channel.pending} pending</>}
-          {admin && <Button className="sm" aria-label={`Edit ${channel.name}`} onClick={() => setSearch({ add: null, edit: `channel:${channel.name}` })}>Edit</Button>}
+          {admin && <Button variant="ghost" size="sm" aria-label={`Edit ${channel.name}`} onClick={() => setSearch({ add: null, edit: `channel:${channel.name}` })}>Edit</Button>}
         </li>)}</ul> : <p>No channels configured.</p>}
       </section>
       <section className="panel history-block">
         <div className="panel-h"><h2>Alert log</h2></div>
-        <div className="toolbar history-controls">
+        <div className="history-controls seg" role="group" aria-label="Alert log period">
           <Button aria-pressed={!search.has("from")} onClick={() => setSearch({ from: null, to: null, before: null })}>All time</Button>
           {[[86400, "24 hours"], [604800, "7 days"]].map(([span, label]) => <Button key={span}
             aria-pressed={Number(search.get("to")) - Number(search.get("from")) === span}
