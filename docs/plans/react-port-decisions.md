@@ -72,3 +72,17 @@ These must be applied in Phase 5, as the plan says. Do not edit them earlier.
   replaces it. Already in the plan's section 3.
 - **Secrets:** the earlier rule "secrets are never shown or stored by the app"
   is replaced by D13/D14, which store secrets with origin binding.
+
+## Owner sign-off (2026-11-20)
+
+Decisions taken after reviewing the Phase 2–5 results
+(`react-port-phase-2-5.md`).
+
+| Item | Decision |
+|---|---|
+| Whole-dist bundle cap | **Accepted** at 450 KB gzip / 1.35 MB raw, as in `web/scripts/size.mjs`. The combined chart payload (about 115 KB gzip) is accepted; the 60 KB per-chunk cap stays. |
+| Docker image size | **Accepted** at about 13.3 MB ("size still reasonable"). Not yet built: tighten the gate to 13.5 MB so growth is still caught. |
+| D9 JSON compression | **Decided:** gzip larger JSON responses when the client accepts gzip, with `Vary: Accept-Encoding`. Never compress the SSE stream (`/api/v1/stream`). Not yet built. |
+| D19 first providers | **Deferred** to the next step. |
+| PR #3 | The owner merges it. |
+| Cross-device testing | Required before merge: Chromium, Firefox and WebKit at phone, tablet, laptop and desktop sizes, plus a check on real devices. Not yet done. |

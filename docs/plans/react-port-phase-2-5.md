@@ -70,8 +70,8 @@ extra `.gz` copies from raw size and sum those copies for gzip size.
 | Whole dist | **1,344,189** | **449,533** | Original ≤1,300,000 / 400,000: **both missed** |
 | Whole dist, raised script cap | 1,344,189 | 449,533 | ≤1,350,000 / 450,000: pass (467 gzip bytes remain) |
 
-**[code]** The raised whole-dist cap is a deviation awaiting the owner's sign-off,
-not approval implied by a green size check. `web/scripts/size.mjs` also uses
+**[code]** The raised whole-dist cap was a deviation; the owner accepted it on
+2026-11-20 (see the sign-off in `react-port-decisions.md`). `web/scripts/size.mjs` also uses
 60 KB per chart chunk, stricter than the plan's 110 KB per vendor chunk, but
 does not enforce a combined chart download cap. The four chart-named files sum
 **115,235 B gzip**: this exceeds 110 KB if that allowance is applied to the
@@ -388,7 +388,7 @@ commit `1c2e647` (all added crates older than seven days).
 From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[exp]**:
 
 1. Whole-dist cap raised first to 420 KB and then **450 KB gzip / 1.35 MB raw**
-   (`a5c0de5`, `ef54589`); owner sign-off is still outstanding. Original caps
+   (`a5c0de5`, `ef54589`); accepted by the owner on 2026-11-20. Original caps
    are missed. Chart chunks are split and individually capped at 60 KB; their
    aggregate named payload is 115,235 B gzip, above a combined 110 KB allowance.
 2. Image **13.3 MB >13 MB** after old UI removal. Lower idle memory does not
