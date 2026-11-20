@@ -327,15 +327,15 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
         <span className="ch-v num">{last === null ? "—" : format(unit, last)}</span>
         <fieldset className="ch-lg">
           <legend className="sr">{`${title} layers`}</legend>
-          <Button type="button" className="lg avg" aria-pressed={showAvg} onClick={() => toggle("avg")}>
+          <Button variant="ghost" size="sm" className="lg avg" aria-pressed={showAvg} onClick={() => toggle("avg")}>
             Average
           </Button>
           {hasBand && (
-            <Button type="button" className="lg max" aria-pressed={!off.includes("max")} onClick={() => toggle("max")}>
+            <Button variant="ghost" size="sm" className="lg max" aria-pressed={!off.includes("max")} onClick={() => toggle("max")}>
               Max
             </Button>
           )}
-          {compare && <Button type="button" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</Button>}
+          {compare && <Button variant="ghost" size="sm" className="lg" aria-pressed={showCompare} onClick={() => toggle("cmp")}>Yesterday</Button>}
         </fieldset>
       </figcaption>
       {!hasValues ? (
