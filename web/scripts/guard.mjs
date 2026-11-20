@@ -62,9 +62,6 @@ function* files(dir) {
 // Existing hot-path controls have bespoke styling. Catch additions as the
 // remaining controls migrate to wrappers.
 const nativeControls = new Map([
-  ["src/app/Sidebar.tsx", 5],
-  ["src/app/Shell.tsx", 2],
-  ["src/app/ThemeButton.tsx", 1],
   ["src/routes/containers/index.tsx", 6],
   ["src/routes/Login.tsx", 3],
 ]);

@@ -27,9 +27,8 @@ export function Account() {
         triggerClassName="icon-btn"
         trigger={
           <>
-            <UserIcon aria-hidden="true" />
+            <span className="account-avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span>
             <span className="sr">{user.name}</span>
-            <span className="signed" aria-hidden="true" />
           </>
         }
         header={
@@ -37,7 +36,7 @@ export function Account() {
             Signed in as <strong>{user.name}</strong>
           </>
         }
-        items={[{ label: "Account", onSelect: () => navigate("/app/account") }, { label: "Sign out", icon: <LogOutIcon aria-hidden="true" />, testId: "signout", onSelect: () => void signOut() }]}
+        items={[{ label: "Account", icon: <UserIcon aria-hidden="true" />, onSelect: () => navigate("/app/account") }, { label: "Sign out", danger: true, separator: true, icon: <LogOutIcon aria-hidden="true" />, testId: "signout", onSelect: () => void signOut() }]}
       />
     </div>
   );

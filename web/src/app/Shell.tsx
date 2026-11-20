@@ -387,20 +387,20 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 <nav className="crumb" aria-label="Breadcrumb">
                   <a href="/app/containers">Containers</a>
                   <ChevronRightIcon aria-hidden="true" />
-                  <h1 className="title mono">{loc.route.ctr}</h1>
+                  <span className="title mono">{loc.route.ctr}</span>
                 </nav>
-              ) : <h1 className="title">{title}</h1>}
+              ) : <span className="title">{title}</span>}
             </div>
-            <Button className="cmd" data-testid="palette-open" aria-label="Search and commands (Ctrl K)" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+            <Button variant="outline" className="cmd" data-testid="palette-open" aria-label="Search and commands" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
               <span className="cmd-t">Search or jump to…</span>
-              <kbd className="cmd-k">Ctrl K</kbd>
+              <kbd className="cmd-k">⌘ K</kbd>
             </Button>
             {b && !b.scoped && !phone && <Vitals />}
             <ThemeButton />
-            <button type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
+            <Button variant="ghost" type="button" className="icon-btn pwa-reload" aria-label="Reload this page" title="Reload" onClick={() => window.location.reload()}>
               <RefreshCwIcon aria-hidden="true" />
-            </button>
+            </Button>
             <Account />
           </header>
           <main id="main" tabIndex={-1}>
@@ -460,7 +460,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           {firing > 0 && <b className="bb-n">{firing}</b>}
         </a>
         </>}
-        <button
+        <Button variant="ghost"
           type="button"
           className="bb-i"
           data-testid="drawer-open"
@@ -471,7 +471,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         >
           <EllipsisIcon aria-hidden="true" />
           <span>More</span>
-        </button>
+        </Button>
       </nav>
       {palette && <Suspense fallback={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></Suspense>}
       {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}

@@ -1,3 +1,4 @@
+import { Badge } from "../ui/Badge.tsx";
 // The live indicator in the sidebar foot (its dot stays in the rail) and the
 // "Live updates stopped at HH:MM" pill (ROB-13): shown after the stream has
 // been reconnecting for 4 s, so quick reconnects show nothing; it goes when
@@ -20,11 +21,11 @@ export function LiveIndicator() {
   const { status } = useLiveInfo();
   const word = WORD[status];
   return (
-    <span className="live" data-testid="live-status" data-state={status} title={`Live updates: ${word}`}>
+    <Badge className="live" variant={status === "live" ? "success" : status === "reconnecting" ? "warning" : "secondary"} data-testid="live-status" data-state={status} title={`Live updates: ${word}`}>
       <span className={status === "live" ? "dot ok" : status === "reconnecting" ? "dot warn" : "dot off"} aria-hidden="true" />
       <span className="live-t">{word}</span>
       <span className="sr"> (live updates)</span>
-    </span>
+    </Badge>
   );
 }
 

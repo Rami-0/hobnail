@@ -1,3 +1,5 @@
+import { TextInput } from "../ui/Field.tsx";
+import { Button } from "../ui/Button.tsx";
 // Sidebar navigation:
 // the pages, the stack tree, and the foot (live indicator, shortcuts,
 // version).
@@ -284,7 +286,7 @@ function Tree({ active, filterRef }: { active: string | null; filterRef: Ref<HTM
       </div>
       <div className="tree-filter">
         <FunnelIcon aria-hidden="true" />
-        <input
+        <TextInput
           ref={filterRef}
           id="tree-filter"
           type="search"
@@ -377,7 +379,7 @@ export function Sidebar({
     >
       <div className="side-head">
         <Brand site={site} />
-        <button
+        <Button variant="ghost"
           type="button"
           className="icon-btn rail-toggle"
           aria-label={railLabel}
@@ -386,10 +388,10 @@ export function Sidebar({
           onClick={onToggle}
         >
           <PanelLeftIcon aria-hidden="true" />
-        </button>
-        <button type="button" className="icon-btn side-close" aria-label="Close menu" title="Close" onClick={onClose}>
+        </Button>
+        <Button variant="ghost" type="button" className="icon-btn side-close" aria-label="Close menu" title="Close" onClick={onClose}>
           <XIcon aria-hidden="true" />
-        </button>
+        </Button>
       </div>
       <nav className="nav" aria-label="Main" data-testid="sidebar">
         {b && !b.scoped && <NavLink href="/app/overview" label="Overview" current={r.name === "overview" || (r.name === "home" && !b.default_board)} icon={<LayoutGridIcon aria-hidden="true" />} />}
@@ -419,19 +421,20 @@ export function Sidebar({
         />
         </>}
         {b && b.role !== "viewer" && <NavLink href={`/app${settingsHref(local(), b.role === "owner", b.scoped)}`} label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
+        {!!b?.boards.length && <span className="nav-sep label">Boards</span>}
         {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
           icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
-        <button type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
+        <Button variant="ghost" type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
           <FunnelIcon aria-hidden="true" />
           <span className="nav-label">Stacks and containers</span>
-        </button>
+        </Button>
       </nav>
       {(!phone || open) && <Tree active={active} filterRef={filterRef} />}
       <div className="side-foot">
         <LiveIndicator />
-        <button type="button" className="linklike keys-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onKeys}>
+        <Button variant="ghost" type="button" className="linklike keys-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onKeys}>
           <KeyboardIcon aria-hidden="true" />
-        </button>
+        </Button>
         {build && (
           <span className="ver" title={`built ${build.time}`}>
             v{build.version} · <code>{build.sha}</code>

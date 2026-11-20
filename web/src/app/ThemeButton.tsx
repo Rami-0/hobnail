@@ -1,3 +1,4 @@
+import { Button } from "../ui/Button.tsx";
 // Cycle through the themes and announce the new choice with a toast.
 import { ContrastIcon, FlameIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 import { useSyncExternalStore, type ReactNode } from "react";
@@ -26,7 +27,7 @@ export function ThemeButton() {
   const theme = useSyncExternalStore(subscribeTheme, currentTheme, currentTheme);
   const next = nextTheme(theme);
   return (
-    <button
+    <Button variant="ghost"
       type="button"
       className="icon-btn"
       data-testid="theme"
@@ -35,6 +36,6 @@ export function ThemeButton() {
       onClick={() => chooseTheme(next)}
     >
       {ICON[theme]}
-    </button>
+    </Button>
   );
 }
