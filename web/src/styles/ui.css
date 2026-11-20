@@ -21,7 +21,7 @@
 .badge-info{background:var(--info-bg);color:var(--info)}
 
 /* Container identity uses the same avatar frame in detail and logs. */
-.page-heading>.icon{width:36px;height:36px;flex:none;object-fit:contain;border-radius:var(--r)}
+.page-heading>.icon,.ctr-head .page-heading>.icon{width:36px;height:36px;flex:none;object-fit:contain;border-radius:var(--r)}
 .page-heading>.avatar{display:grid;place-items:center;background:var(--muted);color:var(--foreground);font-weight:600}
 
 /* ---- buttons ---- */
@@ -213,6 +213,8 @@ pre.cmdline{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-sm);background
 @keyframes sk{from{background-position:100% 0}to{background-position:-200% 0}}
 @keyframes sk-in{from{opacity:0}}
 .sk-rows{display:grid;gap:var(--s-2);width:100%}.sk-rows .sk{height:12px}.sk-rows .sk:nth-child(2n){width:72%}.sk-rows .sk:nth-child(3n){width:86%}
+
+#root>.page[aria-busy=true]{padding:var(--page-pad)}
 
 /* ---- data marks: sparkline, health strip, meter ---- */
 .spark{display:block;overflow:visible}

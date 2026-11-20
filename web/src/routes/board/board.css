@@ -13,3 +13,5 @@
 .editor-cell .sel{flex-direction:column;align-items:stretch}.editor-cell .sel-l,.editor-cell .sel .in{white-space:normal;overflow-wrap:anywhere}.editor-cell .sel .in{height:auto;min-height:var(--ctl-h)}
 .editor-spans{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
 .suggestions .btn{justify-content:flex-start}
+
+.editor-fields>.btn,.editor-fields .board-section>.btn{justify-self:start}
