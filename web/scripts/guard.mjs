@@ -63,7 +63,6 @@ function* files(dir) {
 // remaining controls migrate to wrappers.
 const nativeControls = new Map([
   ["src/routes/containers/index.tsx", 6],
-  ["src/routes/Login.tsx", 3],
 ]);
 const problems = [];
 for (const file of files(src)) {

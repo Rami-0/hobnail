@@ -1,3 +1,6 @@
+import { Card, CardContent } from "../ui/Card.tsx";
+import { Field, TextInput } from "../ui/Field.tsx";
+import { PageHeader } from "../ui/PageHeader.tsx";
 import { LockIcon, LogInIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -82,42 +85,37 @@ function Credentials({ mode, token, next }: {
 
   return (
     <main id="main" className="page narrow">
-      <div className="panel primary login">
-        <div className="login-h">
-          <LockIcon aria-hidden="true" />
-          <h1>{title}</h1>
-        </div>
-        {mode === "onboarding" && <p className="muted" data-testid="no-password">Create the owner account to get started.</p>}
-        {invite?.valid && <p className="muted">You were invited as {invite.role}.</p>}
+      <Card className="login">
+        <PageHeader title={title} icon={<LockIcon aria-hidden="true" />} description={
+          mode === "onboarding" ? <span data-testid="no-password">Create the owner account to get started.</span> :
+          invite?.valid ? `You were invited as ${invite.role}.` : undefined
+        } />
+        <CardContent>
         <form data-testid={mode} method="post" action={path} onSubmit={(event) => void submit(event)}>
-          <div className="field">
-            <label htmlFor="username">Username</label>
-            <input id="username" className="input" name="username" autoComplete="username" required maxLength={64} />
-          </div>
-          <div className="field">
-            <label htmlFor="pw">Password</label>
-            <input
-              id="pw" className="input" type="password" name="password"
+          <Field id="username" label="Username">
+            <TextInput name="username" autoComplete="username" required maxLength={64} />
+          </Field>
+          <Field id="pw" label="Password">
+            <TextInput
+              type="password" name="password"
               autoComplete={creating ? "new-password" : "current-password"}
               required minLength={creating ? 8 : undefined} maxLength={1024}
               aria-describedby={message ? "login-msg" : undefined}
             />
-          </div>
-          {creating && (
-            <div className="field">
-              <label htmlFor="confirm">Confirm password</label>
-              <input id="confirm" className="input" type="password" name="confirm" autoComplete="new-password" required maxLength={1024} />
-            </div>
-          )}
+          </Field>
+          {creating && <Field id="confirm" label="Confirm password">
+            <TextInput type="password" name="confirm" autoComplete="new-password" required maxLength={1024} />
+          </Field>}
           {message && <p className="form-msg" id="login-msg" role="alert" data-testid="login-error">{message}</p>}
           <div className="login-acts">
-            <Button type="submit" variant="primary" icon={<LogInIcon aria-hidden="true" />} busy={busy} disabled={wait > 0 || invite?.valid === false}>
+            <Button type="submit" variant="default" size="lg" leadingIcon={<LogInIcon aria-hidden="true" />} busy={busy} disabled={wait > 0 || invite?.valid === false}>
               {creating ? title : "Sign in"}
             </Button>
-            {mode === "invite" && <a className="btn ghost" data-testid="signin" href="/app/login">Sign in</a>}
+            {mode === "invite" && <a className="btn btn-link" data-testid="signin" href="/app/login">Sign in</a>}
           </div>
         </form>
-      </div>
+        </CardContent>
+      </Card>
     </main>
   );
 }
