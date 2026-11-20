@@ -1,3 +1,4 @@
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { ActivityIcon, CpuIcon, MemoryStickIcon, ThermometerIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { HostValue } from "../../api/gen/HostValue.ts";
@@ -54,7 +55,7 @@ export default function Host() {
   const used = memory.get("Used");
   const total = memory.get("Total");
   return <div className="page hx" data-testid="host">
-    <p className="page-sub">Everything the kernel reports about this machine. Live values refresh while this tab is visible; rates are averages since the previous reading.</p>
+    <PageHeader title="Host" description="Live kernel metrics for this machine. Rates are averages since the previous reading." />
     {error && <p role="alert">{error}</p>}
     {host ? <>
       <div className="hx-grid">
@@ -90,10 +91,10 @@ export default function Host() {
         <summary>Top processes</summary>
         {host.processes.length ? <div className="host-table"><table className="tbl"><thead><tr>
           <th scope="col">PID</th><th scope="col">Command</th><th scope="col">Container</th>
-          <th scope="col">UID</th><th scope="col">CPU</th><th scope="col">RSS</th><th scope="col">Threads</th>
+          <th scope="col" className="num">UID</th><th scope="col" className="num">CPU</th><th scope="col" className="num">RSS</th><th scope="col" className="num">Threads</th>
         </tr></thead><tbody>{host.processes.map((p) => <tr key={p.pid}>
           <td>{p.pid}</td><td>{p.command}</td><td>{p.container === null ? "Host" : <a href={containerHref(p.container)}>{p.container}</a>}</td>
-          <td>{p.uid ?? "—"}</td><td>{pct(p.cpu_pct)}</td><td>{bytes(p.rss_bytes)}</td><td>{p.threads}</td>
+          <td className="num">{p.uid ?? "—"}</td><td className="num">{pct(p.cpu_pct)}</td><td className="num">{bytes(p.rss_bytes)}</td><td className="num">{p.threads}</td>
         </tr>)}</tbody></table></div> : <p>No processes visible.</p>}
       </details>}
       {!!host.process_groups?.length && boot?.role !== "viewer" && <details className="panel hx-p hx-wide">
@@ -150,13 +151,13 @@ function History({ recording }: { recording: boolean }) {
   return <section className="history-block" id="history" aria-label="Host history">
     <h2>History</h2>
     <div className="toolbar history-controls">
-      {RANGES.map((r) => <Button key={r} aria-pressed={r === range && window.kind !== "zoom"}
-        onClick={() => setSearch({ range: r, from: null, to: null })}>{r}</Button>)}
-      {steps && (["earlier", "in", "out", "later"] as const).map((k, i) => <Button key={k} disabled={!steps[k]}
+      <div className="seg" role="group" aria-label="Range">{RANGES.map((r) => <Button key={r} aria-pressed={r === range && window.kind !== "zoom"}
+        onClick={() => setSearch({ range: r, from: null, to: null })}>{r}</Button>)}</div>
+      {steps && (["earlier", "in", "out", "later"] as const).map((k, i) => <Button variant="ghost" size="sm" key={k} disabled={!steps[k]}
         onClick={() => { if (steps[k]) setSearch(steps[k]); }}>{["Earlier", "Zoom in", "Zoom out", "Later"][i]}</Button>)}
-      {window.kind === "zoom" && <Button onClick={() => setSearch({ from: null, to: null })}>Reset zoom</Button>}
+      {window.kind === "zoom" && <Button variant="ghost" size="sm" onClick={() => setSearch({ from: null, to: null })}>Reset zoom</Button>}
     </div>
-    <div className="toolbar history-controls">
+    <div className="history-controls seg" role="group" aria-label="Metric group">
       {HISTORY.map(([key, label]) => <Button key={key} aria-pressed={key === group} onClick={() => setSearch({ group: key ?? null })}>{label}</Button>)}
     </div>
     {error && <p role="alert">{error}</p>}
