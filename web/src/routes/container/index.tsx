@@ -1,3 +1,5 @@
+import { Badge, statusBadge } from "../../ui/Badge.tsx";
+import { PageHeader } from "../../ui/PageHeader.tsx";
 // Container detail routes share the time window and subscribe to live stats.
 import {
   ActivityIcon,
@@ -197,14 +199,10 @@ export default function ContainerPage() {
 
   return (
     <div className="page cd-page cd">
-      <header className="ctr-head" data-testid="ctr-head">
-        <ServiceIcon name={row.icon} label={row.title} />
-        <div className="ctr-id">
-          <h1>
-            <StatusDot dot={row.dot} />
-            <span className="ctr-t">{row.title}</span>
-          </h1>
-          <p className="mono muted">
+      <PageHeader className="ctr-head" testId="ctr-head"
+        icon={<ServiceIcon name={row.icon} label={row.title} />}
+        title={<><StatusDot dot={row.dot} /> <span className="ctr-t">{row.title}</span></>}
+        description={<p className="mono muted">
             {row.title !== row.name && <>{row.name} · </>}
             {row.image}
             {row.stack !== row.name && (
@@ -215,23 +213,20 @@ export default function ContainerPage() {
             )}
             {" · id "}
             <span title={detail.id}>{detail.id.slice(0, 12)}</span>
-          </p>
-        </div>
-        <div className="ctr-actions">
-          {open && (
-            <a className="btn" href={open} target="_blank" rel="noopener noreferrer" data-testid="open">
+          </p>}
+        actions={open || canEdit ? <>{open && (
+            <a className="btn btn-link" href={open} target="_blank" rel="noopener noreferrer" data-testid="open">
               <ExternalLinkIcon aria-hidden="true" />
               Open
             </a>
           )}
           {canEdit && (
-            <a className="btn ghost" href={editHref} data-testid="edit" title="Display name, group, icon, link">
+            <a className="btn btn-ghost" href={editHref} data-testid="edit" title="Display name, group, icon, link">
               <PencilIcon aria-hidden="true" />
               Edit
             </a>
-          )}
-        </div>
-      </header>
+          )}</> : undefined}
+        tabs={<TabNav layout="container" label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />} />
       {dockerError && (
         <output className="cd-why warn">
           <TriangleAlertIcon aria-hidden="true" />
@@ -239,7 +234,6 @@ export default function ContainerPage() {
         </output>
       )}
       {detail.why && <WhyNote why={detail.why} name={row.name} admin={canEdit} />}
-      <TabNav layout="container" label="Container sections" items={visibleTabs} current={tab} testId="ctr-tabs" />
 
       <section className="strip facts" aria-label="Status" data-testid="tiles">
         <div className="cell">
@@ -247,7 +241,7 @@ export default function ContainerPage() {
             <span className="label">State</span>
           </div>
           <div className="big">
-            <span className={`st-l lg ${stateDot}`}>{stateWord}</span>
+            <Badge variant={statusBadge(stateDot)}>{stateWord}</Badge>
           </div>
           <div className="sub" title={row.started_at ? new Date(row.started_at * 1000).toLocaleString() : undefined}>{up ? `up ${up}` : row.state === "exited" ? "stopped" : row.state}</div>
         </div>
@@ -274,7 +268,7 @@ export default function ContainerPage() {
               <span className="label">Health check</span>
             </div>
             <div className="big">
-              <span className={`st-l lg ${row.dot}`}>{health}</span>
+              <Badge variant={statusBadge(row.dot)}>{health}</Badge>
             </div>
             <div className="sub">Docker health check</div>
           </div>
