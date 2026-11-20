@@ -1,86 +1,75 @@
-/* Design tokens and themes (DESIGN.md §11.2–11.3).
-   Themes are variable sets on <html data-theme>. With no attribute or
-   the auto theme, CSS follows the OS. Settings previews can use the same
-   theme selectors on a nested element. The custom stylesheet loads after
-   the client styles and can override these tokens. */
-:root{
---font:ui-sans-serif,system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
---mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-/* type scale (root = 14 px at the browser default; everything in rem so a larger default font size scales the UI) */
---fs-micro:calc(11rem/14);--fs-xs:calc(12rem/14);--fs-sm:calc(13rem/14);--fs-body:1rem;--fs-title:calc(15rem/14);--fs-h2:calc(18rem/14);--fs-value:calc(24rem/14);--fs-display:calc(32rem/14);--fs-input:calc(13rem/14);
---lh:1.45;--lh-tight:1.2;--track-label:.06em;
-/* space: 4 px grid */
---s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:20px;--s-6:24px;--s-8:32px;--s-10:40px;
-/* control sizes */
-/* A11Y-20: boxes that hold text grow with the root font size (same px at
-   the default 14 px root). */
---ctl-h:max(32px,calc(32rem/14));--ctl-h-sm:max(28px,calc(28rem/14));--ia:28px;--hit:24px;
-/* radius */
---r-xs:4px;--r-sm:6px;--r:10px;--r-lg:14px;--r-pill:999px;
-/* motion: four durations, three easings; all become 0 under reduced motion */
---dur-1:90ms;--dur-2:160ms;--dur-3:240ms;--dur-4:1600ms;
---ease-out:cubic-bezier(.2,.7,.3,1);--ease-in:cubic-bezier(.5,0,.75,0);--ease-io:cubic-bezier(.45,0,.25,1);
-/* layers */
---z-top:20;--z-side:30;--z-pop:40;--z-toast:70;
---side-w:240px;--top-h:max(52px,calc(52rem/14));--row:36px;
-/* older names the page CSS still uses */
---t:var(--dur-2);--ease:var(--ease-out);--fs-label:var(--fs-micro)}
-/* retired names, kept as aliases so a user custom.css that reads them keeps working (§11.2) */
-:root,[data-theme]{--ctl:var(--ctl-border);--border-2:var(--ctl-border);--accent-bg:var(--accent);--glow:transparent;--pop:var(--shadow-2)}
+/* Set the color scheme on the theme boundary so previews use the same tokens. */
+:root,[data-theme]{color-scheme:light dark;
+ --background:light-dark(#fafafa,#09090b);--foreground:light-dark(#18181b,#fafafa);
+ --card:light-dark(#fff,#18181b);--card-foreground:var(--foreground);
+ --muted:light-dark(#f4f4f5,#27272a);--muted-foreground:light-dark(#52525b,#a1a1aa);
+ --border:light-dark(#e4e4e7,#3f3f46);--input:light-dark(#a1a1aa,#71717a);--ring:light-dark(#52525b,#d4d4d8);
+ --primary:light-dark(#18181b,#fafafa);--primary-foreground:light-dark(#fafafa,#18181b);
+ --secondary:light-dark(#eaeaec,#333338);--accent:var(--muted);--accent-foreground:var(--foreground);
+ --success:light-dark(#166534,#86efac);--warning:light-dark(#854d0e,#fde68a);
+ --danger:light-dark(#b91c1c,#fca5a5);--info:light-dark(#1e40af,#bfdbfe);
+ --destructive:light-dark(#b91c1c,#fca5a5);--destructive-foreground:light-dark(#fff,#450a0a);
+ --success-bg:color-mix(in srgb,var(--success) 10%,var(--card));--warning-bg:color-mix(in srgb,var(--warning) 10%,var(--card));
+ --danger-bg:color-mix(in srgb,var(--danger) 10%,var(--card));--info-bg:color-mix(in srgb,var(--info) 10%,var(--card));
+ --ch-cpu:light-dark(#4338ca,#a5b4fc);--ch-mem:light-dark(#7e22ce,#d8b4fe);
+ --ch-rx:var(--success);--ch-tx:var(--warning);--ch-temp:light-dark(#9a3412,#fdba74);
+ --ch-load:light-dark(#0369a1,#7dd3fc);--ch-swap:light-dark(#a21caf,#f0abfc);--ch-disk:light-dark(#be185d,#f9a8d4);
+ --shadow-xs:0 1px 2px rgb(0 0 0/.07);--shadow-sm:0 3px 10px rgb(0 0 0/.15);
+ --scrim:rgb(0 0 0/.55);
+ /* Compatibility aliases for route styles and custom.css. */
+ --bg:var(--background);--bg-side:var(--card);--surface:var(--card);--surface-2:var(--muted);--raised:var(--card);
+ --text:var(--foreground);--text-2:var(--muted-foreground);--text-3:var(--muted-foreground);
+ --field:var(--card);--line:var(--border);--ctl-border:var(--input);--ctl:var(--input);--border-2:var(--input);
+ --focus:var(--ring);--accent-bg:var(--accent);--accent-fg:var(--accent-foreground);--on-accent:var(--primary-foreground);
+ --accent-hover:color-mix(in srgb,var(--primary) 88%,var(--card));--glow:transparent;
+ --ok:var(--success);--ok-fg:var(--success);--warn:var(--warning);--warn-fg:var(--warning);
+ --bad:var(--danger);--bad-fg:var(--danger);--on-bad:var(--destructive-foreground);--off:var(--muted-foreground);
+ --tint:color-mix(in srgb,var(--foreground) 5%,transparent);--tint-2:color-mix(in srgb,var(--foreground) 10%,transparent);
+ --shadow-1:var(--shadow-xs);--shadow-2:var(--shadow-sm);--shadow-3:var(--shadow-sm);--pop:var(--shadow-sm)
+}
+[data-theme=light]{color-scheme:light}
+[data-theme=dark],[data-theme=ember],[data-theme=contrast]{color-scheme:dark}
+[data-theme=ember]{
+ --background:#171211;--card:#211a18;--muted:#302622;--secondary:#3b2d26;--foreground:#fff4ed;
+ --muted-foreground:#d0b7a9;--border:#493831;--input:#886b5f;--ring:#fdba95;
+ --primary:#fdba95;--primary-foreground:#2a150c;--ch-cpu:#fdba95
+}
+[data-theme=contrast]{
+ --background:#000;--card:#101012;--muted:#212124;--secondary:#262629;--foreground:#fff;
+ --muted-foreground:#e4e4e7;--border:#82828c;--input:#bfbfc6;--ring:#fff
+}
 
-:root,[data-theme=dark]{color-scheme:dark;
---bg:#1D1210;--bg-side:#1A100E;--surface:#241714;--surface-2:#35231D;--raised:#281A16;--field:#1A100E;--border:#795245;--line:#4E342C;--ctl-border:#9A7566;
---text:#FFF0E5;--text-2:#CDB4A8;--text-3:#B09486;
---accent:#F77848;--accent-hover:#FF956B;--accent-fg:#F77848;--on-accent:#26120B;--focus:#F77848;
---ok:#83CCA7;--warn:#F4D05E;--bad:#FF678B;--off:#8F7A6F;--ok-fg:#83CCA7;--warn-fg:#F4D05E;--bad-fg:#FF678B;--on-bad:#26120B;
---ch-cpu:#F77848;--ch-mem:#A99BFF;--ch-rx:#83CCA7;--ch-tx:#F4D05E;--ch-temp:#FFB27A;--ch-load:#7CC4F0;--ch-swap:#D69CF0;--ch-disk:#F28FB8;
---tint:rgb(255 240 229/.06);--tint-2:rgb(255 240 229/.11);--scrim:rgb(12 6 4/.62);
---shadow-1:0 1px 0 rgb(255 240 229/.03) inset,0 6px 18px -12px rgb(0 0 0/.7);--shadow-2:0 10px 30px -6px rgb(0 0 0/.6),0 2px 6px rgb(0 0 0/.35);--shadow-3:0 24px 64px -12px rgb(0 0 0/.75),0 4px 14px rgb(0 0 0/.4)}
-[data-theme=light]{color-scheme:light;
---bg:#FAF0EA;--bg-side:#F7ECE5;--surface:#FFF8F3;--surface-2:#F4E8E0;--raised:#FFFBF8;--field:#FFFDFB;--border:#AD8877;--line:#DAC6BB;--ctl-border:#8E6B5C;
---text:#2B1912;--text-2:#725448;--text-3:#7E6053;
---accent:#AC3712;--accent-hover:#922B0A;--accent-fg:#AC3712;--on-accent:#FFFFFF;--focus:#AC3712;
---ok:#216648;--warn:#806000;--bad:#AD1747;--off:#94796D;--ok-fg:#216648;--warn-fg:#806000;--bad-fg:#AD1747;--on-bad:#FFFFFF;
---ch-cpu:#AC3712;--ch-mem:#5A48C8;--ch-rx:#216648;--ch-tx:#806000;--ch-temp:#A4520F;--ch-load:#1F6E9E;--ch-swap:#7B3FA0;--ch-disk:#A3245E;
---tint:rgb(43 25 18/.045);--tint-2:rgb(43 25 18/.09);--scrim:rgb(43 25 18/.38);
---shadow-1:0 1px 2px rgb(60 30 20/.06);--shadow-2:0 10px 28px -8px rgb(60 30 20/.22),0 2px 6px rgb(60 30 20/.08);--shadow-3:0 24px 60px -14px rgb(60 30 20/.32),0 4px 12px rgb(60 30 20/.1)}
-/* Ember (kept by the owner, §11.13 Y1): deeper, redder surfaces from the mark's
-   dark tone #7A2A12 and the brand's lighter orange #FF956B as the accent */
-[data-theme=ember]{color-scheme:dark;
---bg:#140A07;--bg-side:#110806;--surface:#1D0F0B;--surface-2:#3A1D14;--raised:#231310;--field:#110806;--border:#8A4A35;--line:#4F271C;--ctl-border:#B0715A;
---text:#FFF0E5;--text-2:#E3BFAE;--text-3:#C99A86;
---accent:#FF956B;--accent-hover:#FFB08F;--accent-fg:#FF956B;--on-accent:#26120B;--focus:#FF956B;
---ok:#83CCA7;--warn:#F4D05E;--bad:#FF678B;--off:#9A7A6C;--ok-fg:#83CCA7;--warn-fg:#F4D05E;--bad-fg:#FF678B;--on-bad:#26120B;
---ch-cpu:#FF956B;--ch-mem:#A99BFF;--ch-rx:#83CCA7;--ch-tx:#F4D05E;--ch-temp:#FFC08A;--ch-load:#7CC4F0;--ch-swap:#D69CF0;--ch-disk:#F28FB8;
---tint:rgb(255 240 229/.06);--tint-2:rgb(255 240 229/.11);--scrim:rgb(10 4 2/.66);
---shadow-1:0 1px 0 rgb(255 149 107/.04) inset,0 6px 18px -12px rgb(0 0 0/.75);--shadow-2:0 10px 30px -6px rgb(0 0 0/.65),0 2px 6px rgb(0 0 0/.4);--shadow-3:0 24px 64px -12px rgb(0 0 0/.8),0 4px 14px rgb(0 0 0/.45)}
-[data-theme=contrast]{color-scheme:dark;
---bg:#000000;--bg-side:#000000;--surface:#0A0706;--surface-2:#241A16;--raised:#120D0B;--field:#000000;--border:#A08A80;--line:#5A4A44;--ctl-border:#D9C8BF;
---text:#FFFFFF;--text-2:#FFF0E5;--text-3:#E6D3C9;
---accent:#FF9F7A;--accent-hover:#FFB89B;--accent-fg:#FFB08F;--on-accent:#000000;--focus:#FFFFFF;
---ok:#8FF0B9;--warn:#FFE27A;--bad:#FF9AB2;--off:#BFB0A8;--ok-fg:#8FF0B9;--warn-fg:#FFE27A;--bad-fg:#FF9AB2;--on-bad:#000000;
---ch-cpu:#FF9F7A;--ch-mem:#C4B8FF;--ch-rx:#8FF0B9;--ch-tx:#FFE27A;--ch-temp:#FFC59B;--ch-load:#9AD8FF;--ch-swap:#E9C2FF;--ch-disk:#FFB3D1;
---tint:rgb(255 255 255/.1);--tint-2:rgb(255 255 255/.18);--scrim:rgb(0 0 0/.8);
---shadow-1:0 0 0 1px #A08A80;--shadow-2:0 0 0 1px #FFFFFF;--shadow-3:0 0 0 2px #FFFFFF}
-@media (prefers-color-scheme:light){:root:not([data-theme]),[data-theme=auto]{color-scheme:light;
---bg:#FAF0EA;--bg-side:#F7ECE5;--surface:#FFF8F3;--surface-2:#F4E8E0;--raised:#FFFBF8;--field:#FFFDFB;--border:#AD8877;--line:#DAC6BB;--ctl-border:#8E6B5C;
---text:#2B1912;--text-2:#725448;--text-3:#7E6053;
---accent:#AC3712;--accent-hover:#922B0A;--accent-fg:#AC3712;--on-accent:#FFFFFF;--focus:#AC3712;
---ok:#216648;--warn:#806000;--bad:#AD1747;--off:#94796D;--ok-fg:#216648;--warn-fg:#806000;--bad-fg:#AD1747;--on-bad:#FFFFFF;
---ch-cpu:#AC3712;--ch-mem:#5A48C8;--ch-rx:#216648;--ch-tx:#806000;--ch-temp:#A4520F;--ch-load:#1F6E9E;--ch-swap:#7B3FA0;--ch-disk:#A3245E;
---tint:rgb(43 25 18/.045);--tint-2:rgb(43 25 18/.09);--scrim:rgb(43 25 18/.38);
---shadow-1:0 1px 2px rgb(60 30 20/.06);--shadow-2:0 10px 28px -8px rgb(60 30 20/.22),0 2px 6px rgb(60 30 20/.08);--shadow-3:0 24px 60px -14px rgb(60 30 20/.32),0 4px 12px rgb(60 30 20/.1)}}
-/* phones and touch: 16 px inputs (no iOS zoom), 44 px targets */
-@media (pointer:coarse),(max-width:699px){:root{--fs-input:calc(16rem/14);--ctl-h:max(44px,calc(32rem/14));--ctl-h-sm:max(44px,calc(28rem/14));--ia:44px;--hit:44px}}
-@media (prefers-reduced-motion:reduce){:root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms;--dur-4:0ms}
- *,*::before,*::after{animation-duration:0ms!important;animation-iteration-count:1!important;transition-duration:0ms!important;scroll-behavior:auto!important}}
+:root{
+ --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+ --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ --fs-micro:calc(11rem/14);--fs-xs:calc(12rem/14);--fs-sm:calc(13rem/14);--fs-body:1rem;
+ --fs-title:calc(16rem/14);--fs-h2:calc(20rem/14);--fs-value:calc(24rem/14);--fs-display:calc(30rem/14);--fs-input:var(--fs-body);
+ --lh:1.45;--lh-tight:1.2;--track-label:.04em;--fs-label:var(--fs-xs);
+ --s-1:4px;--s-2:8px;--s-3:12px;--s-4:16px;--s-5:20px;--s-6:24px;--s-8:32px;--s-10:40px;
+ --r-xs:4px;--r-sm:6px;--r:8px;--r-lg:12px;--r-pill:999px;
+ --ctl-h-sm:max(32px,calc(32rem/14));--ctl-h:max(36px,calc(36rem/14));--ctl-h-lg:max(40px,calc(40rem/14));
+ --ia:var(--ctl-h-sm);--hit:24px;--row:40px;
+ --dur-1:90ms;--dur-2:160ms;--dur-3:240ms;--dur-4:1600ms;
+ --ease-out:cubic-bezier(.2,.7,.3,1);--ease-in:cubic-bezier(.5,0,.75,0);--ease-io:cubic-bezier(.45,0,.25,1);
+ --z-top:20;--z-side:30;--z-pop:40;--z-toast:70;--t:var(--dur-2);--ease:var(--ease-out);
+ --side-w:240px;--top-h:max(56px,4rem);--page-pad:var(--s-6);--page-max:1480px
+}
+@media (pointer:coarse),(max-width:700px){
+ :root{--fs-input:calc(16rem/14);--ctl-h:44px;--ctl-h-sm:44px;--ctl-h-lg:44px;--hit:44px}
+}
+@media (max-width:700px){:root{--fs-display:var(--fs-value);--page-pad:var(--s-4)}}
+@media (prefers-reduced-motion:reduce){
+ :root{--dur-1:0ms;--dur-2:0ms;--dur-3:0ms;--dur-4:0ms}
+ *,*::before,*::after{animation-duration:0ms!important;animation-iteration-count:1!important;transition-duration:0ms!important;scroll-behavior:auto!important}
+}
 
 /* ---- base ---- */
 *,*::before,*::after{box-sizing:border-box}
 html{font-size:87.5%;background:var(--bg);-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh) var(--font);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
-/* headings keep today's weight and height until the pages move (DESIGN.md §11.3: 650) */
 h1,h2,h3{margin:0;font-weight:600;line-height:1.25}
+h1{font-size:var(--fs-display);letter-spacing:-.025em}
+h2,h3{font-size:var(--fs-title)}
 p{margin:0}
 a{color:var(--accent-fg);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -91,12 +80,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .sr{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 .mono,code,kbd,pre{font-family:var(--mono);font-size:.92em}
 code{color:var(--text-2)}
-kbd{display:inline-block;min-width:18px;padding:0 4px;border:1px solid var(--border);border-bottom-width:2px;border-radius:var(--r-xs);font-size:.7857rem;line-height:16px;text-align:center;color:var(--text-2);background:var(--surface)}
+kbd{display:inline-block;min-width:18px;padding:0 4px;border:1px solid var(--border);border-radius:var(--r-xs);font-size:.7857rem;line-height:16px;text-align:center;color:var(--text-2);background:var(--surface)}
 .num{font-variant-numeric:tabular-nums}
 .wrap{overflow-wrap:anywhere;white-space:normal}
-.skip{position:absolute;left:8px;top:-40px;translate:0 -100%;z-index:100;padding:6px 10px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent)}
+.skip{position:absolute;left:8px;top:-40px;translate:0 -100%;z-index:100;padding:6px 10px;border-radius:var(--r-sm);background:var(--primary);color:var(--primary-foreground)}
 .skip:focus{top:8px;translate:none}
 .muted{color:var(--text-3)}
-.label{font-size:var(--fs-micro);font-weight:600;letter-spacing:var(--track-label);text-transform:uppercase;color:var(--text-3)}
+.label{font-size:var(--fs-micro);font-weight:600;color:var(--text-3)}
 svg.i{width:16px;height:16px;flex:none;vertical-align:-3px}
 [hidden]{display:none!important}
