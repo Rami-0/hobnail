@@ -11,7 +11,7 @@ export function Checkbox({ checked, onChange, label, disabled }: {
 }) {
   const field = useContext(Ctx);
   return <label className="cb">
-    <SdkCheckbox className="checkbox" checked={checked} onCheckedChange={onChange} disabled={disabled}
+    <SdkCheckbox className="checkbox" checked={checked} onCheckedChange={(next) => onChange(next === true)} disabled={disabled}
       id={field?.id} aria-describedby={field?.describedBy} aria-invalid={field?.invalid || undefined}>
       <CheckboxIndicator><CheckIcon aria-hidden="true" /></CheckboxIndicator>
     </SdkCheckbox>
