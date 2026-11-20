@@ -5,10 +5,15 @@
 import { Button as SdkButton } from "@ui-sdk/react/button";
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+export type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive" | "link" | "primary";
+export type ButtonSize = "sm" | "default" | "lg" | "icon";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
+  size?: ButtonSize;
+  loading?: boolean;
+  leadingIcon?: ReactNode;
+  trailingIcon?: ReactNode;
   /** The action this button started is running: spinner, no further clicks. */
   busy?: boolean;
   /** An icon before the label (hidden while busy, the spinner takes its place). */
@@ -18,8 +23,12 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button({
-  variant = "secondary",
-  busy = false,
+  variant = "outline",
+  size = "default",
+  loading = false,
+  busy = loading,
+  leadingIcon,
+  trailingIcon,
   icon,
   type = "button",
   className,
@@ -27,7 +36,7 @@ export function Button({
   children,
   ...rest
 }: ButtonProps) {
-  const cls = ["btn", variant === "secondary" ? "" : variant, className ?? ""].filter(Boolean).join(" ");
+  const cls = ["btn", variant === "primary" ? "btn-default" : `btn-${variant}`, size === "default" ? "" : `btn-${size}`, className ?? ""].filter(Boolean).join(" ");
   const click = (e: MouseEvent<HTMLElement>) => {
     if (busy) {
       e.preventDefault();
@@ -44,8 +53,9 @@ export function Button({
       aria-disabled={busy || rest["aria-disabled"] || undefined}
       onClick={click}
     >
-      {icon}
+      {!busy && (leadingIcon ?? icon)}
       {children}
+      {!busy && trailingIcon}
     </SdkButton>
   );
 }
