@@ -1,3 +1,6 @@
+import { Badge } from "../../ui/Badge.tsx";
+import { Card, CardHeader } from "../../ui/Card.tsx";
+import { PageHeader } from "../../ui/PageHeader.tsx";
 import { useCallback, useEffect, useState } from "react";
 import { api, useSession } from "../../api/session.ts";
 import type { SessionInfo } from "../../api/gen/SessionInfo.ts";
@@ -29,19 +32,18 @@ export function Sessions() {
     void Promise.resolve().then(() => load(controller.signal));
     return () => controller.abort();
   }, [load]);
-  return <section className="settings-section" data-testid="account-sessions">
-    <h2>Sessions</h2>
-    <p>This session stays signed in when you revoke other sessions.</p>
+  return <Card className="settings-section" data-testid="account-sessions">
+    <CardHeader title="Sessions" description="This session stays signed in when you revoke other sessions." />
     {error && revoke === null && <Note kind="bad">{error}</Note>}
     <div className="settings-list">{sessions.map((session) => <div className="settings-row" key={session.id}>
       <div>Signed in {new Date(session.created * 1000).toLocaleString()}<br />
         <span className="muted">Expires {new Date(session.expires * 1000).toLocaleString()}</span>
       </div>
-      <Button onClick={() => { setError(""); setRevoke(session.id); }}>Sign out session</Button>
+      <Button variant="ghost" onClick={() => { setError(""); setRevoke(session.id); }}>Sign out session</Button>
     </div>)}</div>
     {sessions.length > 0 ? <div><Button onClick={() => { setError(""); setRevoke(""); }}>Sign out all other sessions</Button></div> : <p className="muted">No other sessions.</p>}
     <Dialog open={revoke !== null} title="Sign out other sessions?" onClose={() => { if (!busy) setRevoke(null); }}
-      footer={<Button busy={busy} className="danger" onClick={async () => {
+      cancelLabel="Cancel" footer={<Button busy={busy} variant="destructive" onClick={async () => {
         if (busy || revoke === null) return;
         setBusy(true);
         const result = await api.request("DELETE", revoke ? `${sessionsPath}/${encodeURIComponent(revoke)}` : sessionsPath);
@@ -55,7 +57,7 @@ export function Sessions() {
       <p>{revoke ? "Sign out this other session?" : "Sign out every session for your account except this one?"}</p>
       {error && <Note kind="bad">{error}</Note>}
     </Dialog>
-  </section>;
+  </Card>;
 }
 
 export default function AccountPage() {
@@ -64,10 +66,9 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [passwordRevision, setPasswordRevision] = useState(0);
   return <div className="page settings-page" data-testid="account-page">
-    <h1>Account</h1>
-    <p>{user?.name} · <span className="settings-role">{user?.role}</span></p>
-    <section className="settings-section">
-      <h2>Change password</h2>
+    <PageHeader title="Account" description={user?.name} actions={user && <Badge className="settings-role" variant="secondary">{user.role}</Badge>} />
+    <Card className="settings-section">
+      <CardHeader title="Change password" />
       <form className="settings-form" data-testid="account-password" noValidate onSubmit={async (event) => {
         event.preventDefault();
         if (busy) return;
@@ -98,9 +99,9 @@ export default function AccountPage() {
         <Field id="account-new" label="New password" error={errors.new}><TextInput name="new" type="password" autoComplete="new-password" required /></Field>
         <Field id="account-confirm" label="Confirm new password" error={errors.confirm}><TextInput name="confirm" type="password" autoComplete="new-password" required /></Field>
         {errors.form && <Note kind="bad">{errors.form}</Note>}
-        <div><Button type="submit" variant="primary" busy={busy}>Change password</Button></div>
+        <div><Button type="submit" variant="default" busy={busy}>Change password</Button></div>
       </form>
-    </section>
+    </Card>
     <Sessions key={passwordRevision} />
   </div>;
 }
