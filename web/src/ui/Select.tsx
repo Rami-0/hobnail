@@ -1,5 +1,6 @@
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { useContext, useId, type ReactNode, type Ref, type SelectHTMLAttributes } from "react";
-import { Select as SdkSelect, SelectContent, SelectItem, SelectTrigger } from "@ui-sdk/react/select";
+import { Select as SdkSelect, SelectContent, SelectItem, SelectItemIndicator, SelectTrigger, SelectValue } from "@ui-sdk/react/select";
 import { Ctx } from "./Field.tsx";
 
 export interface SelectOption {
@@ -15,23 +16,25 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
   ref?: Ref<HTMLSelectElement>;
   /** The label is for screen readers only (a toolbar select). */
   hideLabel?: boolean;
+  placeholder?: string;
 }
 
-/** A native <select> with its own label (inside a Field, the Field's label is used instead). */
-export function Select({ label, value, onChange, options, className, hideLabel, id, ...rest }: SelectProps) {
+/** Outside a Field, the select supplies its own label. */
+export function Select({ label, value, onChange, options, className, hideLabel, id, placeholder, ...rest }: SelectProps) {
   const f = useContext(Ctx);
   const auto = useId();
   const sid = f?.id ?? id ?? auto;
   const control = (
     <SdkSelect value={value} items={options} onValueChange={(next) => { if (next !== null) onChange(next); }}
-      name={rest.name} disabled={rest.disabled}>
-      <SelectTrigger id={sid} className={["in", className ?? ""].filter(Boolean).join(" ")}
+      name={rest.name} disabled={rest.disabled} placeholder={placeholder}>
+      <SelectTrigger id={sid} className={["in select-trigger", className ?? ""].filter(Boolean).join(" ")}
         aria-describedby={f?.describedBy} aria-invalid={f?.invalid || undefined}
         aria-label={typeof label === "string" ? label : undefined}>
-        {options.find((o) => o.value === value)?.label ?? value}
+        <SelectValue />
+        <ChevronDownIcon aria-hidden="true" />
       </SelectTrigger>
       <SelectContent className="sdk-select-list">
-        {options.map((o) => <SelectItem key={o.value} value={o.value} data-value={o.value} className="menu-item">{o.label}</SelectItem>)}
+        {options.map((o) => <SelectItem key={o.value} value={o.value} data-value={o.value} className="menu-item">{o.label}<SelectItemIndicator><CheckIcon aria-hidden="true" /></SelectItemIndicator></SelectItem>)}
       </SelectContent>
     </SdkSelect>
   );

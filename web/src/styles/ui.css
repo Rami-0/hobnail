@@ -240,7 +240,11 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--accent)}
 .dlg[data-slot="dialog-content"]{position:fixed;inset:0;display:flex}
 
 .sdk-select-list{padding:6px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);color:var(--text);max-height:min(360px,70dvh);overflow:auto;min-width:var(--anchor-width);box-shadow:var(--shadow-2)}
-.sdk-select-list [data-highlighted]{background:var(--hover)}
+.select-trigger{display:flex;align-items:center;justify-content:space-between;gap:var(--s-2);cursor:pointer}
+.select-trigger svg{width:16px;height:16px;flex:none;color:var(--muted-foreground)}
+.select-trigger [data-placeholder]{color:var(--muted-foreground)}
+.sdk-select-list [data-highlighted]{background:var(--accent);color:var(--foreground)}
+.sdk-select-list [data-slot=select-item-indicator]{margin-left:auto}
 
 .service-icon{display:inline-grid;place-items:center;flex:none;width:36px;height:36px;object-fit:contain;border-radius:var(--r);background:var(--field);color:var(--text-2);font-weight:600}.nav-item>.service-icon{width:20px;height:20px;font-size:var(--fs-xs)}
 
