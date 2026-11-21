@@ -1,0 +1,42 @@
+import type { Field as Spec } from "../api/gen/Field.ts";
+import { Button } from "../ui/Button.tsx";
+import { Field, Textarea, TextInput } from "../ui/Field.tsx";
+import { Select } from "../ui/Select.tsx";
+import { Switch } from "../ui/Switch.tsx";
+import { secretHint, type Values } from "./schema.ts";
+
+export const pinField: Spec = {
+  id: "fingerprint", label: "TLS certificate fingerprint", kind: "text", required: false,
+  help: "Optional SHA-256 leaf fingerprint, 64 hexadecimal digits.", max_length: 64,
+  min: null, max: null, choices: [], default: null,
+};
+
+export function SchemaForm({ id, schema, values, errors, onChange, bound, cleared, onClear }: {
+  id: string; schema: Spec[]; values: Values; errors?: Record<string, string>;
+  onChange: (id: string, value: string | boolean) => void;
+  bound?: string | null; cleared?: boolean; onClear?: () => void;
+}) {
+  return <>{schema.map((field) => {
+    const { kind, label, help } = field;
+    const key = field.id;
+    const name = `${id}-${kind === "url" ? "url" : key}`;
+    const value = values[key] ?? field.default;
+    const text = Array.isArray(value) ? value.join("\n") : String(value ?? "");
+    const change = (value: string | boolean) => onChange(key, value);
+    const secret = kind === "secret";
+    const url = String(values.base_url ?? "");
+    const hint = (secret && secretHint(bound, url, cleared)) || help;
+    return <div key={key}>
+      <Field id={name} label={kind === "bool" || kind === "select" ? null : label} error={errors?.[key]} hint={hint}>
+        {kind === "bool" ? <Switch label={label} checked={value === true || value === "true"} onChange={change} />
+          : kind === "select" ? <Select label={label} options={field.choices.map((option) => ({ value: option, label: option }))} value={text} onChange={change} />
+          : kind === "list" ? <Textarea name={key} rows={3} value={text} onChange={(e) => change(e.target.value)} />
+          : <TextInput name={key} type={secret ? "password" : kind === "url" || kind === "number" ? kind : "text"}
+            autoComplete={secret ? "new-password" : undefined} maxLength={field.max_length ?? undefined}
+            min={field.min ?? undefined} max={field.max ?? undefined} value={text} onChange={(e) => change(e.target.value)} />}
+      </Field>
+      {secret && text && url.toLowerCase().startsWith("http://") && <p className="warn-fg">HTTP sends this credential unencrypted.</p>}
+      {secret && bound && onClear && <Button onClick={onClear}>{cleared ? "Keep saved credential" : "Clear saved credential"}</Button>}
+    </div>;
+  })}</>;
+}

@@ -67,11 +67,11 @@ export function watchBoards(cb: (event: { id: string; version: number }) => void
 
 export type ReadTopic = "widget" | "alerts" | "host";
 const reads = new Map<ReadTopic, Set<(data: unknown) => void>>();
-export function watchReadTopic(topic: ReadTopic, cb: (data: unknown) => void): () => void {
+export function watchReadTopic(topic: ReadTopic, cb: (data: unknown) => void, board?: string): () => void {
   const listeners = reads.get(topic) ?? new Set();
   reads.set(topic, listeners);
   listeners.add(cb);
-  const release = wantTopic(topic);
+  const release = wantTopic(topic, board);
   return () => { listeners.delete(cb); release(); };
 }
 
@@ -360,9 +360,9 @@ export function wantContainers(): () => void {
   };
 }
 
-export function wantTopic(t: Topic): () => void {
+export function wantTopic(t: Topic, board?: string): () => void {
   start();
-  return stream.want(t);
+  return stream.want(t, board);
 }
 
 let stripsWanted = 0;

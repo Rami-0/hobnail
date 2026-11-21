@@ -12,7 +12,7 @@ import type { SetupTarget } from "../../api/gen/SetupTarget.ts";
 import type { SetupUpdate } from "../../api/gen/SetupUpdate.ts";
 import { navigate } from "../../app/router.ts";
 import { applyTheme, currentTheme, isTheme } from "../../app/theme.ts";
-import { payloadIdentity } from "../../boards/document.ts";
+import { origin, payloadIdentity } from "../../boards/document.ts";
 import { LinkUrl } from "../../boards/LinkUrl.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Card, CardContent } from "../../ui/Card.tsx";
@@ -22,7 +22,8 @@ import { Field, TextInput } from "../../ui/Field.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
-import { HttpConnectionFields } from "../../configuration/HttpConnectionFields.tsx";
+import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
+import type { Provider } from "../../api/gen/Provider.ts";
 import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
 import { incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
 import "./setup.css";
@@ -74,6 +75,14 @@ function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft
 }
 
 function Wizard({ initial }: { initial: SetupDraft }) {
+  const [providers, setProviders] = useState<Provider[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.get<Provider[]>("/api/v1/providers", { signal: controller.signal }).then((result) => {
+      if (!controller.signal.aborted && result.kind === "ok") setProviders(result.data);
+    });
+    return () => controller.abort();
+  }, []);
   const [draft, setDraft] = useState(initial);
   const [doc, setDoc] = useState(initial.document);
   const [credentials, setCredentials] = useState<Record<string, SetupCredentialChange>>({});
@@ -263,12 +272,20 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       const bound = change?.secret === null ? null : draft.credential_origins[id];
       canTest = !!target.base_url && target.enabled;
       content = <>
-        <HttpConnectionFields id={id} url={target.base_url} enabled={target.enabled} bound={bound}
-          secret={change?.secret ?? ""} busy={busy} fields={{ base_url: fieldError(id, "base_url") ?? "", secret: fieldError(id, "secret") ?? "" }}
-          setSecret={(secret) => changeSecret(item, target.base_url, secret)}
-          setUrl={(base_url) => changeTarget(item, { ...target, base_url })}
-          setEnabled={(enabled) => changeTarget(item, { ...target, enabled })}
-          clearSecret={() => changeSecret(item, target.base_url, null)} />
+        <SchemaForm id={id} schema={[...(providers.find((provider) => provider.id === target.kind)?.fields ?? []), pinField]}
+          values={{ ...target, secret: change?.secret ?? "" }} bound={bound}
+          errors={Object.fromEntries(["base_url", "secret", "fingerprint"].map((key) => [key, fieldError(id, key) ?? ""]))}
+          onChange={(key, value) => {
+            if (key === "secret") changeSecret(item, target.base_url, String(value));
+            if (key === "enabled") changeTarget(item, { ...target, enabled: value === true });
+            if (key === "fingerprint") changeTarget(item, { ...target, fingerprint: String(value) || null });
+            if (key === "base_url") {
+              const base_url = String(value);
+              const changedOrigin = origin(base_url) !== origin(target.base_url);
+              if (changedOrigin) changeSecret(item, base_url, "");
+              changeTarget(item, { ...target, base_url, fingerprint: changedOrigin ? null : target.fingerprint });
+            }
+          }} onClear={() => changeSecret(item, target.base_url, null)} />
         {change && <Button disabled={controlsDisabled} onClick={() => void persist(doc, [change])}>
           {change.secret === null ? "Confirm credential removal" : "Save credential"}
         </Button>}
@@ -291,6 +308,10 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       <Button data-testid="setup-test" disabled={controlsDisabled || !canTest} onClick={() => void test(item)}>{change ? "Save and test connection" : "Test connection"}</Button>
       {result && <Note kind={typeof result !== "string" && result.ok ? "ok" : "warn"} testId="setup-verdict">
         {typeof result === "string" ? result : result.message}
+        {typeof result !== "string" && result.fingerprint && target.kind !== "board" && <>
+          <p className="wrap">Compare the service certificate with <code>{result.fingerprint}</code>.</p>
+          <Button onClick={() => changeTarget(item, { ...target, fingerprint: result.fingerprint })}>Confirm and pin fingerprint</Button>
+        </>}
       </Note>}
     </section>;
   }
@@ -327,7 +348,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             </div>
             {doc.items.map((item) => <section className="setup-item" key={item.id} data-testid="setup-selection">
               <Field id={`${item.id}-include`} label={null}
-                error={failure?.item === item.id && !["name", "group", "url", "base_url", "secret"].includes(failure.field ?? "") ? failure.message : undefined}>
+                error={failure?.item === item.id && !["name", "group", "url", "base_url", "secret", "fingerprint"].includes(failure.field ?? "") ? failure.message : undefined}>
                 <Checkbox checked={item.included} onChange={(included) => update(item.id, { included })}
                   label={`Include ${item.name || "unnamed service"}`} />
               </Field>
@@ -379,7 +400,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                     </Field>}
                     {error && (!matchError || !matches) && <p className="bad-fg" role="alert">{error.message}</p>}
                     {fix && <Button variant="link" disabled={controlsDisabled} onClick={() => void goTo({
-                      ...doc, step: ["url", "base_url", "secret"].includes(fix) ? "connections" : "select",
+                      ...doc, step: ["url", "base_url", "secret", "fingerprint"].includes(fix) ? "connections" : "select",
                     })}>Fix {item.name || "unnamed service"}</Button>}
                   </li>;
                 })}</ul>

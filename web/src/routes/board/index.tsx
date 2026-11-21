@@ -13,7 +13,7 @@ import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
 import { useBootstrap, useContainers, onConfigChange, watchBoards, watchReadTopic } from "../../live/index.ts";
-import { useRoute, containerHref } from "../../app/router.ts";
+import { useRoute, containerHref, navigate } from "../../app/router.ts";
 import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState, Note } from "../../ui/Note.tsx";
@@ -82,8 +82,8 @@ export default function BoardPage() {
     return watchReadTopic("widget", (data) => {
       const widget = data as WidgetView;
       setWidgetUpdates((previous) => ({ ...previous, [widget.id]: widget }));
-    });
-  }, [b, hasWidgets, editing]);
+    }, id);
+  }, [b, hasWidgets, editing, id]);
   useEffect(() => watchBoards((event) => { if (event.id === id) { if (editing) setChanged(event.version > editing.version); else void load(); } }), [id, load, editing]);
   useEffect(() => {
     if (!admin) return;
@@ -109,7 +109,10 @@ export default function BoardPage() {
   if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board">
     <PageHeader title={view.board.name} icon={<ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
-      actions={admin && <Button variant="default" data-testid="board-edit" onClick={() => void openEditor()}>Edit board</Button>} />
+      actions={admin && <>
+        {!b?.scoped && <Button onClick={() => navigate(`/app/settings/integrations?board=${id}`)}>Add integration</Button>}
+        <Button variant="default" data-testid="board-edit" onClick={() => void openEditor()}>Edit board</Button>
+      </>} />
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) { setPicker(undefined); setEditing(draft.document); } setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {!draft && (tourReplay || (!tourClosed && session?.board_tour_pending && tourBoard(b) === id)) &&
       <Suspense fallback={null}><Tour admin={admin} empty={view.document.sections.length === 0} onClose={() => {

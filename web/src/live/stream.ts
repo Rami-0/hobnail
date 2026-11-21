@@ -63,6 +63,7 @@ export function streamUrl(topics: Iterable<Topic>): string | null {
 export class LiveStream {
   private deps: StreamDeps;
   private sink: (m: StreamMessage) => void;
+  private board: string | null = null;
   private counts = new Map<Topic, number>();
   private es: SourceLike | null = null;
   private esUrl: string | null = null;
@@ -101,13 +102,15 @@ export class LiveStream {
   }
 
   /** Ask for a topic while mounted; the stream reconnects with the new set on the next tick. */
-  want(topic: Topic): () => void {
+  want(topic: Topic, board?: string): () => void {
+    if (board) this.board = board;
     this.counts.set(topic, (this.counts.get(topic) ?? 0) + 1);
     this.schedule();
     let done = false;
     return () => {
       if (done) return;
       done = true;
+      if (board === this.board) this.board = null;
       const n = (this.counts.get(topic) ?? 1) - 1;
       if (n <= 0) this.counts.delete(topic);
       else this.counts.set(topic, n);
@@ -140,7 +143,7 @@ export class LiveStream {
       this.deps.clearTimeout(this.reconcileT);
       this.reconcileT = null;
     }
-    const url = streamUrl(this.counts.keys());
+    const url = this.wantedUrl();
     if (this.paused || url === null) {
       this.cancelRetry();
       this.close();
@@ -151,6 +154,11 @@ export class LiveStream {
     if (this.retryT !== null && !this.es) return; // a retry is already waiting
     this.close();
     this.connect(url);
+  }
+
+  private wantedUrl(): string | null {
+    const url = streamUrl(this.counts.keys());
+    return url && this.board ? `${url}&board=${encodeURIComponent(this.board)}` : url;
   }
 
   private schedule(): void {

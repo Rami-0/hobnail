@@ -1,6 +1,6 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { BellIcon, BookmarkIcon, BoxIcon, HistoryIcon, LayoutGridIcon, LockIcon, PlugIcon, SlidersHorizontalIcon, SunIcon, TerminalIcon, UsersIcon, ZapIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
@@ -11,12 +11,12 @@ import { settingsTabs, type SettingsTab } from "../../app/settings-tabs.ts";
 import { useRoute } from "../../app/router.ts";
 import { fetchBootstrap, onConfigChange, useBootstrap } from "../../live/index.ts";
 import { tourHref } from "../../boards/tour.ts";
-import { needsSecret } from "../../boards/document.ts";
+import type { Provider } from "../../api/gen/Provider.ts";
+import { Switch } from "../../ui/Switch.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
 import { Select } from "../../ui/Select.tsx";
-import { HttpConnectionFields } from "../../configuration/HttpConnectionFields.tsx";
 import { Note, EmptyState } from "../../ui/Note.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
@@ -31,6 +31,8 @@ import Notifications from "./Notifications.tsx";
 import Widgets from "./Widgets.tsx";
 import General from "./General.tsx";
 import Bookmarks from "./Bookmarks.tsx";
+
+const ProviderDialog = lazy(() => import("./ProviderDialog.tsx"));
 
 const panels = {
   users: Users,
@@ -83,7 +85,7 @@ export default function SettingsPage() {
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
-  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null, default_theme: null });
+  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null, default_theme: null, provider_internet: false });
   const [editing, setEditing] = useState<BoardSummary | "new" | null>(null);
   const [deleting, setDeleting] = useState<BoardSummary | null>(null);
   const [error, setError] = useState("");
@@ -137,52 +139,46 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [items, setItems] = useState<IntegrationView[]>([]);
   const [editing, setEditing] = useState<IntegrationView | "new" | null>(null);
   const [deleting, setDeleting] = useState<IntegrationView | null>(null);
-  const [url, setUrl] = useState("");
-  const [secret, setSecret] = useState("");
-  const [enabled, setEnabled] = useState(true);
-  const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => { const result = await api.get<IntegrationView[]>("/api/v1/integrations"); if (result.kind === "ok") setItems(result.data); else setError(result.message); }, []);
-  // load updates state only after the asynchronous server response.
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [internet, setInternet] = useState(false);
+  const boot = useBootstrap();
+  const board = useRoute().search.get("board") ?? "";
+  const load = useCallback(async () => {
+    const [result, catalog, settings] = await Promise.all([
+      api.get<IntegrationView[]>("/api/v1/integrations"), api.get<Provider[]>("/api/v1/providers"),
+      api.get<DashboardSettings>("/api/v1/settings"),
+    ]);
+    if (result.kind === "ok") setItems(result.data); else setError(result.message);
+    if (catalog.kind === "ok") setProviders(catalog.data); else setError(catalog.message);
+    if (settings.kind === "ok") setInternet(settings.data.provider_internet);
+  }, []);
   // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => { void load(); return onConfigChange(() => { void load(); }); }, [load]);
-  const close = () => { setEditing(null); setSecret(""); setFields({}); };
-  const edit = (item: IntegrationView | "new") => { setEditing(item); setUrl(item === "new" ? "" : (item.admin?.base_url ?? item.origin)); setSecret(""); setEnabled(item === "new" ? true : item.admin?.enabled ?? true); setFields({}); };
-  const bound = editing && editing !== "new" ? editing.admin?.secret_origin : null;
-  const changed = needsSecret(bound, url);
-  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="default" data-testid="integration-create" onClick={() => edit("new")}>Add integration</Button>}</header>
+  const close = () => setEditing(null);
+  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="default" data-testid="integration-create" disabled={!providers.length} onClick={() => setEditing("new")}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
     {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
     <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{item.admin?.base_url ?? item.origin}</p><IntegrationStatus integration={item} /></div>
-      {admin && <div className="settings-actions"><Button variant="ghost" onClick={() => edit(item)}>Edit</Button><Button busy={busy} disabled={!item.enabled} data-testid="integration-test" onClick={async () => {
+      {admin && <div className="settings-actions"><Button variant="ghost" disabled={!providers.length} onClick={() => setEditing(item)}>Edit</Button><Button busy={busy} disabled={!item.enabled} data-testid="integration-test" onClick={async () => {
         setBusy(true); const result = await api.post(`/api/v1/integrations/${item.id}/test`);
         if (result.kind === "ok") await load(); else setError(result.message); setBusy(false);
       }}>Test connection</Button>{manage && <Button variant="ghost" onClick={() => setDeleting(item)}>Delete</Button>}</div>}
     </div>)}</div>
-    <Dialog open={!!editing} title={editing === "new" ? "Add integration" : "Edit integration"} onClose={close} testId="integration-form" footer={<><Button onClick={close}>Cancel</Button><Button type="submit" form="integration-form" variant="default" busy={busy}>Save</Button></>}>
-      {editing && <form id="integration-form" onSubmit={async (e) => {
-        e.preventDefault(); if (busy) return; setFields({});
-        if (changed && !secret) { setFields({ secret: "Enter the credential again for the new origin, or clear the saved credential first." }); return; }
-        const data = new FormData(e.currentTarget); setBusy(true);
-        const result = await api.request<IntegrationView>(editing === "new" ? "POST" : "PUT", `/api/v1/integrations${editing === "new" ? "" : `/${editing.id}`}`, { body: {
-          name: String(data.get("name")), kind: "http", base_url: url, enabled, icon: String(data.get("icon")) || null, ...(secret ? { secret } : {}),
-        } });
-        if (result.kind === "ok") { close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
-      }}>
-        <Field id="integration-name" label="Name" error={fields.name}><TextInput name="name" required maxLength={80} defaultValue={editing === "new" ? "" : editing.name} /></Field>
-        <Field id="integration-icon" label="Icon name" error={fields.icon}><TextInput name="icon" defaultValue={editing === "new" ? "" : editing.admin?.icon ?? ""} /></Field>
-        <HttpConnectionFields id="integration" url={url} secret={secret} bound={bound} enabled={enabled}
-          fields={fields} busy={busy} setUrl={setUrl} setSecret={setSecret} setEnabled={setEnabled}
-          clearSecret={editing === "new" ? undefined : async () => {
-            setBusy(true); const result = await api.request<IntegrationView>("DELETE", `/api/v1/integrations/${editing.id}/secret`);
-            if (result.kind === "ok") { setEditing(result.data); setSecret(""); await load(); }
-            else setFields({ secret: result.message });
-            setBusy(false);
-          }} />
-        {fields.form && <Note kind="bad">{fields.form}</Note>}
-      </form>}
-    </Dialog>
+    {editing && <Suspense fallback={<p>Opening integration catalog…</p>}>
+      <ProviderDialog providers={providers} item={editing === "new" ? null : editing} preferredBoard={board}
+        manage={manage} icons={!!boot?.remote_icons} internet={internet} onClose={close} onSaved={() => { close(); void load(); }} />
+    </Suspense>}
+    {manage && <div className="settings-section">
+      <h3>Provider internet access</h3>
+      <p>{internet ? "Providers may contact public destinations." : "Providers are blocked from public destinations."}</p>
+      <Switch label="Allow provider internet access" checked={internet} onChange={async (provider_internet) => {
+        const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { provider_internet } });
+        if (result.kind === "ok") setInternet(result.data.provider_internet); else setError(result.message);
+      }} />
+      {providers.map((provider) => <p key={provider.id}><strong>{provider.name}</strong> · {provider.contacts}</p>)}
+    </div>}
     <Dialog open={!!deleting} title="Delete integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy} onClick={async () => {
       if (!deleting) return; setBusy(true); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);
       if (result.kind === "ok") { setDeleting(null); await load(); } else setError(result.message); setBusy(false);
