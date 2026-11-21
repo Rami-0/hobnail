@@ -489,6 +489,30 @@ and [cluster API source](https://github.com/proxmox/pve-manager/blob/d147600a851
 
 UNVERIFIED: live clusters and releases with different resource schemas.
 
+## TrueNAS SCALE
+
+Enter the TrueNAS SCALE URL and API key. The key needs read access to
+`disk.query`, `pool.query`, `alert.list` and `smart.test.results`. On
+24.10, a standard UI-generated legacy API key has broad appliance access.
+Hobnail uses it as a Bearer token and tests a one-entry disk query.
+
+**Storage health** shows non-dismissed alerts, status and free space for
+up to ten pools, and the latest reported SMART self-test for up to ten
+disks. Missing results stay unknown. The provider reads the test log and
+does not start a test. Oversized lists leave independent metrics visible.
+
+Verified from [24.10.2 REST v2.0](https://www.truenas.com/docs/scale/24.10/api/scale_rest_api.html),
+[Bearer auth source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/restful.py),
+[SMART results source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/plugins/smart.py)
+and [TrueNAS 26 API removal notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/).
+
+The REST API is deprecated in 25.04 and 25.10, and removed in TrueNAS 26.
+TrueNAS 26 requires JSON-RPC over WebSocket, which the provider connection
+contract does not support.
+
+UNVERIFIED: live appliances, 25.x REST compatibility and disk health
+beyond the latest SMART self-test result.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

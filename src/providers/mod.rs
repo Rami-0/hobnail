@@ -56,6 +56,7 @@ mod syncthing;
 mod tailscale;
 mod technitium;
 mod transmission;
+mod truenas;
 mod uptime_kuma;
 mod wg_easy;
 
@@ -94,6 +95,7 @@ pub const REGISTRY: &[Provider] = &[
     syncthing::SYNCTHING,
     duplicati::DUPLICATI,
     proxmox::PROXMOX,
+    truenas::TRUENAS,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
