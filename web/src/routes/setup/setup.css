@@ -1,0 +1,6 @@
+.setup-fields { border: 0; min-width: 0; margin: 0; padding: 0; }
+.setup-fields > .acts, .setup-fields > .note { margin-block: var(--s-3); }
+.setup-item { padding-block: var(--s-3); border-bottom: 1px solid var(--line); }
+.setup-item-fields { display: grid; gap: var(--s-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+.setup-actions { margin-block-start: var(--s-4); }
+.setup-actions > [role="status"] { align-self: center; }

@@ -248,6 +248,12 @@ async function runPass(size, scheme) {
       await typeText(value);
     }
     await click(`${onboarding} button[type="submit"]`);
+    for (const title of ["Appearance", "Discover services", "Select what to include", "Configure connections"]) {
+      if (!(await step(`guided setup opens ${title}`, () => until(`document.querySelector('[data-testid="setup-step"]')?.textContent === ${q(title)}`)))) return summarise();
+      await click('[data-testid="setup-skip"]');
+    }
+    if (!(await step("guided setup reaches Review", () => until(`document.querySelector('[data-testid="setup-step"]')?.textContent === "Review dashboard"`)))) return summarise();
+    await click('[data-testid="setup-create"]');
     if (!(await step("onboarding signs in the owner", () => until(`!!document.querySelector('[data-testid="user"]')`, 10000)))) return summarise();
     await click('[data-testid="user"]');
     await until(`!!document.querySelector('button[data-testid="signout"]')`, 3000);

@@ -12,12 +12,14 @@ import { Field, TextInput } from "../../ui/Field.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Note } from "../../ui/Note.tsx";
+import { LinkTest } from "../../boards/LinkTest.tsx";
+import { LinkUrl } from "../../boards/LinkUrl.tsx";
 import { Tile } from "./index.tsx";
 
 const breakpoint = (): keyof GridSpans => window.innerWidth < 700 ? "mobile" : window.innerWidth < 1100 ? "tablet" : "desktop";
 
-export default function Editor({ view, initial, changed, onSave, onCancel, onRebase }: {
-  view: BoardView; initial: BoardDocument; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: () => void;
+export default function Editor({ view, initial, initialPicker, scoped, changed, onSave, onCancel, onRebase }: {
+  view: BoardView; initial: BoardDocument; initialPicker?: "add" | "discover"; scoped: boolean; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: () => void;
 }) {
   const [base, setBase] = useState(() => initial.version === view.document.version ? view.document : recoveryBase(initial, view.document));
   const [doc, setDoc] = useState(initial);
@@ -26,9 +28,10 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const [conflict, setConflict] = useState(initial.version !== view.document.version);
   const [draftState, setDraftState] = useState("Draft ready");
   const [announcement, setAnnouncement] = useState("");
-  const [picker, setPicker] = useState<number | null>(null);
+  const [picker, setPicker] = useState<number | null>(initialPicker ? 0 : null);
   const [suggestions, setSuggestions] = useState<BoardSuggestion[]>([]);
   const [query, setQuery] = useState("");
+  const [link, setLink] = useState("");
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDraft = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -36,7 +39,9 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
   const leaving = useRef(false);
   const operation = useRef(false);
   const root = useRef<HTMLDivElement>(null);
-  useEffect(() => { root.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }, []);
+  const linkTitle = useRef<HTMLInputElement>(null);
+  const [manual, setManual] = useState(initialPicker === "add");
+  useEffect(() => { if (!initialPicker) root.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }, [initialPicker]);
   const [toolCount, setToolCount] = useState(6);
   const itemCount = doc.sections.reduce((count, section) => count + section.items.length, 0);
   useEffect(() => {
@@ -136,7 +141,17 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
     const stop = () => { button.removeEventListener("pointerup", up); button.removeEventListener("pointercancel", stop); };
     button.addEventListener("pointerup", up); button.addEventListener("pointercancel", stop);
   };
-  const openPicker = async (section: number) => { setPicker(section); setQuery(""); const result = await api.get<BoardSuggestion[]>(`${path}/suggestions`); if (result.kind === "ok") setSuggestions(result.data); else setError(result.message); };
+  const openPicker = (section: number) => { setManual(false); setPicker(section); setQuery(""); setLink(""); };
+  useEffect(() => {
+    if (picker === null) return;
+    const controller = new AbortController();
+    void api.get<BoardSuggestion[]>(`${path}/suggestions`, { signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") setSuggestions(result.data);
+      else setError(result.message);
+    });
+    return () => controller.abort();
+  }, [path, picker]);
   return <div ref={root} className="board-editor" data-testid="board-editor">
     <PageHeader title={`Edit ${view.board.name}`}
       description={<p role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p>}
@@ -165,14 +180,30 @@ export default function Editor({ view, initial, changed, onSave, onCancel, onReb
         {doc.sections.length > 1 && <Select label="Move to section" value={String(s)} options={doc.sections.map((entry, index) => ({ value: String(index), label: entry.title }))} onChange={(value) => move(s, i, Number(value), doc.sections[Number(value)]?.items.length ?? 0)} />}
         <div className="editor-spans">{(["mobile", "tablet", "desktop", "rows"] as const).map((dimension) => <Field key={dimension} id={`span-${s}-${i}-${dimension}`} label={dimension}><TextInput type="number" min={1} max={dimension === "mobile" ? 4 : dimension === "tablet" ? 8 : 12} value={item.spans[dimension]} onChange={(e) => change({ type: "resize", section: s, item: i, spans: { ...item.spans, [dimension]: Number(e.target.value) } }, `${dimension} resized`)} /></Field>)}</div>
         {item.payload.kind === "container" && <div className="editor-custom">{(["title", "icon", "link"] as const).map((field) => <Field key={field} id={`custom-${s}-${i}-${field}`} label={`Custom ${field}`}><TextInput value={item.payload.kind === "container" ? item.payload[field] ?? "" : ""} onChange={(e) => { if (item.payload.kind === "container") change({ type: "payload", section: s, item: i, payload: { ...item.payload, [field]: e.target.value || null } }, `Custom ${field} updated`); }} /></Field>)}</div>}
+        {item.payload.kind !== "container" && <div className="editor-custom">
+          <Field id={`title-${s}-${i}`} label="Custom title"><TextInput value={item.payload.title ?? ""} maxLength={80}
+            onChange={(e) => {
+              if (item.payload.kind === "container") return;
+              const { title: _title, ...target } = item.payload;
+              const title = e.target.value;
+              const payload = title || target.kind === "link" ? { ...target, title } : target;
+              change({ type: "payload", section: s, item: i, payload }, "Custom title updated");
+            }} /></Field>
+          {item.payload.kind === "link" && <>
+            <LinkUrl id={`url-${s}-${i}`} value={item.payload.url}
+              onChange={(url) => { if (item.payload.kind === "link") change({ type: "payload", section: s, item: i, payload: { ...item.payload, url } }, "URL updated"); }} />
+            {!scoped && <LinkTest url={item.payload.url} />}
+          </>}
+        </div>}
+
         </>}
       </div>; })}</div><Button data-testid="board-add-item" onClick={() => { void openPicker(s); }}>Add item</Button>
     </section>)}
     <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
-    <Dialog open={picker !== null} title="Add item" onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
+    <Dialog open={picker !== null} title="Add item" initialFocus={manual ? linkTitle : undefined} onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
       <div className="suggestions">{suggestions.filter((suggestion) => suggestion.title.toLowerCase().includes(query.toLowerCase()) && !doc.sections.some((section) => section.items.some((item) => JSON.stringify(item.payload) === JSON.stringify(suggestion.payload)))).map((suggestion) => <Button variant="ghost" data-testid="board-suggestion" key={JSON.stringify(suggestion.payload)} onClick={() => { if (picker !== null) change({ type: "add", section: picker, payload: suggestion.payload }, "Item added"); setPicker(null); }}>{suggestion.title}</Button>)}</div>
       <h3>Add a link</h3><form data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); if (picker === null) return; const data = new FormData(e.currentTarget); change({ type: "add", section: picker, payload: { kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null } }, "Link added"); setPicker(null); }}>
-        <Field id="link-title" label="Title"><TextInput name="title" required maxLength={80} /></Field><Field id="link-url" label="URL"><TextInput name="url" type="url" required pattern="https?://.*" /></Field><Field id="link-icon" label="Icon name"><TextInput name="icon" /></Field><Button type="submit" variant="default">Add link</Button>
+        <Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} /></Field><LinkUrl id="link-url" value={link} onChange={setLink} />{!scoped && <LinkTest url={link} />}<Field id="link-icon" label="Icon name"><TextInput name="icon" /></Field><Button type="submit" variant="default">Add link</Button>
       </form>
     </Dialog>
     <Dialog testId="board-leave" open={pendingHref !== null} title="Leave this edit?" onClose={() => setPendingHref(null)} footer={<><Button onClick={() => setPendingHref(null)}>Keep editing</Button><Button variant="default" onClick={async () => { await settle(); const saved = await saveDraft(latest.current); if (!saved) { setPendingHref(null); setError("Could not preserve the draft. Keep editing and retry when the server is available."); return; } leaving.current = true; if (pendingHref) navigate(pendingHref); }}>Leave and keep draft</Button></>}><p>Your changes have not been saved to the board. Keep editing or leave with a server-side draft.</p></Dialog>

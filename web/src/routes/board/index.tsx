@@ -1,5 +1,6 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from "react";
+import { reduceDocument } from "../../boards/document.ts";
 import { api } from "../../api/session.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardDraft } from "../../api/gen/BoardDraft.ts";
@@ -28,7 +29,7 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   const targetMissing = resolved?.missing || (p.kind === "container" && !!matched && !!live.data && !container);
   const integration = resolved?.integration;
   const widget = resolved?.widget;
-  const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? widget?.title ?? p.widget_id : integration?.name ?? "Integration";
+  const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? p.title ?? widget?.title ?? p.widget_id : p.title ?? integration?.name ?? "Integration";
   const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : p.kind === "widget" ? widget?.icon : integration?.admin?.icon;
   const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : p.kind === "widget" ? widget?.link : (integration?.admin?.base_url ?? integration?.origin);
   return <div className="board-tile" data-testid="board-tile" data-missing={targetMissing || undefined}>
@@ -49,6 +50,7 @@ export default function BoardPage() {
   const containerNames = live.data?.groups.flatMap((group) => group.containers.map((container) => container.name)).join("\0");
   const admin = b?.role === "admin" || b?.role === "owner";
   const [editing, setEditing] = useState<BoardDocument | null>(null);
+  const [picker, setPicker] = useState<"add" | "discover">();
   const [draft, setDraft] = useState<BoardDraft | null>(null);
   const [changed, setChanged] = useState(false);
   const [view, setView] = useState<BoardView | null>(null);
@@ -85,21 +87,31 @@ export default function BoardPage() {
     });
     return () => controller.abort();
   }, [admin, id]);
+  async function openEditor(mode?: "add" | "discover") {
+    if (!view) return;
+    const result = await api.get<BoardDraft | null>(`/api/v1/boards/${id}/draft`);
+    if (result.kind !== "ok") { setError(result.message); return; }
+    if (result.data) setDraft(result.data);
+    else {
+      setPicker(mode);
+      setEditing(mode ? reduceDocument(view.document, { type: "section", title: "Services" }) : view.document);
+      setChanged(false);
+    }
+  }
   if (missing) return <NotFound path={`/app/boards/${id}`} />;
   if (!view) return <div className="page">{error || "Loading board…"}</div>;
-  if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
+  if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board">
     <PageHeader title={view.board.name} icon={<ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
-      actions={admin && <Button variant="default" data-testid="board-edit" onClick={async () => {
-        const result = await api.get<BoardDraft | null>(`/api/v1/boards/${id}/draft`);
-        if (result.kind !== "ok") { setError(result.message); return; }
-        if (result.data) setDraft(result.data);
-        else { setEditing(view.document); setChanged(false); }
-      }}>Edit board</Button>} />
-    <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) setEditing(draft.document); setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
+      actions={admin && <Button variant="default" data-testid="board-edit" onClick={() => void openEditor()}>Edit board</Button>} />
+    <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) { setPicker(undefined); setEditing(draft.document); } setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {error && <Note kind="bad">{error}</Note>}
-    {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty">
-      {admin ? "Choose Edit board to add a section and the services or links you want here." : "No sections or items have been added to this board yet."}
+    {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty"
+      actions={admin && <>
+        <Button data-testid="board-empty-add" onClick={() => void openEditor("add")}>Add</Button>
+        <Button data-testid="board-empty-discover" onClick={() => void openEditor("discover")}>Discover</Button>
+      </>}>
+      {admin ? "Add a link or browse available services." : "No sections or items have been added to this board yet."}
     </EmptyState> : view.document.sections.map((section) => <section key={section.id} className="board-section">
       <h2>{section.title}</h2><div className="board-grid">{section.items.map((item) => {
         const resolved = view.resolved.find((r) => r.id === item.id);

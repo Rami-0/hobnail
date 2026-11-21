@@ -65,7 +65,7 @@ function Credentials({ mode, token, next }: {
     setError("");
     const r = await api.post(path, { username, password, token });
     if (r.kind === "ok") {
-      window.location.replace(mode === "invite" ? "/app" : next);
+      window.location.replace(mode === "onboarding" ? "/app/setup" : mode === "invite" ? "/app" : next);
       return;
     }
     setBusy(false);

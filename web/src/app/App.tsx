@@ -26,6 +26,7 @@ function pageChunk(loader: () => Promise<{ default: ComponentType }>, ...routes:
   return lazy(() => initial ?? loader());
 }
 
+const SetupPage = lazy(() => import("../routes/setup/GuidedSetup.tsx"));
 const LogsPage = pageChunk(() => import("../routes/logs/index.tsx"), "logs", "container_logs", "stack_logs");
 const AlertsPage = pageChunk(() => import("../routes/alerts/index.tsx"), "alerts");
 const OverviewPage = pageChunk(() => import("../routes/overview/index.tsx"), "overview");
@@ -93,16 +94,18 @@ export function App() {
   // long task on a slow phone).
   const ready = useDeferredValue(true, false);
   const authPage = route.name === "login" || route.name === "invite";
-  const redirect = s.session && !s.session.user && !authPage && route.name !== "settings"
-    ? `/app/login?next=${encodeURIComponent(pathname + query + hash)}`
-    : null;
+  const owner = s.session?.user?.role === "owner";
+  const setupPage = route.name === "setup";
+  const redirect = owner && s.session?.setup_pending && route.name === "home" ? "/app/setup"
+    : s.session && !s.session.user && !authPage && route.name !== "settings"
+      ? `/app/login?next=${encodeURIComponent(pathname + query + hash)}` : null;
   useEffect(() => {
     if (redirect) navigate(redirect, { replace: true });
   }, [redirect]);
   const showCredentials = authPage && s.session !== null;
   useEffect(() => {
-    if (ready && showCredentials) document.getElementById("root")?.setAttribute("data-ready", "1");
-  }, [ready, showCredentials]);
+    if (ready && (showCredentials || (setupPage && s.session?.user))) document.getElementById("root")?.setAttribute("data-ready", "1");
+  }, [ready, showCredentials, setupPage, s.session?.user]);
 
 
 
@@ -140,6 +143,10 @@ export function App() {
       </main>
     ) : <Loading />;
   }
+
+  if (setupPage) return owner ? <Suspense fallback={<Loading />}><SetupPage /></Suspense>
+    : <main className="page narrow" id="main"><Banner kind="warn">Only the owner can run guided setup.</Banner></main>;
+  if (redirect) return <Loading />;
 
   let page;
   switch (route.name) {

@@ -10,7 +10,7 @@ const route = matchRoute(pathname);
 // The HTML session preload resolves while route code is loading. Avoid
 // protected preloads entirely for visitors without a session.
 void refreshSession().then(({ session }) => {
-  if (!session?.user || route.name === "login" || route.name === "invite" || route.name === "not_found") return;
+  if (!session?.user || route.name === "login" || route.name === "invite" || route.name === "setup" || (route.name === "home" && session.setup_pending) || route.name === "not_found") return;
   prefetchEntryRead("/api/v1/bootstrap");
   prefetchEntryRead("/api/v1/containers");
   switch (route.name) {

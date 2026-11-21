@@ -15,7 +15,7 @@ import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
 import { Select } from "../../ui/Select.tsx";
-import { Switch } from "../../ui/Switch.tsx";
+import { HttpConnectionFields } from "../../configuration/HttpConnectionFields.tsx";
 import { Note, EmptyState } from "../../ui/Note.tsx";
 import { TabNav } from "../../ui/TabNav.tsx";
 import "./settings.css";
@@ -81,7 +81,7 @@ export default function SettingsPage() {
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
-  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null });
+  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null, default_theme: null });
   const [editing, setEditing] = useState<BoardSummary | "new" | null>(null);
   const [deleting, setDeleting] = useState<BoardSummary | null>(null);
   const [error, setError] = useState("");
@@ -173,16 +173,16 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
         if (result.kind === "ok") { if (connectionChanged) forgetVerdict(result.data.id); close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
       }}>
         <Field id="integration-name" label="Name" error={fields.name}><TextInput name="name" required maxLength={80} defaultValue={editing === "new" ? "" : editing.name} /></Field>
-        <Field id="integration-url" label="Service URL" error={fields.base_url}><TextInput name="base_url" type="url" required value={url} onChange={(e) => setUrl(e.target.value)} /></Field>
         <Field id="integration-icon" label="Icon name" error={fields.icon}><TextInput name="icon" defaultValue={editing === "new" ? "" : editing.admin?.icon ?? ""} /></Field>
-        <Field id="integration-secret" label="Bearer credential" error={fields.secret} hint={bound ? `A credential is saved for ${bound}. The credential is bound to the origin (scheme, host, and port). Path changes keep the binding.` : "Optional. The credential is bound to the origin (scheme, host, and port). Path changes keep the binding."}><TextInput name="secret" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} /></Field>
-        {secret && /^http:\/\//i.test(url.trim()) && <Note kind="warn">This HTTP connection sends the credential unencrypted.</Note>}
-        {changed && <Note kind="warn">The origin changed. Enter the credential again for this destination.</Note>}
-        {bound && editing !== "new" && <Button busy={busy} onClick={async () => {
-          setBusy(true); const result = await api.request<IntegrationView>("DELETE", `/api/v1/integrations/${editing.id}/secret`);
-          if (result.kind === "ok") { setEditing(result.data); setSecret(""); forgetVerdict(result.data.id); await load(); } else setFields({ secret: result.message }); setBusy(false);
-        }}>Clear saved credential</Button>}
-        <Switch checked={enabled} onChange={setEnabled} label="Enabled" />{fields.form && <Note kind="bad">{fields.form}</Note>}
+        <HttpConnectionFields id="integration" url={url} secret={secret} bound={bound} enabled={enabled}
+          fields={fields} busy={busy} setUrl={setUrl} setSecret={setSecret} setEnabled={setEnabled}
+          clearSecret={editing === "new" ? undefined : async () => {
+            setBusy(true); const result = await api.request<IntegrationView>("DELETE", `/api/v1/integrations/${editing.id}/secret`);
+            if (result.kind === "ok") { setEditing(result.data); setSecret(""); forgetVerdict(result.data.id); await load(); }
+            else setFields({ secret: result.message });
+            setBusy(false);
+          }} />
+        {fields.form && <Note kind="bad">{fields.form}</Note>}
       </form>}
     </Dialog>
     <Dialog open={!!deleting} title="Delete integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy} onClick={async () => {

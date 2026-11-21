@@ -105,7 +105,7 @@ export default defineConfig(({ command }) => {
       // Keep its dependencies in a separate lazy chunk so a chart vendor
       // never has to import an initializer from the chart route itself.
       rolldownOptions: { output: {
-        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
+        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
         { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
