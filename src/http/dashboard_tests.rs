@@ -1843,6 +1843,113 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
 }
 
 #[tokio::test]
+async fn scoped_admins_can_test_and_configure_granted_provider_integrations() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Granted board").await;
+    let other = owner.board("Private board").await;
+    let input = json!({"name":"Existing","kind":"http","enabled":true,"base_url":url});
+    let granted = owner
+        .json("POST", "/api/v1/integrations", input.clone(), 201)
+        .await;
+    let denied = owner
+        .json("POST", "/api/v1/integrations", input.clone(), 201)
+        .await;
+    let admin = owner
+        .guest(
+            "scoped-provider-admin",
+            "admin",
+            json!({
+                "boards":[board],"integrations":[granted["id"]]
+            }),
+        )
+        .await;
+    let test = "/api/v1/providers/test";
+    let install = "/api/v1/providers/install";
+    for route in [test, install] {
+        admin
+            .json("POST", route, json!({"integration":input}), 403)
+            .await;
+        admin
+            .json(
+                "POST",
+                route,
+                json!({"integration":input,"integration_id":denied["id"]}),
+                403,
+            )
+            .await;
+    }
+    let fake = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        upstream_request(&mut socket).await;
+        socket
+            .write_all(b"HTTP/1.1 204 No Content\r\n\r\n")
+            .await
+            .unwrap();
+    });
+    let draft = json!({"name":"Edited","kind":"http","enabled":true,"base_url":url});
+    let result = admin
+        .json(
+            "POST",
+            test,
+            json!({"integration":draft,"integration_id":granted["id"]}),
+            200,
+        )
+        .await;
+    assert_eq!(result["ok"], true);
+    fake.await.unwrap();
+
+    let placement = |board: &str, widget_options: Value| {
+        json!({
+            "integration":draft,"integration_id":granted["id"],"board_id":board,
+            "widgets":[{"id":"json","options":widget_options}]
+        })
+    };
+    admin
+        .json("POST", install, placement(&other, json!({})), 404)
+        .await;
+    let id = granted["id"].as_str().unwrap();
+    let options =
+        |id: &str, board: &str| format!("/api/v1/providers/widgets?integration={id}&board={board}");
+    admin
+        .json("GET", &options(id, &other), Value::Null, 404)
+        .await;
+    admin
+        .json(
+            "GET",
+            &options(denied["id"].as_str().unwrap(), &board),
+            Value::Null,
+            403,
+        )
+        .await;
+    let saved = admin
+        .json(
+            "POST",
+            install,
+            placement(&board, json!({"paths":["reading"]})),
+            201,
+        )
+        .await;
+    assert_eq!(saved["name"], "Edited");
+    let saved_options = admin
+        .json("GET", &options(id, &board), Value::Null, 200)
+        .await;
+    let mut change = placement(&board, json!({"paths":["new_reading"]}));
+    change["widgets"][0]["placement"] = saved_options["json"][0]["id"].clone();
+    admin.json("POST", install, change, 201).await;
+    let saved_options = admin
+        .json("GET", &options(id, &board), Value::Null, 200)
+        .await;
+    assert_eq!(
+        saved_options["json"][0]["options"]["paths"],
+        json!(["new_reading"])
+    );
+}
+
+#[tokio::test]
 async fn credentialed_json_widgets_require_specific_paths() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

@@ -126,8 +126,10 @@ Provider catalog and installation:
   The selected board's placement gets the options and refresh interval. An
   empty selection saves the connection alone.
 - `GET /api/v1/providers/widgets?integration=<id>&board=<id>` returns a map
-  of widget descriptor IDs to arrays of placements `{id, options}`. Draft
-  tests, installs and this options route require unscoped Admin or Owner access.
+  of widget descriptor IDs to arrays of placements `{id, options}`. Scoped
+  admins can test or update a granted integration by supplying its ID. Reading
+  or saving widget placements also requires that board's grant. Installing or
+  draft testing a new integration requires unscoped Admin or Owner access.
 - Integration input uses `name`, `kind` (the provider ID), `base_url`,
   `enabled`, and optional `icon`, `options`, `fingerprint`, and
   `credentials`. Each credential field ID maps to a replacement string or

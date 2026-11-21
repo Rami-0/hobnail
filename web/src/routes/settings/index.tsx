@@ -168,7 +168,7 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
     </div>)}</div>
     {editing && <Suspense fallback={<p>Opening integration catalog…</p>}>
       <ProviderDialog providers={providers} item={editing === "new" ? null : editing} preferredBoard={board}
-        manage={manage} icons={!!boot?.remote_icons} internet={internet} onClose={close} onSaved={() => { close(); void load(); }} />
+        icons={!!boot?.remote_icons} internet={internet} onClose={close} onSaved={() => { close(); void load(); }} />
     </Suspense>}
     {manage && <div className="settings-section">
       <h3>Provider internet access</h3>

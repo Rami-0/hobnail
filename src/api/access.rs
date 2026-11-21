@@ -201,6 +201,14 @@ pub(crate) fn check_scope(
                     | Handler::IntegrationSetSecret
                     | Handler::IntegrationClearSecret
                     | Handler::IntegrationTest => principal.can_see_integration(id),
+                    // These handlers check the integration and board IDs from
+                    // the request body or query before using either resource.
+                    Handler::ProviderTest
+                    | Handler::ProviderInstall
+                    | Handler::ProviderWidgetOptions => principal
+                        .scopes
+                        .as_ref()
+                        .is_some_and(|scope| !scope.integrations.is_empty()),
                     _ => false,
                 };
                 if !granted {

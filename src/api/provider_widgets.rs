@@ -57,6 +57,17 @@ struct PlacementOptions {
     options: Values,
 }
 
+fn check_integration(user: &Principal, id: Option<&str>) -> Result<(), ApiError> {
+    if user.is_scoped() && !id.is_some_and(|id| user.can_see_integration(id)) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "insufficient role",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn route(
     state: &AppState,
     req: Request<Incoming>,
@@ -69,6 +80,10 @@ pub(super) async fn route(
             crate::http::query::query_get(&query, "integration").ok_or_else(ApiError::not_found)?;
         let board =
             crate::http::query::query_get(&query, "board").ok_or_else(ApiError::not_found)?;
+        check_integration(user, Some(id))?;
+        if !user.can_see_board(board) {
+            return Err(ApiError::not_found());
+        }
         let options = state.db.dashboard(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT widget, id, options FROM provider_widgets pw
@@ -100,6 +115,7 @@ pub(super) async fn route(
     }
     if handler == Handler::ProviderTest {
         let input: Draft = super::read_json(req, 16384).await?;
+        check_integration(user, input.integration_id.as_deref())?;
         let (provider, target) = state.db.dashboard(|conn| {
             integrations::draft_target(
                 state,
@@ -115,6 +131,7 @@ pub(super) async fn route(
         ));
     }
     let input: Install = super::read_json(req, 32768).await?;
+    check_integration(user, input.integration_id.as_deref())?;
     let (integration, board) = state
         .db
         .dashboard(|conn| install(state, conn, input, user))?;
@@ -137,6 +154,14 @@ fn install(
             "Choose a board and supported widgets.",
             Some("widgets"),
         ));
+    }
+    if !input.widgets.is_empty()
+        && input
+            .board_id
+            .as_ref()
+            .is_some_and(|id| !user.can_see_board(id))
+    {
+        return Err(ApiError::not_found());
     }
     let mut seen = HashSet::new();
     let mut options = Vec::new();
@@ -168,9 +193,6 @@ fn install(
         ));
     }
     let board = if let Some(id) = input.board_id.filter(|_| !options.is_empty()) {
-        if !user.can_see_board(&id) {
-            return Err(ApiError::not_found());
-        }
         let board = boards::get(conn, &id)?;
         let previous = boards::document(conn, &board)?;
         let mut doc = previous.clone();

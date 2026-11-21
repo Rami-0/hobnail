@@ -17,9 +17,9 @@ import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Switch } from "../../ui/Switch.tsx";
 import { matchesConnectionTest, type ConnectionTest } from "./connection-test.ts";
 
-export default function ProviderDialog({ providers, item, preferredBoard, manage, icons, internet, onClose, onSaved }: {
+export default function ProviderDialog({ providers, item, preferredBoard, icons, internet, onClose, onSaved }: {
   providers: Provider[]; item: IntegrationView | null; preferredBoard: string;
-  manage: boolean; icons: boolean; internet: boolean; onClose: () => void; onSaved: () => void;
+  icons: boolean; internet: boolean; onClose: () => void; onSaved: () => void;
 }) {
   const [provider, setProvider] = useState(providers.find((p) => p.id === item?.kind));
   const [query, setQuery] = useState("");
@@ -47,7 +47,6 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
   const [widgetErrors, setWidgetErrors] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
-    if (!manage) return;
     let active = true;
     void api.get<BoardSummary[]>("/api/v1/boards").then((result) => {
       if (!active) return;
@@ -57,7 +56,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
       } else setErrors({ form: result.message });
     });
     return () => { active = false; };
-  }, [preferredBoard, manage]);
+  }, [preferredBoard]);
 
   useEffect(() => {
     if (!choosing || !item || !board || !provider) return;
@@ -152,8 +151,8 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
       <Button onClick={() => choosing ? setChoosing(false) : provider && !item ? setProvider(undefined) : onClose()} disabled={busy}>
         {choosing || provider && !item ? "Back" : "Cancel"}
       </Button>
-      {provider && !choosing && manage && <Button busy={busy} disabled={config.enabled === false} data-testid="provider-draft-test" onClick={() => void submit(true)}>Test connection</Button>}
-      {provider && !choosing && manage && verdict?.ok && <Button variant="default" onClick={() => { setLoadedBoard(""); setChoosing(true); }} disabled={busy}>Choose widgets</Button>}
+      {provider && !choosing && <Button busy={busy} disabled={config.enabled === false} data-testid="provider-draft-test" onClick={() => void submit(true)}>Test connection</Button>}
+      {provider && !choosing && boards.length > 0 && (item || verdict?.ok) && <Button variant="default" onClick={() => { setLoadedBoard(""); setChoosing(true); }} disabled={busy}>Choose widgets</Button>}
       {provider && <Button type="submit" form="integration-form" variant="default" busy={busy} disabled={choosing && !!board && loadingWidgets}>{choosing && board ? "Save widgets to board" : item ? "Save" : "Save connection"}</Button>}
     </>}>
     <form id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
