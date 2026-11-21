@@ -1,15 +1,19 @@
 # Install, run and redeploy
 
 Hobnail runs as one container next to the ones it watches. You need Docker with
-Compose.
+Compose. Building and deploying also requires Python 3.9 or newer, curl with
+Unix socket support, and access to a local Docker daemon over a Unix socket
+for the image-size gate.
 
 ## First run
 
 ```sh
 git clone https://github.com/Rami-0/hobnail.git
 cd hobnail
-docker build -t hobnail:latest .
-docker compose -f deploy/compose.yaml up -d
+docker build -t hobnail:candidate . &&
+  scripts/check-image-size.py hobnail:candidate &&
+  docker tag hobnail:candidate hobnail:latest &&
+  docker compose -f deploy/compose.yaml up -d
 ```
 
 Open <http://127.0.0.1:3200/app> and set the owner username and password in
@@ -43,8 +47,10 @@ PORT=3395 scripts/bench-mem.sh hobnail-rp:m5 /tmp/hobnail-bench # throwaway imag
 scripts/cargo.sh test    # run cargo in the dev container (also: clippy, fmt, build)
 ```
 
-`deploy.sh` tags the image `hobnail:latest` and `hobnail:<git sha>`,
-copies `deploy/compose.yaml` to the stack folder (`STACK`, default
+`deploy.sh` uses Docker BuildKit and the local Unix-socket connection
+described above. It builds `hobnail:<git sha>`, checks the 13,500,000-byte
+image limit, and promotes the image to `hobnail:latest` only if the gate passes.
+It needs write access to the stack folder. It then copies `deploy/compose.yaml` to the stack folder (`STACK`, default
 `/opt/stacks/hobnail`), runs `docker compose up -d`, waits for the healthcheck
 and curls every published address.
 `deploy.sh` asks for confirmation; `DEPLOY_YES=1` is the explicit unattended
@@ -54,9 +60,11 @@ shows the version and the build SHA (hover for the build time).
 Manual equivalent:
 
 ```sh
-docker build --build-arg RH_GIT_SHA=$(git rev-parse --short HEAD) \
-             --build-arg RH_BUILD_TIME=$(date -u +%FT%RZ) -t hobnail:latest .
-docker compose -f deploy/compose.yaml up -d
+docker build --build-arg RH_GIT_SHA="$(git rev-parse --short HEAD)" \
+             --build-arg RH_BUILD_TIME="$(date -u +%FT%RZ)" -t hobnail:candidate . &&
+  scripts/check-image-size.py hobnail:candidate &&
+  docker tag hobnail:candidate hobnail:latest &&
+  docker compose -f deploy/compose.yaml up -d
 ```
 
 What the container gets: the Docker socket **read-only** (the app only sends
