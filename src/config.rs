@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -293,6 +294,7 @@ pub struct Loaded {
 pub struct ConfigStore {
     path: PathBuf,
     inner: RwLock<Loaded>,
+    http_revision: watch::Sender<()>,
     stamp: RwLock<Option<(SystemTime, u64)>>,
 }
 
@@ -307,6 +309,7 @@ impl ConfigStore {
                 loaded_at: crate::util::unix_now(),
                 file_exists: false,
             }),
+            http_revision: watch::channel(()).0,
             stamp: RwLock::new(None),
         };
         store.reload();
@@ -319,6 +322,11 @@ impl ConfigStore {
 
     pub fn current(&self) -> Arc<Config> {
         self.inner.read().unwrap().config.clone()
+    }
+
+    pub(crate) fn provider_http(&self) -> (Arc<Config>, watch::Receiver<()>) {
+        let inner = self.inner.read().unwrap();
+        (inner.config.clone(), self.http_revision.subscribe())
     }
 
     pub fn snapshot(&self) -> Loaded {
@@ -348,6 +356,9 @@ impl ConfigStore {
         let mut inner = self.inner.write().unwrap();
         match result {
             Ok((cfg, exists)) => {
+                if inner.config.http.allow_hosts != cfg.http.allow_hosts {
+                    self.http_revision.send_replace(());
+                }
                 inner.config = Arc::new(cfg);
                 inner.error = None;
                 inner.generation += 1;

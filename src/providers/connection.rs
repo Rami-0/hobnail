@@ -31,17 +31,6 @@ pub(crate) struct Target {
 }
 
 impl Target {
-    pub fn link(url: String, credential: Option<BoundCredential>) -> Self {
-        Self::new(
-            url,
-            credential
-                .map(|value| ("secret".into(), value))
-                .into_iter()
-                .collect(),
-            true,
-        )
-    }
-
     pub fn new(url: String, credentials: Credentials, internet_enabled: bool) -> Self {
         Self {
             url,
@@ -61,6 +50,7 @@ type Signal = (u64, watch::Sender<()>);
 pub(crate) struct Connections {
     revisions: Mutex<Revisions>,
     sessions: Mutex<VecDeque<(SessionKey, Session)>>,
+    creating: [tokio::sync::Mutex<()>; 4],
 }
 
 #[derive(Default)]
@@ -77,16 +67,17 @@ fn signal(next: &mut u64) -> Signal {
 
 #[derive(Clone, Default)]
 pub(crate) struct Revision {
+    http: Option<watch::Receiver<()>>,
     policy: Option<watch::Receiver<()>>,
     integration: Option<watch::Receiver<()>>,
 }
 
 impl Revision {
     pub fn check(&self) -> Result<(), String> {
-        if [&self.policy, &self.integration]
+        if [&self.http, &self.policy, &self.integration]
             .into_iter()
             .flatten()
-            .any(|rx| rx.has_changed().is_err())
+            .any(|rx| rx.has_changed().unwrap_or(true))
         {
             return Err("connection changed".into());
         }
@@ -103,6 +94,7 @@ impl Revision {
             }
         }
         tokio::select! {
+            _ = wait(self.http.as_mut()) => {},
             _ = wait(self.policy.as_mut()) => {},
             _ = wait(self.integration.as_mut()) => {},
         }
@@ -158,15 +150,9 @@ impl Connections {
 /// Opaque provider session material. Store only the part needed to authenticate
 /// the next request (for example a SID, cookie header value or bearer token).
 #[derive(Clone, PartialEq, Eq)]
-pub struct Session(String);
-
-impl Session {
-    pub fn new(value: &str) -> Result<Self, Fault> {
-        if value.is_empty() || value.len() > MAX_SESSION {
-            return Err(Class::Protocol.into());
-        }
-        Ok(Self(value.into()))
-    }
+pub struct Session {
+    scope: u64,
+    value: String,
 }
 
 impl fmt::Debug for Session {
@@ -191,12 +177,15 @@ impl fmt::Debug for Input<'_> {
 pub enum Auth<'a> {
     Header(&'a str, Input<'a>),
     Bearer(Input<'a>),
+    #[allow(dead_code)] // Available to providers that use HTTP Basic.
     Basic(Input<'a>, Input<'a>),
+    #[allow(dead_code)] // Available to providers with custom authorization schemes.
     Authorization(&'a str, Input<'a>),
 }
 
 pub enum Body<'a> {
     Json(Values, &'a [(&'a str, Input<'a>)]),
+    #[allow(dead_code)] // Available to providers with form-based login.
     Form(&'a [(&'a str, Input<'a>)]),
 }
 
@@ -204,7 +193,9 @@ pub enum Body<'a> {
 pub enum Verb {
     Get,
     Post,
+    #[allow(dead_code)] // Available for provider APIs using PUT.
     Put,
+    Delete,
 }
 
 pub struct Step<'a> {
@@ -239,7 +230,9 @@ impl fmt::Debug for Step<'_> {
 
 pub struct Conn<'a> {
     target: &'a Target,
+    revision: Revision,
     origin: String,
+    session_scope: u64,
     policy: &'a HttpPolicy,
     connections: &'a Connections,
     _permit: OwnedSemaphorePermit,
@@ -253,7 +246,17 @@ impl<'a> Conn<'a> {
         permit: OwnedSemaphorePermit,
     ) -> Result<Self, Fault> {
         let origin = client::origin(&target.url).ok_or(Class::Blocked)?;
+        let session_scope = target.session_key.as_ref().map_or_else(
+            || {
+                let mut revisions = connections.revisions.lock().unwrap();
+                revisions.next += 1;
+                revisions.next
+            },
+            |key| key.revision,
+        );
         Ok(Self {
+            session_scope,
+            revision: target.revision.clone(),
             target,
             origin,
             policy,
@@ -262,13 +265,18 @@ impl<'a> Conn<'a> {
         })
     }
 
+    pub(crate) fn with_http_revision(mut self, revision: watch::Receiver<()>) -> Self {
+        self.revision.http = Some(revision);
+        self
+    }
+
     pub(crate) async fn run<T>(
         &self,
         job: impl Future<Output = Result<T, Fault>>,
     ) -> Result<T, Fault> {
         tokio::select! {
             biased;
-            _ = self.target.revision.clone().cancelled() => Err(Class::Changed.into()),
+            _ = self.revision.clone().cancelled() => Err(Class::Changed.into()),
             result = tokio::time::timeout(REQUEST_TIMEOUT, job) => result.unwrap_or_else(|_| Err(Class::Timeout.into())),
         }
     }
@@ -284,7 +292,8 @@ impl<'a> Conn<'a> {
     fn resolve<'b>(&'b self, input: &'b Input<'_>) -> Result<&'b str, Fault> {
         match input {
             Input::Text(text) => Ok(text),
-            Input::Session(session) => Ok(&session.0),
+            Input::Session(session) if session.scope == self.session_scope => Ok(&session.value),
+            Input::Session(_) => Err(Class::Blocked.into()),
             Input::Credential(field) => {
                 let credential = self.target.credentials.get(*field).ok_or(Class::Auth)?;
                 if credential.origin != self.origin {
@@ -293,6 +302,13 @@ impl<'a> Conn<'a> {
                 Ok(&credential.token)
             }
         }
+    }
+
+    fn auth_value<'b>(&'b self, input: &'b Input<'_>) -> Result<&'b str, Fault> {
+        if matches!(input, Input::Text(_)) {
+            return Err(Class::Protocol.into());
+        }
+        self.resolve(input)
     }
 
     pub async fn request(&self, step: Step<'_>) -> Result<Response, Fault> {
@@ -309,23 +325,26 @@ impl<'a> Conn<'a> {
             Verb::Get => Method::GET,
             Verb::Post => Method::POST,
             Verb::Put => Method::PUT,
+            Verb::Delete => Method::DELETE,
         };
         for auth in step.auth {
             let (name, value) = match auth {
-                Auth::Header(name, input) => (*name, self.resolve(input)?.to_owned()),
-                Auth::Bearer(input) => {
-                    ("authorization", format!("Bearer {}", self.resolve(input)?))
-                }
+                Auth::Header(name, input) => (*name, self.auth_value(input)?.to_owned()),
+                Auth::Bearer(input) => (
+                    "authorization",
+                    format!("Bearer {}", self.auth_value(input)?),
+                ),
                 Auth::Basic(user, password) => (
                     "authorization",
                     format!(
                         "Basic {}",
-                        basic(self.resolve(user)?, self.resolve(password)?)?
+                        basic(self.auth_value(user)?, self.auth_value(password)?)?
                     ),
                 ),
-                Auth::Authorization(prefix, input) => {
-                    ("authorization", format!("{prefix}{}", self.resolve(input)?))
-                }
+                Auth::Authorization(prefix, input) => (
+                    "authorization",
+                    format!("{prefix}{}", self.auth_value(input)?),
+                ),
             };
             let header = HeaderName::try_from(name).map_err(|_| Class::Protocol)?;
             if matches!(
@@ -334,6 +353,8 @@ impl<'a> Conn<'a> {
                     | "content-length"
                     | "transfer-encoding"
                     | "connection"
+                    | "proxy-authorization"
+                    | "proxy-connection"
                     | "upgrade"
                     | "te"
                     | "trailer"
@@ -383,7 +404,7 @@ impl<'a> Conn<'a> {
                 local_only: !self.target.internet_enabled,
                 max_body: Some(MAX_RESPONSE),
                 headers,
-                revision: self.target.revision.clone(),
+                revision: self.revision.clone(),
             },
         )
         .await
@@ -406,27 +427,81 @@ impl<'a> Conn<'a> {
         Ok(encoded)
     }
 
+    pub fn session(&self, value: &str) -> Result<Session, Fault> {
+        if value.is_empty() || value.len() > MAX_SESSION {
+            return Err(Class::Protocol.into());
+        }
+        Ok(Session {
+            scope: self.session_scope,
+            value: value.into(),
+        })
+    }
+
+    #[allow(dead_code)] // Available to challenge and cookie based providers.
+    pub fn session_header(&self, response: &Response, name: &str) -> Result<Session, Fault> {
+        self.session(
+            response
+                .headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .ok_or(Class::Protocol)?,
+        )
+    }
+
+    pub fn uses_session_cache(&self) -> bool {
+        self.target.session_key.is_some()
+    }
+
     pub async fn get_or_create_session(
         &self,
         create: impl Future<Output = Result<Session, Fault>>,
     ) -> Result<Session, Fault> {
-        if let Some(key) = &self.target.session_key {
-            let sessions = self.connections.sessions.lock().unwrap();
-            if let Some((_, session)) = sessions.iter().find(|(entry, _)| entry == key) {
-                return Ok(session.clone());
-            }
+        let Some(key) = &self.target.session_key else {
+            return create.await;
+        };
+        // A fixed number of locks avoids duplicate logins without allocating
+        // a lock per integration. Waiting consumes the operation's deadline.
+        let _login = self.connections.creating
+            [key.revision as usize % self.connections.creating.len()]
+        .lock()
+        .await;
+        if let Some((_, session)) = self
+            .connections
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(entry, _)| entry == key)
+        {
+            return Ok(session.clone());
         }
         let session = create.await?;
-        if let Some(key) = &self.target.session_key {
-            let mut sessions = self.connections.sessions.lock().unwrap();
-            self.target.revision.check().map_err(|_| Class::Changed)?;
-            sessions.retain(|(entry, _)| entry != key);
-            if sessions.len() == MAX_SESSIONS {
-                sessions.pop_front();
-            }
-            sessions.push_back((key.clone(), session.clone()));
-        }
+        self.store_session(key, &session)?;
         Ok(session)
+    }
+
+    fn store_session(&self, key: &SessionKey, session: &Session) -> Result<(), Fault> {
+        if session.scope != self.session_scope {
+            return Err(Class::Blocked.into());
+        }
+        let mut sessions = self.connections.sessions.lock().unwrap();
+        self.revision.check().map_err(|_| Class::Changed)?;
+        sessions.retain(|(entry, _)| entry != key);
+        if sessions.len() == MAX_SESSIONS {
+            sessions.pop_front();
+        }
+        sessions.push_back((key.clone(), session.clone()));
+        Ok(())
+    }
+
+    fn discard_session(&self, session: &Session) {
+        if let Some(key) = &self.target.session_key {
+            self.connections
+                .sessions
+                .lock()
+                .unwrap()
+                .retain(|(entry, cached)| entry != key || cached != session);
+        }
     }
 
     pub async fn retry_session<T, C, R>(
@@ -439,23 +514,27 @@ impl<'a> Conn<'a> {
         R: Future<Output = Result<T, Fault>>,
     {
         let session = self.get_or_create_session(create()).await?;
-        let result = request(session.clone()).await;
+        let error = match request(session.clone()).await {
+            Err(error) if matches!(error.class, Class::Auth | Class::Conflict) => error,
+            result => return result,
+        };
+        self.discard_session(&session);
+        let next = if let Some(replacement) = error.session {
+            if let Some(key) = &self.target.session_key {
+                self.store_session(key, &replacement)?;
+            }
+            replacement
+        } else {
+            self.get_or_create_session(create()).await?
+        };
+        let result = request(next.clone()).await;
         if result
             .as_ref()
             .is_err_and(|error| matches!(error.class, Class::Auth | Class::Conflict))
         {
-            if let Some(key) = &self.target.session_key {
-                self.connections
-                    .sessions
-                    .lock()
-                    .unwrap()
-                    .retain(|(entry, cached)| entry != key || cached != &session);
-            }
-            let session = self.get_or_create_session(create()).await?;
-            request(session).await
-        } else {
-            result
+            self.discard_session(&next);
         }
+        result
     }
 
     pub(super) fn scrub(&self, json: &mut serde_json::Value) -> Result<(), Fault> {
@@ -484,7 +563,7 @@ fn join(base: &str, path: &str) -> Result<String, Fault> {
     }
     // Provider paths are fixed endpoint names. Disallow escape sequences
     // entirely, including nested percent encoding and encoded dot segments.
-    if path.starts_with("//")
+    if path.contains("//")
         || !path
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"/-._~".contains(&b))
@@ -539,3 +618,6 @@ fn basic(user: &str, password: &str) -> Result<String, Fault> {
     }
     Ok(out)
 }
+
+#[cfg(test)]
+pub(in crate::providers) mod tests;

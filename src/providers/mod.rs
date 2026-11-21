@@ -1,7 +1,11 @@
 //! Add a provider in its own module and register its static descriptor below.
 //! Declare fields, destination policy, connection test and widgets together.
-//! Use the bound HTTP client through Target, return actionable errors without
-//! upstream text, and shape successful data for the common widget renderer.
+//! Test and Fetch receive a Conn for their full operation. Declare write-only
+//! secret fields and refer to them by ID via Input::Credential. Use Step for
+//! provider-relative requests, opt in to individual response headers, and
+//! use the Conn session helpers for authentication handshakes. Return typed
+//! faults and structured display data. Exercise the workflow with a fake HTTP
+//! server. See docs/features/integrations.md for the complete contract.
 
 use std::{future::Future, pin::Pin, time::Duration};
 
@@ -104,7 +108,7 @@ impl Field {
         }
     }
 
-    fn accepts(&self, value: &Value) -> bool {
+    pub(crate) fn accepts(&self, value: &Value) -> bool {
         let text = || {
             value.as_str().filter(|s| {
                 !s.trim().is_empty() && self.max_length.is_none_or(|max| s.len() <= max)
@@ -112,7 +116,7 @@ impl Field {
         };
         match self.kind {
             Kind::Url => text().and_then(client::origin).is_some(),
-            Kind::Secret => text().is_some_and(|s| s.bytes().all(|b| b.is_ascii_graphic())),
+            Kind::Secret => text().is_some_and(|s| !s.chars().any(char::is_control)),
             Kind::Text => text().is_some(),
             Kind::Bool => value.is_boolean(),
             Kind::Number => value.as_u64().is_some_and(|n| {
@@ -190,6 +194,25 @@ pub const REFRESH: Field = Field {
 pub struct Fault {
     pub class: Class,
     pub fingerprint: Option<String>,
+    session: Option<Session>,
+}
+
+impl std::fmt::Debug for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fault")
+            .field("message", &self.class.message())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Fault {
+    #[allow(dead_code)] // A provider may answer a conflict with a replacement session.
+    pub fn session_conflict(session: Session) -> Self {
+        Self {
+            session: Some(session),
+            ..Class::Conflict.into()
+        }
+    }
 }
 
 impl From<Class> for Fault {
@@ -197,6 +220,7 @@ impl From<Class> for Fault {
         Self {
             class,
             fingerprint: None,
+            session: None,
         }
     }
 }
@@ -226,6 +250,7 @@ impl From<client::BoundError> for Fault {
         Self {
             class,
             fingerprint: error.fingerprint,
+            session: None,
         }
     }
 }
@@ -347,7 +372,7 @@ mod tests {
             Err("base_url".into())
         );
         let mut values =
-            serde_json::json!({"base_url":"http://example.test", "secret":"spaces rejected"})
+            serde_json::json!({"base_url":"http://example.test", "secret":"control\nrejected"})
                 .as_object()
                 .unwrap()
                 .clone();

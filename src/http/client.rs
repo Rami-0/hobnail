@@ -375,7 +375,12 @@ async fn exchange(
     request: HRequest<Full<Bytes>>,
     policy: Option<IntegrationPolicy>,
 ) -> Result<Response, String> {
-    let (mut sender, mut driver) = hyper::client::conn::http1::handshake(TokioIo::new(io))
+    let mut builder = hyper::client::conn::http1::Builder::new();
+    if policy.is_some() {
+        builder.max_buf_size(32 * 1024);
+    }
+    let (mut sender, mut driver) = builder
+        .handshake(TokioIo::new(io))
         .await
         .map_err(|e| format!("http handshake: {e}"))?;
     if let Some(policy) = &policy {
