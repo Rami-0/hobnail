@@ -34,6 +34,7 @@ use crate::{
 
 mod connection;
 mod generic;
+mod jellyfin;
 mod pihole;
 mod uptime_kuma;
 
@@ -47,7 +48,12 @@ pub use connection::TargetHeader;
 pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
 pub(crate) use connection::{success_status, Connections, Credentials, Revision, Target};
 
-pub const REGISTRY: &[Provider] = &[generic::HTTP, pihole::PI_HOLE, uptime_kuma::UPTIME_KUMA];
+pub const REGISTRY: &[Provider] = &[
+    generic::HTTP,
+    pihole::PI_HOLE,
+    uptime_kuma::UPTIME_KUMA,
+    jellyfin::JELLYFIN,
+];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
 pub const MAX_RESPONSE: usize = 128 * 1024;

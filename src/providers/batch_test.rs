@@ -54,3 +54,14 @@ pub(super) async fn exercise(
     };
     tokio::join!(server, verify(&conn));
 }
+
+pub(super) fn assert_header(wire: &str, header: &str, credential: &str) {
+    let expected = format!("\r\n{header}\r\n");
+    assert!(wire.contains(&expected), "missing authentication header");
+    assert!(!wire.replacen(&expected, "", 1).contains(credential));
+}
+
+pub(super) async fn assert_test_fault(conn: &Conn<'_>, provider: &Provider, class: Class) {
+    let fault = conn.run((provider.test)(conn)).await.unwrap_err();
+    assert_eq!(fault.class.message(), class.message());
+}

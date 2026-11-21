@@ -95,6 +95,28 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected releases and live proxies.
 
+## Jellyfin
+
+Enter the service URL and a Jellyfin Dashboard API key. Create a dedicated
+key in Dashboard → API Keys. Jellyfin grants application keys server-wide
+access without per-route scopes. Hobnail uses read endpoints only and sends
+the key in the `Authorization` header using the MediaBrowser scheme.
+
+**Active streams** counts sessions with a current media item, including
+paused playback, and lists up to ten titles and clients. **Library counts**
+shows server-wide movies, series, episodes, albums, songs and books.
+**Latest added** shows up to ten recently created library entries, newest
+first. Its server-wide `/Items` query works with an application key alone.
+Jellyfin's user-specific `/Items/Latest` needs a user ID.
+
+Verified from:
+
+- [Jellyfin 10.11.10 OpenAPI](https://api.jellyfin.org/openapi/stable/jellyfin-openapi-10.11.10.json)
+- [Authorization parser and API key lookup](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Server.Implementations/Security/AuthorizationContext.cs)
+- [Sessions](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/SessionController.cs), [server-wide item queries](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/ItemsController.cs) and [user-specific latest media](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/UserLibraryController.cs)
+
+UNVERIFIED: Compatibility outside the inspected release and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
