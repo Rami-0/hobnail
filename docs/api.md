@@ -41,7 +41,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/icons/<name>` | Viewer | Dashboard icon. |
 | GET | `/api/v1/boards` | Viewer | Boards. |
 | POST | `/api/v1/boards` | Admin | Board create. |
-| POST | `/api/v1/boards/test-link` | Admin | Test a service URL entered in the board editor using the connection policy. |
+| POST | `/api/v1/boards/test-link` | Unscoped Admin or Owner | Test a service URL entered in the board editor using the connection policy. |
 | GET | `/api/v1/boards/<id>` | Viewer | Board. |
 | PUT | `/api/v1/boards/<id>` | Admin | Board save. |
 | PATCH | `/api/v1/boards/<id>` | Admin | Board update. |
