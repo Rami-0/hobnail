@@ -306,7 +306,8 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
     assert_eq!(
         integrations,
         json!([{
-            "id":visible_i,"name":"Service","kind":"http","origin":"https://example.test","has_secret":true
+            "id":visible_i,"name":"Service","kind":"http","origin":"https://example.test","has_secret":true,
+            "enabled":true,"check":null
         }])
     );
 
