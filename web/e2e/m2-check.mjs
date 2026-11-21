@@ -263,7 +263,7 @@ try {
     testTimes.push(Date.now());
     await require("upstream 503 is explained in the wizard", text(attr("setup-verdict"), "non-success status"));
     await require("saved credential removes unload protection", `window.dispatchEvent(new Event("beforeunload", {cancelable:true}))`);
-    await require("stored credential is masked", `${el(secret)}?.value === "" && ${text(wizard, "A credential is saved for")}`);
+    await require("stored credential is masked", `${el(secret)}?.value === "" && ${text(wizard, "Saved for")}`);
     await capture("failed-connection", wizard, attr("setup-verdict"));
     await move("back", 2);
     await move("continue", 3);
