@@ -15,7 +15,7 @@ use hyper::body::Incoming;
 use hyper::{Method, Request as HRequest, Response as HResponse};
 use hyper_util::rt::TokioIo;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -325,68 +325,106 @@ fn restricted_integration_ip(ip: IpAddr) -> bool {
     }
 }
 
+const MAX_BOUND_ADDRESSES: usize = 64;
+
+pub(super) struct Destination<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub tls: bool,
+}
+
+impl<'a> Destination<'a> {
+    pub fn parse(uri: &'a hyper::Uri) -> Result<Self, String> {
+        let host = uri
+            .host()
+            .ok_or("URL has no host")?
+            .trim_matches(['[', ']']);
+        let tls = match uri.scheme_str().unwrap_or("http") {
+            scheme if scheme.eq_ignore_ascii_case("http") => false,
+            scheme if scheme.eq_ignore_ascii_case("https") => true,
+            scheme => return Err(format!("unsupported scheme {scheme}")),
+        };
+        Ok(Self {
+            host,
+            tls,
+            port: uri.port_u16().unwrap_or(if tls { 443 } else { 80 }),
+        })
+    }
+
+    pub async fn resolve(
+        &self,
+        policy: &HttpPolicy,
+        bound: Option<(&crate::providers::Revision, bool)>,
+    ) -> Result<Vec<SocketAddr>, String> {
+        let Self { host, port, .. } = *self;
+        if !policy.allows(host) {
+            return Err(format!("host {host} is not in http.allow_hosts"));
+        }
+        let resolved = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|e| format!("resolve {host}: {e}"))?;
+        let addresses: Vec<_> = match bound {
+            Some(_) => resolved.take(MAX_BOUND_ADDRESSES + 1).collect(),
+            None => resolved.collect(),
+        };
+        if addresses.is_empty() {
+            return Err(format!("resolve {host}: no addresses"));
+        }
+        if let Some((revision, local_only)) = bound {
+            if addresses.len() > MAX_BOUND_ADDRESSES {
+                return Err("response too large: too many resolved addresses".into());
+            }
+            if policy.allow_hosts.is_empty()
+                && addresses
+                    .iter()
+                    .any(|addr| restricted_integration_ip(addr.ip()))
+            {
+                return Err("blocked integration address".into());
+            }
+            if local_only && addresses.iter().any(|addr| !local_ip(addr.ip())) {
+                return Err("blocked by public internet setting".into());
+            }
+            revision.check()?;
+        }
+        Ok(addresses)
+    }
+}
+
 async fn send_inner(
     req: Request,
     policy: &HttpPolicy,
     integration: Option<IntegrationPolicy>,
 ) -> Result<Response, String> {
     let uri: hyper::Uri = req.url.parse().map_err(|_| "invalid URL".to_string())?;
-    let scheme = uri.scheme_str().unwrap_or("http").to_ascii_lowercase();
-    let host = uri.host().ok_or("URL has no host")?.to_string();
-    let host_bare = host
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .to_string();
-    if !policy.allows(&host_bare) {
-        return Err(format!("host {host_bare} is not in http.allow_hosts"));
-    }
-    let tls = match scheme.as_str() {
-        "http" => false,
-        "https" => true,
-        s => return Err(format!("unsupported scheme {s}")),
-    };
-    let port = uri.port_u16().unwrap_or(if tls { 443 } else { 80 });
+    let destination = Destination::parse(&uri)?;
+    let Destination {
+        host: host_bare,
+        port,
+        tls,
+    } = destination;
+    let host = uri.host().ok_or("URL has no host")?;
     let host_header = match uri.port_u16() {
         Some(p) => format!("{host}:{p}"),
-        None => host.clone(),
+        None => host.to_owned(),
     };
-    let path = uri
-        .path_and_query()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_else(|| "/".into());
-
-    let addresses: Vec<_> = tokio::net::lookup_host((host_bare.as_str(), port))
-        .await
-        .map_err(|e| format!("resolve {host_bare}: {e}"))?
-        .collect();
-    if addresses.is_empty() {
-        return Err(format!("resolve {host_bare}: no addresses"));
-    }
-    if integration.is_some()
-        && policy.allow_hosts.is_empty()
-        && addresses
-            .iter()
-            .any(|addr| restricted_integration_ip(addr.ip()))
-    {
-        return Err("blocked integration address".into());
-    }
-    if integration.as_ref().is_some_and(|policy| policy.local_only)
-        && addresses.iter().any(|addr| !local_ip(addr.ip()))
-    {
-        return Err("blocked by public internet setting".into());
-    }
-    if let Some(policy) = &integration {
-        policy.revision.check()?;
-    }
+    let path = uri.path_and_query().map_or("/", |p| p.as_str());
+    let addresses = destination
+        .resolve(
+            policy,
+            integration
+                .as_ref()
+                .map(|policy| (&policy.revision, policy.local_only)),
+        )
+        .await?;
     // Connect using the exact addresses that passed the policy check.
     let tcp = TcpStream::connect(addresses.as_slice())
         .await
         .map_err(|e| format!("connect {host_bare}:{port}: {e}"))?;
     let _ = tcp.set_nodelay(true);
 
-    let request = http_request(req.method, &host_header, &path, &req.headers, req.body)?;
+    let request = http_request(req.method, &host_header, path, &req.headers, req.body)?;
     if tls {
-        let server_name = rustls::pki_types::ServerName::try_from(host_bare.clone())
+        let server_name = rustls::pki_types::ServerName::try_from(host_bare.to_owned())
             .map_err(|_| format!("invalid TLS server name {host_bare}"))?;
         let stream = tokio_rustls::TlsConnector::from(
             integration
@@ -519,7 +557,7 @@ pub async fn read_body(body: Incoming, limit: usize) -> Result<Bytes, String> {
         })
 }
 
-fn roots() -> Arc<rustls::RootCertStore> {
+pub(super) fn roots() -> Arc<rustls::RootCertStore> {
     static ROOTS: OnceLock<Arc<rustls::RootCertStore>> = OnceLock::new();
     ROOTS
         .get_or_init(|| {

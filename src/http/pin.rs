@@ -34,6 +34,7 @@ pub(super) fn display(pin: &Fingerprint) -> String {
 pub(super) struct Leaf {
     pub(super) presented: OnceLock<Fingerprint>,
     expected: Option<Fingerprint>,
+    pub(super) inspection: Option<OnceLock<Result<(), Error>>>,
     webpki: Arc<WebPkiServerVerifier>,
 }
 
@@ -42,10 +43,26 @@ impl Leaf {
         expected: Option<Fingerprint>,
         roots: Arc<RootCertStore>,
     ) -> (Arc<Self>, Arc<ClientConfig>) {
+        Self::build(expected, roots, false)
+    }
+
+    pub(super) fn inspect(
+        expected: Option<Fingerprint>,
+        roots: Arc<RootCertStore>,
+    ) -> (Arc<Self>, Arc<ClientConfig>) {
+        Self::build(expected, roots, true)
+    }
+
+    fn build(
+        expected: Option<Fingerprint>,
+        roots: Arc<RootCertStore>,
+        inspect: bool,
+    ) -> (Arc<Self>, Arc<ClientConfig>) {
         let crypto = Arc::new(rustls::crypto::ring::default_provider());
         let verifier = Arc::new(Self {
             presented: OnceLock::new(),
             expected,
+            inspection: inspect.then(OnceLock::new),
             webpki: WebPkiServerVerifier::builder_with_provider(roots, crypto.clone())
                 .build()
                 .expect("nonempty TLS roots"),
@@ -73,12 +90,20 @@ impl ServerCertVerifier for Leaf {
         let digest = ring::digest::digest(&ring::digest::SHA256, leaf.as_ref());
         let fingerprint: Fingerprint = digest.as_ref().try_into().expect("SHA-256 digest");
         let _ = self.presented.set(fingerprint);
-        match self.expected {
+        let verdict = match self.expected {
             Some(pin) if pin == fingerprint => Ok(ServerCertVerified::assertion()),
             Some(_) => Err(Error::InvalidCertificate(
                 CertificateError::ApplicationVerificationFailure,
             )),
             None => self.webpki.verify_server_cert(leaf, chain, name, ocsp, now),
+        };
+        if let Some(inspection) = &self.inspection {
+            let _ = inspection.set(verdict.map(drop));
+            // Only certificate trust is relaxed during inspection. The
+            // handshake still verifies that the peer controls the leaf key.
+            Ok(ServerCertVerified::assertion())
+        } else {
+            verdict
         }
     }
 

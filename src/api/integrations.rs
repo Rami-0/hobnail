@@ -579,7 +579,7 @@ pub(super) async fn test_connection(
         conn.run(async {
             match provider {
                 Some(provider) => (provider.test)(&conn).await,
-                None => providers::success(conn.request(providers::Step::get("")).await?).map(drop),
+                None => providers::success_status(conn.http_status().await?.status),
             }
         })
         .await

@@ -2,7 +2,9 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
     future::Future,
+    net::IpAddr,
     sync::Mutex,
+    time::Instant,
 };
 
 use hyper::{header::HeaderName, Method};
@@ -11,7 +13,10 @@ use tokio::sync::{watch, OwnedSemaphorePermit};
 use super::{Class, Fault, Values, MAX_RESPONSE, REQUEST_TIMEOUT};
 use crate::{
     config::HttpPolicy,
-    http::client::{self, BoundCredential, BoundPolicy, Response},
+    http::{
+        client::{self, BoundCredential, BoundPolicy, Response},
+        probe::{HttpProbe, ProbeTarget, TcpProbe, TlsLeaf},
+    },
 };
 
 const MAX_REQUEST: usize = 16 * 1024;
@@ -503,6 +508,49 @@ impl<'a> Conn<'a> {
         .map_err(Fault::from)
     }
 
+    #[allow(dead_code)] // Available to credential-free probe providers.
+    fn probe_target(&self) -> ProbeTarget<'_> {
+        ProbeTarget {
+            url: &self.target.url,
+            policy: self.policy,
+            revision: &self.revision,
+            local_only: !self.target.internet_enabled,
+        }
+    }
+
+    /// Resolve A/AAAA addresses for the bound target using the system resolver.
+    #[allow(dead_code)] // Available to credential-free probe providers.
+    pub async fn dns_lookup(&self) -> Result<Vec<IpAddr>, Fault> {
+        self.probe_target().dns().await
+    }
+
+    /// Time a connection to the bound target's TCP port.
+    #[allow(dead_code)] // Available to credential-free probe providers.
+    pub async fn tcp_probe(&self) -> Result<TcpProbe, Fault> {
+        self.probe_target().tcp().await
+    }
+
+    /// Inspect the HTTPS target's leaf over a signature-verified handshake.
+    #[allow(dead_code)] // Available to credential-free probe providers.
+    pub async fn tls_leaf(&self) -> Result<TlsLeaf, Fault> {
+        self.probe_target().tls(self.target.fingerprint).await
+    }
+
+    /// Read the bound endpoint's HTTP status without downloading its body.
+    pub async fn http_status(&self) -> Result<HttpProbe, Fault> {
+        let start = Instant::now();
+        let response = self
+            .request(Step {
+                status_only: true,
+                ..Step::get("")
+            })
+            .await?;
+        Ok(HttpProbe {
+            status: response.status,
+            latency: start.elapsed(),
+        })
+    }
+
     fn pairs(&self, fields: &[(&str, Input<'_>)]) -> Result<String, Fault> {
         let mut encoded = String::new();
         for (index, (name, value)) in fields.iter().enumerate() {
@@ -679,8 +727,12 @@ impl<'a> Conn<'a> {
 }
 
 pub fn success(response: Response) -> Result<Response, Fault> {
-    match response.status {
-        200..=299 => Ok(response),
+    success_status(response.status).map(|()| response)
+}
+
+pub(crate) fn success_status(status: u16) -> Result<(), Fault> {
+    match status {
+        200..=299 => Ok(()),
         401 | 403 => Err(Class::Auth.into()),
         409 => Err(Class::Conflict.into()),
         _ => Err(Class::HttpStatus.into()),

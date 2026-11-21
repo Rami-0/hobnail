@@ -640,3 +640,177 @@ async fn a_cold_transmission_session_starts_with_the_real_rpc() {
     assert!(connections.sessions.lock().unwrap().is_empty());
     fake.await.unwrap();
 }
+
+#[tokio::test]
+async fn credential_free_probes_share_destination_policy_and_skip_http_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let origin = format!("http://{addr}");
+    let target = Target::new(format!("{origin}/saved"), credentials(&origin), false);
+    let connections = Connections::default();
+    let allowed = policy();
+    let blocked = HttpPolicy {
+        allow_hosts: Vec::new(),
+    };
+    let semaphore = std::sync::Arc::new(Semaphore::new(1));
+    let conn = Conn::new(
+        &target,
+        &allowed,
+        &connections,
+        semaphore.clone().try_acquire_owned().unwrap(),
+    )
+    .unwrap();
+
+    let fake = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        assert_eq!(socket.read(&mut [0]).await.unwrap(), 0);
+        let (mut socket, wire) = receive(&listener).await;
+        assert!(wire.starts_with("GET /saved HTTP/1.1"));
+        assert!(!wire.contains("authorization:") && !wire.contains("cookie:"));
+        socket
+            .write_all(b"HTTP/1.1 503 Unavailable\r\nContent-Length: 1048576\r\n\r\n")
+            .await
+            .unwrap();
+        let _ = socket.read(&mut [0]).await;
+    });
+    conn.run(async {
+        assert_eq!(conn.dns_lookup().await?, [addr.ip()]);
+        assert!(conn.tcp_probe().await?.reachable);
+        let probe = conn.http_status().await?;
+        assert_eq!(probe.status, 503);
+        assert!(probe.latency < REQUEST_TIMEOUT);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    fake.await.unwrap();
+    drop(conn);
+
+    let conn = Conn::new(
+        &target,
+        &allowed,
+        &connections,
+        semaphore.clone().try_acquire_owned().unwrap(),
+    )
+    .unwrap();
+    assert!(!conn.run(conn.tcp_probe()).await.unwrap().reachable);
+    drop(conn);
+
+    let conn = Conn::new(
+        &target,
+        &blocked,
+        &connections,
+        semaphore.clone().try_acquire_owned().unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        conn.run(conn.dns_lookup()).await.unwrap_err().class,
+        Class::Blocked
+    ));
+    drop(conn);
+    let target = Target::new("https://203.0.113.1".into(), Credentials::new(), false);
+    let conn = Conn::new(
+        &target,
+        &blocked,
+        &connections,
+        semaphore.try_acquire_owned().unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        conn.run(conn.tcp_probe()).await.unwrap_err().class,
+        Class::InternetOff
+    ));
+}
+
+#[tokio::test]
+async fn tls_probe_reports_untrusted_leaves_without_sending_http() {
+    use crate::providers::{SubjectAltName, TlsVerification};
+    use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+    use std::sync::Arc;
+
+    const CERT: &[u8] = include_bytes!("../../http/testdata/integration-self-signed.der");
+    const KEY: &[u8] = include_bytes!("../../http/testdata/integration-test-key.der");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let fingerprint: [u8; 32] = ring::digest::digest(&ring::digest::SHA256, CERT)
+        .as_ref()
+        .try_into()
+        .unwrap();
+    let fake = tokio::spawn(async move {
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from(CERT)],
+            PrivatePkcs8KeyDer::from(KEY).into(),
+        )
+        .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        for _ in 0..3 {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut tls = acceptor.accept(socket).await.unwrap();
+            match tls.read(&mut [0]).await {
+                Ok(0) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {}
+                _ => panic!("TLS metadata probe sent application data"),
+            }
+        }
+    });
+
+    let connections = Connections::default();
+    let policy = policy();
+    let semaphore = Arc::new(Semaphore::new(1));
+    for pin in [None, Some(fingerprint), Some([0; 32])] {
+        let mut target = Target::new(format!("https://{addr}/ignored"), Credentials::new(), false);
+        target.fingerprint = pin;
+        let conn = Conn::new(
+            &target,
+            &policy,
+            &connections,
+            semaphore.clone().try_acquire_owned().unwrap(),
+        )
+        .unwrap();
+        let leaf = conn.run(conn.tls_leaf()).await.unwrap();
+        assert_eq!(leaf.subject, "CN=localhost");
+        assert_eq!(leaf.issuer, "CN=localhost");
+        assert_eq!(leaf.sans, [SubjectAltName::Ip(addr.ip())]);
+        assert!(leaf.not_before < leaf.not_after);
+        assert_eq!(leaf.not_after, 2_425_723_887);
+        assert_eq!(leaf.fingerprint, fingerprint);
+        match pin {
+            None => assert!(matches!(leaf.verification, TlsVerification::Rejected(_))),
+            Some(pin) if pin == fingerprint => {
+                assert_eq!(leaf.verification, TlsVerification::Pinned)
+            }
+            Some(_) => assert_eq!(leaf.verification, TlsVerification::PinMismatch),
+        }
+    }
+    fake.await.unwrap();
+}
+
+#[tokio::test]
+async fn changing_a_target_cancels_a_stalled_tls_probe() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connections = Connections::default();
+    let mut target = Target::new(
+        format!("https://{}", listener.local_addr().unwrap()),
+        Credentials::new(),
+        false,
+    );
+    connections.bind(&mut target, Some("probe"), false);
+    let policy = policy();
+    let permit = std::sync::Arc::new(Semaphore::new(1))
+        .try_acquire_owned()
+        .unwrap();
+    let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+    let invalidate = async {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket.read_u8().await.unwrap(); // TLS record, with no server response.
+        connections.invalidate(Some("probe"));
+    };
+    let (result, ()) = tokio::join!(conn.run(conn.tls_leaf()), invalidate);
+    assert!(matches!(result.unwrap_err().class, Class::Changed));
+}

@@ -21,10 +21,12 @@ mod connection;
 mod generic;
 mod pihole;
 
+#[allow(unused_imports)] // Available to credential-free probe providers.
+pub use crate::http::probe::{HttpProbe, SubjectAltName, TcpProbe, TlsLeaf, TlsVerification};
 #[allow(unused_imports)] // Available to providers that need CSRF headers.
 pub use connection::TargetHeader;
 pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
-pub(crate) use connection::{Connections, Credentials, Revision, Target};
+pub(crate) use connection::{success_status, Connections, Credentials, Revision, Target};
 
 pub const REGISTRY: &[Provider] = &[generic::HTTP, pihole::PI_HOLE];
 pub const MIN_REFRESH: u64 = 15;
