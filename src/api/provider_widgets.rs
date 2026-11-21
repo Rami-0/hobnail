@@ -448,7 +448,7 @@ pub(crate) fn poll(
             let result = tokio::select! {
                 biased;
                 _ = visible.changed() => None,
-                result = (poll.widget.fetch)(&poll.target, &config.http, &poll.options) => Some(result),
+                result = providers::bounded((poll.widget.fetch)(&poll.target, &config.http, &poll.options)) => Some(result),
             };
             if let Some(result) = result {
                 let mut output = WidgetOutput {

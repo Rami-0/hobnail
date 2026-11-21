@@ -309,6 +309,46 @@ mod tests {
     }
 
     #[test]
+    fn provider_upgrade_preserves_existing_http_connections_and_board_targets() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        let previous = MIGRATIONS.len() - 1;
+        for sql in &MIGRATIONS[..previous] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", previous as i64)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO integrations (id,name,kind,origin,config,secret,secret_origin)
+                VALUES ('legacy','Old HTTP','http','https://fixture.test',
+                        '{"base_url":"https://fixture.test/status","enabled":true}',
+                        'fake-bearer','https://fixture.test');
+               INSERT INTO boards (id,name,created,updated) VALUES ('old-board','Board',1,1);
+               INSERT INTO board_items (id,board_id,kind,config,integration_id) VALUES
+                ('old-link','old-board','integration','{"kind":"integration","integration_id":"legacy"}','legacy'),
+                ('old-widget','old-board','widget','{"kind":"widget","widget_id":"local-toml"}',NULL);"#,
+        ).unwrap();
+        migrate(&mut conn).unwrap();
+        let saved = conn.query_row(
+            "SELECT json_extract(config,'$.base_url'), secret, secret_origin FROM integrations WHERE id='legacy'",
+            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        ).unwrap();
+        assert_eq!(
+            saved,
+            (
+                "https://fixture.test/status".into(),
+                "fake-bearer".into(),
+                "https://fixture.test".into()
+            )
+        );
+        let targets: String = conn.query_row(
+            "SELECT group_concat(id) FROM (SELECT id FROM board_items WHERE board_id='old-board' ORDER BY id)",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(targets, "old-link,old-widget");
+    }
+
+    #[test]
     fn boards_start_empty_and_integration_secrets_are_origin_bound() {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn, false).unwrap();

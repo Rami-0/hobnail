@@ -128,7 +128,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
         {choosing || provider && !item ? "Back" : "Cancel"}
       </Button>
       {provider && !choosing && manage && <Button busy={busy} disabled={config.enabled === false} data-testid="provider-draft-test" onClick={() => void submit(true)}>Test connection</Button>}
-      {provider && !choosing && manage && (verdict?.ok || item?.check?.verdict.ok) && <Button variant="default" onClick={() => setChoosing(true)} disabled={busy}>Choose widgets</Button>}
+      {provider && !choosing && manage && verdict?.ok && <Button variant="default" onClick={() => setChoosing(true)} disabled={busy}>Choose widgets</Button>}
       {provider && <Button type="submit" form="integration-form" variant="default" busy={busy}>{choosing && board ? "Save widgets to board" : item ? "Save" : "Save connection"}</Button>}
     </>}>
     <form id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>

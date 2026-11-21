@@ -4,9 +4,9 @@ import type { Field } from "../api/gen/Field.ts";
 export type Values = Record<string, unknown>;
 
 export function initial(fields: Field[]): Values {
-  return Object.fromEntries(fields.filter((f) => f.default !== null).map((f) => [
-    f.id, ["bool", "list"].includes(f.kind) ? JSON.parse(f.default!) : f.default,
-  ]));
+  return Object.fromEntries(fields.flatMap((f) => f.default === null ? [] : [[
+    f.id, ["bool", "list"].includes(f.kind) ? JSON.parse(f.default) : f.default,
+  ]]));
 }
 
 export function secretHint(bound: string | null | undefined, url: string, cleared = false) {

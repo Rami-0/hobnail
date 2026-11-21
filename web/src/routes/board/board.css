@@ -21,3 +21,5 @@
 .board-tour .acts{display:flex;flex-wrap:wrap;gap:var(--s-2)}
 [data-board-tour-anchor]{outline:2px solid var(--ring);outline-offset:3px}
 :root.side-open .board-tour{visibility:hidden}
+
+.provider-table{overflow-x:auto}

@@ -20,6 +20,13 @@ pub const REGISTRY: &[Provider] = &[generic::HTTP];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
 pub const MAX_RESPONSE: usize = 128 * 1024;
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub async fn bounded<T>(job: impl Future<Output = Result<T, Fault>>) -> Result<T, Fault> {
+    tokio::time::timeout(REQUEST_TIMEOUT, job)
+        .await
+        .unwrap_or_else(|_| Err(Class::Timeout.into()))
+}
 
 pub fn get(id: &str) -> Option<&'static Provider> {
     REGISTRY.iter().find(|provider| provider.id == id)

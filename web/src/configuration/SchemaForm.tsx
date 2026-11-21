@@ -19,15 +19,15 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
   return <>{schema.map((field) => {
     const { kind, label, help } = field;
     const key = field.id;
-    const name = `${id}-${kind === "url" ? "url" : key}`;
+    const name = `${id}-${key === "base_url" ? "url" : key}`;
     const value = values[key] ?? field.default;
     const text = Array.isArray(value) ? value.join("\n") : String(value ?? "");
-    const change = (value: string | boolean) => onChange(key, value);
+    const change = (next: string | boolean) => onChange(key, next);
     const secret = kind === "secret";
     const url = String(values.base_url ?? "");
     const hint = (secret && secretHint(bound, url, cleared)) || help;
     return <div key={key}>
-      <Field id={name} label={kind === "bool" || kind === "select" ? null : label} error={errors?.[key]} hint={hint}>
+      <Field id={name} label={kind === "bool" ? null : label} error={errors?.[key]} hint={hint}>
         {kind === "bool" ? <Switch label={label} checked={value === true || value === "true"} onChange={change} />
           : kind === "select" ? <Select label={label} options={field.choices.map((option) => ({ value: option, label: option }))} value={text} onChange={change} />
           : kind === "list" ? <Textarea name={key} rows={3} value={text} onChange={(e) => change(e.target.value)} />
@@ -35,7 +35,7 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
             autoComplete={secret ? "new-password" : undefined} maxLength={field.max_length ?? undefined}
             min={field.min ?? undefined} max={field.max ?? undefined} value={text} onChange={(e) => change(e.target.value)} />}
       </Field>
-      {secret && text && url.toLowerCase().startsWith("http://") && <p className="warn-fg">HTTP sends this credential unencrypted.</p>}
+      {secret && text && url.toLowerCase().startsWith("http://") && <p className="warn-fg">This HTTP connection sends the credential unencrypted.</p>}
       {secret && bound && onClear && <Button onClick={onClear}>{cleared ? "Keep saved credential" : "Clear saved credential"}</Button>}
     </div>;
   })}</>;

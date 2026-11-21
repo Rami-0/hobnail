@@ -2,7 +2,7 @@ import type { WidgetView } from "../api/gen/WidgetView.ts";
 import { RelativeTime } from "./RelativeTime.tsx";
 
 import { StaleBadge } from "./StaleBadge.tsx";
-import { StructuredWidget } from "./StructuredWidget.tsx";
+import { StructuredWidget } from "./StructuredWidget.ts";
 
 const statusText: Record<string, string> = {
   disabled: "Disabled", waiting: "Waiting for the first answer…", ok: "OK", bad: "Not OK", error: "Error",

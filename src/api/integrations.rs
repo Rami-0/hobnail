@@ -402,6 +402,12 @@ pub(super) fn draft_target(
     input: IntegrationInput,
 ) -> Result<(&'static providers::Provider, Target), ApiError> {
     validate_input(&input)?;
+    if !input.enabled {
+        return Err(ApiError::bad_request(
+            "Enable this integration before testing its connection.",
+            Some("enabled"),
+        ));
+    }
     let origin = client::origin(&input.base_url).expect("validated origin");
     let credential = match (input.secret, id) {
         (Some(token), _) => Some(client::BoundCredential { origin, token }),
@@ -473,7 +479,7 @@ pub(super) async fn test_connection(
         Some(provider) if provider.public_internet && !target.internet_enabled => {
             Err(VerdictClass::InternetOff.into())
         }
-        Some(provider) => (provider.test)(&target, &policy.http).await,
+        Some(provider) => providers::bounded((provider.test)(&target, &policy.http)).await,
         None => target.response(&policy.http, None).await.map(drop),
     };
     let (class, fingerprint) = match result {

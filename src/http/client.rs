@@ -191,7 +191,7 @@ pub(crate) async fn send_bound(
     let integration = IntegrationPolicy {
         tls,
         local_only: options.local_only,
-        max_body: options.max_body.unwrap_or(MAX_BODY),
+        max_body: options.max_body.unwrap_or(MAX_BODY).min(MAX_BODY),
     };
     send_with_policy(req, policy, Some(integration))
         .await

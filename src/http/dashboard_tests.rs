@@ -915,6 +915,7 @@ async fn integration_test_reports_public_root_failure() {
         .await;
     assert_eq!(r["ok"], false);
     assert_eq!(r["class"], "tls");
+    assert_eq!(r["fingerprint"].as_str().unwrap().len(), 64);
     assert!(r["message"]
         .as_str()
         .unwrap()
@@ -1870,4 +1871,70 @@ async fn provider_requests_are_capped_in_size_and_time_and_block_public_addresse
     assert_eq!(timeout["class"], "timeout");
     assert!((Duration::from_secs(4)..Duration::from_secs(6)).contains(&elapsed.elapsed()));
     fake.abort();
+}
+
+#[tokio::test]
+async fn provider_refresh_concurrency_is_global_and_disconnect_releases_slots() {
+    use std::time::Duration;
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", upstream.local_addr().unwrap());
+    let state = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    let run = tokio::spawn(crate::live::run(state.clone()));
+    let board = owner.board("Many widgets").await;
+    let other = owner.board("Two boards use the same limit").await;
+    for i in 0..5 {
+        owner.json("POST", "/api/v1/providers/install", json!({
+            "integration":{"name":format!("Fixture {i}"),"kind":"http","base_url":url,"enabled":true},
+            "board_id": if i < 3 { &board } else { &other },
+            "widgets":[{"id":"json"}]
+        }), 201).await;
+    }
+
+    let path = |id: &str| format!("/api/v1/stream?topics=widget&board={id}");
+    let (a, _) = Stream::open(owner.addr, &path(&board), &owner.cookie).await;
+    let (b, _) = Stream::open(owner.addr, &path(&other), &owner.cookie).await;
+    let mut sockets = Vec::new();
+    for _ in 0..4 {
+        sockets.push(
+            tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+                .await
+                .unwrap()
+                .unwrap()
+                .0,
+        );
+    }
+    assert_eq!(state.provider_requests.available_permits(), 0);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), upstream.accept())
+            .await
+            .is_err()
+    );
+    let blocked = owner
+        .json(
+            "POST",
+            "/api/v1/providers/test",
+            json!({
+                "integration":{"name":"Would be sixth","kind":"http","base_url":url,"enabled":true}
+            }),
+            200,
+        )
+        .await;
+    assert_eq!(blocked["class"], "busy");
+    drop(a);
+    drop(b);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while state.viewers() != 0 || state.provider_requests.available_permits() != 4 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), upstream.accept())
+            .await
+            .is_err()
+    );
+    run.abort();
 }
