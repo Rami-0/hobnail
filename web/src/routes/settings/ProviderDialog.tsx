@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { IntegrationInput } from "../../api/gen/IntegrationInput.ts";
 import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
@@ -15,6 +15,7 @@ import { Note } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Switch } from "../../ui/Switch.tsx";
+import { matchesConnectionTest, type ConnectionTest } from "./connection-test.ts";
 
 export default function ProviderDialog({ providers, item, preferredBoard, manage, icons, internet, onClose, onSaved }: {
   providers: Provider[]; item: IntegrationView | null; preferredBoard: string;
@@ -31,7 +32,10 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
   const bound = item?.admin?.credentials;
   const [cleared, setCleared] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [verdict, setVerdict] = useState<IntegrationVerdict>();
+  const revision = useRef(0);
+  const [tested, setTested] = useState<{ key: ConnectionTest; result: IntegrationVerdict }>();
+  const connectionKey = () => ({ url: String(config.base_url ?? ""), pin: String(config.fingerprint ?? "").trim(), revision: revision.current });
+  const verdict = tested?.result;
   const [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [boards, setBoards] = useState<BoardSummary[]>([]);
@@ -83,13 +87,15 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
     setProvider(entry);
     setConfig(initial(entry.fields));
     setName(entry.name);
-    setVerdict(undefined);
+    revision.current++;
+    setTested(undefined);
     setErrors({});
     setSelected(Object.fromEntries(entry.widgets.filter((w) => w.recommended).map((w) => [w.id, initial(w.fields)])));
   }
 
   function change(key: string, value: string | boolean) {
-    setVerdict(undefined);
+    revision.current++;
+    setTested(undefined);
     if (value && cleared[key]) setCleared({ ...cleared, [key]: false });
     setConfig((previous) => {
       if (key === "base_url" && origin(String(previous.base_url ?? "")) !== origin(String(value))) {
@@ -125,9 +131,12 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
     };
     setBusy(true);
     if (test) {
+      const key = connectionKey();
       const result = await api.post<IntegrationVerdict>("/api/v1/providers/test", { integration, integration_id: item?.id });
-      if (result.kind === "ok") setVerdict(result.data);
-      else setErrors({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message });
+      if (matchesConnectionTest(key, connectionKey())) {
+        if (result.kind === "ok") setTested({ key, result: result.data });
+        else setErrors({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message });
+      }
     } else {
       const result = item && !choosing
         ? await api.request("PUT", `/api/v1/integrations/${item.id}`, { body: integration })
@@ -179,7 +188,9 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
           } : undefined} />
         {verdict && <Note testId="provider-draft-verdict" kind={verdict.ok ? "ok" : "warn"}>{verdict.message}
           {verdict.fingerprint && <><p>Compare this fingerprint with the certificate on your service.</p><p className="wrap"><code>{verdict.fingerprint}</code></p>
-            <Button onClick={() => { change("fingerprint", verdict.fingerprint ?? ""); }}>Confirm and pin fingerprint</Button></>}
+            <Button onClick={() => {
+              if (tested && matchesConnectionTest(tested.key, connectionKey())) change("fingerprint", verdict.fingerprint ?? "");
+            }}>Confirm and pin fingerprint</Button></>}
         </Note>}
       </>}
       {errors.form && <Note kind="bad">{errors.form}</Note>}
