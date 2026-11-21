@@ -436,11 +436,12 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 8. M1 adds **Secure** to session cookies when a configured trusted proxy
    reports HTTPS. Plain HTTP keeps working. For the per-IP login limit, the
    same trust list enables rightmost-untrusted `X-Forwarded-For` handling.
-   The credential queue is blocked by the lifetime memory budget. A single
-   existing Argon2id hash uses 19 MiB. With one operation at a time, M5
-   peaked at 20.81 MiB on the isolated sign-in run and 22.24 MiB under
-   dashboard load. Two permits would require 38 MiB for hash workspaces
-   alone. The shared lock and its 429 responses remain in place.
+   A single Argon2id permit preserves the 19 MiB workspace peak. Up to eight
+   requests wait asynchronously for up to five seconds, enough to absorb
+   short bursts while bounding retained credential data and request latency.
+   The active operation runs on a blocking worker. Queue overflow and
+   timeouts return 429 with `Retry-After: 1`; the IP and global back-offs
+   are checked again when a queued login reaches the worker.
 9. Credentials are bound to **origin, not path**. The database stores plaintext
    tokens with their binding; no token is returned. Tests stop at **any redirect**
    rather than following even same-origin redirects. Public roots only: no

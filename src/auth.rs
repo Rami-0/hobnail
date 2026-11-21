@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -13,6 +14,7 @@ use hyper::header::{
 };
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use ring::{digest, rand::SecureRandom};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::api::error::ApiError;
 use crate::db::accounts::AccountError;
@@ -29,6 +31,56 @@ pub const MIN_PASSWORD_CHARS: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 1024;
 /// Login request bodies larger than this are refused.
 const MAX_BODY: usize = 4096;
+
+/// Eight waiting requests retain only parsed credentials and request state.
+pub(crate) const CREDENTIAL_WAITERS: usize = 8;
+const CREDENTIAL_WAIT: Duration = Duration::from_secs(5);
+
+pub(crate) struct CredentialQueue {
+    active: Arc<Semaphore>,
+    waiters: Semaphore,
+}
+
+impl Default for CredentialQueue {
+    fn default() -> Self {
+        Self {
+            active: Arc::new(Semaphore::new(1)),
+            waiters: Semaphore::new(CREDENTIAL_WAITERS),
+        }
+    }
+}
+
+impl CredentialQueue {
+    pub(crate) async fn acquire(&self) -> Option<OwnedSemaphorePermit> {
+        if let Ok(permit) = self.active.clone().try_acquire_owned() {
+            return Some(permit);
+        }
+        let _slot = self.waiters.try_acquire().ok()?;
+        tokio::time::timeout(CREDENTIAL_WAIT, self.active.clone().acquire_owned())
+            .await
+            .ok()?
+            .ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiting(&self) -> usize {
+        CREDENTIAL_WAITERS - self.waiters.available_permits()
+    }
+}
+
+pub(crate) fn credential_busy(legacy: bool) -> Response<Body> {
+    let message = "credential service busy; try again";
+    let mut response = if legacy {
+        json_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            &serde_json::json!({"error": message, "retry_after": 1}),
+        )
+    } else {
+        ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", message).response()
+    };
+    set(&mut response, RETRY_AFTER, "1");
+    response
+}
 
 pub(crate) fn now_s() -> i64 {
     crate::util::unix_now() as i64
@@ -200,10 +252,6 @@ pub(crate) fn change_password_for(
     new: &str,
 ) -> Result<(), String> {
     check_password_policy(new)?;
-    let _permit = state
-        .login_verifying
-        .try_lock()
-        .map_err(|_| "too many attempts; try again in 1 s")?;
     let key = session.account.id;
     let lock = || {
         state
@@ -570,6 +618,11 @@ impl RateLimiter {
         self.ips.remove(&ip);
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_test_failure(&mut self, ip: IpAddr) {
+        self.failure(ip, now_ms());
+    }
+
     fn forget_old(&mut self, now_ms: u64) {
         self.ips
             .retain(|_, s| now_ms.saturating_sub(s.last_ms) < FORGET_AFTER_MS);
@@ -688,10 +741,16 @@ pub(crate) async fn credential_route(
             "username and password required",
         );
     };
+    let Some(permit) = state.credential_queue.acquire().await else {
+        return credential_busy(legacy);
+    };
     let st = state.clone();
-    let outcome = tokio::task::spawn_blocking(move || authenticate(&st, ip, action, credentials))
-        .await
-        .unwrap_or(Err(Attempt::Failed));
+    let outcome = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        authenticate(&st, ip, action, credentials)
+    })
+    .await
+    .unwrap_or(Err(Attempt::Failed));
     let token = match outcome {
         Ok(token) => token,
         Err(Attempt::Limited(secs)) => return limited(secs),
@@ -757,19 +816,6 @@ fn authenticate(
     action: CredentialAction,
     credentials: Credentials,
 ) -> Result<String, Attempt> {
-    // Onboarding queues behind a raced onboarding request so the loser
-    // sees the committed owner and receives 409. Other operations can retry.
-    let _permit = if action == CredentialAction::Onboard {
-        state
-            .login_verifying
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-    } else {
-        state
-            .login_verifying
-            .try_lock()
-            .map_err(|_| Attempt::Limited(1))?
-    };
     let lock = || {
         state
             .login_limiter

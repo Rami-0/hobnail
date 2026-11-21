@@ -2239,6 +2239,98 @@ async fn viewer_cannot_read_administrative_details() {
     assert!(owner_history.body.contains("auth.login_failed"));
 }
 
+async fn queued_login(addr: std::net::SocketAddr) -> Resp {
+    req(
+        addr,
+        "POST",
+        "/api/login",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &format!("http://{addr}")),
+        ],
+        &serde_json::json!({"username": "admin", "password": PW}).to_string(),
+    )
+    .await
+}
+
+async fn wait_for_queued_logins(st: &AppState, count: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while st.credential_queue.waiting() != count {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("logins reached the credential queue");
+}
+
+#[tokio::test]
+async fn concurrent_logins_fill_the_queue_and_overflow_gets_retry_after() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    let logins: Vec<_> = (0..crate::auth::CREDENTIAL_WAITERS)
+        .map(|_| tokio::spawn(queued_login(addr)))
+        .collect();
+    wait_for_queued_logins(&st, logins.len()).await;
+
+    let overflow = queued_login(addr).await;
+    assert_eq!(overflow.status, 429);
+    assert_eq!(header(&overflow.head, "retry-after").as_deref(), Some("1"));
+
+    drop(permit);
+    for login in logins {
+        assert_eq!(login.await.unwrap().status, 200);
+    }
+}
+
+#[tokio::test]
+async fn waiting_login_times_out_and_releases_its_queue_slot() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    let login = tokio::spawn(queued_login(addr));
+    wait_for_queued_logins(&st, 1).await;
+    assert_eq!(req(addr, "GET", "/healthz", &[], "").await.status, 200);
+    let timed_out = login.await.unwrap();
+    assert_eq!(timed_out.status, 429);
+    assert_eq!(header(&timed_out.head, "retry-after").as_deref(), Some("1"));
+    assert_eq!(st.credential_queue.waiting(), 0);
+
+    drop(permit);
+    assert_eq!(queued_login(addr).await.status, 200);
+}
+
+#[tokio::test]
+async fn queued_logins_recheck_ip_and_global_backoff() {
+    for global in [false, true] {
+        let st = state();
+        crate::auth::set_password_for_tests(&st.db, PW);
+        let permit = st.credential_queue.acquire().await.unwrap();
+        let addr = start(st.clone()).await;
+        let login = tokio::spawn(queued_login(addr));
+        wait_for_queued_logins(&st, 1).await;
+        {
+            let mut limiter = st.login_limiter.lock().unwrap();
+            if global {
+                // The first five global failures are free. None is from the
+                // queued login's client IP.
+                for n in 1..=6 {
+                    limiter.record_test_failure(std::net::Ipv4Addr::new(192, 0, 2, n).into());
+                }
+            } else {
+                limiter.record_test_failure(std::net::Ipv4Addr::LOCALHOST.into());
+            }
+        }
+        drop(permit);
+        let throttled = login.await.unwrap();
+        assert_eq!(throttled.status, 429);
+        assert_eq!(header(&throttled.head, "retry-after").as_deref(), Some("1"));
+        assert!(throttled.body.contains("too many failed attempts"));
+    }
+}
+
 #[tokio::test]
 async fn login_throttles_the_rightmost_untrusted_ip_from_trusted_proxies() {
     for use_proxy in [false, true] {

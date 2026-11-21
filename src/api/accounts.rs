@@ -247,8 +247,12 @@ async fn handle(
         Handler::Password => {
             let PasswordRequest { current, new } = body(req).await?;
             auth::check_password_policy(&new).map_err(|e| ApiError::bad_request(e, Some("new")))?;
+            let Some(permit) = state.credential_queue.acquire().await else {
+                return Ok(auth::credential_busy(false));
+            };
             let state = state.clone();
             tokio::task::spawn_blocking(move || {
+                let _permit = permit;
                 auth::change_password_for(&state, &session, &current, &new)
             })
             .await

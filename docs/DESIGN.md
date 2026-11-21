@@ -210,7 +210,7 @@ table and scope gate in `src/api/access.rs` are enforced before dispatch.
 |---|---|
 | Accounts | One Owner plus invited Admin and Viewer accounts. Only the Owner manages users, roles, invitations and scopes. |
 | First-run | The first visitor to `/app` sets the owner username and password in the browser. `hobnail set-password [username]` is optional host recovery. A migrated legacy-password database locks browser claims until host recovery. |
-| Password storage | Salted argon2id in SQLite, 19,456 KiB, two passes, one lane. One shared hashing lock bounds concurrency and can return 429. |
+| Password storage | Salted argon2id in SQLite, 19,456 KiB, two passes, one lane. One server-wide hashing permit, with eight asynchronous waiters and a five-second queue timeout. Queue overflow and timeout return 429. |
 | Sessions | 32 random bytes, only SHA-256 stored. HttpOnly, SameSite=Strict, Path=/, seven-day sliding expiry and cookie renewal; revocable. Adds Secure for HTTPS reported by a configured trusted proxy. Plain HTTP keeps working. |
 | Roles | Viewer reads and manages their account. Admin edits settings. Owner also manages accounts; the sole Owner cannot be deleted, disabled or demoted. |
 | Scopes | Owner grants boards/integrations. Scoped accounts see containers via granted boards only; host-wide pages are refused. Scoped Admin edits are restricted to granted boards/integrations; no global Settings or entity creation/deletion. |

@@ -35,8 +35,11 @@ disabled or deleted. Invitations are single-use, expire, and can be revoked.
 - Unknown Host names return 421. IP literals, localhost, `RH_HOSTNAME` and
   `RH_ALLOWED_HOSTS` globs are accepted; `/healthz` is exempt.
 - Passwords are salted argon2id hashes in SQLite: 19,456 KiB memory, two passes,
-  one lane. Each hash temporarily allocates about 19 MiB. A shared argon2 lock
-  bounds concurrency; a simultaneous credential request can return 429.
+  one lane. Each hash temporarily allocates about 19 MiB. The server does
+  one credential operation at a time on a blocking worker. Eight requests
+  can queue asynchronously for up to five seconds, retaining only parsed
+  credentials and request state. A full queue or an expired wait returns
+  429 with `Retry-After: 1`.
 - Sessions use 32 random bytes; only their SHA-256 is stored. The cookie is
   `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`. Database expiry and cookie
   slide on authenticated responses. Hobnail adds `Secure` when a

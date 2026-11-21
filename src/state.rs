@@ -120,7 +120,7 @@ pub struct AppState {
     pub integration_tests: Mutex<HashMap<i64, VecDeque<std::time::Instant>>>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
-    pub login_verifying: Mutex<()>,
+    pub(crate) credential_queue: crate::auth::CredentialQueue,
     /// Internal notifications for JSON stream topics and config changes.
     pub events: broadcast::Sender<Arc<str>>,
     /// Woken when the first viewer connects.
@@ -155,7 +155,7 @@ impl AppState {
             password_limiter: Mutex::new(Default::default()),
             integration_tests: Mutex::new(HashMap::new()),
             login_limiter: Mutex::new(Default::default()),
-            login_verifying: Mutex::new(()),
+            credential_queue: Default::default(),
             events,
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),

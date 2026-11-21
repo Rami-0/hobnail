@@ -26,7 +26,10 @@ Plain HTTP uses the same session flow without the flag.
 Credential-entry throttling returns `429 Too Many Requests` with
 `Retry-After` in seconds. The per-IP limiter uses the TCP peer by default and
 honours `X-Forwarded-For` only from configured trusted proxies. The global
-failed-attempt limit also applies.
+failed-attempt limit also applies. The server runs one credential operation
+at a time. Up to eight additional login, onboarding, invitation acceptance,
+or password-change requests can wait up to five seconds for it. A full queue
+or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 
 ## Version 1
 
