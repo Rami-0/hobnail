@@ -105,10 +105,10 @@ export default defineConfig(({ command }) => {
       // Keep its dependencies in a separate lazy chunk so a chart vendor
       // never has to import an initializer from the chart route itself.
       rolldownOptions: { output: {
-        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
+        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup|ProviderDialog|SchemaForm)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
-        { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
+        { name: "settings-pages", test: /\/src\/routes\/settings\/(?!ProviderDialog\.tsx$)[^/]+\.tsx$/, includeDependenciesRecursively: false },
         { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
         { name: "charts-vendor-deps", test: /node_modules\/(?:d3-[^/]+|internmap|clsx|eventemitter3|reselect|redux(?:-thunk)?|react-redux|immer|use-sync-external-store|es-toolkit|decimal\.js-light|victory-vendor|@reduxjs\/toolkit|@standard-schema\/[^/]+)\//, includeDependenciesRecursively: false },
         { name: "charts-vendor", test: /node_modules\/recharts\//, includeDependenciesRecursively: false },
