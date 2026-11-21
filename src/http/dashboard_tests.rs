@@ -1992,6 +1992,18 @@ async fn provider_requests_are_capped_in_size_and_time_and_block_public_addresse
         .json("POST", endpoint, body("http://203.0.113.1"), 200)
         .await;
     assert_eq!(blocked["class"], "internet_off");
+    let board = owner.board("Response size").await;
+    let mut install = body(&url);
+    install["board_id"] = json!(board);
+    install["widgets"] = json!([{"id":"json"}]);
+    owner
+        .json("POST", "/api/v1/providers/install", install, 201)
+        .await;
+    let run = tokio::spawn(crate::live::run(state));
+    let path = format!("/api/v1/stream?topics=widget&board={board}");
+    let (mut stream, _) = Stream::open(owner.addr, &path, &owner.cookie).await;
+    assert_eq!(stream.next().await.0, "hello");
+    assert_eq!(stream.next().await.1["status"], "waiting");
     let fake = tokio::spawn(async move {
         let (mut socket, _) = upstream.accept().await.unwrap();
         upstream_request(&mut socket).await;
@@ -2005,13 +2017,16 @@ async fn provider_requests_are_capped_in_size_and_time_and_block_public_addresse
         upstream_request(&mut socket).await;
         tokio::time::sleep(Duration::from_secs(6)).await;
     });
-    let large = owner.json("POST", endpoint, body(&url), 200).await;
-    assert_eq!(large["class"], "too_large");
+    let large = stream.next().await;
+    assert_eq!(large.0, "widget");
+    assert!(large.1["error"].as_str().unwrap().contains("size limit"));
+    drop(stream);
     let elapsed = std::time::Instant::now();
     let timeout = owner.json("POST", endpoint, body(&url), 200).await;
     assert_eq!(timeout["class"], "timeout");
     assert!((Duration::from_secs(4)..Duration::from_secs(6)).contains(&elapsed.elapsed()));
     fake.abort();
+    run.abort();
 }
 
 #[tokio::test]
@@ -2111,7 +2126,7 @@ async fn provider_connection_and_policy_edits_close_upstream_sockets() {
                 .unwrap();
             let _ = upstream_request(&mut socket).await;
             socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n\r\n{")
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n")
                 .await
                 .unwrap();
             match change {

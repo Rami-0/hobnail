@@ -55,21 +55,38 @@ pub const HTTP: Provider = Provider {
         ],
         validate: options,
         fetch,
+    }, Widget {
+        id: "status",
+        name: "HTTP status",
+        description: "Show whether the service returns a successful HTTP status.",
+        recommended: false,
+        fields: &[REFRESH],
+        validate: |_| Ok(()),
+        fetch: status,
     }],
 };
 
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
-    Box::pin(async { json(conn).await.map(drop) })
+    Box::pin(async { response(conn, true).await.map(drop) })
 }
 
-async fn json(conn: &Conn<'_>) -> Result<Value, Fault> {
+fn status<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
+    Box::pin(async {
+        let response = response(conn, true).await?;
+        Ok(StructuredBody::Stat {
+            value: format!("HTTP {}", response.status),
+        })
+    })
+}
+
+async fn response(conn: &Conn<'_>, status_only: bool) -> Result<client::Response, Fault> {
     let mut step = Step::get("");
+    step.status_only = status_only;
     let auth = [Auth::Bearer(Input::Credential("secret"))];
     if conn.has_credential("secret") {
         step.auth = &auth;
     }
-    let response = success(conn.request(step).await?)?;
-    serde_json::from_slice(&response.body).map_err(|_| Class::Protocol.into())
+    success(conn.request(step).await?)
 }
 
 fn options(values: &Values) -> Result<(), &'static str> {
@@ -106,7 +123,8 @@ fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody>
                 message: "Choose specific JSON paths for this credentialed connection.".into(),
             });
         }
-        let json = json(conn).await?;
+        let response = response(conn, false).await?;
+        let json = serde_json::from_slice(&response.body).map_err(|_| Class::Protocol)?;
         let redact = conn.output_redactor();
         let rows: Vec<_> = options
             .get("paths")
@@ -129,4 +147,51 @@ fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody>
             StructuredBody::StatGrid { rows }
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::connection::tests::{receive, respond};
+    use std::sync::Arc;
+    use tokio::{net::TcpListener, sync::Semaphore};
+
+    #[tokio::test]
+    async fn connection_tests_and_status_widgets_accept_non_json_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target = Target::new(
+            format!("http://{}", listener.local_addr().unwrap()),
+            Credentials::new(),
+            false,
+        );
+        let fake = tokio::spawn(async move {
+            for (code, body) in [(204, ""), (200, "plain text")] {
+                for _ in 0..3 {
+                    let (mut socket, _) = receive(&listener).await;
+                    respond(&mut socket, code, "", body).await;
+                }
+            }
+        });
+        let policy = crate::config::HttpPolicy {
+            allow_hosts: vec!["127.0.0.1".into()],
+        };
+        let connections = Connections::default();
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+        let values = Values::new();
+        for code in [204, 200] {
+            conn.run(test(&conn)).await.unwrap();
+            let result = super::super::fetch(&conn, &HTTP.widgets[1], &values)
+                .await
+                .unwrap();
+            assert!(
+                matches!(result, StructuredBody::Stat { value } if value == format!("HTTP {code}"))
+            );
+            let error = super::super::fetch(&conn, &HTTP.widgets[0], &values)
+                .await
+                .unwrap_err();
+            assert!(matches!(error.class, Class::Protocol));
+        }
+        fake.await.unwrap();
+    }
 }

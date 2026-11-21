@@ -93,12 +93,18 @@ those lines can live outside git. Consider a socket proxy (e.g.
 
 ## Upgrading from the old UI
 
-Stop before copying the data volume for backup, or use a consistent SQLite
-backup including any WAL state. Keep a pre-upgrade copy: the database migrates
-forward only. Version 7 adds named accounts, grants, invitations, sessions,
-boards, integrations, settings and drafts; version 8 adds board icons, ordering
-and sections. An old binary refuses a newer database. Rollback needs both the
-old image and its pre-upgrade data, not a downgrade of the migrated database.
+Before upgrading, stop Hobnail and copy the data volume, including
+`hobnail.db` and any SQLite WAL sidecar, to a separate backup location.
+For an online backup, use SQLite's backup command to make a consistent copy.
+Keep the previous image or binary version. The provider framework upgrades
+the database to schema version 14. Older builds refuse to open a database
+with a newer schema version and run with database-backed features disabled.
+
+To roll back, stop the upgraded instance and keep its data volume separately
+if you may need changes made since the upgrade. Restore the pre-upgrade data
+into a clean volume or directory, including any sidecars from that same
+backup, then start the previous build with the restored data. The restored
+database contains the state at the time of the backup.
 
 If the database had a legacy password, browser ownership claims are locked.
 Run `hobnail set-password [username]` on the host to recover the owner. Old

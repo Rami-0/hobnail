@@ -71,16 +71,27 @@ pub(super) async fn route(
             crate::http::query::query_get(&query, "board").ok_or_else(ApiError::not_found)?;
         let options = state.db.dashboard(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT widget, id, options FROM provider_widgets WHERE integration_id=?1 AND board_id=?2 ORDER BY id",
+                "SELECT widget, id, options FROM provider_widgets pw
+                 WHERE integration_id=?1 AND board_id=?2 AND EXISTS (
+                   SELECT 1 FROM board_items item WHERE item.board_id=?2 AND item.kind='widget'
+                   AND json_extract(item.config,'$.widget_id')=pw.id
+                 ) ORDER BY id",
             )?;
             let rows = stmt.query_map([id, board], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })?;
             let mut options = HashMap::<_, Vec<_>>::new();
             for row in rows {
                 let (widget, id, value) = row?;
                 if let Ok(value) = serde_json::from_str::<Values>(&value) {
-                    options.entry(widget).or_default().push(PlacementOptions { id, options: value });
+                    options
+                        .entry(widget)
+                        .or_default()
+                        .push(PlacementOptions { id, options: value });
                 }
             }
             Ok::<_, rusqlite::Error>(options)
@@ -172,10 +183,18 @@ fn install(
         let mut placements = Vec::new();
         let mut updated = HashSet::new();
         for (widget, placement, options) in options {
-            let existing = conn.query_row(
-                "SELECT id FROM provider_widgets WHERE integration_id=?1 AND board_id=?2 AND widget=?3 AND (?4 IS NULL OR id=?4) ORDER BY id LIMIT 1",
-                (&integration.id, &id, widget, &placement), |row| row.get::<_, String>(0),
-            ).optional()?;
+            let existing = conn
+                .query_row(
+                    "SELECT id FROM provider_widgets pw
+                 WHERE integration_id=?1 AND board_id=?2 AND widget=?3 AND (?4 IS NULL OR id=?4)
+                 AND EXISTS (
+                   SELECT 1 FROM board_items item WHERE item.board_id=?2 AND item.kind='widget'
+                   AND json_extract(item.config,'$.widget_id')=pw.id
+                 ) ORDER BY id LIMIT 1",
+                    (&integration.id, &id, widget, &placement),
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
             if let Some(widget_id) = existing {
                 if !updated.insert(widget_id.clone()) {
                     return Err(ApiError::bad_request(

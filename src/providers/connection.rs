@@ -207,6 +207,7 @@ pub struct Step<'a> {
     pub query: &'a [(&'a str, Input<'a>)],
     pub body: Option<Body<'a>>,
     pub response_headers: &'a [&'a str],
+    pub status_only: bool,
 }
 
 impl<'a> Step<'a> {
@@ -218,6 +219,7 @@ impl<'a> Step<'a> {
             query: &[],
             body: None,
             response_headers: &[],
+            status_only: false,
         }
     }
 }
@@ -434,6 +436,7 @@ impl<'a> Conn<'a> {
                 pin: self.target.fingerprint,
                 local_only: !self.target.internet_enabled,
                 max_body: Some(MAX_RESPONSE),
+                status_only: step.status_only,
                 headers,
                 revision: self.revision.clone(),
             },

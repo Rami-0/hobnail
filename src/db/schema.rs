@@ -237,6 +237,49 @@ INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
   SELECT 'provider:' || item.id, pw.integration_id, item.board_id, pw.widget, pw.options
   FROM board_items item JOIN provider_widgets_before_placements pw
     ON item.kind='widget' AND pw.id=json_extract(item.config,'$.widget_id');
+-- Drafts can contain both saved items and new copies of the old shared widget.
+-- Prefer the saved item's placement, then reuse a placement on this board.
+CREATE TEMP TABLE provider_draft_targets AS
+  SELECT refs.board_id, refs.legacy_id, coalesce((
+    SELECT 'provider:' || item.id FROM board_items item
+    WHERE item.board_id=refs.board_id AND item.kind='widget'
+      AND json_extract(item.config,'$.widget_id')=refs.legacy_id
+    ORDER BY item.id LIMIT 1
+  ), 'provider:' || lower(hex(randomblob(16)))) AS placement
+  FROM (
+    SELECT DISTINCT board.id AS board_id, old.id AS legacy_id
+    FROM drafts draft JOIN boards board ON draft.key='board:' || board.id
+    CROSS JOIN json_each(draft.value,'$.sections') section
+    CROSS JOIN json_each(section.value,'$.items') item
+    JOIN provider_widgets_before_placements old
+      ON json_extract(item.value,'$.payload.widget_id')=old.id
+    WHERE json_extract(item.value,'$.payload.kind')='widget'
+  ) refs;
+INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+  SELECT target.placement, old.integration_id, target.board_id, old.widget, old.options
+  FROM provider_draft_targets target JOIN provider_widgets_before_placements old
+    ON old.id=target.legacy_id
+  WHERE NOT EXISTS (SELECT 1 FROM provider_widgets WHERE id=target.placement);
+UPDATE drafts AS draft
+  SET value=json_set(value,'$.sections',json((
+    SELECT json_group_array(json(json_set(section.value,'$.items',json((
+      SELECT json_group_array(json(CASE WHEN target.placement IS NULL THEN item.value
+        ELSE json_set(item.value,'$.payload.widget_id',coalesce((
+          SELECT 'provider:' || saved.id FROM board_items saved
+          WHERE saved.id=json_extract(item.value,'$.id') AND saved.board_id=target.board_id
+            AND saved.kind='widget' AND json_extract(saved.config,'$.widget_id')=target.legacy_id
+        ), target.placement)) END) ORDER BY item.key)
+      FROM json_each(section.value,'$.items') item
+      LEFT JOIN provider_draft_targets target
+        ON draft.key='board:' || target.board_id
+        AND json_extract(item.value,'$.payload.kind')='widget'
+        AND json_extract(item.value,'$.payload.widget_id')=target.legacy_id
+    )))) ORDER BY section.key)
+    FROM json_each(draft.value,'$.sections') section
+  )))
+  WHERE EXISTS (SELECT 1 FROM provider_draft_targets target WHERE draft.key='board:' || target.board_id)
+    AND json_type(draft.value,'$.sections')='array';
+DROP TABLE provider_draft_targets;
 UPDATE board_items SET config=json_set(config,'$.widget_id','provider:' || id)
   WHERE kind='widget' AND EXISTS (
     SELECT 1 FROM provider_widgets WHERE provider_widgets.id='provider:' || board_items.id);
@@ -383,7 +426,20 @@ mod tests {
                    VALUES ('provider:old','legacy','json','{"paths":["value"],"refresh":30}');
                INSERT INTO board_items(id,board_id,kind,config) VALUES
                    ('provider-a','old-board','widget','{"kind":"widget","widget_id":"provider:old"}'),
-                   ('provider-b','other-board','widget','{"kind":"widget","widget_id":"provider:old"}');"#,
+                   ('provider-b','other-board','widget','{"kind":"widget","widget_id":"provider:old"}');
+               INSERT INTO users (id,name,password_hash,role,created,updated)
+                   VALUES (1,'owner','hash','owner',1,1);
+               INSERT INTO drafts (user_id,key,value,updated) VALUES
+                   (1,'board:old-board','{"version":2,"sections":[{"id":"section-a","title":"Section","position":0,"items":[
+                     {"id":"provider-a","position":0,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"provider:old"}},
+                     {"position":1,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"provider:old"}},
+                     {"position":2,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"local-toml"}}]}]}',3);
+               INSERT INTO boards (id,name,created,updated) VALUES ('draft-only','Draft only',1,1);
+               INSERT INTO drafts (user_id,key,value,updated)
+                   SELECT 1,'board:draft-only',value,updated FROM drafts WHERE key='board:old-board';"#,
         ).unwrap();
         migrate(&mut conn).unwrap();
         let saved = conn
@@ -421,6 +477,34 @@ mod tests {
                AND json_extract(pw.options,'$.paths[0]')='value' AND json_extract(pw.options,'$.refresh')=30",
              [], |row| row.get(0)).unwrap();
         assert_eq!(placements, 2);
+        let draft: String = conn
+            .query_row(
+                "SELECT value FROM drafts WHERE key='board:old-board'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let draft: serde_json::Value = serde_json::from_str(&draft).unwrap();
+        let items = &draft["sections"][0]["items"];
+        assert_eq!(draft["version"], 2);
+        assert_eq!(items[0]["payload"]["widget_id"], "provider:provider-a");
+        assert_eq!(items[1]["payload"]["widget_id"], "provider:provider-a");
+        assert_eq!(items[2]["payload"]["widget_id"], "local-toml");
+        let draft_only: i64 = conn.query_row(
+            "SELECT count(*) FROM provider_widgets pw JOIN drafts d ON d.key='board:' || pw.board_id
+             WHERE pw.board_id='draft-only' AND pw.id=json_extract(d.value,'$.sections[0].items[1].payload.widget_id')
+               AND pw.integration_id='legacy' AND pw.widget='json'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(draft_only, 1);
+        let credentials_in_widgets: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM provider_widgets WHERE instr(options,'fake-bearer')>0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(credentials_in_widgets, 0);
     }
 
     #[test]

@@ -653,8 +653,16 @@ pub(super) fn store(
     conn.execute(
         "DELETE FROM provider_widgets WHERE board_id=?1 AND NOT EXISTS (
            SELECT 1 FROM board_items WHERE board_id=?1 AND kind='widget'
-           AND json_extract(board_items.config,'$.widget_id')=provider_widgets.id)",
-        [id],
+           AND json_extract(board_items.config,'$.widget_id')=provider_widgets.id)
+           AND NOT EXISTS (
+             SELECT 1 FROM drafts draft
+             CROSS JOIN json_each(draft.value,'$.sections') section
+             CROSS JOIN json_each(section.value,'$.items') item
+             WHERE draft.key='board:' || ?1 AND draft.updated>=?2
+               AND json_extract(item.value,'$.payload.kind')='widget'
+               AND json_extract(item.value,'$.payload.widget_id')=provider_widgets.id
+           )",
+        params![id, now - 7 * 86400],
     )?;
     conn.execute(
         "UPDATE boards SET sections=?2,version=version+1,updated=?3 WHERE id=?1",
@@ -680,6 +688,51 @@ fn live_containers(state: &AppState, now: i64) -> Vec<(ContainerMatch, Container
         .collect();
     rows.sort_by(|a, b| a.1.name.cmp(&b.1.name));
     rows
+}
+
+// Early milestone builds migrated saved placements without updating drafts.
+fn repair_legacy_draft(
+    conn: &Connection,
+    board: &BoardSummary,
+    draft: &mut BoardDocument,
+) -> Result<(), ApiError> {
+    if board.version != draft.version {
+        return Ok(());
+    }
+    let existing = document(conn, board)?;
+    let mut saved_widgets = HashMap::new();
+    for item in existing.sections.iter().flat_map(|section| &section.items) {
+        if let BoardPayload::Widget { widget_id, .. } = &item.payload {
+            if widget_id.starts_with("provider:") {
+                saved_widgets.insert(&item.id, widget_id);
+            }
+        }
+    }
+    let mut legacy_ids = HashMap::new();
+    for item in draft.sections.iter().flat_map(|section| &section.items) {
+        if let (BoardPayload::Widget { widget_id, .. }, Some(saved)) =
+            (&item.payload, saved_widgets.get(&item.id))
+        {
+            if widget_id.starts_with("provider:")
+                && widget_id != *saved
+                && super::provider_widgets::placement_scope(conn, widget_id)?.is_none()
+            {
+                legacy_ids.insert(widget_id.clone(), *saved);
+            }
+        }
+    }
+    for item in draft
+        .sections
+        .iter_mut()
+        .flat_map(|section| &mut section.items)
+    {
+        if let BoardPayload::Widget { widget_id, .. } = &mut item.payload {
+            if let Some(saved) = legacy_ids.get(widget_id) {
+                widget_id.clone_from(saved_widgets.get(&item.id).unwrap_or(saved));
+            }
+        }
+    }
+    Ok(())
 }
 
 // Keep the placement IDs so a scoped editor can round-trip the board.
@@ -1101,13 +1154,14 @@ pub(super) async fn route(
         }
         Handler::BoardDraft => {
             let draft = db.dashboard(|c| -> Result<_, ApiError> {
-                get(c, id)?;
+                let board = get(c, id)?;
                 let row: Option<(String,i64)> = c.query_row(
                     "SELECT value,updated FROM drafts WHERE user_id=?1 AND key=?2 AND updated>=?3",
                     params![user.id,draft_key,now-7*86400], |r| Ok((r.get(0)?,r.get(1)?)),
                 ).optional()?;
                 row.map(|(value, updated)| {
                     let mut document = decode(&value)?;
+                    repair_legacy_draft(c, &board, &mut document)?;
                     mask_provider_widgets(c, user, &mut document)?;
                     Ok(BoardDraft { document, updated })
                 })

@@ -26,7 +26,9 @@ existing layouts.
 
 ## Generic HTTP
 
-Generic HTTP reads a JSON endpoint. In **JSON values**, enter up to 16 JSON
+Generic HTTP connection tests and **HTTP status** widgets check the HTTP status.
+Any 2xx response succeeds, including 204 and plain-text 200. **JSON values**
+requires a JSON response. Enter up to 16 JSON
 paths, one per line. Paths can address nested fields (`stats.users`) and array
 elements (`items[0].title`). With no saved credential, use `$` for the entire
 document or leave the paths blank for a short preview. Connections with a

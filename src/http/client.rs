@@ -168,6 +168,7 @@ pub(crate) struct BoundPolicy {
     pub pin: Option<Fingerprint>,
     pub local_only: bool,
     pub max_body: Option<usize>,
+    pub status_only: bool,
 }
 
 struct IntegrationPolicy {
@@ -176,6 +177,7 @@ struct IntegrationPolicy {
     tls: Option<Arc<rustls::ClientConfig>>,
     local_only: bool,
     max_body: usize,
+    status_only: bool,
 }
 
 #[derive(Debug)]
@@ -239,6 +241,7 @@ pub(crate) async fn send_step(
         tls,
         local_only: options.local_only,
         max_body: options.max_body.unwrap_or(MAX_BODY).min(MAX_BODY),
+        status_only: options.status_only,
     };
     send_with_policy(req, policy, Some(integration))
         .await
@@ -400,11 +403,15 @@ async fn exchange(
                 }
             }
         }
-        let body = read_body(
-            response.into_body(),
-            policy.map_or(MAX_BODY, |p| p.max_body),
-        )
-        .await?;
+        let body = if policy.as_ref().is_some_and(|p| p.status_only) {
+            Bytes::new()
+        } else {
+            read_body(
+                response.into_body(),
+                policy.map_or(MAX_BODY, |p| p.max_body),
+            )
+            .await?
+        };
         Ok(Response {
             status,
             body,
