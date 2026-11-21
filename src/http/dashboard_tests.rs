@@ -1206,10 +1206,14 @@ async fn setup_resumes_and_commits_once_with_a_failing_connection() {
     let http_id = "00000000000000000000000000000003";
     let http_item = json!({"id":http_id,"included":true,"name":"Private service","group":"Tools",
         "target":{"kind":"http","base_url":"http://127.0.0.1:1/","enabled":true}});
+    let earlier_integration = json!({
+        "id":"00000000000000000000000000000004","included":true,"name":"Earlier integration","group":"Tools",
+        "target":{"kind":"http","base_url":"https://example.test/","enabled":true}
+    });
     let mut document = json!({
         "theme":"ember","step":"connections","items":[
             item("web","00000000000000000000000000000001"),
-            item("db","00000000000000000000000000000002"),http_item
+            item("db","00000000000000000000000000000002"),earlier_integration,http_item
         ]
     });
     let update = json!({"revision":0,"document":document,"credentials":[{
@@ -1242,7 +1246,7 @@ async fn setup_resumes_and_commits_once_with_a_failing_connection() {
     assert!(!result.to_string().contains("setup-test-only"));
 
     document["step"] = json!("review");
-    document["items"][2]["target"]["base_url"] = json!("http://127.0.0.1:2/");
+    document["items"][3]["target"]["base_url"] = json!("http://127.0.0.1:2/");
     resumed
         .json(
             "PUT",
@@ -1281,7 +1285,7 @@ async fn setup_resumes_and_commits_once_with_a_failing_connection() {
             .status,
         409
     );
-    document["items"][2]["target"]["base_url"] = json!("http://127.0.0.1:1/");
+    document["items"][3]["target"]["base_url"] = json!("http://127.0.0.1:1/");
     resumed
         .json(
             "PUT",
@@ -1318,12 +1322,27 @@ async fn setup_resumes_and_commits_once_with_a_failing_connection() {
     let connections = resumed
         .json("GET", "/api/v1/integrations", Value::Null, 200)
         .await;
-    assert_eq!(connections.as_array().unwrap().len(), 1);
-    assert_eq!(connections[0]["has_secret"], true);
+    assert_eq!(connections.as_array().unwrap().len(), 2);
+    assert_eq!(connections[1]["has_secret"], true);
     assert!(!connections.to_string().contains("setup-test-only"));
     let done = resumed.json("GET", SETUP_DRAFT, Value::Null, 200).await;
     assert_eq!(done["board_id"], id);
     assert_eq!(done["credential_origins"], json!({}));
+    assert_eq!(
+        resumed
+            .call(
+                "PUT",
+                SETUP_DRAFT,
+                json!({"revision":done["revision"],"document":{},"credentials":[]})
+            )
+            .await
+            .status,
+        409
+    );
+    assert_eq!(
+        resumed.json("GET", SETUP_DRAFT, Value::Null, 200).await,
+        done
+    );
     let boot = resumed
         .json("GET", "/api/v1/bootstrap", Value::Null, 200)
         .await;
