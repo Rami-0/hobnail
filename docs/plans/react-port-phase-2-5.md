@@ -49,11 +49,13 @@ All **[exp]**. Image display size is the `docker images` figure; content is
 | main (`680a339`, retained phase 0–1 baseline) | 6,633,904 | 11.6 MB / 3,910,610 |
 | phase 1 | 7,780,784 | 13.3 MB / 4,448,685 |
 | M5 (`b93b92e`) | **7,694,768** | **13.3 MB / 4,578,941** |
+| Finish Hobnail M1 | 7,723,440 | 13.4 MB / 4,579,996 |
 
 M5 exceeded the original **13 MB** budget. The owner accepted the roughly
 13.3 MB image on 2026-11-20. M1 enforces the signed-off **13,500,000 B** limit
 using the exact Docker image-list size in `scripts/check-image-size.py`,
-called before deployment. Historical M5 evidence:
+called before deployment. The local x86-64 M1 release image used
+**13,359,582 B**, leaving 140,418 B of headroom. Historical M5 evidence:
 [startup and size output](react-port-raw/m5/startup.log).
 
 ## Bundle
@@ -237,14 +239,34 @@ No container-membership change occurred during this capture, so it does not
 measure a `containers` event. A 40-widget/container board and a mature history
 can be larger. [Raw responses/event sizes](react-port-raw/m5/json-sizes.log).
 
-**D9 recommendation [assume].** Add negotiated compression for larger JSON
-responses after a separate reviewed implementation: the measured containers,
-strips and board responses have substantial savings (63,725→6,596 B,
-33,170→611 B, 12,547→1,757 B). Keep a minimum-size threshold to avoid gzip overhead
-on tiny responses (the hello event grows 123→124 B). Do not apply this experiment's
-per-event gzip figures directly to SSE: streaming needs bounded buffers and
-flush-latency/CPU/memory measurements. Keep SSE uncompressed until that evidence
-exists. No compression was implemented in M5.
+**D9 built in M1.** Buffered JSON bodies above 1,024 B use level-1 gzip
+when accepted and carry `Vary: Accept-Encoding` for either representation.
+An explicit `gzip;q=0` selects identity. Both SSE endpoints and the log
+download bypass negotiation. Responses with an existing encoding keep it.
+
+**[exp]** Ran the static musl x86-64 M1 release binary on loopback port 3300
+on an Intel i5-7200U, with a fresh scratch database and an authenticated
+Owner. A fake Docker Unix socket served 150 containers across 13 stacks.
+SQLite held 241 synthetic system samples at 15-second intervals for a
+fixed one-hour history window. The legacy config contained 40 synthetic
+bookmarks. A keep-alive client alternated identity and gzip using the same
+binary and data to isolate the encoding cost. Each cell reports the median
+of five 2,000-request blocks per encoding. CPU is server user plus system
+time from `/proc/<pid>/stat` (100 Hz), divided by the request count. Body
+sizes exclude HTTP headers. All 80,000 timed requests succeeded.
+
+| Response | Identity B | Gzip request B | Identity CPU µs/request | Gzip request CPU µs/request |
+|---|---:|---:|---:|---:|
+| `/api/v1/containers` | 61,203 | 4,291 | 2,990 | 3,345 |
+| `/api/v1/history`, one hour | 40,593 | 12,741 | 2,940 | 3,565 |
+| `/api/v1/settings`, default settings | 22 | 22 | 165 | 165 |
+| `/api/settings/config`, 40 bookmarks | 3,372 | 434 | 570 | 690 |
+
+The client decoded gzip and checked it against identity. It also verified
+that `gzip;q=0` suppressed compression even with a wildcard and that eligible
+responses varied in both cases. The 22 B settings response stayed below the
+threshold. These figures cover local request handling and depend on the
+payload and host. They exclude client decoding and LAN transfer time.
 
 ## Browser performance
 
@@ -415,9 +437,10 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    reports HTTPS. Plain HTTP keeps working. For the per-IP login limit, the
    same trust list enables rightmost-untrusted `X-Forwarded-For` handling.
    The credential queue is blocked by the lifetime memory budget. A single
-   existing Argon2id hash uses 19 MiB and the M5 benchmark peaked at 22.24 MiB
-   even with one operation at a time. The shared lock and its 429 responses
-   remain in place.
+   existing Argon2id hash uses 19 MiB. With one operation at a time, M5
+   peaked at 20.81 MiB on the isolated sign-in run and 22.24 MiB under
+   dashboard load. Two permits would require 38 MiB for hash workspaces
+   alone. The shared lock and its 429 responses remain in place.
 9. Credentials are bound to **origin, not path**. The database stores plaintext
    tokens with their binding; no token is returned. Tests stop at **any redirect**
    rather than following even same-origin redirects. Public roots only: no
