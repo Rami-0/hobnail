@@ -37,6 +37,7 @@ mod arr;
 mod connection;
 mod generic;
 mod glances;
+mod home_assistant;
 mod immich;
 mod jellyfin;
 mod jellyseerr;
@@ -84,6 +85,7 @@ pub const REGISTRY: &[Provider] = &[
     immich::IMMICH,
     transmission::TRANSMISSION,
     sabnzbd::SABNZBD,
+    home_assistant::HOME_ASSISTANT,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
@@ -303,8 +305,7 @@ fn within_response_limit<T>(result: Result<T, Fault>) -> Result<Option<T>, Fault
 fn display_text(conn: &Conn<'_>, mut text: String) -> String {
     conn.output_redactor().redact(&mut text);
     if let Some((end, _)) = text.char_indices().nth(160) {
-        text.truncate(end);
-        text.push('…');
+        return format!("{}…", &text[..end]);
     }
     text
 }

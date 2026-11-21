@@ -397,6 +397,22 @@ Verified from:
 
 UNVERIFIED: Releases outside v4.5.5 and live reverse proxies.
 
+## Home Assistant
+
+Enter the Home Assistant URL and a long-lived access token from your profile.
+Use an account that can read the selected entities. The connection test checks
+`GET /api/` with the token in the Bearer header.
+
+**Entity states** takes up to 16 distinct IDs such as `sensor.temperature`,
+one per line. It reads each ID separately and shows its state, any unit of
+measurement and the on/off counts across those entities. Missing and oversized
+entities appear as unavailable while other readings remain visible.
+
+Verified from: [Home Assistant REST API](https://contributors.home-assistant.io/core/internals/rest-api/)
+and [Core 2025.11.0 API source](https://github.com/home-assistant/core/blob/2025.11.0/homeassistant/components/api/__init__.py).
+
+UNVERIFIED: live installations and the permissions of custom authentication providers.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
