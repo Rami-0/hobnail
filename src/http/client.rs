@@ -118,6 +118,33 @@ async fn send_with_policy(
     }
 }
 
+// Evaluate the saved path before appending any provider endpoint. Reject
+// escaped percent signs as well, since another proxy can decode them again.
+fn safe_base_path(path: &str) -> bool {
+    path.split('/').all(|segment| {
+        let mut decoded = Vec::with_capacity(segment.len());
+        let mut bytes = segment.as_bytes().iter().copied();
+        while let Some(byte) = bytes.next() {
+            let byte = if byte == b'%' {
+                let Some(high) = bytes.next().and_then(|b| char::from(b).to_digit(16)) else {
+                    return false;
+                };
+                let Some(low) = bytes.next().and_then(|b| char::from(b).to_digit(16)) else {
+                    return false;
+                };
+                (high * 16 + low) as u8
+            } else {
+                byte
+            };
+            if matches!(byte, b'/' | b'\\' | b'%') || byte.is_ascii_control() {
+                return false;
+            }
+            decoded.push(byte);
+        }
+        !matches!(decoded.as_slice(), b"." | b"..")
+    })
+}
+
 /// Canonical origin for a dashboard connection URL. Credentials belong in the
 /// separate credential field, so URLs with user information or queries are rejected.
 pub(crate) fn origin(url: &str) -> Option<String> {
@@ -125,6 +152,9 @@ pub(crate) fn origin(url: &str) -> Option<String> {
         return None;
     }
     let uri: hyper::Uri = url.parse().ok()?;
+    if !safe_base_path(uri.path()) {
+        return None;
+    }
     let scheme = uri.scheme_str()?;
     let default = match scheme {
         "http" => 80,

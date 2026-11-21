@@ -523,3 +523,34 @@ async fn debug_omits_request_response_credential_and_session_material() {
     );
     assert!(!debug.contains(material));
 }
+
+#[test]
+fn rejects_ambiguous_paths_in_saved_targets() {
+    for path in [
+        "/prefix/./leaf",
+        "/prefix/../leaf",
+        "/prefix/%2e/leaf",
+        "/prefix/.%2E/leaf",
+        "/prefix/%2Fleaf",
+        "/prefix/%5cleaf",
+        "/prefix/%252e%252e/leaf",
+        "/prefix/%252fleaf",
+        "/prefix/%",
+        "/prefix/%00",
+    ] {
+        assert!(
+            client::origin(&format!("https://fixture.test{path}")).is_none(),
+            "{path}"
+        );
+    }
+    for path in [
+        "/prefix/multi.part",
+        "/prefix/encoded%20space",
+        "/prefix/a%2Eb",
+    ] {
+        assert!(
+            client::origin(&format!("https://fixture.test{path}")).is_some(),
+            "{path}"
+        );
+    }
+}
