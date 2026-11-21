@@ -227,6 +227,22 @@ Verified from:
 
 UNVERIFIED: Other versions and live reverse proxies.
 
+## Technitium DNS
+
+Enter the web console URL and an API token created for a user with
+Dashboard View, Zones View and View on each zone you want counted. The server
+and reverse proxies may include the token query parameter in access logs.
+
+**DNS activity** shows queries and blocks from the last hour and the total
+number of zones visible to that user. Hobnail requests one zone per page
+and reads only the total. Verified against Technitium DNS Server v14.3.0.
+
+Verified from:
+
+- [Upstream v14.3.0 API reference](https://github.com/TechnitiumSoftware/DnsServer/blob/v14.3.0/APIDOCS.md)
+
+UNVERIFIED: Older pagination contracts, cluster aggregation and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

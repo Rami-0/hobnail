@@ -43,6 +43,7 @@ mod prowlarr;
 mod qbittorrent;
 mod radarr;
 mod sonarr;
+mod technitium;
 mod uptime_kuma;
 
 #[cfg(test)]
@@ -66,6 +67,7 @@ pub const REGISTRY: &[Provider] = &[
     prowlarr::PROWLARR,
     jellyseerr::JELLYSEERR,
     adguard_home::ADGUARD_HOME,
+    technitium::TECHNITIUM,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
