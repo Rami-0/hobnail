@@ -264,6 +264,27 @@ Verified from:
 
 UNVERIFIED: OAuth token renewal, live responses and large tailnets. Use the default `-` for account aliases containing `@`.
 
+## WireGuard (wg-easy)
+
+Enter the wg-easy Web UI URL and password. For v15 also enter the username
+of the account whose peers you want to see. A regular v15 user can see
+their assigned peers. An administrator can see all peers. v14 exposes the
+shared Web UI password and has no narrower scope.
+
+**WireGuard peers** shows the accessible peer count and up to ten peers
+with their latest handshake and received and sent bytes. Hobnail exchanges
+credentials for a session cookie. It uses the v14 password-only login with
+`connect.sid`, or the v15 username/password login with `wg-easy`.
+
+Verified from:
+
+- [Upstream v14 session routes](https://github.com/wg-easy/wg-easy/blob/v14/src/lib/Server.js)
+- [Upstream v14 peer metrics](https://github.com/wg-easy/wg-easy/blob/v14/src/lib/WireGuard.js)
+- [Upstream v15.1.0 session and client routes](https://github.com/wg-easy/wg-easy/tree/v15.1.0/src/server/api)
+- [Upstream v15.1.0 cookie and peer metrics](https://github.com/wg-easy/wg-easy/tree/v15.1.0/src/server/utils)
+
+UNVERIFIED: v14 without a password, v15 accounts with two-factor authentication, other releases and live instances.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

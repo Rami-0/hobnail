@@ -46,6 +46,7 @@ mod sonarr;
 mod tailscale;
 mod technitium;
 mod uptime_kuma;
+mod wg_easy;
 
 #[cfg(test)]
 mod batch_test;
@@ -70,6 +71,7 @@ pub const REGISTRY: &[Provider] = &[
     adguard_home::ADGUARD_HOME,
     technitium::TECHNITIUM,
     tailscale::TAILSCALE,
+    wg_easy::WG_EASY,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
