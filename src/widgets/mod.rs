@@ -221,7 +221,63 @@ pub struct WidgetOutput {
     pub stale_since: Option<u64>,
 }
 
+// Retained display and alert values share one cache. Reserve space for a
+// later error beside the last good data. The aggregate is 1.25% of 20 MiB.
+const WIDGET_OUTPUT_BYTES: usize = 32 * 1024;
+const WIDGET_CACHE_BYTES: usize = 256 * 1024;
+const WIDGET_ERROR_BYTES: usize = 512;
+
+fn map_bytes<'a>(len: usize, entries: impl Iterator<Item = (&'a String, &'a Value)>) -> usize {
+    // Allow for the tree root, node slack and links as well as the entries.
+    let overhead = if len == 0 { 0 } else { 1024 + 256 * len };
+    overhead
+        + entries
+            .map(|(key, value)| key.capacity() + value_bytes(value))
+            .sum::<usize>()
+}
+
+fn value_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(s) => s.capacity(),
+        Value::Array(values) => {
+            values.capacity() * size_of::<Value>() + values.iter().map(value_bytes).sum::<usize>()
+        }
+        Value::Object(values) => map_bytes(values.len(), values.iter()),
+        _ => 0,
+    }
+}
+
 impl WidgetOutput {
+    fn retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self.display.rows.capacity() * size_of::<(String, String)>()
+            + self
+                .display
+                .rows
+                .iter()
+                .map(|(label, value)| label.capacity() + value.capacity())
+                .sum::<usize>()
+            + [&self.display.headline, &self.display.text, &self.error]
+                .into_iter()
+                .flatten()
+                .map(String::capacity)
+                .sum::<usize>()
+            + map_bytes(self.values.len(), self.values.iter())
+    }
+
+    fn bound(&mut self) {
+        if let Some(error) = &mut self.error {
+            if error.capacity() > WIDGET_ERROR_BYTES {
+                *error = error[..error.floor_char_boundary(WIDGET_ERROR_BYTES)].to_owned();
+            }
+        }
+        if self.retained_bytes() > WIDGET_OUTPUT_BYTES - WIDGET_ERROR_BYTES {
+            self.display = WidgetBody::default();
+            self.values.clear();
+            self.error = Some("Widget output exceeded the 32 KiB retained data limit.".into());
+        }
+    }
+
     pub(crate) fn record(&mut self, mut next: Self) {
         if next.error.is_some() {
             let last_good = self
@@ -241,6 +297,7 @@ impl WidgetOutput {
 #[derive(Default)]
 pub(crate) struct WidgetCache {
     slots: std::collections::HashMap<String, WidgetSlot>,
+    retained_bytes: usize,
 }
 
 #[derive(Default)]
@@ -248,11 +305,13 @@ struct WidgetSlot {
     started: u64,
     completed: Option<(u64, Instant)>,
     output: Option<WidgetOutput>,
+    bytes: usize,
 }
 
 impl WidgetCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+        self.retained_bytes = 0;
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<&WidgetOutput> {
@@ -275,7 +334,7 @@ impl WidgetCache {
         id: &str,
         attempt: u64,
         completed: Instant,
-        out: WidgetOutput,
+        mut out: WidgetOutput,
     ) -> bool {
         let Some(slot) = self.slots.get_mut(id) else {
             return false;
@@ -284,9 +343,24 @@ impl WidgetCache {
             return false;
         }
         slot.completed = Some((attempt, completed));
+        out.bound();
+        self.retained_bytes -= slot.bytes;
         match &mut slot.output {
             Some(current) => current.record(out),
             None => slot.output = Some(out),
+        }
+        slot.bytes = slot.output.as_ref().map_or(0, WidgetOutput::retained_bytes);
+        self.retained_bytes += slot.bytes;
+        while self.retained_bytes > WIDGET_CACHE_BYTES {
+            let oldest = self
+                .slots
+                .iter_mut()
+                .filter(|(other, slot)| other.as_str() != id && slot.output.is_some())
+                .min_by_key(|(_, slot)| slot.completed.map(|(_, at)| at))
+                .expect("aggregate budget exceeds the single-widget budget")
+                .1;
+            self.retained_bytes -= std::mem::take(&mut oldest.bytes);
+            oldest.output = None;
         }
         true
     }

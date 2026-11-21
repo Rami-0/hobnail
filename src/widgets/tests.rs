@@ -748,3 +748,80 @@ fn widget_refresh_uses_elapsed_time_and_orders_overlapping_attempts() {
     assert_eq!(out.display.headline.as_deref(), Some("last good"));
     assert_eq!(cache.deadline("widget", refresh), Some(completed + refresh));
 }
+
+#[test]
+fn retained_widget_output_enforces_byte_budgets_for_values_and_last_good_data() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let id = "bounded-widget";
+    let good = cache.begin(id);
+    assert!(cache.record(
+        id,
+        good,
+        now,
+        WidgetOutput {
+            fetched_at: 1,
+            display: WidgetBody {
+                headline: Some("😀".repeat(6500)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    ));
+    for oversized in [
+        WidgetOutput {
+            display: WidgetBody {
+                text: Some("😀".repeat(9000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        WidgetOutput {
+            values: BTreeMap::from([(
+                "nested".into(),
+                serde_json::json!([{"value": "x".repeat(40000)}]),
+            )]),
+            ..Default::default()
+        },
+        WidgetOutput {
+            error: Some("é".repeat(2000)),
+            ..Default::default()
+        },
+    ] {
+        let attempt = cache.begin(id);
+        assert!(cache.record(id, attempt, now, oversized));
+        let output = cache.get(id).unwrap();
+        assert!(output.error.as_ref().unwrap().len() <= WIDGET_ERROR_BYTES);
+        assert_eq!(output.stale_since, Some(1));
+        assert_eq!(output.display.headline.as_ref().unwrap().len(), 26000);
+        assert!(output.retained_bytes() <= WIDGET_OUTPUT_BYTES);
+    }
+}
+
+#[test]
+fn widget_cache_evicts_output_within_the_aggregate_budget_but_keeps_its_deadline() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let count = 20;
+    for i in 0..count {
+        let id = format!("widget-{i}");
+        let attempt = cache.begin(&id);
+        let output = WidgetOutput {
+            display: WidgetBody {
+                headline: Some("a".repeat(28000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(cache.record(&id, attempt, now + Duration::from_secs(i), output));
+        assert!(cache.retained_bytes <= WIDGET_CACHE_BYTES);
+    }
+    assert!(cache.get("widget-0").is_none());
+    assert_eq!(
+        cache.deadline("widget-0", Duration::from_secs(1)),
+        Some(now + Duration::from_secs(1))
+    );
+    assert!(cache.get("widget-19").is_some());
+    cache.clear();
+    assert_eq!(cache.retained_bytes, 0);
+}

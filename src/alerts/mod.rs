@@ -124,7 +124,6 @@ use crate::config::Config;
 use crate::model::{Snapshot, SystemStats};
 use crate::state::AppState;
 use crate::util::unix_now;
-use crate::widgets::WidgetOutput;
 use engine::{Engine, Event, EventKind, Record};
 use rules::{CheckResult, HttpState};
 use template::Vars;
@@ -630,7 +629,6 @@ struct HttpProbe {
 
 #[derive(Default)]
 struct WidgetProbe {
-    out: Option<WidgetOutput>,
     next_due: Option<Instant>,
     in_flight: bool,
 }
@@ -648,11 +646,8 @@ enum ProbeResult {
         res: CheckResult,
     },
     Widget {
-        config: Arc<Config>,
         id: String,
-        attempt: u64,
-        completed: Instant,
-        out: WidgetOutput,
+        accepted: bool,
     },
 }
 
@@ -732,12 +727,10 @@ impl Probes {
                 let cache = state.widgets.lock().unwrap();
                 cache
                     .deadline(&w.id, refresh)
-                    .filter(|due| *due > tick)
-                    .and_then(|due| Some((due, cache.get(&w.id)?.clone())))
+                    .filter(|due| *due > tick && cache.get(&w.id).is_some())
             };
-            if let Some((due, out)) = cached {
+            if let Some(due) = cached {
                 p.next_due = Some(due);
-                p.out = Some(out);
                 continue;
             }
             let Some(attempt) = state.begin_widget(cfg, &w.id) else {
@@ -745,18 +738,11 @@ impl Probes {
             };
             p.in_flight = true;
             p.next_due = Some(crate::widgets::refresh_deadline(tick, refresh));
-            let (w, config, tx) = (w.clone(), cfg.clone(), tx.clone());
+            let (state, w, config, tx) = (state.clone(), w.clone(), cfg.clone(), tx.clone());
             tokio::spawn(async move {
                 let out = crate::widgets::run(&w, &config.http).await;
-                let _ = tx
-                    .send(ProbeResult::Widget {
-                        config,
-                        id: w.id,
-                        attempt,
-                        completed: Instant::now(),
-                        out,
-                    })
-                    .await;
+                let accepted = state.record_widget(&config, &w.id, attempt, Instant::now(), out);
+                let _ = tx.send(ProbeResult::Widget { id: w.id, accepted }).await;
             });
         }
 
@@ -782,7 +768,7 @@ impl Probes {
         }
     }
 
-    fn apply(&mut self, state: &AppState, r: ProbeResult) {
+    fn apply(&mut self, r: ProbeResult) {
         match r {
             ProbeResult::Http { rule, url, res } => {
                 if let Some(p) = self.http.get_mut(&rule) {
@@ -792,19 +778,10 @@ impl Probes {
                     }
                 }
             }
-            ProbeResult::Widget {
-                config,
-                id,
-                attempt,
-                completed,
-                out,
-            } => {
-                let accepted = state.record_widget(&config, &id, attempt, completed, out.clone());
+            ProbeResult::Widget { id, accepted } => {
                 if let Some(p) = self.widgets.get_mut(&id) {
                     p.in_flight = false;
-                    if accepted {
-                        p.out = Some(out);
-                    } else {
+                    if !accepted {
                         p.next_due = None;
                     }
                 }
@@ -839,9 +816,10 @@ fn evaluate(
     cfg: &Config,
     probes: &Probes,
     snap: &Snapshot,
-    host: &str,
+    state: &AppState,
     now: u64,
 ) -> usize {
+    let host = &state.env.hostname;
     let mut events = Vec::new();
     for r in cfg.alerts.iter().filter(|r| r.enabled()) {
         let ro = match r.kind {
@@ -855,12 +833,10 @@ fn evaluate(
                 .as_ref()
                 .and_then(|h| h.stats.as_ref())
                 .and_then(|s| rules::eval_host(r, s)),
-            RuleKind::Widget => r
-                .widget
-                .as_ref()
-                .and_then(|w| probes.widgets.get(w))
-                .and_then(|p| p.out.as_ref())
-                .and_then(|o| rules::eval_widget(r, o)),
+            RuleKind::Widget => r.widget.as_deref().and_then(|id| {
+                let cache = state.widgets.lock().unwrap();
+                cache.get(id).and_then(|out| rules::eval_widget(r, out))
+            }),
             RuleKind::LogMatch => {
                 let window = r.window.map(|d| d.0.as_secs()).unwrap_or(300);
                 crate::logs::watch::rule_view(&r.name, window, now)
@@ -927,7 +903,7 @@ pub async fn run(state: Arc<AppState>) {
                 chan_check = Some((generation, now));
             }
             let snap = state.snapshot();
-            if evaluate(&mut c, &cfg, &probes, &snap, &state.env.hostname, now) > 0 {
+            if evaluate(&mut c, &cfg, &probes, &snap, &state, now) > 0 {
                 wake.notify_one();
             }
             c.flush_history(&state.db, now);
@@ -959,7 +935,7 @@ pub async fn run(state: Arc<AppState>) {
                     break;
                 }
                 Some(p) = rx.recv() => {
-                    probes.apply(&state, p);
+                    probes.apply(p);
                     break;
                 }
                 m = events.recv() => match m {
