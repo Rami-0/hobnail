@@ -227,7 +227,7 @@ So nobody "fixes" it.
 |---|---|---|---|---|---|---|
 | SET-40 | major | The URL is not checked although the hint says "http(s) link.": "not a url" and `javascript:alert(1)` were both saved as bookmarks (HTTP 200) | Accept only http(s) URLs, error on the field | `src/settings/ops.rs:877`, `src/ui/settings/bookmarks.rs:25` | P1 | fixed c38e18b |
 | SET-41 | major | One long name without spaces (308 characters) breaks the tab: the Name column takes the width, every URL wraps three characters per line, one row grows to thousands of pixels and the page scrolls sideways (document 2973 px wide at 1440) | Long values wrap or are cut with an ellipsis; a length limit in the form | `static/settings.css:132` | P5 | fixed 4eb67a3 |
-| SET-42 | minor | Each click on an up / down arrow is a full save: a request, a toast, a new revision ("bookmarks: reordered") and a rebuilt list. The same for widgets | Drag or arrows that save once | `static/settings.js:581`, `static/settings.js:639` | P2 | deferred: owner decision at the design gate (Y13): the one-click reorder arrows stay, one revision per step |
+| SET-42 | minor | Each click on an up / down arrow is a full save: a request, a toast, a new revision ("bookmarks: reordered") and a rebuilt list. The same for widgets | Drag or arrows that save once | `static/settings.js:581`, `static/settings.js:639` | P2 | fixed in M2 (D17): stage arrow moves, then Save order or Cancel |
 | SET-43 | minor | The same name can be added any number of times (five `qa-bm` rows); they cannot be told apart in the list or in the delete question | Warn on a duplicate name | `static/settings.js:567` | P1 | fixed 4eb67a3 |
 
 ### Widgets
@@ -1069,7 +1069,7 @@ findings. Current measured passes and misses are in the
 
 | Finding | Current outcome |
 |---|---|
-| SET-42 | Board edit mode has private drafts and explicit Save/Cancel, one document write per session (D17). Legacy config collection reorder arrows still write one revision per click; the original finding is only partly addressed. |
+| SET-42 | Board documents use private drafts and explicit Save/Cancel. Legacy TOML collections stage arrow moves and submit the final order once on **Save order**. The Settings browser check asserts three moves write zero revisions, Cancel writes zero, and Save writes exactly one. |
 | SET-46 | Still deferred. Fetch now returns structured display/values, not the raw upstream response. There are no provider integrations to replace this workflow. |
 | SET-69 | The React raw editor wraps on phones (`web/src/routes/settings/settings.css`); tested by settings-check. |
 | NAV-81 | The client has a shared sign-in/credential-entry flow. Application data requires login; obsolete public/read-only lock prompts were removed. |

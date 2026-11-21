@@ -484,10 +484,12 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    tokens with their binding; no token is returned. Tests stop at **any redirect**
    rather than following even same-origin redirects. Public roots only: no
    self-signed certificates or fingerprint pinning (D21 step b not built).
-10. **No providers** were selected or implemented (D19); guided onboarding beyond
-    owner password/account creation (appearance/discover/configure/review) is
-    not built. Boards/drafts and generic connection entities are not acceptance
-    of those product outcomes. Integration icons remain opt-in dashboard-icons.
+10. M2 adds the five-step owner setup wizard, resumable SQLite drafts, and
+    an idempotent commit that opens a first board containing the owner's
+    selections. Empty boards offer Add and Discover. The first-board tour is
+    skippable, saved per account, and replayable. Service-specific providers
+    and the provider catalog remain deferred (D19). Integration icons remain
+    opt-in dashboard-icons.
 11. UI SDK is installed under the owner's explicit D2 age exception, but its
     project-local skill was **not installed**: skills CLI 1.9.0, published
     2026-11-16, was younger than seven days (`web/AGENTS.md`). Other npm packages
@@ -497,9 +499,11 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 13. M5 added the requested API reference drift test and its Docker context input.
     The memory asset graph required two isolated script fixes; the original
     run and the stopped intermediate run are not passed off as full workloads.
-14. Legacy TOML collection arrows still save one revision per click. Board edit
-    mode uses explicit Save/Cancel and private drafts; it does not remove every
-    instance of SET-42. Widgets have no separate last-good result on error.
+14. M2 closes SET-42 for legacy TOML collection arrows with staged moves
+    and explicit Save order and Cancel. One Save writes the complete order
+    in one revision. Widget tiles and manual HTTP integration retests now
+    show retained results with an aged stale badge and the latest error. An
+    initial failure displays only the error, and recovery clears the badge.
 
 ## Budgets still missed
 

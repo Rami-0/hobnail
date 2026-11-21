@@ -161,3 +161,10 @@ atomically (temp file + rename, same mode) → add a revision → record a
   confirm.
 - *Security:* recent authentication events and account links. Password and
   session management live on `/app/account`; password changes revoke sessions.
+
+### Reorder a legacy collection
+
+Use the up and down buttons to stage changes to TOML collection order. Choose
+**Save order** to apply all moves in one revision or **Cancel** to restore the
+saved list. If the configuration changes during the edit, cancel the draft
+and start again from the latest list.

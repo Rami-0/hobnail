@@ -20,6 +20,13 @@ blocked, protocol. Any redirect stops the test and returns a non-success HTTP
 status verdict; credentials are never forwarded along a redirect. A user may
 make three tests in a rolling ten-second window.
 
+Settings and board tiles show the latest saved test outcome. If a retest fails
+after a success, they keep the last successful test's age and latency with a
+stale badge and the current failure reason. Evidence is kept in memory for
+the running server and cleared when the connection or its credentials change.
+A successful test describes that attempt, since generic HTTP integrations
+have no scheduled polling.
+
 `[http] allow_hosts` applies to hostname resolution. With an empty allow-list,
 private LAN destinations are allowed, but loopback, link-local/metadata,
 multicast, reserved IPv4 and selected translation/metadata IPv6 addresses are

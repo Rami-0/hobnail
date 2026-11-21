@@ -64,3 +64,23 @@ echo, or stdin), not first-run setup. It recovers the owner and revokes sessions
 A database migrated from the legacy shared-password model is locked against
 browser ownership claims: the old password is discarded and host recovery is
 required. Keep a pre-upgrade database copy; migrations only move forward.
+
+## Guided setup
+
+After browser owner creation, setup opens Appearance → Discover services →
+Select what to include → Configure connections → Review dashboard.
+Use Back, Continue or Skip to move through the optional steps. The draft lives
+in SQLite, so signing in as the same owner in another browser resumes the
+saved step and choices. The selected theme previews during setup and applies
+as the dashboard default on creation.
+
+Discovery suggests Docker services, bookmarks, widgets and saved integrations.
+When Docker is unavailable, use the remaining suggestions or add links and HTTP
+integrations manually. Include, exclude, rename and group the items before
+reviewing them. Connection tests run from Hobnail. You can continue after a
+failed test. Save a credential explicitly to include it with the connection.
+Draft responses show the origin of each saved credential.
+
+Creating the board saves the reviewed selection once, even if the request is
+retried. The resulting Home board opens immediately. Its Add and Discover
+actions and first-use tour are described in [Boards](boards.md).

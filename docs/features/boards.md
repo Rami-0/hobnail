@@ -10,7 +10,7 @@ A board has a name, icon and position. Sections have a title and ordered items.
 Item kinds are container, link, widget and integration. Container targets use
 Compose project/service where available, otherwise the container name. Widget
 items show an existing configured widget's structured read model. Integration
-tiles show saved connection metadata, not provider health. A deleted or missing
+tiles show connection metadata and the outcome of a manual connection test. A deleted or missing
 target remains visible as missing instead of silently vanishing.
 
 Responsive spans are columns, not pixels: mobile 1–4, tablet 1–8, desktop 1–12,
@@ -32,3 +32,28 @@ Owner edit. Scoped Admins edit granted documents but cannot create or delete
 boards or integrations. Scoped containers are the union of container targets
 on granted boards; host-wide pages are unavailable. Suggestions require Admin
 and obey visibility. See [login.md](login.md) and [api.md](../api.md).
+
+## First board and tour
+
+[Guided setup](login.md#guided-setup) creates Home from the owner's selection
+and sets it as the landing page. If the owner selects nothing, Home opens
+with Add and Discover. Those actions open the standard board editor and picker.
+
+On the first visit to the default board (or the first accessible board if
+there is no default), Hobnail offers a short tour of the controls the account
+can use. The tour points to the controls on the page. Use Next to advance,
+Skip tour or Escape to dismiss, and Finish at the end. The tour moves keyboard
+focus to its actions and returns focus to the highlighted control on dismissal.
+Completion and dismissal are saved per account across browser sessions.
+Use **Replay board tour** in Settings or Keyboard shortcuts to run it again.
+
+## Refresh failures
+
+When a configured widget refresh fails, its tile keeps the last successful
+reading and shows a stale badge with its age and the latest failure reason.
+A failure before the first successful refresh shows the error by itself.
+The next successful refresh replaces the reading and clears the badge.
+
+Generic HTTP integration tiles show evidence from manual connection tests.
+A failed retest retains the timestamp and latency of the previous successful
+test with a stale badge and the failure reason. See [Integrations](integrations.md).
