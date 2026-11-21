@@ -32,6 +32,7 @@ use crate::{
     widgets,
 };
 
+mod adguard_home;
 mod arr;
 mod connection;
 mod generic;
@@ -64,6 +65,7 @@ pub const REGISTRY: &[Provider] = &[
     radarr::RADARR,
     prowlarr::PROWLARR,
     jellyseerr::JELLYSEERR,
+    adguard_home::ADGUARD_HOME,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

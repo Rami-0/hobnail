@@ -213,6 +213,20 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected releases and live proxies.
 
+## AdGuard Home
+
+Enter the Web UI URL and an AdGuard Home account username and password.
+The control API uses HTTP Basic authentication and has no read-only account
+scope. **DNS protection** reads the configured statistics interval and
+reports filtering-rule blocks, their share of all queries, and the current
+protection setting. With zero queries the percentage is undefined.
+
+Verified from:
+
+- [Upstream OpenAPI for v0.107.73](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.73/openapi/openapi.yaml)
+
+UNVERIFIED: Other versions and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
