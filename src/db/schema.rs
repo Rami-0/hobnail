@@ -590,4 +590,54 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn legacy_provider_title_migration_marks_only_candidate_sections() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        let previous = MIGRATIONS.len() - 1;
+        for migration in &MIGRATIONS[..previous] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", previous).unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO integrations(id,name,kind,origin,config)
+                VALUES ('provider','New name','http','https://fixture.test','{}');
+            INSERT INTO boards(id,name,created,updated,sections)
+                VALUES ('board','Board',1,1,'[
+                    {"id":"legacy","title":"Old name","position":0},
+                    {"id":"mixed","title":"New name","position":1},
+                    {"id":"other","title":"Other","position":2}
+                ]');
+            INSERT INTO provider_widgets(id,integration_id,board_id,widget,options) VALUES
+                ('provider:a','provider','board','json','{}'),
+                ('provider:b','provider','board','json','{}');
+            INSERT INTO board_items(id,board_id,kind,config,layout) VALUES
+                ('a','board','widget','{"widget_id":"provider:a"}','{"section":"legacy"}'),
+                ('b','board','widget','{"widget_id":"provider:b"}','{"section":"mixed"}'),
+                ('c','board','link','{}','{"section":"mixed"}'),
+                ('d','board','link','{}','{"section":"other"}');
+        "#,
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let markers = conn
+            .query_row(
+                "SELECT json_extract(sections,'$[0].legacy_provider_title'),
+                    json_extract(sections,'$[1].legacy_provider_title'),
+                    json_extract(sections,'$[2].legacy_provider_title')
+             FROM boards WHERE id='board'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, bool>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, Option<bool>>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(markers, (true, true, None));
+    }
 }

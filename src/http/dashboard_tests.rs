@@ -2670,3 +2670,85 @@ async fn editing_and_committing_setup_cancel_in_flight_tests() {
     }
     assert_eq!(st.provider_requests.available_permits(), 4);
 }
+
+#[tokio::test]
+async fn renaming_and_deleting_an_integration_hide_legacy_widget_titles() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st.clone()).await).await;
+    let board = owner.board("Shared").await;
+    let mut input = json!({
+        "name":"Former private name","kind":"http","enabled":true,"base_url":"http://fixture.invalid"
+    });
+    let saved = owner
+        .json(
+            "POST",
+            "/api/v1/providers/install",
+            json!({
+                "integration":input, "board_id":board, "widgets":[{"id":"json"}]
+            }),
+            201,
+        )
+        .await;
+    let board_path = format!("/api/v1/boards/{board}");
+    let integration = saved["id"].as_str().unwrap();
+    let integration_path = format!("/api/v1/integrations/{integration}");
+    let installed = owner.json("GET", &board_path, Value::Null, 200).await;
+    assert_eq!(installed["document"]["sections"][0]["title"], "Widgets");
+
+    // Emulate the legacy title and marker brought forward by migration.
+    st.db
+        .dashboard(|conn| {
+            conn.execute(
+                "UPDATE boards SET sections=json_set(sections,
+            '$[0].title','Former private name','$[0].legacy_provider_title',json('true'))
+            WHERE id=?1",
+                [&board],
+            )?;
+            conn.execute(
+                "UPDATE board_items SET config=json_set(config,'$.title','Private widget title')
+            WHERE board_id=?1",
+                [&board],
+            )?;
+            Ok::<_, rusqlite::Error>(())
+        })
+        .unwrap();
+    let shared = owner
+        .guest(
+            "shared-viewer",
+            "viewer",
+            json!({"boards":[board], "integrations":[]}),
+        )
+        .await;
+    input["name"] = json!("Current private name");
+    owner.json("PUT", &integration_path, input, 200).await;
+    let view = shared.json("GET", &board_path, Value::Null, 200).await;
+    assert_eq!(view["document"]["sections"][0]["title"], "Widgets");
+    assert_eq!(
+        view["document"]["sections"][0]["items"][0]["payload"]["title"],
+        "Widget unavailable"
+    );
+    assert!(
+        !view.to_string().contains("private name")
+            && !view.to_string().contains("Private widget title")
+    );
+    assert_eq!(
+        owner
+            .call("DELETE", &integration_path, Value::Null)
+            .await
+            .status,
+        204
+    );
+    for reader in [&shared, &owner] {
+        let view = reader.json("GET", &board_path, Value::Null, 200).await;
+        assert_eq!(view["document"]["sections"][0]["title"], "Widgets");
+        assert_eq!(
+            view["document"]["sections"][0]["items"][0]["payload"]["title"],
+            "Widget unavailable"
+        );
+        assert!(
+            !view.to_string().contains("private name")
+                && !view.to_string().contains("Private widget title")
+        );
+    }
+}
