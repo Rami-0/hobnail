@@ -184,10 +184,12 @@ try {
   const testTimes = [];
   if (!empty) {
     await fill("#setup-search", readingTitle);
-    await click(".suggestions .cb");
+    await require("search shows the widget suggestion", text(".suggestions .cb", readingTitle));
+    await click('.suggestions .cb .checkbox');
     await fill(group, "Home tools");
     await fill("#setup-search", "Service 1");
-    await click(".suggestions .cb");
+    await require("search shows a container suggestion", text(".suggestions .cb", "Service 1"));
+    await click('.suggestions .cb .checkbox');
     await fill(`${selected}:nth-of-type(2) input[id$="-name"]`, "Selected service");
     await require("discovery edits autosave", text(".setup-actions [role=status]", "Draft saved"));
     const original = tab;

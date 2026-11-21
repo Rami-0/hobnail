@@ -134,4 +134,3 @@ export function payloadIdentity(payload: BoardPayload): string {
     case "integration": return `integration:${payload.integration_id}`;
   }
 }
-
