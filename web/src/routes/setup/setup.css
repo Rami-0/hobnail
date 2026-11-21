@@ -4,3 +4,4 @@
 .setup-item-fields { display: grid; gap: var(--s-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
 .setup-actions { margin-block-start: var(--s-4); }
 .setup-actions > [role="status"] { align-self: center; }
+.setup-fields > .acts, .setup-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
