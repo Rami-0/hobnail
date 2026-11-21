@@ -109,7 +109,7 @@ export function Collection(props: Props) {
     focus();
   }
   function saveOrder() {
-    if (ordering && !orderConflict) void run({ action: "reorder", order: ordering.entries.map((entry) => entry.id) });
+    if (ordering && !orderConflict) void run({ action: "reorder", order: ordering.entries.map((item) => item.id) });
   }
   const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy}
     retry={() => { void refreshEditingSession().then((session) => {
