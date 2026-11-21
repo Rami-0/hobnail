@@ -113,6 +113,112 @@ fn rejects_authority_and_prefix_escape_variants() {
 }
 
 #[tokio::test]
+async fn shared_fetch_redacts_all_emitted_auth_representations() {
+    use crate::{
+        providers::{self, Job, Widget},
+        widgets::StructuredBody,
+    };
+    use serde_json::json;
+
+    fn echo<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
+        Box::pin(async {
+            let session = conn.session("fake-sid+/")?;
+            let response = conn
+                .request(Step {
+                    auth: &[
+                        Auth::Bearer(Input::Credential("token")),
+                        Auth::Basic(Input::Credential("user"), Input::Credential("password")),
+                        Auth::Header("x-api-key", Input::Credential("header")),
+                        Auth::Header("cookie", Input::Session(&session)),
+                    ],
+                    query: &[("auth", Input::Credential("query"))],
+                    ..Step::get("")
+                })
+                .await?;
+            serde_json::from_slice(&response.body).map_err(|_| Class::Protocol.into())
+        })
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let mut credentials = credentials(&origin);
+    credentials.get_mut("token").unwrap().token = r#"token+"with\quotes"#.into();
+    for (field, value) in [("header", "header-secret"), ("query", "query +/secret")] {
+        credentials.insert(
+            field.into(),
+            BoundCredential {
+                origin: origin.clone(),
+                token: value.into(),
+            },
+        );
+    }
+    let echoes = [
+        r#"token+"with\quotes"#,
+        r#"Bearer token+"with\quotes"#,
+        "dG9rZW4rIndpdGhccXVvdGVz",
+        r#"token+\"with\\quotes"#,
+        "token%2B%22with%5Cquotes",
+        "Basic c29tZS11c2VyOnArIHNzJi8=",
+        "c29tZS11c2VyOnArIHNzJi8=",
+        "some-user:p+ ss&/",
+        "some-user",
+        "p+ ss&/",
+        "header-secret",
+        "query%20%2B%2Fsecret",
+        "query+%2b%2fsecret",
+        "fake-sid+/",
+        "fake-sid%2B%2F",
+        "untouched",
+    ];
+    let fake = tokio::spawn(async move {
+        let (mut socket, _) = receive(&listener).await;
+        let rows: Vec<_> = echoes.iter().map(|value| json!([value, value])).collect();
+        respond(
+            &mut socket,
+            200,
+            "",
+            &json!({"kind":"stat_grid","rows":rows}).to_string(),
+        )
+        .await;
+    });
+    let connections = Connections::default();
+    let target = Target::new(format!("{origin}/"), credentials, false);
+    let policy = policy();
+    let permit = std::sync::Arc::new(Semaphore::new(1))
+        .try_acquire_owned()
+        .unwrap();
+    let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+    let widget = Widget {
+        id: "echo",
+        name: "Echo",
+        description: "",
+        recommended: false,
+        fields: &[],
+        fetch: echo,
+        validate: |_| Ok(()),
+    };
+    let StructuredBody::StatGrid { rows } = providers::fetch(&conn, &widget, &Values::new())
+        .await
+        .unwrap()
+    else {
+        panic!("unexpected output shape")
+    };
+    fake.await.unwrap();
+    assert_eq!(rows.len(), echoes.len());
+    for (index, (label, value)) in rows.iter().enumerate() {
+        let expected = if index == echoes.len() - 1 {
+            "untouched"
+        } else {
+            "<redacted>"
+        };
+        assert!(
+            label == expected && value == expected,
+            "redaction at row {index}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn steps_encode_credentials_and_only_return_requested_headers() {
     let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", upstream.local_addr().unwrap());

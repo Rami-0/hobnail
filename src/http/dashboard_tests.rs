@@ -1736,11 +1736,11 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
     let run = tokio::spawn(crate::live::run(state.clone()));
     let board = owner.board("Provider test").await;
     let elsewhere = owner.board("Other board").await;
-    let token = "M3-only-fake-provider-credential";
+    let token = r#"M3-only-fake"provider\credential"#;
     let install = |name: &str, board: &str| {
         json!({
             "integration": {"name": name, "kind":"http", "enabled":true, "base_url":url, "secret":token},
-            "board_id": board, "widgets":[{"id":"json","options":{"paths":["reading", "echo"], "refresh":15}}]
+            "board_id": board, "widgets":[{"id":"json","options":{"paths":["reading", "echo", "nested"], "refresh":15}}]
         })
     };
     crate::log::capture_test_logs();
@@ -1786,7 +1786,11 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
     assert!(upstream_request(&mut socket)
         .await
         .contains(&format!("authorization: Bearer {token}\r\n")));
-    let body = json!({"reading":"42 units","echo":token}).to_string();
+    let encoded = json!(token).to_string();
+    let body = json!({
+        "reading":"42 units", "echo":token, "nested":{"echo": &encoded[1..encoded.len() - 1]}
+    })
+    .to_string();
     socket
         .write_all(
             format!(
@@ -1803,7 +1807,11 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
         assert_eq!(widget["status"], "ready");
         assert_eq!(
             widget["structured"]["rows"],
-            json!([["reading", "42 units"], ["echo", "<redacted>"]])
+            json!([
+                ["reading", "42 units"],
+                ["echo", "<redacted>"],
+                ["nested", r#"{"echo":"<redacted>"}"#]
+            ])
         );
         assert!(!widget.to_string().contains(token));
     }
@@ -1832,6 +1840,39 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
         .iter()
         .all(|line| !line.contains(token)));
     run.abort();
+}
+
+#[tokio::test]
+async fn credentialed_json_widgets_require_specific_paths() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Readings").await;
+    for options in [
+        json!({}),
+        json!({"paths":["$"]}),
+        json!({"paths":["value","$."]}),
+    ] {
+        let error = owner
+            .json(
+                "POST",
+                "/api/v1/providers/install",
+                json!({
+                    "integration":{"name":"Fixture","kind":"http","base_url":"http://fixture.test",
+                                   "enabled":true,"secret":"fixture-token"},
+                    "board_id":board,"widgets":[{"id":"json","options":options}]
+                }),
+                400,
+            )
+            .await;
+        assert_eq!(error["error"]["field"], "paths");
+    }
+    assert_eq!(
+        owner
+            .json("GET", "/api/v1/integrations", Value::Null, 200)
+            .await,
+        json!([])
+    );
 }
 
 #[tokio::test]

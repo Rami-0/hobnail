@@ -148,6 +148,14 @@ fn install(
         false
     };
     let integration = integrations::save(conn, input.integration_id.as_deref(), input.integration)?;
+    if options.iter().any(|(widget, _, values)| {
+        providers::requires_paths(provider.id, widget, integration.has_secret, values)
+    }) {
+        return Err(ApiError::bad_request(
+            "Choose specific JSON paths for a connection with saved credentials.",
+            Some("paths"),
+        ));
+    }
     let board = if let Some(id) = input.board_id.filter(|_| !options.is_empty()) {
         if !user.can_see_board(&id) {
             return Err(ApiError::not_found());
@@ -608,7 +616,7 @@ pub(crate) fn poll(
                 result = async {
                     let conn = providers::Conn::new(&poll.target, &config.http, &state.provider_connections, permit)?
                         .with_http_revision(revision);
-                    conn.run((poll.widget.fetch)(&conn, &poll.options)).await
+                    providers::fetch(&conn, poll.widget, &poll.options).await
                 } => Some(result),
             };
             if let Some(result) = result.filter(|_| poll.target.revision.check().is_ok()) {

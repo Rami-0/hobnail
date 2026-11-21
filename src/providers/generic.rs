@@ -48,7 +48,7 @@ pub const HTTP: Provider = Provider {
                     "paths",
                     "JSON paths",
                     Kind::List,
-                    "One per line, for example stats.users. Leave empty for a response preview.",
+                    "One per line, for example stats.users. Credentials require explicit paths.",
                 )
             },
             REFRESH,
@@ -69,9 +69,7 @@ async fn json(conn: &Conn<'_>) -> Result<Value, Fault> {
         step.auth = &auth;
     }
     let response = success(conn.request(step).await?)?;
-    let mut json = serde_json::from_slice(&response.body).map_err(|_| Class::Protocol)?;
-    conn.scrub(&mut json)?;
-    Ok(json)
+    serde_json::from_slice(&response.body).map_err(|_| Class::Protocol.into())
 }
 
 fn options(values: &Values) -> Result<(), &'static str> {
@@ -87,9 +85,29 @@ fn options(values: &Values) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub(super) fn explicit_paths(options: &Values) -> bool {
+    options
+        .get("paths")
+        .and_then(Value::as_array)
+        .is_some_and(|paths| {
+            !paths.is_empty()
+                && paths.iter().all(|path| {
+                    path.as_str()
+                        .and_then(|path| Path::parse(path).ok())
+                        .is_some_and(|path| !path.0.is_empty())
+                })
+        })
+}
+
 fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async {
+        if conn.has_credentials() && !explicit_paths(options) {
+            return Ok(StructuredBody::Unavailable {
+                message: "Choose specific JSON paths for this credentialed connection.".into(),
+            });
+        }
         let json = json(conn).await?;
+        let redact = conn.output_redactor();
         let rows: Vec<_> = options
             .get("paths")
             .and_then(Value::as_array)
@@ -97,9 +115,10 @@ fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody>
             .flatten()
             .filter_map(Value::as_str)
             .filter_map(|path| {
-                Path::parse(path)
-                    .ok()
-                    .map(|parsed| (path.to_owned(), template::display(&parsed.eval(&json))))
+                let mut value = Path::parse(path).ok()?.eval(&json);
+                // Scrub before serializing nested values or shortening their display.
+                redact.json(&mut value);
+                Some((path.to_owned(), template::display(&value)))
             })
             .collect();
         Ok(if rows.is_empty() {

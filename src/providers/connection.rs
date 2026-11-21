@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     future::Future,
     sync::Mutex,
@@ -235,6 +235,7 @@ pub struct Conn<'a> {
     session_scope: u64,
     policy: &'a HttpPolicy,
     connections: &'a Connections,
+    auth_output: Mutex<HashSet<String>>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -261,6 +262,7 @@ impl<'a> Conn<'a> {
             origin,
             policy,
             connections,
+            auth_output: Mutex::default(),
             _permit: permit,
         })
     }
@@ -289,10 +291,38 @@ impl<'a> Conn<'a> {
         self.target.credentials.contains_key(field)
     }
 
+    pub(super) fn has_credentials(&self) -> bool {
+        !self.target.credentials.is_empty()
+    }
+
+    fn remember_auth(&self, value: &str) {
+        if !value.is_empty() {
+            let mut values = self.auth_output.lock().unwrap();
+            if !values.contains(value) {
+                values.insert(value.to_owned());
+            }
+        }
+    }
+
+    pub(super) fn output_redactor(&self) -> super::OutputRedactor {
+        let emitted = self.auth_output.lock().unwrap();
+        super::OutputRedactor::new(
+            emitted.iter().map(String::as_str).chain(
+                self.target
+                    .credentials
+                    .values()
+                    .map(|value| value.token.as_str()),
+            ),
+        )
+    }
+
     fn resolve<'b>(&'b self, input: &'b Input<'_>) -> Result<&'b str, Fault> {
         match input {
             Input::Text(text) => Ok(text),
-            Input::Session(session) if session.scope == self.session_scope => Ok(&session.value),
+            Input::Session(session) if session.scope == self.session_scope => {
+                self.remember_auth(&session.value);
+                Ok(&session.value)
+            }
             Input::Session(_) => Err(Class::Blocked.into()),
             Input::Credential(field) => {
                 let credential = self.target.credentials.get(*field).ok_or(Class::Auth)?;
@@ -334,13 +364,13 @@ impl<'a> Conn<'a> {
                     "authorization",
                     format!("Bearer {}", self.auth_value(input)?),
                 ),
-                Auth::Basic(user, password) => (
-                    "authorization",
-                    format!(
-                        "Basic {}",
-                        basic(self.auth_value(user)?, self.auth_value(password)?)?
-                    ),
-                ),
+                Auth::Basic(user, password) => {
+                    let user = self.auth_value(user)?;
+                    let password = self.auth_value(password)?;
+                    let raw = basic_input(user, password)?;
+                    self.remember_auth(&raw);
+                    ("authorization", format!("Basic {}", base64(&raw)))
+                }
                 Auth::Authorization(prefix, input) => (
                     "authorization",
                     format!("{prefix}{}", self.auth_value(input)?),
@@ -363,6 +393,7 @@ impl<'a> Conn<'a> {
             ) {
                 return Err(Class::Protocol.into());
             }
+            self.remember_auth(&value);
             request.headers.push((header.as_str().into(), value));
         }
         if let Some(body) = step.body {
@@ -431,6 +462,7 @@ impl<'a> Conn<'a> {
         if value.is_empty() || value.len() > MAX_SESSION {
             return Err(Class::Protocol.into());
         }
+        self.remember_auth(value);
         Ok(Session {
             scope: self.session_scope,
             value: value.into(),
@@ -536,16 +568,6 @@ impl<'a> Conn<'a> {
         }
         result
     }
-
-    pub(super) fn scrub(&self, json: &mut serde_json::Value) -> Result<(), Fault> {
-        for credential in self.target.credentials.values() {
-            crate::widgets::Scrub::new(std::slice::from_ref(&credential.token)).json(json);
-            if json.to_string().contains(&credential.token) {
-                return Err(Class::Protocol.into());
-            }
-        }
-        Ok(())
-    }
 }
 
 pub fn success(response: Response) -> Result<Response, Fault> {
@@ -578,7 +600,7 @@ fn join(base: &str, path: &str) -> Result<String, Fault> {
     ))
 }
 
-fn encode(out: &mut String, text: &str) {
+pub(super) fn encode(out: &mut String, text: &str) {
     use std::fmt::Write;
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
@@ -589,12 +611,15 @@ fn encode(out: &mut String, text: &str) {
     }
 }
 
-fn basic(user: &str, password: &str) -> Result<String, Fault> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+fn basic_input(user: &str, password: &str) -> Result<String, Fault> {
     if user.contains(':') {
         return Err(Class::Protocol.into());
     }
-    let raw = format!("{user}:{password}");
+    Ok(format!("{user}:{password}"))
+}
+
+pub(super) fn base64(raw: &str) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(raw.len().div_ceil(3) * 4);
     for chunk in raw.as_bytes().chunks(3) {
         let a = chunk[0];
@@ -616,7 +641,7 @@ fn basic(user: &str, password: &str) -> Result<String, Fault> {
             });
         }
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]

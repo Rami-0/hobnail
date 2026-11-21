@@ -62,7 +62,7 @@ pub struct IntegrationView {
     pub name: String,
     pub(super) kind: String,
     origin: String,
-    has_secret: bool,
+    pub(super) has_secret: bool,
     enabled: bool,
     check: Option<IntegrationCheck>,
     #[serde(skip_serializing_if = "Option::is_none")]

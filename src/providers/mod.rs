@@ -320,6 +320,177 @@ pub fn refresh(values: &Values) -> Duration {
     )
 }
 
+/// Redact authentication material at the provider output boundary, including
+/// credentials echoed as encoded strings inside JSON or as part of a URL.
+pub(super) struct OutputRedactor(Vec<String>);
+
+impl OutputRedactor {
+    fn new(values: impl Iterator<Item = impl AsRef<str>>) -> Self {
+        let mut patterns = std::collections::HashSet::new();
+        for value in values {
+            let value = value.as_ref();
+            if value.is_empty() {
+                continue;
+            }
+            let encoded = connection::base64(value);
+            let url_base64 = encoded.replace('+', "-").replace('/', "_");
+            for text in [
+                value,
+                &encoded,
+                encoded.trim_end_matches('='),
+                &url_base64,
+                url_base64.trim_end_matches('='),
+            ] {
+                patterns.insert(text.to_owned());
+
+                let escaped = Value::from(text).to_string();
+                patterns.insert(escaped[1..escaped.len() - 1].to_owned());
+
+                let mut url = String::new();
+                connection::encode(&mut url, text);
+                // Encoders may write lowercase hex or use '+' for spaces.
+                let mut lower = url.clone().into_bytes();
+                let mut index = 0;
+                while index + 2 < lower.len() {
+                    if lower[index] == b'%' {
+                        lower[index + 1..index + 3].make_ascii_lowercase();
+                        index += 2;
+                    }
+                    index += 1;
+                }
+                let lower = String::from_utf8(lower).expect("percent-encoded ASCII");
+                for url in [url, lower] {
+                    patterns.insert(url.replace("%20", "+"));
+                    patterns.insert(url);
+                }
+            }
+        }
+        let mut patterns: Vec<_> = patterns.into_iter().collect();
+        patterns.sort_unstable_by_key(|text| std::cmp::Reverse(text.len()));
+        Self(patterns)
+    }
+
+    fn matches(&self, text: &str) -> bool {
+        self.0.iter().any(|pattern| text.contains(pattern))
+    }
+
+    fn redact(&self, text: &mut String) -> bool {
+        let mut changed = false;
+        for pattern in &self.0 {
+            if text.contains(pattern) {
+                *text = text.replace(pattern, "<redacted>");
+                changed = true;
+            }
+        }
+        if changed && self.matches(text) {
+            text.clear();
+        }
+        changed
+    }
+
+    fn json(&self, value: &mut Value) {
+        if self.0.is_empty() {
+            return;
+        }
+        match value {
+            Value::String(text) => {
+                self.redact(text);
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.json(item);
+                }
+            }
+            Value::Object(fields) => {
+                for (mut key, mut item) in std::mem::take(fields) {
+                    self.redact(&mut key);
+                    self.json(&mut item);
+                    fields.insert(key, item);
+                }
+            }
+            _ if self.matches(&value.to_string()) => {
+                *value = Value::String("<redacted>".into());
+            }
+            _ => {}
+        }
+    }
+
+    fn body(&self, body: &mut widgets::StructuredBody) {
+        use widgets::StructuredBody::*;
+        match body {
+            Stat { value } | Unavailable { message: value } => {
+                self.redact(value);
+            }
+            StatGrid { rows } => {
+                for (key, value) in rows {
+                    self.redact(key);
+                    self.redact(value);
+                }
+            }
+            StatusList { rows } => {
+                for (key, _) in rows {
+                    self.redact(key);
+                }
+            }
+            ItemList { items } => {
+                for item in items {
+                    self.redact(&mut item.title);
+                    if let Some(text) = &mut item.secondary {
+                        self.redact(text);
+                    }
+                    if item.link.as_ref().is_some_and(|link| self.matches(link)) {
+                        item.link = None;
+                    }
+                    if item
+                        .time
+                        .is_some_and(|time| self.matches(&time.to_string()))
+                    {
+                        item.time = None;
+                    }
+                }
+            }
+            Meter { label, percent } => {
+                self.redact(label);
+                if self.matches(&percent.to_string()) {
+                    *body = Unavailable {
+                        message: "Value withheld".into(),
+                    };
+                }
+            }
+            Table { headings, rows } => {
+                for text in headings.iter_mut().chain(rows.iter_mut().flatten()) {
+                    self.redact(text);
+                }
+            }
+        }
+    }
+}
+
+pub(crate) async fn fetch(
+    conn: &Conn<'_>,
+    widget: &Widget,
+    options: &Values,
+) -> Result<widgets::StructuredBody, Fault> {
+    conn.run(async {
+        let mut body = (widget.fetch)(conn, options).await?;
+        conn.output_redactor().body(&mut body);
+        Ok(body)
+    })
+    .await
+}
+
+pub(crate) fn requires_paths(
+    provider: &str,
+    widget: &str,
+    credentials: bool,
+    options: &Values,
+) -> bool {
+    provider == generic::HTTP.id
+        && widget == "json"
+        && credentials
+        && !generic::explicit_paths(options)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

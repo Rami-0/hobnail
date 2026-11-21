@@ -28,9 +28,12 @@ existing layouts.
 
 Generic HTTP reads a JSON endpoint. In **JSON values**, enter up to 16 JSON
 paths, one per line. Paths can address nested fields (`stats.users`) and array
-elements (`items[0].title`). Use `$` for the entire document or leave the paths
-blank for a short JSON preview. This provider is intended for arbitrary JSON
-endpoints, where field names vary by service.
+elements (`items[0].title`). With no saved credential, use `$` for the entire
+document or leave the paths blank for a short preview. Connections with a
+saved credential require specific paths. A previously configured preview
+stays unavailable until you choose specific paths or clear the credential.
+Hobnail redacts credentials and session values from provider output before
+caching or streaming it.
 
 Existing HTTP integrations keep their IDs, configuration and credentials
 through the upgrade. Existing integration links and TOML widgets retain their
