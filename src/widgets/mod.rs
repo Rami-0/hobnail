@@ -216,6 +216,29 @@ pub struct WidgetOutput {
     /// Unix seconds.
     pub fetched_at: u64,
     pub duration_ms: u64,
+    /// Timestamp of retained display data, present only after a refresh fails.
+    #[serde(skip)]
+    pub stale_since: Option<u64>,
+}
+
+impl WidgetOutput {
+    pub(crate) fn record(&mut self, mut next: Self) {
+        if next.fetched_at < self.fetched_at {
+            return;
+        }
+        if next.error.is_some() {
+            let last_good = self
+                .stale_since
+                .or_else(|| self.error.is_none().then_some(self.fetched_at));
+            if let Some(at) = last_good {
+                next.display = std::mem::take(&mut self.display);
+                next.values = std::mem::take(&mut self.values);
+                next.duration_ms = self.duration_ms;
+                next.stale_since = Some(at);
+            }
+        }
+        *self = next;
+    }
 }
 
 /// Parsed paths and templates of one widget.

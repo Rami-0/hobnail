@@ -7,6 +7,7 @@ import type { BoardDraft } from "../../api/gen/BoardDraft.ts";
 import { Dialog } from "../../ui/Dialog.tsx";
 import type { BoardView } from "../../api/gen/BoardView.ts";
 import type { BoardItem } from "../../api/gen/BoardItem.ts";
+import { IntegrationStatus } from "../../ui/IntegrationStatus.tsx";
 import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
@@ -38,7 +39,7 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
     {targetMissing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
       p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
       p.kind === "link" ? <p className="muted">Saved link · {p.url}</p> :
-      p.kind === "integration" ? <><p className="muted">{(integration?.admin?.base_url ?? integration?.origin)}</p><p>{integration?.admin?.enabled === false ? "Disabled" : "No connection test recorded"}</p></> :
+      p.kind === "integration" ? <><p className="muted">{(integration?.admin?.base_url ?? integration?.origin)}</p><IntegrationStatus integration={integration} /></> :
       widget ? <WidgetContent widget={widget} /> : <p>Waiting for widget data…</p>}
   </div>;
 }

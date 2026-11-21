@@ -503,7 +503,7 @@ pub(super) async fn route(
             let integrations = db.dashboard(|conn| {
                 let saved = read(conn, user.id)?;
                 require_revision(&saved, saved.revision)?;
-                integrations::list(conn, user)
+                integrations::list(state, conn, user)
             })?;
             let snap = state.snapshot();
             let docker = if !config.docker.enabled {

@@ -117,6 +117,7 @@ pub struct AppState {
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
     pub password_limiter: Mutex<crate::auth::PasswordLimiter>,
+    pub(crate) integration_checks: Mutex<HashMap<String, crate::api::integrations::CheckSlot>>,
     pub integration_tests: Mutex<HashMap<i64, VecDeque<std::time::Instant>>>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
@@ -153,6 +154,7 @@ impl AppState {
             db,
             alerts: Mutex::new(Default::default()),
             password_limiter: Mutex::new(Default::default()),
+            integration_checks: Mutex::new(HashMap::new()),
             integration_tests: Mutex::new(HashMap::new()),
             login_limiter: Mutex::new(Default::default()),
             credential_queue: Default::default(),
@@ -162,6 +164,25 @@ impl AppState {
             widget_viewers: AtomicUsize::new(0),
             env,
         })
+    }
+
+    pub(crate) fn record_widget(
+        &self,
+        config: &Arc<crate::config::Config>,
+        id: &str,
+        out: WidgetOutput,
+    ) {
+        let mut cache = self.widgets.lock().unwrap();
+        if !Arc::ptr_eq(config, &self.config.current()) {
+            return;
+        }
+        match cache.get_mut(id) {
+            Some(current) => current.record(out),
+            None => {
+                cache.insert(id.to_string(), out);
+            }
+        }
+        self.changed(&format!("w-{id}"));
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {

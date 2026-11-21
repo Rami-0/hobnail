@@ -666,3 +666,38 @@ fn widget_links_reject_network_path_references() {
     assert!(!safe_link("//evil.example"));
     assert!(!safe_link(r"/\evil.example"));
 }
+
+#[test]
+fn refresh_errors_keep_only_the_previous_success_until_recovery() {
+    let failed = |fetched_at| WidgetOutput {
+        fetched_at,
+        error: Some("timed out".into()),
+        ..Default::default()
+    };
+    let success = |fetched_at| WidgetOutput {
+        fetched_at,
+        display: WidgetBody {
+            headline: Some(fetched_at.to_string()),
+            ..Default::default()
+        },
+        values: BTreeMap::from([("number".into(), fetched_at.into())]),
+        ..Default::default()
+    };
+    let mut current = failed(1);
+    current.record(failed(2));
+    assert!(current.stale_since.is_none());
+    assert!(current.display.headline.is_none());
+    current.record(success(3));
+    current.record(failed(4));
+    current.record(failed(5));
+    assert_eq!(current.fetched_at, 5);
+    assert_eq!(current.stale_since, Some(3));
+    assert_eq!(current.display.headline.as_deref(), Some("3"));
+    assert_eq!(current.values["number"], 3);
+    assert_eq!(current.error.as_deref(), Some("timed out"));
+    current.record(success(6));
+    current.record(failed(5));
+    assert_eq!(current.display.headline.as_deref(), Some("6"));
+    assert!(current.stale_since.is_none());
+    assert!(current.error.is_none());
+}

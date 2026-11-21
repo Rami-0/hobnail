@@ -15,6 +15,7 @@ pub(super) struct WidgetView {
     link: Option<String>,
     status: &'static str,
     fetched_at: Option<u64>,
+    last_good_at: Option<u64>,
     duration_ms: Option<u64>,
     body: Option<WidgetBody>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
@@ -27,9 +28,11 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
     let enabled = config.is_enabled();
     let output = cache.get(&config.id).filter(|_| enabled);
     let error = output.and_then(|o| o.error.as_deref());
+    let last_good_at = output.and_then(|o| o.stale_since);
     let status = match (enabled, output) {
         (false, _) => "disabled",
         (_, None) => "waiting",
+        (_, Some(_)) if last_good_at.is_some() => "stale",
         (_, Some(_)) if error.is_some() => "error",
         (_, Some(o)) => match o.values.get("_ok").and_then(serde_json::Value::as_bool) {
             Some(true) => "ok",
@@ -44,11 +47,13 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
         link: config.link.clone().filter(|l| crate::widgets::safe_link(l)),
         status,
         fetched_at: output.map(|o| o.fetched_at),
+        last_good_at,
         duration_ms: output.map(|o| o.duration_ms),
         body: output
-            .filter(|_| error.is_none())
+            .filter(|_| error.is_none() || last_good_at.is_some())
             .map(|o| o.display.clone()),
         values: output
+            .filter(|_| error.is_none() || last_good_at.is_some())
             .into_iter()
             .flat_map(|o| {
                 config.fields.keys().filter_map(|key| {

@@ -56,6 +56,8 @@ pub struct IntegrationView {
     kind: IntegrationKind,
     origin: String,
     has_secret: bool,
+    enabled: bool,
+    check: Option<IntegrationCheck>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     admin: Option<IntegrationDetails>,
@@ -77,13 +79,45 @@ struct Config {
     enabled: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationVerdict {
     ok: bool,
     class: VerdictClass,
     message: &'static str,
     latency_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct IntegrationCheck {
+    verdict: IntegrationVerdict,
+    last_good_at: Option<u64>,
+    last_good_latency_ms: Option<u64>,
+}
+
+pub(crate) struct CheckSlot {
+    started: Instant,
+    check: Option<IntegrationCheck>,
+}
+
+impl CheckSlot {
+    fn record(&mut self, verdict: IntegrationVerdict, now: u64) {
+        let previous = self.check.as_ref();
+        self.check = Some(IntegrationCheck {
+            last_good_at: if verdict.ok {
+                Some(now)
+            } else {
+                previous.and_then(|check| check.last_good_at)
+            },
+            last_good_latency_ms: if verdict.ok {
+                Some(verdict.latency_ms)
+            } else {
+                previous.and_then(|check| check.last_good_latency_ms)
+            },
+            verdict,
+        });
+    }
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -124,6 +158,8 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
         kind,
         origin,
         has_secret: secret_origin.is_some(),
+        enabled: config.enabled,
+        check: None,
         admin: admin.then_some(IntegrationDetails {
             base_url: config.base_url,
             icon: config.icon,
@@ -133,7 +169,11 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
     })
 }
 
-pub(super) fn list(conn: &Connection, user: &Principal) -> Result<Vec<IntegrationView>, ApiError> {
+pub(super) fn list(
+    state: &AppState,
+    conn: &Connection,
+    user: &Principal,
+) -> Result<Vec<IntegrationView>, ApiError> {
     let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY name, id"))?;
     let mut rows = stmt.query([])?;
     let mut visible = Vec::new();
@@ -143,10 +183,21 @@ pub(super) fn list(conn: &Connection, user: &Principal) -> Result<Vec<Integratio
                 .as_str()
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
         ) {
-            visible.push(read(row, user.role >= Role::Admin)?);
+            let mut view = read(row, user.role >= Role::Admin)?;
+            attach_check(state, &mut view);
+            visible.push(view);
         }
     }
     Ok(visible)
+}
+
+fn attach_check(state: &AppState, view: &mut IntegrationView) {
+    view.check = state
+        .integration_checks
+        .lock()
+        .unwrap()
+        .get(&view.id)
+        .and_then(|slot| slot.check.clone());
 }
 
 fn get(conn: &Connection, id: &str, admin: bool) -> Result<IntegrationView, ApiError> {
@@ -326,14 +377,32 @@ pub(super) async fn route(
         Handler::Integrations => {
             return Ok(super::json(
                 StatusCode::OK,
-                &db.dashboard(|c| list(c, user))?,
+                &db.dashboard(|c| list(state, c, user))?,
             ))
         }
-        Handler::Integration => db.dashboard(|c| get(c, id, user.role >= Role::Admin))?,
+        Handler::Integration => db.dashboard(|c| {
+            let mut view = get(c, id, user.role >= Role::Admin)?;
+            attach_check(state, &mut view);
+            Ok::<_, ApiError>(view)
+        })?,
         Handler::IntegrationCreate | Handler::IntegrationUpdate => {
             let create = m.route.handler == Handler::IntegrationCreate;
-            let input = super::read_json(req, 16384).await?;
-            let saved = db.dashboard(|c| save(c, (!create).then_some(id), input))?;
+            let input: IntegrationInput = super::read_json(req, 16384).await?;
+            let saved = db.dashboard(|c| {
+                let connection_changed = !create
+                    && (input.secret.is_some()
+                        || get(c, id, true)?.admin.is_some_and(|old| {
+                            old.base_url != input.base_url || old.enabled != input.enabled
+                        }));
+                let mut view = save(c, (!create).then_some(id), input)?;
+                if connection_changed {
+                    state.integration_checks.lock().unwrap().remove(id);
+                } else {
+                    attach_check(state, &mut view);
+                }
+                Ok::<_, ApiError>(view)
+            })?;
+            state.changed("reload");
             return Ok(super::json(
                 if create {
                     StatusCode::CREATED
@@ -382,6 +451,7 @@ pub(super) async fn route(
                         [id],
                     )?;
                 }
+                state.integration_checks.lock().unwrap().remove(id);
                 get(c, id, true)
             })?
         }
@@ -400,20 +470,79 @@ pub(super) async fn route(
                     "DELETE FROM access_grants WHERE kind='integration' AND target_id=?1",
                     [id],
                 )?;
+                state.integration_checks.lock().unwrap().remove(id);
                 Ok(())
             })?;
             state.changed("reload");
             return Ok(super::no_content());
         }
         Handler::IntegrationTest => {
-            let (url, credential) = db.dashboard(|c| target(c, id))?;
-            limit_test(state, user.id)?;
-            return Ok(super::json(
-                StatusCode::OK,
-                &test_connection(state, url, credential).await,
-            ));
+            let (url, credential, started) = db.dashboard(|c| {
+                let (url, credential) = target(c, id)?;
+                limit_test(state, user.id)?;
+                let started = Instant::now();
+                let mut checks = state.integration_checks.lock().unwrap();
+                checks
+                    .entry(id.to_string())
+                    .or_insert(CheckSlot {
+                        started,
+                        check: None,
+                    })
+                    .started = started;
+                Ok::<_, ApiError>((url, credential, started))
+            })?;
+            let verdict = test_connection(state, url, credential).await;
+            if let Some(slot) = state
+                .integration_checks
+                .lock()
+                .unwrap()
+                .get_mut(id)
+                .filter(|slot| slot.started == started)
+            {
+                slot.record(verdict.clone(), crate::util::unix_now());
+                state.changed("reload");
+            }
+            return Ok(super::json(StatusCode::OK, &verdict));
         }
         _ => unreachable!("integration route"),
     };
     Ok(super::json(StatusCode::OK, &view))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_keep_the_last_success_through_failures() {
+        let mut slot = CheckSlot {
+            started: Instant::now(),
+            check: None,
+        };
+        let failed = IntegrationVerdict {
+            ok: false,
+            class: VerdictClass::Connect,
+            message: "Could not connect to the service",
+            latency_ms: 10,
+        };
+        slot.record(failed.clone(), 1);
+        assert!(slot.check.as_ref().unwrap().last_good_at.is_none());
+        let success = IntegrationVerdict {
+            ok: true,
+            class: VerdictClass::Success,
+            message: "Connection succeeded",
+            latency_ms: 5,
+        };
+        slot.record(success.clone(), 2);
+        slot.record(failed.clone(), 3);
+        slot.record(failed, 4);
+        let check = slot.check.as_ref().unwrap();
+        assert!(!check.verdict.ok);
+        assert_eq!(check.last_good_at, Some(2));
+        assert_eq!(check.last_good_latency_ms, Some(5));
+        slot.record(success, 5);
+        let check = slot.check.unwrap();
+        assert!(check.verdict.ok);
+        assert_eq!(check.last_good_at, Some(5));
+    }
 }

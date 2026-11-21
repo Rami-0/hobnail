@@ -5,7 +5,7 @@ import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
-import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
+import { IntegrationStatus } from "../../ui/IntegrationStatus.tsx";
 import { local, rememberSettingsTab } from "../../app/prefs.ts";
 import { settingsTabs, type SettingsTab } from "../../app/settings-tabs.ts";
 import { useRoute } from "../../app/router.ts";
@@ -141,8 +141,6 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [verdicts, setVerdicts] = useState<Record<string, IntegrationVerdict>>({});
-  const forgetVerdict = (id: string) => setVerdicts(({ [id]: _old, ...remaining }) => remaining);
   const load = useCallback(async () => { const result = await api.get<IntegrationView[]>("/api/v1/integrations"); if (result.kind === "ok") setItems(result.data); else setError(result.message); }, []);
   // load updates state only after the asynchronous server response.
   // eslint-disable-next-line react/set-state-in-effect
@@ -154,23 +152,21 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="default" data-testid="integration-create" onClick={() => edit("new")}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
     {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
-    <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{(item.admin?.base_url ?? item.origin)}</p>{item.admin?.enabled === false && <p>Disabled</p>}
-      {verdicts[item.id] && <Note kind={verdicts[item.id]?.ok ? "ok" : "warn"} testId="integration-verdict">{verdicts[item.id]?.class}: {verdicts[item.id]?.message}{verdicts[item.id]?.class === "tls" && " Only public certificate authorities are trusted."}</Note>}</div>
-      {admin && <div className="settings-actions"><Button variant="ghost" onClick={() => edit(item)}>Edit</Button><Button busy={busy} disabled={item.admin?.enabled === false} data-testid="integration-test" onClick={async () => {
-        setBusy(true); const result = await api.post<IntegrationVerdict>(`/api/v1/integrations/${item.id}/test`);
-        if (result.kind === "ok") setVerdicts((old) => ({ ...old, [item.id]: result.data })); else setError(result.message); setBusy(false);
+    <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{item.admin?.base_url ?? item.origin}</p><IntegrationStatus integration={item} /></div>
+      {admin && <div className="settings-actions"><Button variant="ghost" onClick={() => edit(item)}>Edit</Button><Button busy={busy} disabled={!item.enabled} data-testid="integration-test" onClick={async () => {
+        setBusy(true); const result = await api.post(`/api/v1/integrations/${item.id}/test`);
+        if (result.kind === "ok") await load(); else setError(result.message); setBusy(false);
       }}>Test connection</Button>{manage && <Button variant="ghost" onClick={() => setDeleting(item)}>Delete</Button>}</div>}
     </div>)}</div>
     <Dialog open={!!editing} title={editing === "new" ? "Add integration" : "Edit integration"} onClose={close} testId="integration-form" footer={<><Button onClick={close}>Cancel</Button><Button type="submit" form="integration-form" variant="default" busy={busy}>Save</Button></>}>
       {editing && <form id="integration-form" onSubmit={async (e) => {
         e.preventDefault(); if (busy) return; setFields({});
         if (changed && !secret) { setFields({ secret: "Enter the credential again for the new origin, or clear the saved credential first." }); return; }
-        const connectionChanged = editing === "new" || url !== (editing.admin?.base_url ?? editing.origin) || !!secret || enabled !== (editing.admin?.enabled ?? true);
         const data = new FormData(e.currentTarget); setBusy(true);
         const result = await api.request<IntegrationView>(editing === "new" ? "POST" : "PUT", `/api/v1/integrations${editing === "new" ? "" : `/${editing.id}`}`, { body: {
           name: String(data.get("name")), kind: "http", base_url: url, enabled, icon: String(data.get("icon")) || null, ...(secret ? { secret } : {}),
         } });
-        if (result.kind === "ok") { if (connectionChanged) forgetVerdict(result.data.id); close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
+        if (result.kind === "ok") { close(); await load(); } else setFields({ [result.kind === "invalid" ? result.field ?? "form" : "form"]: result.message }); setBusy(false);
       }}>
         <Field id="integration-name" label="Name" error={fields.name}><TextInput name="name" required maxLength={80} defaultValue={editing === "new" ? "" : editing.name} /></Field>
         <Field id="integration-icon" label="Icon name" error={fields.icon}><TextInput name="icon" defaultValue={editing === "new" ? "" : editing.admin?.icon ?? ""} /></Field>
@@ -178,7 +174,7 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
           fields={fields} busy={busy} setUrl={setUrl} setSecret={setSecret} setEnabled={setEnabled}
           clearSecret={editing === "new" ? undefined : async () => {
             setBusy(true); const result = await api.request<IntegrationView>("DELETE", `/api/v1/integrations/${editing.id}/secret`);
-            if (result.kind === "ok") { setEditing(result.data); setSecret(""); forgetVerdict(result.data.id); await load(); }
+            if (result.kind === "ok") { setEditing(result.data); setSecret(""); await load(); }
             else setFields({ secret: result.message });
             setBusy(false);
           }} />
@@ -187,7 +183,7 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
     </Dialog>
     <Dialog open={!!deleting} title="Delete integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy} onClick={async () => {
       if (!deleting) return; setBusy(true); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);
-      if (result.kind === "ok") { forgetVerdict(deleting.id); setDeleting(null); await load(); } else setError(result.message); setBusy(false);
+      if (result.kind === "ok") { setDeleting(null); await load(); } else setError(result.message); setBusy(false);
     }}>Delete integration</Button></>}><p>Delete “{deleting?.name}” and its saved credential? Board items will show a missing target.</p></Dialog>
   </section>;
 }

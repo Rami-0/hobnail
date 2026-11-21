@@ -785,7 +785,7 @@ pub(super) async fn route(
                 Ok((
                     board.clone(),
                     document(c, &board)?,
-                    integrations::list(c, user)?,
+                    integrations::list(state, c, user)?,
                 ))
             })?;
             if handler == Handler::Board {
@@ -825,7 +825,7 @@ pub(super) async fn route(
                 let board = get(c, id)?;
                 Ok(Ok((
                     document(c, &board)?,
-                    integrations::list(c, user)?,
+                    integrations::list(state, c, user)?,
                     board,
                 )))
             })?;

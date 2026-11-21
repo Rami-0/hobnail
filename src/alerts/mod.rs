@@ -648,6 +648,7 @@ enum ProbeResult {
         res: CheckResult,
     },
     Widget {
+        config: Arc<Config>,
         id: String,
         out: WidgetOutput,
     },
@@ -732,10 +733,16 @@ impl Probes {
             }
             p.in_flight = true;
             p.next_due = now + refresh;
-            let (w, policy, tx) = (w.clone(), cfg.http.clone(), tx.clone());
+            let (w, config, tx) = (w.clone(), cfg.clone(), tx.clone());
             tokio::spawn(async move {
-                let out = crate::widgets::run(&w, &policy).await;
-                let _ = tx.send(ProbeResult::Widget { id: w.id, out }).await;
+                let out = crate::widgets::run(&w, &config.http).await;
+                let _ = tx
+                    .send(ProbeResult::Widget {
+                        config,
+                        id: w.id,
+                        out,
+                    })
+                    .await;
             });
         }
 
@@ -771,13 +778,12 @@ impl Probes {
                     }
                 }
             }
-            ProbeResult::Widget { id, out } => {
+            ProbeResult::Widget { config, id, out } => {
                 if let Some(p) = self.widgets.get_mut(&id) {
                     p.in_flight = false;
                     p.out = Some(out.clone());
                 }
-                state.widgets.lock().unwrap().insert(id.clone(), out);
-                state.changed(&format!("w-{id}"));
+                state.record_widget(&config, &id, out);
             }
         }
     }

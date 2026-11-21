@@ -18,8 +18,12 @@ pub async fn config_watcher(state: Arc<AppState>) {
     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         iv.tick().await;
+        let mut widgets = state.widgets.lock().unwrap();
+        let previous = state.config.current();
         if state.config.poll() {
-            state.widgets.lock().unwrap().clear();
+            if !Arc::ptr_eq(&previous, &state.config.current()) {
+                widgets.clear();
+            }
             state.changed("reload");
         }
     }
@@ -63,14 +67,8 @@ pub async fn run(state: Arc<AppState>) {
                 (state.clone(), w.clone(), in_flight.clone(), cfg.clone());
             tokio::spawn(async move {
                 let out = crate::widgets::run(&w, &run_config.http).await;
-                {
-                    let mut cache = st.widgets.lock().unwrap();
-                    if Arc::ptr_eq(&run_config, &st.config.current()) {
-                        cache.insert(w.id.clone(), out);
-                    }
-                }
+                st.record_widget(&run_config, &w.id, out);
                 fl.lock().unwrap().remove(&w.id);
-                st.changed(&format!("w-{}", w.id));
             });
         }
         tokio::time::sleep(TICK).await;

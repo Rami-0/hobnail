@@ -53,6 +53,7 @@ fn files() -> Vec<(String, String)> {
         render::<super::integrations::IntegrationInput>(),
         render::<super::integrations::IntegrationSecretInput>(),
         render::<super::integrations::IntegrationView>(),
+        render::<super::integrations::IntegrationCheck>(),
         render::<super::integrations::IntegrationDetails>(),
         render::<super::integrations::IntegrationVerdict>(),
         render::<super::integrations::VerdictClass>(),
