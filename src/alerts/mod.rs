@@ -816,10 +816,10 @@ fn evaluate(
     cfg: &Config,
     probes: &Probes,
     snap: &Snapshot,
-    state: &AppState,
+    host: &str,
     now: u64,
+    widgets: &Mutex<crate::widgets::WidgetCache>,
 ) -> usize {
-    let host = &state.env.hostname;
     let mut events = Vec::new();
     for r in cfg.alerts.iter().filter(|r| r.enabled()) {
         let ro = match r.kind {
@@ -834,7 +834,7 @@ fn evaluate(
                 .and_then(|h| h.stats.as_ref())
                 .and_then(|s| rules::eval_host(r, s)),
             RuleKind::Widget => r.widget.as_deref().and_then(|id| {
-                let cache = state.widgets.lock().unwrap();
+                let cache = widgets.lock().unwrap();
                 cache.get(id).and_then(|out| rules::eval_widget(r, out))
             }),
             RuleKind::LogMatch => {
@@ -903,7 +903,16 @@ pub async fn run(state: Arc<AppState>) {
                 chan_check = Some((generation, now));
             }
             let snap = state.snapshot();
-            if evaluate(&mut c, &cfg, &probes, &snap, &state, now) > 0 {
+            if evaluate(
+                &mut c,
+                &cfg,
+                &probes,
+                &snap,
+                &state.env.hostname,
+                now,
+                &state.widgets,
+            ) > 0
+            {
                 wake.notify_one();
             }
             c.flush_history(&state.db, now);

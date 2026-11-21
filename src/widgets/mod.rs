@@ -304,7 +304,7 @@ pub(crate) struct WidgetCache {
 struct WidgetSlot {
     started: u64,
     completed: Option<(u64, Instant)>,
-    output: Option<WidgetOutput>,
+    output: Option<Box<WidgetOutput>>,
     bytes: usize,
 }
 
@@ -315,7 +315,7 @@ impl WidgetCache {
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<&WidgetOutput> {
-        self.slots.get(id)?.output.as_ref()
+        self.slots.get(id)?.output.as_deref()
     }
 
     pub(crate) fn deadline(&self, id: &str, refresh: Duration) -> Option<Instant> {
@@ -347,9 +347,12 @@ impl WidgetCache {
         self.retained_bytes -= slot.bytes;
         match &mut slot.output {
             Some(current) => current.record(out),
-            None => slot.output = Some(out),
+            None => slot.output = Some(Box::new(out)),
         }
-        slot.bytes = slot.output.as_ref().map_or(0, WidgetOutput::retained_bytes);
+        slot.bytes = slot
+            .output
+            .as_deref()
+            .map_or(0, WidgetOutput::retained_bytes);
         self.retained_bytes += slot.bytes;
         while self.retained_bytes > WIDGET_CACHE_BYTES {
             let oldest = self
