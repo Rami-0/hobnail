@@ -268,7 +268,8 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
         .await;
     });
     let connections = Connections::default();
-    let target = Target::new(format!("{origin}/prefix"), credentials(&origin), false);
+    let mut target = Target::new(format!("{origin}/prefix"), credentials(&origin), false);
+    connections.bind(&mut target, Some("fixture"), true);
     let policy = policy();
     let permit = std::sync::Arc::new(Semaphore::new(1))
         .try_acquire_owned()
@@ -315,11 +316,12 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
             .await?;
         assert_eq!(response.status, 302);
         assert!(response.headers.is_empty());
-        let other = Target::new(
+        let mut other = Target::new(
             format!("http://{}", foreign.local_addr().unwrap()),
             credentials(&origin),
             false,
         );
+        connections.bind(&mut other, Some("fixture"), true);
         let other = Conn::new(
             &other,
             &policy,

@@ -176,6 +176,7 @@ impl Connections {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Session {
     scope: u64,
+    origin: String,
     value: String,
     cookie_value_start: Option<usize>,
 }
@@ -356,11 +357,15 @@ impl<'a> Conn<'a> {
         )
     }
 
+    fn owns_session(&self, session: &Session) -> bool {
+        session.scope == self.session_scope && session.origin == self.origin
+    }
+
     fn resolve<'b>(&'b self, input: &'b Input<'_>) -> Result<&'b str, Fault> {
         match input {
             Input::Text(text) => Ok(text),
             Input::Session(session)
-                if session.scope == self.session_scope && session.cookie_value_start.is_none() =>
+                if self.owns_session(session) && session.cookie_value_start.is_none() =>
             {
                 self.remember_auth(&session.value);
                 Ok(&session.value)
@@ -420,7 +425,7 @@ impl<'a> Conn<'a> {
                 Auth::Cookie(session) => {
                     let start = session
                         .cookie_value_start
-                        .filter(|_| session.scope == self.session_scope)
+                        .filter(|_| self.owns_session(session))
                         .ok_or(Class::Blocked)?;
                     self.remember_auth(session.value[start..].trim_matches('"'));
                     ("cookie", session.value.clone())
@@ -574,6 +579,7 @@ impl<'a> Conn<'a> {
         self.remember_auth(value);
         Ok(Session {
             scope: self.session_scope,
+            origin: self.origin.clone(),
             value: value.into(),
             cookie_value_start: None,
         })
@@ -625,6 +631,7 @@ impl<'a> Conn<'a> {
         self.remember_auth(pair);
         Ok(Session {
             scope: self.session_scope,
+            origin: self.origin.clone(),
             value: pair.into(),
             cookie_value_start: Some(start),
         })
@@ -665,7 +672,7 @@ impl<'a> Conn<'a> {
     }
 
     fn store_session(&self, key: &SessionKey, session: &Session) -> Result<(), Fault> {
-        if session.scope != self.session_scope {
+        if !self.owns_session(session) {
             return Err(Class::Blocked.into());
         }
         let mut sessions = self.connections.sessions.lock().unwrap();
