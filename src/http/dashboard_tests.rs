@@ -1665,3 +1665,52 @@ async fn discovery_caps_suggestions_before_serializing_container_identity_rows()
         .all(|suggestion| suggestion["payload"]["kind"] == "container"
             && suggestion.get("stats").is_none()));
 }
+
+#[tokio::test]
+async fn setup_draft_limits_fields_without_requiring_complete_values() {
+    let owner = browser_owner(start(state()).await).await;
+    let id = "00000000000000000000000000000001";
+    let link = json!({"id":id,"included":true,"name":"","group":"",
+        "target":{"kind":"board","payload":{"kind":"link","title":"","url":""}}});
+    let update = |item| json!({"revision":1,"document":{"step":"connections","items":[item]},"credentials":[]});
+    let saved = owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":0,"document":{"step":"connections","items":[link]},"credentials":[]}),
+            200,
+        )
+        .await;
+    for (pointer, field, limit) in [
+        ("/name", "name", 256),
+        ("/group", "group", 256),
+        ("/target/payload/url", "url", 2048),
+    ] {
+        let mut item = link.clone();
+        *item.pointer_mut(pointer).unwrap() = json!("é".repeat(limit / 2 + 1));
+        let error = owner.json("PUT", SETUP_DRAFT, update(item), 400).await;
+        assert_eq!(error["error"]["field"], format!("items.{id}.{field}"));
+    }
+    let mut http = link.clone();
+    http["target"] = json!({"kind":"http","base_url":"a".repeat(2049),"enabled":true});
+    let error = owner.json("PUT", SETUP_DRAFT, update(http), 400).await;
+    assert_eq!(error["error"]["field"], format!("items.{id}.base_url"));
+    let mut nested = link.clone();
+    nested["target"]["payload"]["icon"] = json!("x".repeat(97));
+    let error = owner.json("PUT", SETUP_DRAFT, update(nested), 400).await;
+    assert_eq!(error["error"]["field"], format!("items.{id}.icon"));
+    let mut sourced = link.clone();
+    sourced["source"] = json!("x".repeat(4097));
+    let error = owner.json("PUT", SETUP_DRAFT, update(sourced), 400).await;
+    assert_eq!(error["error"]["field"], format!("items.{id}.source"));
+    assert_eq!(
+        owner.json("GET", SETUP_DRAFT, Value::Null, 200).await,
+        saved
+    );
+
+    let mut at_limit = link;
+    at_limit["name"] = json!("é".repeat(128));
+    at_limit["group"] = json!("b".repeat(256));
+    at_limit["target"]["payload"]["url"] = json!("h".repeat(2048));
+    owner.json("PUT", SETUP_DRAFT, update(at_limit), 200).await;
+}

@@ -134,6 +134,9 @@ landing page.
   write-only `secret`. Omit the change to retain a credential, or send a null
   secret to clear it. SQLite stores staged tokens separately with their bound
   origin. Draft responses return only the origins.
+  Setup writes accept up to 2 MiB and 512 items. Item names and sections
+  accept up to 256 UTF-8 bytes, URLs up to 2,048 bytes, and icon names up to
+  96 bytes. The legacy discovery source field accepts up to 4,096 bytes.
 - GET `/onboarding/discovery` for Docker availability, config status and the
   regular board suggestions. Docker failure leaves the other sources usable.
 - POST `revision` and `item_id` to `/onboarding/test` to test a saved, included

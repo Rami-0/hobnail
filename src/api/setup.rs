@@ -70,6 +70,71 @@ impl SetupItem {
     }
 }
 
+const LABEL_BYTES: usize = 256;
+const URL_BYTES: usize = 2048;
+const ICON_BYTES: usize = 96;
+const SOURCE_BYTES: usize = 4096;
+
+fn field_length(value: &str, field: &str, max: usize) -> Result<(), ApiError> {
+    if value.len() > max {
+        return Err(ApiError::bad_request(
+            format!("Use at most {max} bytes."),
+            Some(field),
+        ));
+    }
+    Ok(())
+}
+
+fn draft_lengths(item: &SetupItem) -> Result<(), ApiError> {
+    field_length(&item.name, "name", LABEL_BYTES)?;
+    field_length(&item.group, "group", LABEL_BYTES)?;
+    field_length(
+        item.source.as_deref().unwrap_or_default(),
+        "source",
+        SOURCE_BYTES,
+    )?;
+    match &item.target {
+        SetupTarget::Http { base_url, .. } => field_length(base_url, "base_url", URL_BYTES),
+        SetupTarget::Board { payload } => match payload {
+            BoardPayload::Link { title, url, icon } => {
+                field_length(title, "title", LABEL_BYTES)?;
+                field_length(icon.as_deref().unwrap_or_default(), "icon", ICON_BYTES)?;
+                field_length(url, "url", URL_BYTES)
+            }
+            BoardPayload::Container {
+                target,
+                title,
+                icon,
+                link,
+            } => {
+                match target {
+                    boards::ContainerMatch::Compose { project, service } => {
+                        field_length(project, "project", LABEL_BYTES)?;
+                        field_length(service, "service", LABEL_BYTES)?;
+                    }
+                    boards::ContainerMatch::Name { name } => {
+                        field_length(name, "target", LABEL_BYTES)?
+                    }
+                }
+                field_length(title.as_deref().unwrap_or_default(), "title", LABEL_BYTES)?;
+                field_length(icon.as_deref().unwrap_or_default(), "icon", ICON_BYTES)?;
+                field_length(link.as_deref().unwrap_or_default(), "link", URL_BYTES)
+            }
+            BoardPayload::Widget { widget_id, title } => {
+                field_length(widget_id, "widget_id", LABEL_BYTES)?;
+                field_length(title.as_deref().unwrap_or_default(), "title", LABEL_BYTES)
+            }
+            BoardPayload::Integration {
+                integration_id,
+                title,
+            } => {
+                field_length(integration_id, "integration_id", 32)?;
+                field_length(title.as_deref().unwrap_or_default(), "title", LABEL_BYTES)
+            }
+        },
+    }
+}
+
 fn item_error(id: &str, mut error: ApiError) -> ApiError {
     if error.status == StatusCode::BAD_REQUEST {
         let field = match error.field.as_deref() {
@@ -287,6 +352,9 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
         ));
     }
     dashboard_settings::validate_theme(update.document.theme.as_deref())?;
+    for item in &update.document.items {
+        draft_lengths(item).map_err(|error| item_error(&item.id, error))?;
+    }
     // An omitted item or one converted to another kind cannot retain a token.
     let mut stmt = conn.prepare("SELECT item_id FROM setup_credentials WHERE user_id=?1")?;
     let keys = stmt
@@ -308,6 +376,7 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
                 Some("secret"),
             ));
         };
+        field_length(&change.base_url, "base_url", URL_BYTES).map_err(local)?;
         if let Some(secret) = change.secret {
             integrations::secret_value(&secret).map_err(local)?;
             let origin = integration_origin(&change.base_url).map_err(local)?;
