@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, watch, Notify};
 
 use crate::config::ConfigStore;
 use crate::model::{Snapshot, StatsMap, SystemStats};
-use crate::widgets::WidgetOutput;
+use crate::widgets::{WidgetCache, WidgetOutput};
 
 #[derive(Debug, Clone)]
 pub struct BuildInfo {
@@ -111,7 +111,7 @@ pub struct AppState {
     pub containers: watch::Sender<Arc<Snapshot>>,
     pub container_stats: Mutex<(crate::docker::StatsSampler, StatsMap)>,
     pub system: Mutex<(crate::system::Sampler, Option<SystemStats>)>,
-    pub widgets: Mutex<HashMap<String, WidgetOutput>>,
+    pub(crate) widgets: Mutex<WidgetCache>,
     /// Local history database (docs/DESIGN.md section 4). May be disabled.
     pub db: Arc<crate::db::Db>,
     pub alerts: Mutex<crate::alerts::Status>,
@@ -150,7 +150,7 @@ impl AppState {
                 crate::system::Sampler::new(&env.host_proc, &env.host_sys),
                 None,
             )),
-            widgets: Mutex::new(HashMap::new()),
+            widgets: Mutex::default(),
             db,
             alerts: Mutex::new(Default::default()),
             password_limiter: Mutex::new(Default::default()),
@@ -166,23 +166,31 @@ impl AppState {
         })
     }
 
+    pub(crate) fn begin_widget(
+        &self,
+        config: &Arc<crate::config::Config>,
+        id: &str,
+    ) -> Option<u64> {
+        let mut cache = self.widgets.lock().unwrap();
+        Arc::ptr_eq(config, &self.config.current()).then(|| cache.begin(id))
+    }
+
     pub(crate) fn record_widget(
         &self,
         config: &Arc<crate::config::Config>,
         id: &str,
+        attempt: u64,
+        completed: std::time::Instant,
         out: WidgetOutput,
-    ) {
+    ) -> bool {
         let mut cache = self.widgets.lock().unwrap();
-        if !Arc::ptr_eq(config, &self.config.current()) {
-            return;
-        }
-        match cache.get_mut(id) {
-            Some(current) => current.record(out),
-            None => {
-                cache.insert(id.to_string(), out);
-            }
+        if !Arc::ptr_eq(config, &self.config.current())
+            || !cache.record(id, attempt, completed, out)
+        {
+            return false;
         }
         self.changed(&format!("w-{id}"));
+        true
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {

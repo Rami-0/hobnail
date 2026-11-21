@@ -117,7 +117,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, Notify};
 
 use crate::config::Config;
@@ -631,7 +631,7 @@ struct HttpProbe {
 #[derive(Default)]
 struct WidgetProbe {
     out: Option<WidgetOutput>,
-    next_due: u64,
+    next_due: Option<Instant>,
     in_flight: bool,
 }
 
@@ -650,6 +650,8 @@ enum ProbeResult {
     Widget {
         config: Arc<Config>,
         id: String,
+        attempt: u64,
+        completed: Instant,
         out: WidgetOutput,
     },
 }
@@ -714,25 +716,35 @@ impl Probes {
             .filter_map(|r| r.widget.as_deref())
             .collect();
         self.widgets.retain(|id, _| wanted.contains(id.as_str()));
+        let tick = Instant::now();
         for w in cfg
             .widgets
             .iter()
             .filter(|w| wanted.contains(w.id.as_str()))
         {
-            let refresh = w.refresh.0.as_secs().max(5);
+            let refresh = w.refresh.0.max(Duration::from_secs(5));
             let p = self.widgets.entry(w.id.clone()).or_default();
-            if p.in_flight || p.next_due > now {
+            if p.in_flight || p.next_due.is_some_and(|due| due > tick) {
                 continue;
             }
             // Reuse a fresh result from the viewer refresh loop if there is one.
-            let cached = state.widgets.lock().unwrap().get(&w.id).cloned();
-            if let Some(out) = cached.filter(|o| o.fetched_at + refresh > now) {
-                p.next_due = out.fetched_at + refresh;
+            let cached = {
+                let cache = state.widgets.lock().unwrap();
+                cache
+                    .deadline(&w.id, refresh)
+                    .filter(|due| *due > tick)
+                    .and_then(|due| Some((due, cache.get(&w.id)?.clone())))
+            };
+            if let Some((due, out)) = cached {
+                p.next_due = Some(due);
                 p.out = Some(out);
                 continue;
             }
+            let Some(attempt) = state.begin_widget(cfg, &w.id) else {
+                continue;
+            };
             p.in_flight = true;
-            p.next_due = now + refresh;
+            p.next_due = Some(crate::widgets::refresh_deadline(tick, refresh));
             let (w, config, tx) = (w.clone(), cfg.clone(), tx.clone());
             tokio::spawn(async move {
                 let out = crate::widgets::run(&w, &config.http).await;
@@ -740,6 +752,8 @@ impl Probes {
                     .send(ProbeResult::Widget {
                         config,
                         id: w.id,
+                        attempt,
+                        completed: Instant::now(),
                         out,
                     })
                     .await;
@@ -778,12 +792,22 @@ impl Probes {
                     }
                 }
             }
-            ProbeResult::Widget { config, id, out } => {
+            ProbeResult::Widget {
+                config,
+                id,
+                attempt,
+                completed,
+                out,
+            } => {
+                let accepted = state.record_widget(&config, &id, attempt, completed, out.clone());
                 if let Some(p) = self.widgets.get_mut(&id) {
                     p.in_flight = false;
-                    p.out = Some(out.clone());
+                    if accepted {
+                        p.out = Some(out);
+                    } else {
+                        p.next_due = None;
+                    }
                 }
-                state.record_widget(&config, &id, out);
             }
         }
     }
@@ -795,13 +819,16 @@ impl Probes {
             .values()
             .filter(|p| !p.in_flight)
             .map(|p| p.next_due);
-        let widgets = self
-            .widgets
+        let host = self.host.iter().map(|h| h.next_due);
+        http.chain(host).min()
+    }
+
+    fn next_widget_due(&self) -> Option<Instant> {
+        self.widgets
             .values()
             .filter(|p| !p.in_flight)
-            .map(|p| p.next_due);
-        let host = self.host.iter().map(|h| h.next_due);
-        http.chain(widgets).chain(host).min()
+            .filter_map(|p| p.next_due)
+            .min()
     }
 }
 
@@ -917,7 +944,11 @@ pub async fn run(state: Arc<AppState>) {
         if let Some(t) = probes.next_due() {
             wait = wait.min(t.saturating_sub(now).max(1));
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(wait);
+        let mut deadline = Instant::now() + Duration::from_secs(wait);
+        if let Some(widget_due) = probes.next_widget_due() {
+            deadline = deadline.min(widget_due);
+        }
+        let deadline = tokio::time::Instant::from_std(deadline);
         loop {
             tokio::select! {
                 r = containers.changed(), if container_rules && containers_open => {

@@ -696,8 +696,55 @@ fn refresh_errors_keep_only_the_previous_success_until_recovery() {
     assert_eq!(current.values["number"], 3);
     assert_eq!(current.error.as_deref(), Some("timed out"));
     current.record(success(6));
-    current.record(failed(5));
     assert_eq!(current.display.headline.as_deref(), Some("6"));
     assert!(current.stale_since.is_none());
     assert!(current.error.is_none());
+}
+
+#[test]
+fn widget_refresh_uses_elapsed_time_and_orders_overlapping_attempts() {
+    let mut cache = WidgetCache::default();
+    let tick = Instant::now();
+    let refresh = Duration::from_secs(30);
+    let success = cache.begin("widget");
+    let failure = cache.begin("widget");
+    assert!(cache.record(
+        "widget",
+        success,
+        tick,
+        WidgetOutput {
+            fetched_at: 1000,
+            display: WidgetBody {
+                headline: Some("last good".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    ));
+    let completed = tick + Duration::from_secs(1);
+    assert!(cache.record(
+        "widget",
+        failure,
+        completed,
+        WidgetOutput {
+            fetched_at: 900,
+            error: Some("timed out".into()),
+            ..Default::default()
+        }
+    ));
+    assert!(!cache.record(
+        "widget",
+        success,
+        completed,
+        WidgetOutput {
+            fetched_at: 1001,
+            ..Default::default()
+        }
+    ));
+    let out = cache.get("widget").unwrap();
+    assert_eq!(out.fetched_at, 900);
+    assert_eq!(out.stale_since, Some(1000));
+    assert_eq!(out.error.as_deref(), Some("timed out"));
+    assert_eq!(out.display.headline.as_deref(), Some("last good"));
+    assert_eq!(cache.deadline("widget", refresh), Some(completed + refresh));
 }

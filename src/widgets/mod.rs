@@ -223,9 +223,6 @@ pub struct WidgetOutput {
 
 impl WidgetOutput {
     pub(crate) fn record(&mut self, mut next: Self) {
-        if next.fetched_at < self.fetched_at {
-            return;
-        }
         if next.error.is_some() {
             let last_good = self
                 .stale_since
@@ -239,6 +236,66 @@ impl WidgetOutput {
         }
         *self = next;
     }
+}
+
+#[derive(Default)]
+pub(crate) struct WidgetCache {
+    slots: std::collections::HashMap<String, WidgetSlot>,
+}
+
+#[derive(Default)]
+struct WidgetSlot {
+    started: u64,
+    completed: Option<(u64, Instant)>,
+    output: Option<WidgetOutput>,
+}
+
+impl WidgetCache {
+    pub(crate) fn clear(&mut self) {
+        self.slots.clear();
+    }
+
+    pub(crate) fn get(&self, id: &str) -> Option<&WidgetOutput> {
+        self.slots.get(id)?.output.as_ref()
+    }
+
+    pub(crate) fn deadline(&self, id: &str, refresh: Duration) -> Option<Instant> {
+        let (_, completed) = self.slots.get(id)?.completed?;
+        Some(refresh_deadline(completed, refresh))
+    }
+
+    pub(crate) fn begin(&mut self, id: &str) -> u64 {
+        let slot = self.slots.entry(id.to_owned()).or_default();
+        slot.started += 1;
+        slot.started
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        completed: Instant,
+        out: WidgetOutput,
+    ) -> bool {
+        let Some(slot) = self.slots.get_mut(id) else {
+            return false;
+        };
+        if slot.completed.is_some_and(|(latest, _)| latest >= attempt) {
+            return false;
+        }
+        slot.completed = Some((attempt, completed));
+        match &mut slot.output {
+            Some(current) => current.record(out),
+            None => slot.output = Some(out),
+        }
+        true
+    }
+}
+
+pub(crate) fn refresh_deadline(now: Instant, refresh: Duration) -> Instant {
+    // Durations too large to represent as a deadline are effectively never due.
+    now.checked_add(refresh)
+        .unwrap_or_else(|| now + Duration::from_secs(100 * 365 * 24 * 3600))
 }
 
 /// Parsed paths and templates of one widget.
