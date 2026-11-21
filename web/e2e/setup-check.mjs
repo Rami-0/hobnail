@@ -62,22 +62,36 @@ try {
     await tab.send("Page.reload");
     await step("Select what to include");
     await require("name and section survived reload", `document.querySelector(${q(selected + ' input[id$="-name"]')})?.value === "Selected service" && document.querySelector(${q(selected + ' input[id$="-group"]')})?.value === "Home tools"`);
-    await user.click('.setup-fields .acts button:first-child');
+    await user.click(".setup-fields .acts button:first-child");
+    await user.click(".setup-fields .acts button:nth-child(2)");
   }
   await nav("continue");
   await step("Configure connections");
 
   if (!empty) {
-    await fill('.setup-item:last-of-type input[name="url"]', "http://127.0.0.1:1/");
+    const linkUrl = '.setup-item:nth-of-type(2) input[name="url"]';
+    const httpUrl = '.setup-item:last-of-type input[name="base_url"]';
+    const credential = '.setup-item:last-of-type input[name="secret"]';
+    await fill(linkUrl, "http://127.0.0.1:1/");
+    await fill(httpUrl, "http://127.0.0.1:2/");
+    await fill(credential, "invalid fixture");
+    await nav("skip");
+    await step("Review dashboard");
+    await require("an invalid pending credential does not prevent skipping", 'document.body.textContent.includes("Only saved credentials are included")');
+    await nav("back");
+    await step("Configure connections");
+    await require("URL and pending credential survived Skip and Back", `document.querySelector(${q(linkUrl)})?.value === "http://127.0.0.1:1/" && document.querySelector(${q(credential)})?.value.length > 0`);
+    await fill(credential, crypto.randomUUID());
     const target = `.setup-item:last-of-type ${attr("setup-test")}`;
     await require("test action available", `document.querySelector(${q(target)})?.matches('button:not(:disabled):not([aria-disabled=true])')`);
     await user.click(target);
     await require("failed connection test is shown", `document.querySelector(${q(attr("setup-verdict"))})?.textContent.includes("blocked")`);
+    await require("saved credential is masked on the form", `document.querySelector(${q(credential)})?.value === "" && document.body.textContent.includes("A credential is saved for")`);
     await nav("back");
     await step("Select what to include");
     await nav("continue");
     await step("Configure connections");
-    await require("URL survived Back and Continue", 'document.querySelector(".setup-item:last-of-type input[name=url]")?.value === "http://127.0.0.1:1/"');
+    await require("URL survived Back and Continue", `document.querySelector(${q(httpUrl)})?.value === "http://127.0.0.1:2/"`);
   }
   await nav("skip");
   await step("Review dashboard");
@@ -89,7 +103,7 @@ try {
     await user.click(attr("board-empty-discover"));
     await require("normal board picker opens from Discover", `!!document.querySelector(${q(attr("board-picker"))} + "[data-open]")`);
   } else {
-    await require("board contains exactly the two chosen items", `document.querySelectorAll(${q(attr("board-tile"))}).length === 2 && document.body.textContent.includes("Selected service") && document.body.textContent.includes("Home tools")`);
+    await require("board contains exactly the three chosen items", `document.querySelectorAll(${q(attr("board-tile"))}).length === 3 && document.body.textContent.includes("Selected service") && document.body.textContent.includes("Home tools")`);
   }
   for (const kind of ["csp", "console", "exceptions", "failed"]) {
     assert.equal(events[kind].length, 0, `Unexpected ${kind} during setup (${events[kind].length})`);
