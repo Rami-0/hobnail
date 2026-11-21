@@ -314,4 +314,49 @@ mod tests {
             ])
         );
     }
+
+    #[tokio::test]
+    async fn v5_refuses_encoded_echoes_in_the_only_upstream_text_field() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        const TOKEN_VALUE: &str = "xy~*>&/!";
+        let mut target = Target::new(
+            origin.clone(),
+            [(
+                TOKEN.into(),
+                BoundCredential {
+                    origin,
+                    token: TOKEN_VALUE.into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            false,
+        );
+        target.options.insert("version".into(), "v5".into());
+        let policy = HttpPolicy {
+            allow_hosts: vec!["127.0.0.1".into()],
+        };
+        let connections = Connections::default();
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+        let echoes = super::super::redaction::tests::encoded_echoes(TOKEN_VALUE);
+        let count = echoes.len();
+        let fake = tokio::spawn(async move {
+            for echo in echoes {
+                let (mut socket, _) = receive(&listener).await;
+                respond(&mut socket, 200, "", &serde_json::json!({
+                    "dns_queries_today":100, "ads_blocked_today":15, "ads_percentage_today":15,
+                    "status":echo, "secondary":echo, "link":format!("https://example.test/{echo}")
+                }).to_string()).await;
+            }
+        });
+        for _ in 0..count {
+            let error = super::super::fetch(&conn, &PI_HOLE.widgets[0], &Values::new())
+                .await
+                .unwrap_err();
+            assert!(matches!(error.class, Class::Protocol));
+        }
+        fake.await.unwrap();
+    }
 }

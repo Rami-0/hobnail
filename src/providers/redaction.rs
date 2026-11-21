@@ -9,7 +9,7 @@ const MARKER: &str = "<redacted>";
 
 /// The only derived needles are the binary-to-text forms. Decode textual
 /// escapes on the output side so mixed encoders share the same matching path.
-pub(super) struct OutputRedactor(Option<HashSet<String>>);
+pub(super) struct OutputRedactor(Option<Vec<Needle>>);
 
 impl OutputRedactor {
     pub(super) fn new(values: impl Iterator<Item = impl AsRef<str>>) -> Self {
@@ -34,11 +34,11 @@ impl OutputRedactor {
             }
             needles.insert(secret);
         }
-        Self(Some(needles))
+        Self(Some(needles.into_iter().map(Needle::new).collect()))
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.0.as_ref().is_some_and(HashSet::is_empty)
+        self.0.as_ref().is_some_and(Vec::is_empty)
     }
 
     fn spans(&self, text: &str) -> Vec<bool> {
@@ -51,13 +51,14 @@ impl OutputRedactor {
             let mut base = 0;
             for chunk in bytes.utf8_chunks() {
                 let text = chunk.valid();
-                for needle in needles.iter().filter(|needle| needle.len() <= text.len()) {
-                    let mut offset = 0;
+                for needle in needles
+                    .iter()
+                    .filter(|needle| needle.value.len() <= text.len())
+                {
                     let mut rightmost = 0;
-                    let advance = needle.chars().next().unwrap().len_utf8();
-                    while let Some(index) = text[offset..].find(needle) {
-                        let start = base + offset + index;
-                        let end = start + needle.len();
+                    needle.for_each_match(text, |index| {
+                        let start = base + index;
+                        let end = start + needle.value.len();
                         let (left, right) = if origins.is_empty() {
                             (start, end)
                         } else {
@@ -66,13 +67,15 @@ impl OutputRedactor {
                         // Avoid repeatedly filling overlapping spans.
                         matched[left.max(rightmost).min(right)..right].fill(true);
                         rightmost = right;
-                        offset += index + advance;
-                    }
+                    });
                 }
                 base += text.len() + chunk.invalid().len();
             }
         };
         mark(text.as_bytes(), &[]);
+        if !text.contains(['%', '+', '\\', '&']) {
+            return matched;
+        }
         // '+' is literal in RFC 3986, and space in form encoding. Interpret
         // raw plus in each layer while preserving a percent-decoded plus.
         for form in [false, true] {
@@ -126,14 +129,65 @@ impl OutputRedactor {
                 } else {
                     &text[start..end]
                 });
+                if result.len() > MAX_RESPONSE {
+                    text.clear();
+                    return true;
+                }
                 start = end;
             }
         }
-        if result.len() > MAX_RESPONSE || self.matches(&result) {
+        if self.matches(&result) {
             result.clear();
         }
         *text = result;
         true
+    }
+}
+
+struct Needle {
+    value: String,
+    // Only needed when two occurrences of this needle can overlap.
+    prefix: Vec<u16>,
+}
+
+impl Needle {
+    fn new(value: String) -> Self {
+        let bytes = value.as_bytes();
+        let mut prefix = vec![0; bytes.len()];
+        for index in 1..bytes.len() {
+            prefix[index] =
+                Self::extend(bytes, &prefix, usize::from(prefix[index - 1]), bytes[index]) as u16;
+        }
+        if prefix.last() == Some(&0) {
+            prefix = Vec::new();
+        }
+        Self { value, prefix }
+    }
+
+    fn extend(bytes: &[u8], prefix: &[u16], mut matched: usize, byte: u8) -> usize {
+        while matched > 0 && bytes[matched] != byte {
+            matched = usize::from(prefix[matched - 1]);
+        }
+        matched + usize::from(bytes[matched] == byte)
+    }
+
+    fn for_each_match(&self, text: &str, mut found: impl FnMut(usize)) {
+        if self.prefix.is_empty() {
+            for (index, _) in text.match_indices(&self.value) {
+                found(index);
+            }
+            return;
+        }
+        // Prefix fallback finds every overlapping match in a single pass.
+        let bytes = self.value.as_bytes();
+        let mut matched = 0;
+        for (index, byte) in text.bytes().enumerate() {
+            matched = Self::extend(bytes, &self.prefix, matched, byte);
+            if matched == bytes.len() {
+                found(index + 1 - matched);
+                matched = usize::from(self.prefix[matched - 1]);
+            }
+        }
     }
 }
 
@@ -213,7 +267,7 @@ fn json_escape(rest: &[u8]) -> Option<(usize, char)> {
 }
 
 fn entity(rest: &[u8]) -> Option<(usize, char)> {
-    let end = rest.iter().take(16).position(|&b| b == b';')?;
+    let end = rest.iter().take(24).position(|&b| b == b';')?;
     let name = std::str::from_utf8(&rest[1..end]).ok()?;
     let ch = match name {
         "amp" | "AMP" => '&',
@@ -221,7 +275,34 @@ fn entity(rest: &[u8]) -> Option<(usize, char)> {
         "gt" | "GT" => '>',
         "quot" | "QUOT" => '"',
         "apos" => '\'',
-        "nbsp" => '\u{a0}',
+        "nbsp" | "NonBreakingSpace" => '\u{a0}',
+        "Tab" => '\t',
+        "NewLine" => '\n',
+        "excl" => '!',
+        "num" => '#',
+        "dollar" => '$',
+        "percnt" => '%',
+        "lpar" => '(',
+        "rpar" => ')',
+        "ast" | "midast" => '*',
+        "plus" => '+',
+        "comma" => ',',
+        "period" => '.',
+        "sol" => '/',
+        "colon" => ':',
+        "semi" => ';',
+        "equals" => '=',
+        "quest" => '?',
+        "commat" => '@',
+        "lsqb" | "lbrack" => '[',
+        "bsol" => '\\',
+        "rsqb" | "rbrack" => ']',
+        "Hat" => '^',
+        "lowbar" | "UnderBar" => '_',
+        "grave" | "DiacriticalGrave" => '`',
+        "lcub" | "lbrace" => '{',
+        "verbar" | "vert" | "VerticalLine" => '|',
+        "rcub" | "rbrace" => '}',
         _ => {
             let number = name.strip_prefix('#')?;
             let code = match number.strip_prefix(['x', 'X']) {
@@ -235,8 +316,27 @@ fn entity(rest: &[u8]) -> Option<(usize, char)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::providers) mod tests {
     use super::*;
+
+    /// Ordinary encodings of the shared ASCII fixture, including the distinct
+    /// form and RFC 3986 escapes for tilde and asterisk.
+    pub(in crate::providers) fn encoded_echoes(secret: &str) -> Vec<String> {
+        assert_eq!(secret, "xy~*>&/!");
+        let base64 = connection::base64(secret);
+        let base64url = base64.replace('+', "-").replace('/', "_");
+        vec![
+            secret.into(),
+            "xy%7e*%3e%26%2f%21".into(),
+            "xy~%2A%3E%26%2F%21".into(),
+            r"xy~*>&/!".into(),
+            "xy&#126;&#x2A;&gt;&amp;&#47;!".into(),
+            base64.trim_end_matches('=').into(),
+            base64url.trim_end_matches('=').into(),
+            base64,
+            base64url,
+        ]
+    }
 
     #[test]
     fn maps_mixed_escapes_to_original_spans() {
@@ -266,6 +366,14 @@ mod tests {
             assert!(redactor.redact(&mut value));
             assert_eq!(value, "before:<redacted>:after");
         }
+    }
+
+    #[test]
+    fn merges_overlapping_secret_echoes() {
+        let redactor = OutputRedactor::new(["abab"].into_iter());
+        let mut text = "pre:ababab:post".to_owned();
+        assert!(redactor.redact(&mut text));
+        assert_eq!(text, "pre:<redacted>:post");
     }
 
     #[test]

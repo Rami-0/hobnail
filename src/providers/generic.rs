@@ -194,4 +194,60 @@ mod tests {
         }
         fake.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn encoded_echoes_are_removed_before_display_shortening() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        const SECRET: &str = "xy~*>&/!";
+        let target = Target::new(
+            origin.clone(),
+            [(
+                "secret".into(),
+                client::BoundCredential {
+                    origin,
+                    token: SECRET.into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            false,
+        );
+        let fake = tokio::spawn(async move {
+            for echo in super::super::redaction::tests::encoded_echoes(SECRET) {
+                let (mut socket, _) = receive(&listener).await;
+                let value = format!("{}{}", "x".repeat(template::MAX_TEXT - 4), echo);
+                respond(
+                    &mut socket,
+                    200,
+                    "",
+                    &serde_json::json!({"value":value}).to_string(),
+                )
+                .await;
+            }
+        });
+        let policy = crate::config::HttpPolicy {
+            allow_hosts: vec!["127.0.0.1".into()],
+        };
+        let connections = Connections::default();
+        let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+        let options = serde_json::from_str(r#"{"paths":["value"]}"#).unwrap();
+        for _ in super::super::redaction::tests::encoded_echoes(SECRET) {
+            let StructuredBody::StatGrid { rows } =
+                super::super::fetch(&conn, &HTTP.widgets[0], &options)
+                    .await
+                    .unwrap()
+            else {
+                panic!("unexpected widget shape");
+            };
+            assert_eq!(
+                rows[0].1,
+                template::display(
+                    &format!("{}<redacted>", "x".repeat(template::MAX_TEXT - 4)).into()
+                )
+            );
+        }
+        fake.await.unwrap();
+    }
 }
