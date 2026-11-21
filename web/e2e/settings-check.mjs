@@ -6,6 +6,8 @@ import { CSP_LISTENER, input, launch, q, recorder, sleep } from "./cdp.mjs";
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3396");
 assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
 assert.ok(/^339[5-9]$/.test(base.port) || (base.hostname === "127.0.0.1" && base.port === "3300"));
+const only = process.argv[3];
+assert.ok(!only || /^(390|1440)-(dark|light)$/.test(only), "Optional profile must be WIDTH-THEME");
 const password = process.env.HB_PASSWORD;
 const out = process.env.OUT;
 assert.ok(password && out, "set HB_PASSWORD and OUT");
@@ -60,6 +62,7 @@ const createdUsers = [];
 try {
   for (const width of [1440, 390]) for (const scheme of ["dark", "light"]) {
     const label = `${width}-${scheme}`;
+    if (only && only !== label) continue;
     const tab = await browser.tab();
     const inp = input(tab);
     inp.touch = width < 700;
@@ -203,6 +206,7 @@ try {
       const after = await revisions();
       assert.equal(after[0].note, "bookmarks: reordered");
       assert.equal(after[1].id, beforeRevision, "one Save creates exactly one revision");
+      console.log(`ok ${label}: three arrow clicks and Cancel save no revisions, Save order creates one`);
       await go("/app/overview?add=widget", present(editor));
       await inp.key("Escape");
       await go("/app/alerts?add=channel", present(editor));
