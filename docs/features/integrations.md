@@ -174,6 +174,25 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
 
+## Prowlarr
+
+Enter the service URL and the API key from Settings → General. Prowlarr's
+instance API key is required and has no read-only scope. Hobnail sends it
+in `X-Api-Key` and uses only Prowlarr API v1 GET routes.
+
+**Indexer activity** shows the number of temporarily blocked indexers,
+details for up to five of them, and total and failed grabs from the last
+seven days. The status endpoint reports temporary blocks due to upstream
+failures. The total grab count includes failed grabs.
+
+Verified from:
+
+- [Prowlarr API v1 OpenAPI](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/openapi.json)
+- [Indexer status](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/Indexers/IndexerStatusController.cs) and [blocked-provider filter](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/NzbDrone.Core/ThingiProvider/Status/ProviderStatusServiceBase.cs)
+- [Indexer stats](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/Indexers/IndexerStatsController.cs) and [grab aggregation](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/NzbDrone.Core/IndexerStats/IndexerStatisticsService.cs)
+
+UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
