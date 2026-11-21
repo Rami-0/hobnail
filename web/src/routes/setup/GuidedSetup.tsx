@@ -9,12 +9,13 @@ import type { SetupItem } from "../../api/gen/SetupItem.ts";
 import type { SetupResult } from "../../api/gen/SetupResult.ts";
 import type { SetupTarget } from "../../api/gen/SetupTarget.ts";
 import type { SetupUpdate } from "../../api/gen/SetupUpdate.ts";
+import { navigate } from "../../app/router.ts";
 import { applyTheme, currentTheme, isTheme } from "../../app/theme.ts";
 import { LinkUrl } from "../../boards/LinkUrl.tsx";
-import { origin } from "../../boards/document.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Card, CardContent } from "../../ui/Card.tsx";
 import { Checkbox } from "../../ui/Checkbox.tsx";
+import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
@@ -32,6 +33,26 @@ function openBoard(id: string) {
 export default function SetupPage() {
   const [draft, setDraft] = useState<SetupDraft>();
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (!credentialPending) return;
+    const navigation = (event: Event) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      setDeparture({ to: (event as CustomEvent<string>).detail });
+    };
+    const unload = (event: BeforeUnloadEvent) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("rh:navigate", navigation);
+    window.addEventListener("beforeunload", unload);
+    return () => {
+      window.removeEventListener("rh:navigate", navigation);
+      window.removeEventListener("beforeunload", unload);
+    };
+  }, [credentialPending]);
+
   useEffect(() => {
     const controller = new AbortController();
     void api.get<SetupDraft>(`${PATH}/draft`, { signal: controller.signal }).then((response) => {
@@ -74,10 +95,13 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ message: string; stale?: boolean; draft?: boolean }>();
   const [verdicts, setVerdicts] = useState<Record<string, IntegrationVerdict | string>>({});
+  const [departure, setDeparture] = useState<{ to?: string }>();
+  const leaving = useRef(false);
   const savingRef = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const { step } = doc;
   const dirty = doc !== draft.document;
+  const credentialPending = Object.keys(credentials).length > 0;
   const stepIndex = stepOrder.indexOf(step);
   const chosenTheme = doc.theme ?? draft.theme_default;
 
@@ -147,10 +171,6 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   }
 
   function changeTarget(item: SetupItem, target: SetupTarget) {
-    const change = credentials[item.id];
-    if (change?.secret && target.kind === "http" && origin(change.base_url) !== origin(target.base_url)) {
-      setCredentials(({ [item.id]: _previous, ...others }) => others);
-    }
     update(item.id, { target });
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
@@ -161,16 +181,9 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
 
-  function stageableChanges() {
-    return Object.values(credentials).filter(({ base_url, secret }) =>
-      secret === null || (!!origin(base_url) && /^[!-~]{1,4096}$/.test(secret))
-    );
-  }
-
   async function go(action: "back" | "continue" | "skip") {
     setBusy(true);
-    const pending = stageableChanges();
-    await persist(move(doc, action), pending);
+    await persist(move(doc, action));
     setBusy(false);
   }
 
@@ -189,8 +202,10 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     setBusy(true);
     setFailure(undefined);
     const result = await api.post<SetupResult>(`${PATH}/commit`, { revision: draft.revision });
-    if (result.kind === "ok") openBoard(result.data.board_id);
-    else {
+    if (result.kind === "ok") {
+      leaving.current = true;
+      openBoard(result.data.board_id);
+    } else {
       setFailure({ message: result.message, stale: result.kind === "stale" });
       setBusy(false);
     }
@@ -301,7 +316,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
           </>}
           {step === "review" && <>
             <p>Hobnail will create a board named Home and make it your landing page.</p>
-            {!!Object.keys(credentials).length && <Note kind="warn">Only saved credentials are included. Go back to save or clear any remaining credential entries.</Note>}
+            {credentialPending && <Note kind="warn">Only saved credentials are included. Go back to save or clear any remaining credential entries.</Note>}
             {groups.size === 0 ? <p>Your board will be empty. Use Add or Discover when you are ready.</p> :
               [...groups].map(([group, items]) => <section key={group}>
                 <h3>{group}</h3>
@@ -312,16 +327,33 @@ function Wizard({ initial }: { initial: SetupDraft }) {
           </>}
         </fieldset>
         {failure && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
-          : failure.draft ? <Button disabled={controlsDisabled} onClick={() => void persist(doc, stageableChanges())}>Retry save</Button> : undefined}>{failure.message}</Note>}
+          : failure.draft ? <Button disabled={controlsDisabled} onClick={() => void persist(doc)}>Retry save</Button> : undefined}>{failure.message}</Note>}
         <div className="acts setup-actions">
           <Button data-testid="setup-back" disabled={controlsDisabled || stepIndex === 0} onClick={() => void go("back")}>Back</Button>
           {step !== "review" && <Button data-testid="setup-skip" disabled={controlsDisabled} onClick={() => void go("skip")}>Skip</Button>}
           {step === "review"
-            ? <Button data-testid="setup-create" variant="default" busy={busy} disabled={controlsDisabled || dirty} onClick={() => void create()}>Create board</Button>
+            ? <Button data-testid="setup-create" variant="default" busy={busy} disabled={controlsDisabled || dirty} onClick={() => credentialPending ? setDeparture({}) : void create()}>Create board</Button>
             : <Button data-testid="setup-continue" variant="default" busy={busy} disabled={controlsDisabled} onClick={() => void go("continue")}>Continue</Button>}
-          <span className="muted" role="status">{saving ? "Saving draft…" : dirty ? "Draft has unsaved changes" : "Draft saved"}</span>
+          <span className="muted" role="status">
+            {saving ? "Saving draft…" : dirty ? "Draft has unsaved changes" : credentialPending ? "" : "Draft saved"}
+            {credentialPending && `${saving || dirty ? " · " : ""}Credential not saved`}
+          </span>
         </div>
       </CardContent>
     </Card>
+    <Dialog open={departure !== undefined} testId="setup-leave" title="Discard unsaved credential changes?"
+      onClose={() => setDeparture(undefined)}
+      footer={<><Button onClick={() => setDeparture(undefined)}>Keep editing</Button>
+        <Button variant="destructive" disabled={controlsDisabled && !failure?.stale} onClick={() => {
+          const to = departure?.to;
+          setDeparture(undefined);
+          if (to) {
+            leaving.current = true;
+            setCredentials({});
+            navigate(to);
+          } else void create();
+        }}>{departure?.to ? "Discard and leave" : "Discard and create board"}</Button></>}>
+      <p>Credential changes in this tab will be lost.</p>
+    </Dialog>
   </main>;
 }
