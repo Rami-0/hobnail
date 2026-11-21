@@ -10,7 +10,7 @@ use super::{
     boards::{self, BoardDocument, BoardItem, BoardPayload, BoardSection, BoardSuggestion},
     dashboard_settings,
     error::ApiError,
-    integrations::{self, IntegrationInput, IntegrationKind},
+    integrations::{self, IntegrationInput},
 };
 use crate::{
     http::{client, server::Body},
@@ -94,7 +94,18 @@ fn draft_lengths(item: &SetupItem) -> Result<(), ApiError> {
         SOURCE_BYTES,
     )?;
     match &item.target {
-        SetupTarget::Http { base_url, .. } => field_length(base_url, "base_url", URL_BYTES),
+        SetupTarget::Http {
+            base_url,
+            fingerprint,
+            ..
+        } => {
+            field_length(base_url, "base_url", URL_BYTES)?;
+            field_length(
+                fingerprint.as_deref().unwrap_or_default(),
+                "fingerprint",
+                64,
+            )
+        }
         SetupTarget::Board { payload } => match payload {
             BoardPayload::Link { title, url, icon } => {
                 field_length(title, "title", LABEL_BYTES)?;
@@ -152,8 +163,16 @@ fn item_error(id: &str, mut error: ApiError) -> ApiError {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(tag = "kind", rename_all = "snake_case"))]
 pub enum SetupTarget {
-    Board { payload: BoardPayload },
-    Http { base_url: String, enabled: bool },
+    Board {
+        payload: BoardPayload,
+    },
+    Http {
+        base_url: String,
+        enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional = nullable))]
+        fingerprint: Option<String>,
+    },
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -481,7 +500,13 @@ fn target(
     conn: &Connection,
     user: &Principal,
     test: SetupTest,
-) -> Result<(String, Option<client::BoundCredential>), ApiError> {
+) -> Result<
+    (
+        Option<&'static crate::providers::Provider>,
+        crate::providers::Target,
+    ),
+    ApiError,
+> {
     let saved = read(conn, user.id)?;
     require_revision(&saved, test.revision)?;
     let item = saved
@@ -494,9 +519,14 @@ fn target(
         SetupTarget::Http {
             base_url,
             enabled: true,
+            fingerprint,
         } => {
             let secret = credential(conn, user.id, &item.id, &base_url)?;
-            Ok((base_url, secret))
+            let mut target = crate::providers::Target::link(base_url, secret);
+            target.internet_enabled = dashboard_settings::internet(conn)?;
+            target.fingerprint = crate::providers::fingerprint(&target.url, fingerprint.as_deref())
+                .map_err(|message| ApiError::bad_request(message, Some("fingerprint")))?;
+            Ok((crate::providers::get("http"), target))
         }
         SetupTarget::Http { enabled: false, .. } => Err(ApiError::bad_request(
             "Enable this integration before testing its connection.",
@@ -504,7 +534,8 @@ fn target(
         )),
         SetupTarget::Board {
             payload: BoardPayload::Integration { integration_id, .. },
-        } => integrations::target(conn, &integration_id),
+        } => integrations::target(conn, &integration_id)
+            .map(|(provider, target)| (Some(provider), target)),
         SetupTarget::Board {
             payload:
                 BoardPayload::Link { url, .. }
@@ -513,7 +544,7 @@ fn target(
                 },
         } => {
             boards::check_test_link(&url)?;
-            Ok((url, None))
+            Ok((None, crate::providers::Target::link(url, None)))
         }
         _ => Err(ApiError::bad_request(
             "This item has no HTTP connection to test.",
@@ -536,18 +567,25 @@ fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPaylo
             }
             payload
         }
-        SetupTarget::Http { base_url, enabled } => {
+        SetupTarget::Http {
+            base_url,
+            enabled,
+            fingerprint,
+        } => {
             let secret = credential(conn, owner, &item.id, base_url)?.map(|value| value.token);
             let integration = integrations::save(
                 conn,
                 None,
                 IntegrationInput {
                     name,
-                    kind: IntegrationKind::Http,
+                    kind: "http".into(),
+                    fingerprint: fingerprint.clone(),
+                    options: Default::default(),
                     base_url: base_url.clone(),
                     icon: None,
                     enabled: *enabled,
                     secret,
+                    clear_secret: false,
                 },
             )?;
             BoardPayload::Integration {
@@ -708,11 +746,11 @@ pub(super) async fn route(
         }
         Handler::SetupTest => {
             let test = super::read_json(req, 8192).await?;
-            let (url, secret) = db.dashboard(|conn| target(conn, user, test))?;
+            let (provider, target) = db.dashboard(|conn| target(conn, user, test))?;
             integrations::limit_test(state, user.id)?;
             super::json(
                 StatusCode::OK,
-                &integrations::test_connection(state, url, secret).await,
+                &integrations::test_connection(state, provider, target).await,
             )
         }
         Handler::SetupCommit => {

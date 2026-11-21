@@ -22,6 +22,7 @@ mod log;
 mod logs;
 mod mock;
 mod model;
+mod providers;
 mod read_model;
 mod settings;
 mod state;

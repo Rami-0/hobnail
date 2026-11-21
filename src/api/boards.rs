@@ -289,7 +289,7 @@ fn encode(value: &impl Serialize) -> Result<String, ApiError> {
     serde_json::to_string(value).map_err(|_| rusqlite::Error::InvalidQuery.into())
 }
 
-fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardDocument, ApiError> {
+pub(super) fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardDocument, ApiError> {
     let raw: String = conn.query_row(
         "SELECT sections FROM boards WHERE id=?1",
         [&board.id],
@@ -551,7 +551,8 @@ impl<'a> PayloadValidator<'a> {
                             .config
                             .widgets
                             .iter()
-                            .any(|widget| widget.id == *widget_id))
+                            .any(|widget| widget.id == *widget_id)
+                            && !super::provider_widgets::exists(self.conn, widget_id)?)
                 {
                     return Err(ApiError::bad_request(
                         "invalid widget reference",
@@ -714,7 +715,8 @@ fn resolve(
                     .widgets
                     .iter()
                     .find(|w| w.id == *widget_id)
-                    .map(|config| super::widgets::view(state, config));
+                    .map(|config| super::widgets::view(state, config))
+                    .or_else(|| super::provider_widgets::view(state, widget_id));
                 widget.is_none()
             }
             BoardPayload::Integration { integration_id, .. } => {
@@ -882,7 +884,12 @@ pub(super) async fn route(
             integrations::limit_test(state, user.id)?;
             super::json(
                 StatusCode::OK,
-                &integrations::test_connection(state, url, None).await,
+                &integrations::test_connection(
+                    state,
+                    None,
+                    crate::providers::Target::link(url, None),
+                )
+                .await,
             )
         }
         Handler::Boards => super::json(StatusCode::OK, &db.dashboard(|c| list(c, user))?),

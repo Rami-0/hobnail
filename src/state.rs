@@ -128,6 +128,8 @@ pub struct AppState {
     pub wake: Notify,
     viewers: AtomicUsize,
     widget_viewers: AtomicUsize,
+    pub(crate) provider_viewers: crate::api::provider_widgets::Viewers,
+    pub(crate) provider_requests: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -162,6 +164,8 @@ impl AppState {
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),
             widget_viewers: AtomicUsize::new(0),
+            provider_viewers: Default::default(),
+            provider_requests: Arc::new(tokio::sync::Semaphore::new(4)),
             env,
         })
     }

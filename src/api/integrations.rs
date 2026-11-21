@@ -1,5 +1,4 @@
-//! Generic HTTP integrations. Hobnail trusts public certificate authorities only.
-//! Private CAs and self-signed certificates fail verification. There is no bypass.
+//! Saved dashboard connections and bounded connection tests.
 
 use std::time::{Duration, Instant};
 
@@ -14,29 +13,29 @@ use super::{
 use crate::{
     db::accounts::Role,
     http::{client, server::Body},
+    providers::{self, Class as VerdictClass, Target},
     state::AppState,
 };
-
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename_all = "snake_case"))]
-pub enum IntegrationKind {
-    Http,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationInput {
     pub name: String,
-    pub kind: IntegrationKind,
+    pub kind: String,
     pub base_url: String,
     #[cfg_attr(test, ts(optional = nullable))]
     pub icon: Option<String>,
     pub enabled: bool,
     #[cfg_attr(test, ts(optional = nullable))]
     pub secret: Option<String>,
+    #[serde(default)]
+    pub clear_secret: bool,
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub fingerprint: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional, type = "Record<string, unknown>"))]
+    pub options: providers::Values,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +52,7 @@ pub struct IntegrationSecretInput {
 pub struct IntegrationView {
     pub id: String,
     pub name: String,
-    kind: IntegrationKind,
+    pub(super) kind: String,
     origin: String,
     has_secret: bool,
     enabled: bool,
@@ -70,6 +69,9 @@ pub struct IntegrationDetails {
     icon: Option<String>,
     enabled: bool,
     secret_origin: Option<String>,
+    fingerprint: Option<String>,
+    #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
+    options: providers::Values,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -77,6 +79,9 @@ struct Config {
     base_url: String,
     icon: Option<String>,
     enabled: bool,
+    fingerprint: Option<String>,
+    #[serde(default)]
+    options: providers::Values,
 }
 
 #[derive(Clone, Serialize)]
@@ -86,6 +91,9 @@ pub struct IntegrationVerdict {
     class: VerdictClass,
     message: &'static str,
     latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    fingerprint: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -120,23 +128,6 @@ impl CheckSlot {
     }
 }
 
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename_all = "snake_case"))]
-pub(super) enum VerdictClass {
-    Success,
-    Dns,
-    Connect,
-    Tls,
-    Timeout,
-    HttpStatus,
-    Auth,
-    TooLarge,
-    Blocked,
-    Protocol,
-}
-
 const SELECT: &str = "SELECT id, name, kind, origin, config, secret_origin FROM integrations";
 
 fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationView> {
@@ -146,16 +137,14 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
         base_url: origin.clone(),
         icon: None,
         enabled: true,
+        fingerprint: None,
+        options: Default::default(),
     });
     let secret_origin: Option<String> = row.get(5)?;
-    let kind = match row.get::<_, String>(2)?.as_str() {
-        "http" => IntegrationKind::Http,
-        _ => return Err(rusqlite::Error::InvalidQuery),
-    };
     Ok(IntegrationView {
         id: row.get(0)?,
         name: row.get(1)?,
-        kind,
+        kind: row.get(2)?,
         origin,
         has_secret: secret_origin.is_some(),
         enabled: config.enabled,
@@ -165,6 +154,8 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
             icon: config.icon,
             enabled: config.enabled,
             secret_origin,
+            fingerprint: config.fingerprint,
+            options: config.options,
         }),
     })
 }
@@ -229,6 +220,46 @@ pub(super) fn secret_value(value: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+pub(super) fn provider(kind: &str) -> Result<&'static providers::Provider, ApiError> {
+    providers::get(kind)
+        .ok_or_else(|| ApiError::bad_request("Choose a supported provider.", Some("kind")))
+}
+
+pub(super) fn validate_input(input: &IntegrationInput) -> Result<(), ApiError> {
+    let provider = provider(&input.kind)?;
+    let mut values = input.options.clone();
+    if values.keys().any(|key| {
+        matches!(key.as_str(), "base_url" | "enabled" | "secret")
+            || provider
+                .fields
+                .iter()
+                .any(|field| field.id == key && field.kind == providers::Kind::Secret)
+    }) {
+        return Err(ApiError::bad_request(
+            "Invalid provider options.",
+            Some("options"),
+        ));
+    }
+    values.insert("base_url".into(), input.base_url.clone().into());
+    values.insert("enabled".into(), input.enabled.into());
+    if input.clear_secret && input.secret.is_some() {
+        return Err(ApiError::bad_request(
+            "Choose either replacement or removal.",
+            Some("secret"),
+        ));
+    }
+    if let Some(secret) = &input.secret {
+        secret_value(secret)?;
+        values.insert("secret".into(), secret.clone().into());
+    }
+    providers::validate(provider.fields, &mut values).map_err(|field| {
+        ApiError::bad_request("Enter a valid value for this field.", Some(&field))
+    })?;
+    providers::fingerprint(&input.base_url, input.fingerprint.as_deref())
+        .map_err(|message| ApiError::bad_request(message, Some("fingerprint")))?;
+    Ok(())
+}
+
 pub(super) fn save(
     conn: &Connection,
     id: Option<&str>,
@@ -242,26 +273,31 @@ pub(super) fn save(
             Some("base_url"),
         )
     })?;
-    let kind = match input.kind {
-        IntegrationKind::Http => "http",
-    };
-    if let Some(secret) = &input.secret {
-        secret_value(secret)?;
-    }
+    let kind = &input.kind;
+    validate_input(&input)?;
     let config = serde_json::to_string(&Config {
         base_url: input.base_url,
         icon: input.icon,
         enabled: input.enabled,
+        fingerprint: input.fingerprint,
+        options: input.options,
     })
     .expect("serializable integration config");
     let binding = input.secret.as_ref().map(|_| &origin);
     let id = if let Some(id) = id {
         let previous = get(conn, id, true)?;
+        if previous.kind != input.kind {
+            return Err(ApiError::bad_request(
+                "The provider of a saved integration is fixed.",
+                Some("kind"),
+            ));
+        }
         if previous
             .admin
             .and_then(|a| a.secret_origin)
             .is_some_and(|bound| bound != origin)
             && input.secret.is_none()
+            && !input.clear_secret
         {
             return Err(ApiError::bad_request(
                 "enter a new secret for the changed origin, or clear the stored secret first",
@@ -270,8 +306,18 @@ pub(super) fn save(
         }
         conn.execute(
             "UPDATE integrations SET name=?2, kind=?3, origin=?4, config=?5,
-             secret=coalesce(?6,secret), secret_origin=coalesce(?7,secret_origin) WHERE id=?1",
-            params![id, input.name, kind, origin, config, input.secret, binding],
+             secret=CASE WHEN ?8 THEN NULL ELSE coalesce(?6,secret) END,
+             secret_origin=CASE WHEN ?8 THEN NULL ELSE coalesce(?7,secret_origin) END WHERE id=?1",
+            params![
+                id,
+                input.name,
+                kind,
+                origin,
+                config,
+                input.secret,
+                binding,
+                input.clear_secret
+            ],
         )?;
         id.to_string()
     } else {
@@ -309,27 +355,91 @@ pub(super) fn endpoints(conn: &Connection) -> Result<Vec<(String, String, String
 pub(super) fn target(
     conn: &Connection,
     id: &str,
-) -> Result<(String, Option<client::BoundCredential>), ApiError> {
-    let details = get(conn, id, true)?.admin.expect("admin details");
+) -> Result<(&'static providers::Provider, Target), ApiError> {
+    let view = get(conn, id, true)?;
+    let provider = provider(&view.kind)?;
+    let details = view.admin.expect("admin details");
     if !details.enabled {
         return Err(ApiError::bad_request(
             "Enable this integration before testing its connection.",
             None,
         ));
     }
-    let credential = conn
-        .query_row(
-            "SELECT secret_origin,secret FROM integrations WHERE id=?1 AND secret IS NOT NULL",
-            [id],
-            |r| {
-                Ok(client::BoundCredential {
-                    origin: r.get(0)?,
-                    token: r.get(1)?,
-                })
-            },
-        )
-        .optional()?;
-    Ok((details.base_url, credential))
+    let credential = read_credential(conn, id)?;
+    let target = Target {
+        fingerprint: details
+            .fingerprint
+            .as_deref()
+            .and_then(crate::http::pin::parse),
+        url: details.base_url,
+        credential,
+        internet_enabled: super::dashboard_settings::internet(conn)?,
+        options: details.options,
+    };
+    Ok((provider, target))
+}
+
+fn read_credential(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<client::BoundCredential>> {
+    conn.query_row(
+        "SELECT secret_origin,secret FROM integrations WHERE id=?1 AND secret IS NOT NULL",
+        [id],
+        |row| {
+            Ok(client::BoundCredential {
+                origin: row.get(0)?,
+                token: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub(super) fn draft_target(
+    conn: &Connection,
+    id: Option<&str>,
+    input: IntegrationInput,
+) -> Result<(&'static providers::Provider, Target), ApiError> {
+    validate_input(&input)?;
+    let origin = client::origin(&input.base_url).expect("validated origin");
+    let credential = match (input.secret, id) {
+        (Some(token), _) => Some(client::BoundCredential { origin, token }),
+        (None, Some(id)) if !input.clear_secret => {
+            let saved = get(conn, id, true)?;
+            if saved.kind != input.kind {
+                return Err(ApiError::bad_request(
+                    "Choose the saved provider.",
+                    Some("kind"),
+                ));
+            }
+            let credential = read_credential(conn, id)?;
+            if credential
+                .as_ref()
+                .is_some_and(|value| value.origin != origin)
+            {
+                return Err(ApiError::bad_request(
+                    "Enter the credential again for the new origin.",
+                    Some("secret"),
+                ));
+            }
+            credential
+        }
+        _ => None,
+    };
+    Ok((
+        provider(&input.kind)?,
+        Target {
+            fingerprint: input
+                .fingerprint
+                .as_deref()
+                .and_then(crate::http::pin::parse),
+            url: input.base_url,
+            credential,
+            internet_enabled: super::dashboard_settings::internet(conn)?,
+            options: input.options,
+        },
+    ))
 }
 
 pub(super) fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
@@ -352,37 +462,30 @@ pub(super) fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError>
 
 pub(super) async fn test_connection(
     state: &AppState,
-    url: String,
-    credential: Option<client::BoundCredential>,
+    provider: Option<&providers::Provider>,
+    target: Target,
 ) -> IntegrationVerdict {
     let started = Instant::now();
+    let permit = state.provider_requests.try_acquire();
     let policy = state.config.current();
-    let result = client::send_bound(url, credential, &policy.http).await;
-    use VerdictClass::*;
-    let (class, message) = match result {
-        Ok(r) if r.is_success() => (Success, "Connection succeeded"),
-        Ok(r) if matches!(r.status, 401 | 403) => (Auth, "The service refused authentication"),
-        Ok(_) => (HttpStatus, "The service returned a non-success status"),
-        Err(e) if e.starts_with("TLS") || e.starts_with("invalid TLS") => (
-            Tls,
-            "TLS verification failed. Hobnail trusts public certificate authorities only.",
-        ),
-        Err(e) if e.starts_with("timed out") => (Timeout, "The connection test timed out"),
-        Err(e) if e.starts_with("resolve") => (Dns, "The hostname could not be resolved"),
-        Err(e) if e.starts_with("connect") => (Connect, "Could not connect to the service"),
-        Err(e) if e.starts_with("response too large") => {
-            (TooLarge, "The response exceeds the size limit")
+    let result = match provider {
+        _ if permit.is_err() => Err(VerdictClass::Busy.into()),
+        Some(provider) if provider.public_internet && !target.internet_enabled => {
+            Err(VerdictClass::InternetOff.into())
         }
-        Err(e) if e.starts_with("blocked") || e.contains("http.allow_hosts") => {
-            (Blocked, "The destination is blocked by the outbound policy")
-        }
-        Err(_) => (Protocol, "The service did not return a valid HTTP response"),
+        Some(provider) => (provider.test)(&target, &policy.http).await,
+        None => target.response(&policy.http, None).await.map(drop),
+    };
+    let (class, fingerprint) = match result {
+        Ok(()) => (VerdictClass::Success, None),
+        Err(error) => (error.class, error.fingerprint),
     };
     IntegrationVerdict {
-        ok: matches!(class, Success),
+        ok: matches!(class, VerdictClass::Success),
         class,
-        message,
+        message: class.message(),
         latency_ms: started.elapsed().as_millis() as u64,
+        fingerprint,
     }
 }
 
@@ -416,11 +519,16 @@ pub(super) async fn route(
             let saved = db.dashboard(|c| {
                 let connection_changed = !create
                     && (input.secret.is_some()
+                        || input.clear_secret
                         || get(c, id, true)?.admin.is_some_and(|old| {
-                            old.base_url != input.base_url || old.enabled != input.enabled
+                            old.base_url != input.base_url
+                                || old.enabled != input.enabled
+                                || old.fingerprint != input.fingerprint
+                                || old.options != input.options
                         }));
                 let mut view = save(c, (!create).then_some(id), input)?;
                 if connection_changed {
+                    super::provider_widgets::invalidate(state, c, Some(id))?;
                     state.integration_checks.lock().unwrap().remove(id);
                 } else {
                     attach_check(state, &mut view);
@@ -476,12 +584,14 @@ pub(super) async fn route(
                         [id],
                     )?;
                 }
+                super::provider_widgets::invalidate(state, c, Some(id))?;
                 state.integration_checks.lock().unwrap().remove(id);
                 get(c, id, true)
             })?
         }
         Handler::IntegrationDelete => {
             db.dashboard(|c| -> Result<_, ApiError> {
+                super::provider_widgets::invalidate(state, c, Some(id))?;
                 if c.execute("DELETE FROM integrations WHERE id=?1", [id])? == 0 {
                     return Err(ApiError::not_found());
                 }
@@ -502,8 +612,8 @@ pub(super) async fn route(
             return Ok(super::no_content());
         }
         Handler::IntegrationTest => {
-            let (url, credential, started) = db.dashboard(|c| {
-                let (url, credential) = target(c, id)?;
+            let ((provider, target), started) = db.dashboard(|c| {
+                let target = target(c, id)?;
                 limit_test(state, user.id)?;
                 let started = Instant::now();
                 let mut checks = state.integration_checks.lock().unwrap();
@@ -514,9 +624,9 @@ pub(super) async fn route(
                         check: None,
                     })
                     .started = started;
-                Ok::<_, ApiError>((url, credential, started))
+                Ok::<_, ApiError>((target, started))
             })?;
-            let verdict = test_connection(state, url, credential).await;
+            let verdict = test_connection(state, Some(provider), target).await;
             if let Some(slot) = state
                 .integration_checks
                 .lock()
@@ -549,6 +659,7 @@ mod tests {
             class: VerdictClass::Connect,
             message: "Could not connect to the service",
             latency_ms: 10,
+            fingerprint: None,
         };
         slot.record(failed.clone(), 1);
         assert!(slot.check.as_ref().unwrap().last_good_at.is_none());
@@ -557,6 +668,7 @@ mod tests {
             class: VerdictClass::Success,
             message: "Connection succeeded",
             latency_ms: 5,
+            fingerprint: None,
         };
         slot.record(success.clone(), 2);
         slot.record(failed.clone(), 3);

@@ -12,6 +12,7 @@ use crate::{config::Config, http::server::Body, state::AppState};
 pub struct DashboardSettings {
     pub default_board: Option<String>,
     pub default_theme: Option<String>,
+    pub provider_internet: bool,
 }
 
 #[derive(Deserialize)]
@@ -21,6 +22,7 @@ struct SettingsPatch {
     default_board: Option<Option<String>>,
     #[serde(default, deserialize_with = "present")]
     default_theme: Option<Option<String>>,
+    provider_internet: Option<bool>,
 }
 
 fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
@@ -40,7 +42,18 @@ pub(super) fn get(conn: &Connection, user: &Principal) -> Result<DashboardSettin
     Ok(DashboardSettings {
         default_board,
         default_theme: stored_theme(conn)?,
+        provider_internet: internet(conn)?,
     })
+}
+
+pub(super) fn internet(conn: &Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT value = 'true' FROM settings WHERE key='provider_internet'",
+        [],
+        |row| row.get(0),
+    )
+    .optional()
+    .map(Option::unwrap_or_default)
 }
 
 fn stored_theme(conn: &Connection) -> Result<Option<String>, ApiError> {
@@ -105,7 +118,10 @@ pub(super) async fn route(
     let settings = if req.method() == hyper::Method::PATCH {
         let input: SettingsPatch = super::read_json(req, 8192).await?;
         let saved = state.db.dashboard(|conn| -> Result<_, ApiError> {
-            if input.default_board.is_none() && input.default_theme.is_none() {
+            if input.default_board.is_none()
+                && input.default_theme.is_none()
+                && input.provider_internet.is_none()
+            {
                 return Err(ApiError::bad_request("supply a dashboard setting", None));
             }
             if let Some(id) = input.default_board {
@@ -121,6 +137,14 @@ pub(super) async fn route(
             }
             if let Some(theme) = input.default_theme {
                 set_theme(conn, theme.as_deref())?;
+            }
+            if let Some(enabled) = input.provider_internet {
+                conn.execute(
+                    "INSERT INTO settings (key,value) VALUES ('provider_internet',?1)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    [if enabled { "true" } else { "false" }],
+                )?;
+                super::provider_widgets::invalidate(state, conn, None)?;
             }
             get(conn, user)
         })?;

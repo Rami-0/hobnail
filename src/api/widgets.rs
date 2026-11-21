@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::http::server::Body;
 use crate::state::AppState;
-use crate::widgets::{shorten, WidgetBody, WidgetConfig};
+use crate::widgets::{shorten, StructuredBody, WidgetBody, WidgetConfig};
 use serde_json::Value;
 
 #[derive(Serialize)]
@@ -18,6 +18,9 @@ pub(super) struct WidgetView {
     last_good_at: Option<u64>,
     duration_ms: Option<u64>,
     body: Option<WidgetBody>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    structured: Option<StructuredBody>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     values: std::collections::BTreeMap<String, serde_json::Value>,
     error: Option<String>,
@@ -52,6 +55,7 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
         body: output
             .filter(|_| error.is_none() || last_good_at.is_some())
             .map(|o| o.display.clone()),
+        structured: None,
         values: output
             .filter(|_| error.is_none() || last_good_at.is_some())
             .into_iter()
@@ -64,6 +68,44 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
             })
             .collect(),
         error: error.map(crate::widgets::plain_error),
+    }
+}
+
+pub(super) fn provider_view(
+    state: &AppState,
+    id: &str,
+    title: String,
+    icon: Option<String>,
+    enabled: bool,
+) -> WidgetView {
+    let cache = state.widgets.lock().unwrap();
+    let output = cache.get(id).filter(|_| enabled);
+    let error = output.and_then(|out| out.error.clone());
+    let last_good_at = output.and_then(|out| out.stale_since);
+    let status = if !enabled {
+        "disabled"
+    } else if last_good_at.is_some() {
+        "stale"
+    } else if error.is_some() {
+        "error"
+    } else if output.is_some() {
+        "ready"
+    } else {
+        "waiting"
+    };
+    WidgetView {
+        id: id.into(),
+        title,
+        icon,
+        link: None,
+        status,
+        last_good_at,
+        fetched_at: output.map(|out| out.fetched_at),
+        duration_ms: output.map(|out| out.duration_ms),
+        structured: output.and_then(|out| out.structured.clone()),
+        body: None,
+        values: Default::default(),
+        error,
     }
 }
 

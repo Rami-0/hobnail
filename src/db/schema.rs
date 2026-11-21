@@ -185,6 +185,15 @@ CREATE TABLE setup_credentials (
 ) WITHOUT ROWID;
 ",
     "ALTER TABLE users ADD COLUMN board_tour_seen INTEGER NOT NULL DEFAULT 0;",
+    "
+CREATE TABLE provider_widgets (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT ('provider:' || lower(hex(randomblob(16)))),
+  integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  widget TEXT NOT NULL,
+  options TEXT NOT NULL CHECK (json_valid(options)),
+  UNIQUE (integration_id, widget)
+);
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.

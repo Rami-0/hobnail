@@ -33,6 +33,8 @@ const WRITES: &[(&str, &str)] = &[
     ("DELETE", "/api/v1/boards/sample-1"),
     ("PUT", "/api/v1/boards/sample-1/draft"),
     ("DELETE", "/api/v1/boards/sample-1/draft"),
+    ("POST", "/api/v1/providers/test"),
+    ("POST", "/api/v1/providers/install"),
     ("POST", "/api/v1/integrations"),
     ("PUT", "/api/v1/integrations/sample-1"),
     ("DELETE", "/api/v1/integrations/sample-1"),

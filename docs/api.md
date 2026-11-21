@@ -50,6 +50,10 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/boards/<id>/draft` | Admin | Board draft. |
 | PUT | `/api/v1/boards/<id>/draft` | Admin | Board draft save. |
 | DELETE | `/api/v1/boards/<id>/draft` | Admin | Board draft delete. |
+| GET | `/api/v1/providers` | Viewer | Implemented providers and schemas |
+| POST | `/api/v1/providers/test` | Admin | Test draft connection fields |
+| GET | `/api/v1/providers/widgets` | Admin | Read widget options for an integration |
+| POST | `/api/v1/providers/install` | Admin | Save an instance and add selected widgets |
 | GET | `/api/v1/integrations` | Viewer | Integrations. |
 | POST | `/api/v1/integrations` | Admin | Integration create. |
 | GET | `/api/v1/integrations/<id>` | Viewer | Integration. |

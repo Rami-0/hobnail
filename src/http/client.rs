@@ -20,6 +20,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
+use super::pin::{self, Fingerprint, Leaf};
 use crate::config::HttpPolicy;
 
 /// Largest response body we read (widgets, notification replies).
@@ -84,13 +85,13 @@ impl Response {
 /// Send a request. Errors are human-readable and never include the URL's
 /// path or query (which may carry a secret such as a webhook token).
 pub async fn send(req: Request, policy: &HttpPolicy) -> Result<Response, String> {
-    send_with_policy(req, policy, false).await
+    send_with_policy(req, policy, None).await
 }
 
 async fn send_with_policy(
     req: Request,
     policy: &HttpPolicy,
-    integration: bool,
+    integration: Option<IntegrationPolicy>,
 ) -> Result<Response, String> {
     let timeout = req.timeout;
     match tokio::time::timeout(timeout, send_inner(req, policy, integration)).await {
@@ -130,9 +131,29 @@ pub(crate) fn origin(url: &str) -> Option<String> {
     })
 }
 
+#[derive(Clone)]
 pub(crate) struct BoundCredential {
     pub origin: String,
     pub token: String,
+}
+
+#[derive(Default)]
+pub(crate) struct BoundPolicy {
+    pub pin: Option<Fingerprint>,
+    pub local_only: bool,
+    pub max_body: Option<usize>,
+}
+
+struct IntegrationPolicy {
+    tls: Option<Arc<rustls::ClientConfig>>,
+    local_only: bool,
+    max_body: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct BoundError {
+    pub message: String,
+    pub fingerprint: Option<String>,
 }
 
 /// One request to the saved destination. Redirects are terminal responses.
@@ -141,8 +162,13 @@ pub(crate) async fn send_bound(
     url: String,
     credential: Option<BoundCredential>,
     policy: &HttpPolicy,
-) -> Result<Response, String> {
-    let destination = origin(&url).ok_or("blocked invalid destination")?;
+    options: BoundPolicy,
+) -> Result<Response, BoundError> {
+    let blocked = |message: &str| BoundError {
+        message: message.into(),
+        fingerprint: None,
+    };
+    let destination = origin(&url).ok_or_else(|| blocked("blocked invalid destination"))?;
     let mut req = Request::get(url);
     if let Some(BoundCredential {
         origin: bound_origin,
@@ -150,11 +176,45 @@ pub(crate) async fn send_bound(
     }) = credential
     {
         if destination != bound_origin {
-            return Err("blocked credential destination".into());
+            return Err(blocked("blocked credential destination"));
         }
         req = req.header("authorization", format!("Bearer {token}"));
     }
-    send_with_policy(req, policy, true).await
+    let (leaf, tls) = if destination.starts_with("https:") {
+        let (leaf, tls) = Leaf::configure(options.pin, roots());
+        (Some(leaf), Some(tls))
+    } else if options.pin.is_some() {
+        return Err(blocked("invalid TLS pin for HTTP"));
+    } else {
+        (None, None)
+    };
+    let integration = IntegrationPolicy {
+        tls,
+        local_only: options.local_only,
+        max_body: options.max_body.unwrap_or(MAX_BODY),
+    };
+    send_with_policy(req, policy, Some(integration))
+        .await
+        .map_err(|message| {
+            let fingerprint = message
+                .starts_with("TLS")
+                .then(|| leaf.as_ref()?.presented.get().map(pin::display))
+                .flatten();
+            BoundError {
+                message,
+                fingerprint,
+            }
+        })
+}
+
+fn local_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
+        IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
+            Some(ip) => local_ip(ip.into()),
+            None => ip.is_unique_local() || ip.is_loopback() || ip.is_unicast_link_local(),
+        },
+    }
 }
 
 fn restricted_integration_ip(ip: IpAddr) -> bool {
@@ -188,7 +248,7 @@ fn restricted_integration_ip(ip: IpAddr) -> bool {
 async fn send_inner(
     req: Request,
     policy: &HttpPolicy,
-    integration: bool,
+    integration: Option<IntegrationPolicy>,
 ) -> Result<Response, String> {
     let uri: hyper::Uri = req.url.parse().map_err(|_| "invalid URL".to_string())?;
     let scheme = uri.scheme_str().unwrap_or("http").to_ascii_lowercase();
@@ -222,13 +282,18 @@ async fn send_inner(
     if addresses.is_empty() {
         return Err(format!("resolve {host_bare}: no addresses"));
     }
-    if integration
+    if integration.is_some()
         && policy.allow_hosts.is_empty()
         && addresses
             .iter()
             .any(|addr| restricted_integration_ip(addr.ip()))
     {
         return Err("blocked integration address".into());
+    }
+    if integration.as_ref().is_some_and(|policy| policy.local_only)
+        && addresses.iter().any(|addr| !local_ip(addr.ip()))
+    {
+        return Err("blocked by public internet setting".into());
     }
     // Connect using the exact addresses that passed the policy check.
     let tcp = TcpStream::connect(addresses.as_slice())
@@ -239,10 +304,15 @@ async fn send_inner(
     let resp = if tls {
         let server_name = rustls::pki_types::ServerName::try_from(host_bare.clone())
             .map_err(|_| format!("invalid TLS server name {host_bare}"))?;
-        let stream = tokio_rustls::TlsConnector::from(tls_config())
-            .connect(server_name, tcp)
-            .await
-            .map_err(|e| format!("TLS handshake with {host_bare}: {e}"))?;
+        let stream = tokio_rustls::TlsConnector::from(
+            integration
+                .as_ref()
+                .and_then(|policy| policy.tls.clone())
+                .unwrap_or_else(tls_config),
+        )
+        .connect(server_name, tcp)
+        .await
+        .map_err(|e| format!("TLS handshake with {host_bare}: {e}"))?;
         request_on_io(
             stream,
             req.method,
@@ -256,7 +326,11 @@ async fn send_inner(
         request_on_io(tcp, req.method, &host_header, &path, &req.headers, req.body).await?
     };
     let status = resp.status().as_u16();
-    let body = read_body(resp.into_body(), MAX_BODY).await?;
+    let body = read_body(
+        resp.into_body(),
+        integration.map_or(MAX_BODY, |policy| policy.max_body),
+    )
+    .await?;
     Ok(Response { status, body })
 }
 
@@ -311,18 +385,26 @@ pub async fn read_body(body: Incoming, limit: usize) -> Result<Bytes, String> {
         })
 }
 
+fn roots() -> Arc<rustls::RootCertStore> {
+    static ROOTS: OnceLock<Arc<rustls::RootCertStore>> = OnceLock::new();
+    ROOTS
+        .get_or_init(|| {
+            Arc::new(rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            })
+        })
+        .clone()
+}
+
 fn tls_config() -> Arc<rustls::ClientConfig> {
     static CFG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
     CFG.get_or_init(|| {
-        let roots = rustls::RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
         let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
         .with_safe_default_protocol_versions()
         .expect("rustls protocol versions")
-        .with_root_certificates(roots)
+        .with_root_certificates(roots())
         .with_no_client_auth();
         Arc::new(cfg)
     })

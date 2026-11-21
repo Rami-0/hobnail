@@ -201,11 +201,105 @@ pub struct WidgetBody {
     pub text: Option<String>,
 }
 
+/// Shared provider display vocabulary. Providers select a shape, and supply text
+/// values rather than markup. The legacy TOML widget body remains compatible.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(tag = "kind", rename_all = "snake_case"))]
+pub enum StructuredBody {
+    Stat {
+        value: String,
+    },
+    StatGrid {
+        rows: Vec<(String, String)>,
+    },
+    StatusList {
+        rows: Vec<(String, Health)>,
+    },
+    ItemList {
+        items: Vec<BodyItem>,
+    },
+    Meter {
+        label: String,
+        percent: u8,
+    },
+    Table {
+        headings: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Unavailable {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum Health {
+    Up,
+    Down,
+    Warn,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BodyItem {
+    pub title: String,
+    pub secondary: Option<String>,
+    pub link: Option<String>,
+    pub time: Option<u64>,
+}
+
+impl StructuredBody {
+    fn retained_bytes(&self) -> usize {
+        fn strings(items: &Vec<String>) -> usize {
+            items.capacity() * size_of::<String>()
+                + items.iter().map(String::capacity).sum::<usize>()
+        }
+        match self {
+            Self::Stat { value }
+            | Self::Meter { label: value, .. }
+            | Self::Unavailable { message: value } => value.capacity(),
+            Self::StatGrid { rows } => {
+                rows.capacity() * size_of::<(String, String)>()
+                    + rows
+                        .iter()
+                        .map(|(k, v)| k.capacity() + v.capacity())
+                        .sum::<usize>()
+            }
+            Self::StatusList { rows } => {
+                rows.capacity() * size_of::<(String, Health)>()
+                    + rows.iter().map(|(k, _)| k.capacity()).sum::<usize>()
+            }
+            Self::ItemList { items } => {
+                items.capacity() * size_of::<BodyItem>()
+                    + items
+                        .iter()
+                        .map(|i| {
+                            i.title.capacity()
+                                + i.secondary.as_ref().map_or(0, String::capacity)
+                                + i.link.as_ref().map_or(0, String::capacity)
+                        })
+                        .sum::<usize>()
+            }
+            Self::Table { headings, rows } => {
+                strings(headings)
+                    + rows.capacity() * size_of::<Vec<String>>()
+                    + rows.iter().map(strings).sum::<usize>()
+            }
+        }
+    }
+}
+
 /// Result of one widget run.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct WidgetOutput {
     #[serde(skip)]
     pub display: WidgetBody,
+    #[serde(skip)]
+    pub structured: Option<StructuredBody>,
     /// Extracted values by name, for alert rules (`widget` rules read these).
     /// Every field, plus `_status` (HTTP status / exit code), `_ms`
     /// (latency), `_ok` (status rule result, when one is set) and `_text`
@@ -250,6 +344,10 @@ fn value_bytes(value: &Value) -> usize {
 impl WidgetOutput {
     fn retained_bytes(&self) -> usize {
         size_of::<Self>()
+            + self
+                .structured
+                .as_ref()
+                .map_or(0, StructuredBody::retained_bytes)
             + self.display.rows.capacity() * size_of::<(String, String)>()
             + self
                 .display
@@ -273,6 +371,7 @@ impl WidgetOutput {
         }
         if self.retained_bytes() > WIDGET_OUTPUT_BYTES - WIDGET_ERROR_BYTES {
             self.display = WidgetBody::default();
+            self.structured = None;
             self.values.clear();
             self.error = Some("Widget output exceeded the 32 KiB retained data limit.".into());
         }
@@ -285,6 +384,7 @@ impl WidgetOutput {
                 .or_else(|| self.error.is_none().then_some(self.fetched_at));
             if let Some(at) = last_good {
                 next.display = std::mem::take(&mut self.display);
+                next.structured = self.structured.take();
                 next.values = std::mem::take(&mut self.values);
                 next.duration_ms = self.duration_ms;
                 next.stale_since = Some(at);
@@ -298,11 +398,12 @@ impl WidgetOutput {
 pub(crate) struct WidgetCache {
     slots: std::collections::HashMap<String, WidgetSlot>,
     retained_bytes: usize,
+    next_attempt: u64,
 }
 
 #[derive(Default)]
 struct WidgetSlot {
-    started: u64,
+    first_attempt: u64,
     completed: Option<(u64, Instant)>,
     output: Option<Box<WidgetOutput>>,
     bytes: usize,
@@ -324,9 +425,20 @@ impl WidgetCache {
     }
 
     pub(crate) fn begin(&mut self, id: &str) -> u64 {
-        let slot = self.slots.entry(id.to_owned()).or_default();
-        slot.started += 1;
-        slot.started
+        self.next_attempt += 1;
+        self.slots
+            .entry(id.to_owned())
+            .or_insert_with(|| WidgetSlot {
+                first_attempt: self.next_attempt,
+                ..Default::default()
+            });
+        self.next_attempt
+    }
+
+    pub(crate) fn remove(&mut self, id: &str) {
+        if let Some(slot) = self.slots.remove(id) {
+            self.retained_bytes -= slot.bytes;
+        }
     }
 
     pub(crate) fn record(
@@ -339,7 +451,9 @@ impl WidgetCache {
         let Some(slot) = self.slots.get_mut(id) else {
             return false;
         };
-        if slot.completed.is_some_and(|(latest, _)| latest >= attempt) {
+        if attempt < slot.first_attempt
+            || slot.completed.is_some_and(|(latest, _)| latest >= attempt)
+        {
             return false;
         }
         slot.completed = Some((attempt, completed));
@@ -766,14 +880,14 @@ async fn fetch_api(w: &WidgetConfig, policy: &HttpPolicy) -> Result<Fetched, Fai
 
 /// Replaces the values of a widget's secret headers in what came back
 /// (before anything is extracted, shown, stored or logged).
-struct Scrub(Vec<String>);
+pub(crate) struct Scrub(Vec<String>);
 
 const REDACTED: &str = "<redacted>";
 
 impl Scrub {
     /// Each value, the credentials after its scheme (`Bearer x` → `x`) and
     /// its JSON-escaped form; the longest first.
-    fn new(secrets: &[String]) -> Self {
+    pub(crate) fn new(secrets: &[String]) -> Self {
         let mut all: Vec<String> = Vec::new();
         for v in secrets.iter().map(|v| v.trim()).filter(|v| !v.is_empty()) {
             all.push(v.to_string());
@@ -804,7 +918,7 @@ impl Scrub {
         out
     }
 
-    fn json(&self, v: &mut Value) {
+    pub(crate) fn json(&self, v: &mut Value) {
         if self.0.is_empty() {
             return;
         }

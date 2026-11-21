@@ -360,7 +360,7 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         .await;
     assert_eq!(
         viewer.json("GET", settings, Value::Null, 200).await,
-        json!({"default_board":null,"default_theme":null})
+        json!({"default_board":null,"default_theme":null,"provider_internet":false})
     );
     let bootstrap = viewer
         .json("GET", "/api/v1/bootstrap", Value::Null, 200)
@@ -1149,9 +1149,13 @@ async fn outbound_client_checks_origin_before_connecting() {
             token: "private-token".into(),
         }),
         &Default::default(),
+        Default::default(),
     )
     .await;
-    assert_eq!(result.unwrap_err(), "blocked credential destination");
+    assert_eq!(
+        result.unwrap_err().message,
+        "blocked credential destination"
+    );
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(50), destination.accept())
             .await
@@ -1717,4 +1721,153 @@ async fn setup_draft_limits_fields_without_requiring_complete_values() {
     at_limit["group"] = json!("b".repeat(256));
     at_limit["target"]["payload"]["url"] = json!("h".repeat(2048));
     owner.json("PUT", SETUP_DRAFT, update(at_limit), 200).await;
+}
+
+#[tokio::test]
+async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
+    use std::time::Duration;
+
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/fixture", upstream.local_addr().unwrap());
+    let state = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    let run = tokio::spawn(crate::live::run(state.clone()));
+    let board = owner.board("Provider test").await;
+    let elsewhere = owner.board("Other board").await;
+    let token = "M3-only-fake-provider-credential";
+    let install = |name: &str, board: &str| {
+        json!({
+            "integration": {"name": name, "kind":"http", "enabled":true, "base_url":url, "secret":token},
+            "board_id": board, "widgets":[{"id":"json","options":{"paths":["reading", "echo"], "refresh":15}}]
+        })
+    };
+    crate::log::capture_test_logs();
+    let first = owner
+        .json(
+            "POST",
+            "/api/v1/providers/install",
+            install("Fixture", &board),
+            201,
+        )
+        .await;
+    let second = owner
+        .json(
+            "POST",
+            "/api/v1/providers/install",
+            install("Second", &elsewhere),
+            201,
+        )
+        .await;
+    assert_ne!(first["id"], second["id"]);
+    assert!(!first.to_string().contains(token));
+    assert!(!second.to_string().contains(token));
+    let path = format!("/api/v1/boards/{board}");
+    let view = owner.json("GET", &path, Value::Null, 200).await;
+    assert_eq!(view["resolved"][0]["widget"]["status"], "waiting");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), upstream.accept())
+            .await
+            .is_err()
+    );
+
+    let stream_path = format!("/api/v1/stream?topics=widget,boards&board={board}");
+    let (mut a, _) = Stream::open(owner.addr, &stream_path, &owner.cookie).await;
+    let (mut b, _) = Stream::open(owner.addr, &stream_path, &owner.cookie).await;
+    for stream in [&mut a, &mut b] {
+        assert_eq!(stream.next().await.0, "hello");
+        assert_eq!(stream.next().await.1["status"], "waiting");
+    }
+    let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(upstream_request(&mut socket)
+        .await
+        .contains(&format!("authorization: Bearer {token}\r\n")));
+    let body = json!({"reading":"42 units","echo":token}).to_string();
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    for stream in [&mut a, &mut b] {
+        let (topic, widget) = stream.next().await;
+        assert_eq!(topic, "widget");
+        assert_eq!(widget["status"], "ready");
+        assert_eq!(
+            widget["structured"]["rows"],
+            json!([["reading", "42 units"], ["echo", "<redacted>"]])
+        );
+        assert!(!widget.to_string().contains(token));
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), upstream.accept())
+            .await
+            .is_err()
+    );
+    drop(a);
+    drop(b);
+    for _ in 0..40 {
+        if state.viewers() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(state.viewers(), 0);
+    // A test uses only the updated origin and clears the old token atomically.
+    let path = format!("/api/v1/integrations/{}", first["id"].as_str().unwrap());
+    let unavailable = "http://127.0.0.1:1";
+    let updated = owner.json("PUT", &path, json!({
+        "kind":"http","name":"Fixture","base_url":unavailable,"enabled":true,"clear_secret":true
+    }), 200).await;
+    assert_eq!(updated["has_secret"], false);
+    assert!(crate::log::take_test_logs()
+        .iter()
+        .all(|line| !line.contains(token)));
+    run.abort();
+}
+
+#[tokio::test]
+async fn provider_requests_are_capped_in_size_and_time_and_block_public_addresses() {
+    use std::time::Duration;
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", upstream.local_addr().unwrap());
+    let state = crate::testutil::state_with(
+        Vec::new(),
+        "[http]\nallow_hosts=['127.0.0.1','203.0.113.1']\n",
+    );
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    let body = |url: &str| json!({"integration":{"name":"Fixture","kind":"http","enabled":true,"base_url":url}});
+    let endpoint = "/api/v1/providers/test";
+    let blocked = owner
+        .json("POST", endpoint, body("http://203.0.113.1"), 200)
+        .await;
+    assert_eq!(blocked["class"], "internet_off");
+    let fake = tokio::spawn(async move {
+        let (mut socket, _) = upstream.accept().await.unwrap();
+        upstream_request(&mut socket).await;
+        let size = crate::providers::MAX_RESPONSE + 1;
+        socket
+            .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let _ = socket.write_all(&vec![b'x'; size]).await;
+        let (mut socket, _) = upstream.accept().await.unwrap();
+        upstream_request(&mut socket).await;
+        tokio::time::sleep(Duration::from_secs(6)).await;
+    });
+    let large = owner.json("POST", endpoint, body(&url), 200).await;
+    assert_eq!(large["class"], "too_large");
+    let elapsed = std::time::Instant::now();
+    let timeout = owner.json("POST", endpoint, body(&url), 200).await;
+    assert_eq!(timeout["class"], "timeout");
+    assert!((Duration::from_secs(4)..Duration::from_secs(6)).contains(&elapsed.elapsed()));
+    fake.abort();
 }

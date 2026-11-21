@@ -303,6 +303,7 @@ async fn run(
     st: Arc<AppState>,
     topics: Topics,
     session_hash: String,
+    board: Option<String>,
     mut sub: broadcast::Receiver<Arc<str>>,
     tx: mpsc::Sender<Bytes>,
 ) {
@@ -328,6 +329,22 @@ async fn run(
                 .any(|w| visible_widget(targets, &w.id))
     };
     let mut guard = st.viewer_guard(widget_viewer(&targets));
+    let mut provider_viewer = super::provider_widgets::Subscription::new(&st);
+    let provider_targets = |account: &super::access::Principal| {
+        super::provider_widgets::board_targets(
+            &st,
+            account,
+            board.as_deref().filter(|_| topics.widget),
+        )
+    };
+    provider_viewer.set(provider_targets(&principal));
+    for id in provider_viewer.ids() {
+        if let Some(view) = super::provider_widgets::view(&st, id) {
+            if tx.send(event("widget", &view)).await.is_err() {
+                return;
+            }
+        }
+    }
     let mut sig = list.then(|| current(&st, &principal).1);
     if topics.widget {
         let config = st.config.current();
@@ -364,6 +381,7 @@ async fn run(
                     if account != principal || id.starts_with("board:") || &*id == "reload" {
                         targets = widget_targets(&st, &account, topics.widget).await;
                         guard.set_widgets(widget_viewer(&targets));
+                        provider_viewer.set(provider_targets(&account));
                         principal = account.clone();
                     }
                     match &*id {
@@ -392,6 +410,10 @@ async fn run(
                     "alerts" if topics.alerts && !account.is_scoped() => {
                         event("alerts", &serde_json::json!({"firing": super::alerts::firing(&st).len()}))
                     }
+                    raw if raw.starts_with("w-provider:") && provider_viewer.includes(&raw[2..]) => {
+                        let Some(widget) = super::provider_widgets::view(&st, &raw[2..]) else { continue };
+                        event("widget", &widget)
+                    }
                     raw if topics.widget && raw.starts_with("w-") && visible_widget(&targets, &raw[2..]) => {
                         let config = st.config.current();
                         let Some(widget) = config.widgets.iter().find(|w| w.id == raw[2..]) else { continue };
@@ -410,6 +432,7 @@ async fn run(
                     let Some(account) = account(&st, &session_hash).await else { break };
                     targets = widget_targets(&st, &account, topics.widget).await;
                     guard.set_widgets(widget_viewer(&targets));
+                        provider_viewer.set(provider_targets(&account));
                     principal = account;
                     sig = None;
                     event("resync", &serde_json::json!({}))
@@ -428,6 +451,7 @@ async fn run(
                 let Some(account) = account(&st, &session_hash).await else { break };
                 targets = widget_targets(&st, &account, topics.widget).await;
                 guard.set_widgets(widget_viewer(&targets));
+                        provider_viewer.set(provider_targets(&account));
                 principal = account;
                 Bytes::from_static(b": ping\n\n")
             },
@@ -447,7 +471,11 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String)
         let (tx, rx) = mpsc::channel::<Bytes>(QUEUE);
         let sub = state.events.subscribe();
         let topics = Topics::parse(query);
-        tokio::spawn(run(state.clone(), topics, session_hash, sub, tx));
+        let pairs = crate::http::query::parse_query(query);
+        let board = crate::http::query::query_get(&pairs, "board")
+            .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+            .map(str::to_owned);
+        tokio::spawn(run(state.clone(), topics, session_hash, board, sub, tx));
         Response::new(StreamBody { rx }.boxed_unsync())
     };
     set(&mut r, CONTENT_TYPE, "text/event-stream");

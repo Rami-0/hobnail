@@ -31,6 +31,7 @@ pub async fn config_watcher(state: Arc<AppState>) {
 
 pub async fn run(state: Arc<AppState>) {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let provider_jobs = Arc::default();
     let mut last_sys: Option<Instant> = None;
     let mut last_stats: Option<Instant> = None;
     loop {
@@ -74,6 +75,7 @@ pub async fn run(state: Arc<AppState>) {
                 fl.lock().unwrap().remove(&w.id);
             });
         }
+        crate::api::provider_widgets::poll(&state, &cfg, &provider_jobs, now);
         tokio::time::sleep(TICK).await;
     }
 }

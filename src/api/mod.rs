@@ -28,6 +28,7 @@ mod host;
 pub(crate) mod integrations;
 mod logs;
 mod overview;
+pub(crate) mod provider_widgets;
 pub mod session;
 mod setup;
 pub mod stream;
@@ -57,6 +58,17 @@ pub(crate) async fn route(
     };
     let query = req.uri().query().unwrap_or("");
     match m.route.handler {
+        Handler::ProviderCatalog => json(StatusCode::OK, &crate::providers::REGISTRY),
+        Handler::ProviderTest | Handler::ProviderInstall | Handler::ProviderWidgetOptions => {
+            provider_widgets::route(
+                state,
+                req,
+                m.route.handler,
+                &principal.expect("provider gate").account,
+            )
+            .await
+            .unwrap_or_else(ApiError::response)
+        }
         Handler::Integrations
         | Handler::IntegrationCreate
         | Handler::Integration

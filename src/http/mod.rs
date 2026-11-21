@@ -1,6 +1,7 @@
 pub mod assets;
 pub mod client;
 mod compression;
+pub(crate) mod pin;
 pub mod server;
 
 #[cfg(test)]
