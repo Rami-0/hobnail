@@ -1999,13 +1999,15 @@ async fn provider_connection_and_policy_edits_close_upstream_sockets() {
                 }
                 _ => unreachable!(),
             }
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                0
-            );
+            // Closing with unread upstream bytes can send RST instead of FIN.
+            let closed = tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
+                .await
+                .expect("upstream socket closed after revision change");
+            match closed {
+                Ok(0) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("upstream socket stayed open: {other:?}"),
+            }
         };
         let (verdict, ()) = tokio::join!(test, edit);
         assert_eq!(verdict["class"], "changed");
