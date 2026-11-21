@@ -497,6 +497,7 @@ fn credential(
 }
 
 fn target(
+    state: &AppState,
     conn: &Connection,
     user: &Principal,
     test: SetupTest,
@@ -526,6 +527,7 @@ fn target(
             target.internet_enabled = dashboard_settings::internet(conn)?;
             target.fingerprint = crate::providers::fingerprint(&target.url, fingerprint.as_deref())
                 .map_err(|message| ApiError::bad_request(message, Some("fingerprint")))?;
+            state.provider_connections.bind(&mut target, None, false);
             Ok((crate::providers::get("http"), target))
         }
         SetupTarget::Http { enabled: false, .. } => Err(ApiError::bad_request(
@@ -534,7 +536,7 @@ fn target(
         )),
         SetupTarget::Board {
             payload: BoardPayload::Integration { integration_id, .. },
-        } => integrations::target(conn, &integration_id)
+        } => integrations::target(state, conn, &integration_id)
             .map(|(provider, target)| (Some(provider), target)),
         SetupTarget::Board {
             payload:
@@ -544,7 +546,10 @@ fn target(
                 },
         } => {
             boards::check_test_link(&url)?;
-            Ok((None, crate::providers::Target::link(url, None)))
+            let mut target = crate::providers::Target::link(url, None);
+            target.internet_enabled = dashboard_settings::internet(conn)?;
+            state.provider_connections.bind(&mut target, None, false);
+            Ok((None, target))
         }
         _ => Err(ApiError::bad_request(
             "This item has no HTTP connection to test.",
@@ -746,7 +751,7 @@ pub(super) async fn route(
         }
         Handler::SetupTest => {
             let test = super::read_json(req, 8192).await?;
-            let (provider, target) = db.dashboard(|conn| target(conn, user, test))?;
+            let (provider, target) = db.dashboard(|conn| target(state, conn, user, test))?;
             integrations::limit_test(state, user.id)?;
             super::json(
                 StatusCode::OK,

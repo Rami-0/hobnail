@@ -58,8 +58,20 @@ pub const HTTP: Provider = Provider {
     }],
 };
 
-fn test<'a>(target: &'a Target, policy: &'a HttpPolicy) -> Job<'a, ()> {
-    Box::pin(async { target.json(policy).await.map(drop) })
+fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
+    Box::pin(async { json(conn).await.map(drop) })
+}
+
+async fn json(conn: &Conn<'_>) -> Result<Value, Fault> {
+    let mut step = Step::get("");
+    let auth = [Auth::Bearer(Input::Credential("secret"))];
+    if conn.has_credential("secret") {
+        step.auth = &auth;
+    }
+    let response = success(conn.request(step).await?)?;
+    let mut json = serde_json::from_slice(&response.body).map_err(|_| Class::Protocol)?;
+    conn.scrub(&mut json)?;
+    Ok(json)
 }
 
 fn options(values: &Values) -> Result<(), &'static str> {
@@ -75,13 +87,9 @@ fn options(values: &Values) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn fetch<'a>(
-    target: &'a Target,
-    policy: &'a HttpPolicy,
-    options: &'a Values,
-) -> Job<'a, StructuredBody> {
+fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async {
-        let json = target.json(policy).await?;
+        let json = json(conn).await?;
         let rows: Vec<_> = options
             .get("paths")
             .and_then(Value::as_array)

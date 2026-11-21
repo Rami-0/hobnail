@@ -80,7 +80,12 @@ pub(super) async fn route(
     if handler == Handler::ProviderTest {
         let input: Draft = super::read_json(req, 16384).await?;
         let (provider, target) = state.db.dashboard(|conn| {
-            integrations::draft_target(conn, input.integration_id.as_deref(), input.integration)
+            integrations::draft_target(
+                state,
+                conn,
+                input.integration_id.as_deref(),
+                input.integration,
+            )
         })?;
         integrations::limit_test(state, user.id)?;
         return Ok(super::json(
@@ -279,6 +284,7 @@ pub(super) fn invalidate(
     conn: &Connection,
     integration: Option<&str>,
 ) -> rusqlite::Result<()> {
+    state.provider_connections.invalidate(integration);
     let mut stmt =
         conn.prepare("SELECT id FROM provider_widgets WHERE ?1 IS NULL OR integration_id=?1")?;
     let mut cache = state.widgets.lock().unwrap();
@@ -383,7 +389,7 @@ fn due(
             else {
                 return Ok(None);
             };
-            let Ok((provider, target)) = integrations::target(conn, &integration) else {
+            let Ok((provider, target)) = integrations::target(state, conn, &integration) else {
                 return Ok(None);
             };
             if provider.public_internet && !target.internet_enabled {
@@ -443,14 +449,16 @@ pub(crate) fn poll(
         running_ids.insert(id.clone());
         let (state, config, running) = (state.clone(), config.clone(), running.clone());
         tokio::spawn(async move {
-            let _permit = permit;
             let start = Instant::now();
             let result = tokio::select! {
                 biased;
                 _ = visible.changed() => None,
-                result = providers::bounded((poll.widget.fetch)(&poll.target, &config.http, &poll.options)) => Some(result),
+                result = async {
+                    let conn = providers::Conn::new(&poll.target, &config.http, &state.provider_connections, permit)?;
+                    conn.run((poll.widget.fetch)(&conn, &poll.options)).await
+                } => Some(result),
             };
-            if let Some(result) = result {
+            if let Some(result) = result.filter(|_| poll.target.revision.check().is_ok()) {
                 let mut output = WidgetOutput {
                     fetched_at: crate::util::unix_now(),
                     duration_ms: start.elapsed().as_millis() as u64,

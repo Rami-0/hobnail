@@ -353,6 +353,7 @@ pub(super) fn endpoints(conn: &Connection) -> Result<Vec<(String, String, String
 }
 
 pub(super) fn target(
+    state: &AppState,
     conn: &Connection,
     id: &str,
 ) -> Result<(&'static providers::Provider, Target), ApiError> {
@@ -366,16 +367,14 @@ pub(super) fn target(
         ));
     }
     let credential = read_credential(conn, id)?;
-    let target = Target {
-        fingerprint: details
-            .fingerprint
-            .as_deref()
-            .and_then(crate::http::pin::parse),
-        url: details.base_url,
-        credential,
-        internet_enabled: super::dashboard_settings::internet(conn)?,
-        options: details.options,
-    };
+    let mut target = Target::link(details.base_url, credential);
+    target.fingerprint = details
+        .fingerprint
+        .as_deref()
+        .and_then(crate::http::pin::parse);
+    target.internet_enabled = super::dashboard_settings::internet(conn)?;
+    target.options = details.options;
+    state.provider_connections.bind(&mut target, Some(id), true);
     Ok((provider, target))
 }
 
@@ -397,6 +396,7 @@ fn read_credential(
 }
 
 pub(super) fn draft_target(
+    state: &AppState,
     conn: &Connection,
     id: Option<&str>,
     input: IntegrationInput,
@@ -433,19 +433,15 @@ pub(super) fn draft_target(
         }
         _ => None,
     };
-    Ok((
-        provider(&input.kind)?,
-        Target {
-            fingerprint: input
-                .fingerprint
-                .as_deref()
-                .and_then(crate::http::pin::parse),
-            url: input.base_url,
-            credential,
-            internet_enabled: super::dashboard_settings::internet(conn)?,
-            options: input.options,
-        },
-    ))
+    let mut target = Target::link(input.base_url, credential);
+    target.fingerprint = input
+        .fingerprint
+        .as_deref()
+        .and_then(crate::http::pin::parse);
+    target.internet_enabled = super::dashboard_settings::internet(conn)?;
+    target.options = input.options;
+    state.provider_connections.bind(&mut target, id, false);
+    Ok((provider(&input.kind)?, target))
 }
 
 pub(super) fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
@@ -472,16 +468,27 @@ pub(super) async fn test_connection(
     target: Target,
 ) -> IntegrationVerdict {
     let started = Instant::now();
-    let permit = state.provider_requests.try_acquire();
     let policy = state.config.current();
-    let result = match provider {
-        _ if permit.is_err() => Err(VerdictClass::Busy.into()),
-        Some(provider) if provider.public_internet && !target.internet_enabled => {
-            Err(VerdictClass::InternetOff.into())
+    let result = async {
+        let permit = state
+            .provider_requests
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| VerdictClass::Busy)?;
+        if provider.is_some_and(|provider| provider.public_internet) && !target.internet_enabled {
+            return Err(VerdictClass::InternetOff.into());
         }
-        Some(provider) => providers::bounded((provider.test)(&target, &policy.http)).await,
-        None => target.response(&policy.http, None).await.map(drop),
-    };
+        let conn =
+            providers::Conn::new(&target, &policy.http, &state.provider_connections, permit)?;
+        conn.run(async {
+            match provider {
+                Some(provider) => (provider.test)(&conn).await,
+                None => providers::success(conn.request(providers::Step::get("")).await?).map(drop),
+            }
+        })
+        .await
+    }
+    .await;
     let (class, fingerprint) = match result {
         Ok(()) => (VerdictClass::Success, None),
         Err(error) => (error.class, error.fingerprint),
@@ -619,7 +626,7 @@ pub(super) async fn route(
         }
         Handler::IntegrationTest => {
             let ((provider, target), started) = db.dashboard(|c| {
-                let target = target(c, id)?;
+                let target = target(state, c, id)?;
                 limit_test(state, user.id)?;
                 let started = Instant::now();
                 let mut checks = state.integration_checks.lock().unwrap();

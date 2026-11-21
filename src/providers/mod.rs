@@ -9,24 +9,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    config::HttpPolicy,
     http::{client, pin},
     widgets,
 };
 
+mod connection;
 mod generic;
+
+pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
+pub(crate) use connection::{Connections, Credentials, Revision, Target};
 
 pub const REGISTRY: &[Provider] = &[generic::HTTP];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
 pub const MAX_RESPONSE: usize = 128 * 1024;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-
-pub async fn bounded<T>(job: impl Future<Output = Result<T, Fault>>) -> Result<T, Fault> {
-    tokio::time::timeout(REQUEST_TIMEOUT, job)
-        .await
-        .unwrap_or_else(|_| Err(Class::Timeout.into()))
-}
 
 pub fn get(id: &str) -> Option<&'static Provider> {
     REGISTRY.iter().find(|provider| provider.id == id)
@@ -51,9 +48,8 @@ pub struct Provider {
 }
 
 type Job<'a, T> = Pin<Box<dyn Future<Output = Result<T, Fault>> + Send + 'a>>;
-pub type Test = for<'a> fn(&'a Target, &'a HttpPolicy) -> Job<'a, ()>;
-pub type Fetch =
-    for<'a> fn(&'a Target, &'a HttpPolicy, &'a Values) -> Job<'a, widgets::StructuredBody>;
+pub type Test = for<'a> fn(&'a Conn<'_>) -> Job<'a, ()>;
+pub type Fetch = for<'a> fn(&'a Conn<'_>, &'a Values) -> Job<'a, widgets::StructuredBody>;
 pub type Values = Map<String, Value>;
 
 #[derive(Serialize)]
@@ -191,66 +187,6 @@ pub const REFRESH: Field = Field {
     )
 };
 
-#[derive(Clone)]
-pub struct Target {
-    pub url: String,
-    pub credential: Option<client::BoundCredential>,
-    pub fingerprint: Option<[u8; 32]>,
-    pub internet_enabled: bool,
-    // Provider-defined non-secret connection options.
-    #[allow(dead_code)]
-    pub options: Values,
-}
-
-impl Target {
-    pub fn link(url: String, credential: Option<client::BoundCredential>) -> Self {
-        Self {
-            url,
-            credential,
-            fingerprint: None,
-            internet_enabled: true,
-            options: Values::new(),
-        }
-    }
-
-    pub async fn response(
-        &self,
-        policy: &HttpPolicy,
-        max_body: Option<usize>,
-    ) -> Result<client::Response, Fault> {
-        let result = client::send_bound(
-            self.url.clone(),
-            self.credential.clone(),
-            policy,
-            client::BoundPolicy {
-                pin: self.fingerprint,
-                local_only: !self.internet_enabled,
-                max_body,
-            },
-        )
-        .await
-        .map_err(Fault::from)?;
-        match result.status {
-            401 | 403 => Err(Class::Auth.into()),
-            200..=299 => Ok(result),
-            _ => Err(Class::HttpStatus.into()),
-        }
-    }
-
-    pub async fn json(&self, policy: &HttpPolicy) -> Result<Value, Fault> {
-        let result = self.response(policy, Some(MAX_RESPONSE)).await?;
-        let mut json = serde_json::from_slice(&result.body).map_err(|_| Class::Protocol)?;
-        if let Some(credential) = &self.credential {
-            widgets::Scrub::new(std::slice::from_ref(&credential.token)).json(&mut json);
-            // A token can also be reflected as a JSON number or boolean.
-            if json.to_string().contains(&credential.token) {
-                return Err(Class::Protocol.into());
-            }
-        }
-        Ok(json)
-    }
-}
-
 pub struct Fault {
     pub class: Class,
     pub fingerprint: Option<String>,
@@ -270,6 +206,8 @@ impl From<client::BoundError> for Fault {
         let e = error.message.as_str();
         let class = if e.starts_with("TLS") || e.starts_with("invalid TLS") {
             Class::Tls
+        } else if e == "connection changed" {
+            Class::Changed
         } else if e.starts_with("timed out") {
             Class::Timeout
         } else if e.starts_with("resolve") {
@@ -309,11 +247,15 @@ pub enum Class {
     Protocol,
     InternetOff,
     Busy,
+    Changed,
+    Conflict,
 }
 
 impl Class {
     pub fn message(self) -> &'static str {
         match self {
+            Self::Changed => "Connection settings changed. Try again.",
+            Self::Conflict => "The service returned a session conflict.",
             Self::Busy => "Other connections are in progress. Try again shortly.",
             Self::Success => "Connection succeeded",
             Self::Connect => "Could not connect. Check that the service is running and its port is reachable from Hobnail.",

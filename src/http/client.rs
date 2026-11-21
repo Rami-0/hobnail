@@ -14,6 +14,7 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::{Method, Request as HRequest, Response as HResponse};
 use hyper_util::rt::TokioIo;
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -26,13 +27,21 @@ use crate::config::HttpPolicy;
 /// Largest response body we read (widgets, notification replies).
 pub const MAX_BODY: usize = 2 * 1024 * 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Request {
     pub method: Method,
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
     pub timeout: Duration,
+}
+
+impl fmt::Debug for Request {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Request")
+            .field("method", &self.method)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Request {
@@ -67,10 +76,19 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Response {
     pub status: u16,
     pub body: Bytes,
+    pub headers: hyper::HeaderMap,
+}
+
+impl fmt::Debug for Response {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Response")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Response {
@@ -137,14 +155,24 @@ pub(crate) struct BoundCredential {
     pub token: String,
 }
 
+impl fmt::Debug for BoundCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("BoundCredential([redacted])")
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct BoundPolicy {
+    pub headers: Vec<hyper::header::HeaderName>,
+    pub revision: crate::providers::Revision,
     pub pin: Option<Fingerprint>,
     pub local_only: bool,
     pub max_body: Option<usize>,
 }
 
 struct IntegrationPolicy {
+    headers: Vec<hyper::header::HeaderName>,
+    revision: crate::providers::Revision,
     tls: Option<Arc<rustls::ClientConfig>>,
     local_only: bool,
     max_body: usize,
@@ -158,6 +186,7 @@ pub(crate) struct BoundError {
 
 /// One request to the saved destination. Redirects are terminal responses.
 /// Recheck the actual request URI before a credential can become a header.
+#[cfg(test)]
 pub(crate) async fn send_bound(
     url: String,
     credential: Option<BoundCredential>,
@@ -180,7 +209,23 @@ pub(crate) async fn send_bound(
         }
         req = req.header("authorization", format!("Bearer {token}"));
     }
-    let (leaf, tls) = if destination.starts_with("https:") {
+    send_step(req, &destination, policy, options).await
+}
+
+pub(crate) async fn send_step(
+    req: Request,
+    bound_origin: &str,
+    policy: &HttpPolicy,
+    options: BoundPolicy,
+) -> Result<Response, BoundError> {
+    let blocked = |message: &str| BoundError {
+        message: message.into(),
+        fingerprint: None,
+    };
+    if origin(req.url.split('?').next().unwrap_or_default()).as_deref() != Some(bound_origin) {
+        return Err(blocked("blocked credential destination"));
+    }
+    let (leaf, tls) = if bound_origin.starts_with("https:") {
         let (leaf, tls) = Leaf::configure(options.pin, roots());
         (Some(leaf), Some(tls))
     } else if options.pin.is_some() {
@@ -189,6 +234,8 @@ pub(crate) async fn send_bound(
         (None, None)
     };
     let integration = IntegrationPolicy {
+        headers: options.headers,
+        revision: options.revision,
         tls,
         local_only: options.local_only,
         max_body: options.max_body.unwrap_or(MAX_BODY).min(MAX_BODY),
@@ -295,13 +342,17 @@ async fn send_inner(
     {
         return Err("blocked by public internet setting".into());
     }
+    if let Some(policy) = &integration {
+        policy.revision.check()?;
+    }
     // Connect using the exact addresses that passed the policy check.
     let tcp = TcpStream::connect(addresses.as_slice())
         .await
         .map_err(|e| format!("connect {host_bare}:{port}: {e}"))?;
     let _ = tcp.set_nodelay(true);
 
-    let resp = if tls {
+    let request = http_request(req.method, &host_header, &path, &req.headers, req.body)?;
+    if tls {
         let server_name = rustls::pki_types::ServerName::try_from(host_bare.clone())
             .map_err(|_| format!("invalid TLS server name {host_bare}"))?;
         let stream = tokio_rustls::TlsConnector::from(
@@ -313,25 +364,57 @@ async fn send_inner(
         .connect(server_name, tcp)
         .await
         .map_err(|e| format!("TLS handshake with {host_bare}: {e}"))?;
-        request_on_io(
-            stream,
-            req.method,
-            &host_header,
-            &path,
-            &req.headers,
-            req.body,
-        )
-        .await?
+        exchange(stream, request, integration).await
     } else {
-        request_on_io(tcp, req.method, &host_header, &path, &req.headers, req.body).await?
+        exchange(tcp, request, integration).await
+    }
+}
+
+async fn exchange(
+    io: impl AsyncRead + AsyncWrite + Unpin,
+    request: HRequest<Full<Bytes>>,
+    policy: Option<IntegrationPolicy>,
+) -> Result<Response, String> {
+    let (mut sender, mut driver) = hyper::client::conn::http1::handshake(TokioIo::new(io))
+        .await
+        .map_err(|e| format!("http handshake: {e}"))?;
+    if let Some(policy) = &policy {
+        policy.revision.check()?;
+    }
+    let response = async {
+        let response = sender
+            .send_request(request)
+            .await
+            .map_err(|_| "request failed")?;
+        let status = response.status().as_u16();
+        let mut headers = hyper::HeaderMap::new();
+        if let Some(policy) = &policy {
+            for name in &policy.headers {
+                for value in response.headers().get_all(name) {
+                    headers.append(name, value.clone());
+                }
+            }
+        }
+        let body = read_body(
+            response.into_body(),
+            policy.map_or(MAX_BODY, |p| p.max_body),
+        )
+        .await?;
+        Ok(Response {
+            status,
+            body,
+            headers,
+        })
     };
-    let status = resp.status().as_u16();
-    let body = read_body(
-        resp.into_body(),
-        integration.map_or(MAX_BODY, |policy| policy.max_body),
-    )
-    .await?;
-    Ok(Response { status, body })
+    tokio::pin!(response);
+    tokio::select! {
+        biased;
+        result = &mut response => result,
+        result = &mut driver => {
+            result.map_err(|_| "HTTP connection failed")?;
+            response.await
+        }
+    }
 }
 
 /// Perform one HTTP/1.1 request over any byte stream (TCP, TLS, unix socket)
@@ -353,6 +436,20 @@ where
     tokio::spawn(async move {
         let _ = conn.await;
     });
+    let req = http_request(method, host_header, path_and_query, headers, body)?;
+    sender
+        .send_request(req)
+        .await
+        .map_err(|e| format!("request failed: {e}"))
+}
+
+fn http_request(
+    method: Method,
+    host_header: &str,
+    path_and_query: &str,
+    headers: &[(String, String)],
+    body: Option<Vec<u8>>,
+) -> Result<HRequest<Full<Bytes>>, String> {
     let mut b = HRequest::builder()
         .method(method)
         .uri(path_and_query)
@@ -362,13 +459,8 @@ where
     for (k, v) in headers {
         b = b.header(k.as_str(), v.as_str());
     }
-    let req = b
-        .body(Full::new(Bytes::from(body.unwrap_or_default())))
-        .map_err(|e| format!("bad request: {e}"))?;
-    sender
-        .send_request(req)
-        .await
-        .map_err(|e| format!("request failed: {e}"))
+    b.body(Full::new(Bytes::from(body.unwrap_or_default())))
+        .map_err(|_| "bad request".into())
 }
 
 pub async fn read_body(body: Incoming, limit: usize) -> Result<Bytes, String> {
