@@ -1,5 +1,5 @@
 //! Guided setup for owners created through the browser.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use hyper::{body::Incoming, Request, Response, StatusCode};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -64,7 +64,7 @@ impl SetupItem {
                 SetupTarget::Board {
                     payload: BoardPayload::Link { url, .. },
                 } => url.trim().is_empty(),
-                SetupTarget::Http { base_url, .. } => base_url.trim().is_empty(),
+                SetupTarget::Provider { base_url, .. } => base_url.trim().is_empty(),
                 _ => false,
             }
     }
@@ -94,11 +94,25 @@ fn draft_lengths(item: &SetupItem) -> Result<(), ApiError> {
         SOURCE_BYTES,
     )?;
     match &item.target {
-        SetupTarget::Http {
+        SetupTarget::Provider {
+            provider,
+            options,
             base_url,
             fingerprint,
             ..
         } => {
+            let descriptor = integrations::provider(provider)?;
+            if options.keys().any(|key| {
+                matches!(key.as_str(), "base_url" | "enabled")
+                    || !descriptor.fields.iter().any(|field| {
+                        field.id == key && field.kind != crate::providers::Kind::Secret
+                    })
+            }) {
+                return Err(ApiError::bad_request(
+                    "Invalid provider options.",
+                    Some("options"),
+                ));
+            }
             field_length(base_url, "base_url", URL_BYTES)?;
             field_length(
                 fingerprint.as_deref().unwrap_or_default(),
@@ -166,13 +180,26 @@ pub enum SetupTarget {
     Board {
         payload: BoardPayload,
     },
-    Http {
+    #[serde(alias = "http")]
+    Provider {
+        #[serde(default = "legacy_provider")]
+        provider: String,
+        #[serde(default)]
+        #[cfg_attr(test, ts(optional, type = "Record<string, unknown>"))]
+        options: crate::providers::Values,
         base_url: String,
         enabled: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional = nullable))]
         fingerprint: Option<String>,
     },
+}
+
+fn legacy_provider() -> String {
+    "http".into()
+}
+fn legacy_field() -> String {
+    "secret".into()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -198,6 +225,8 @@ pub struct SetupDraft {
     document: SetupDocument,
     theme_default: String,
     credential_origins: HashMap<String, String>,
+    #[cfg_attr(test, ts(type = "Record<string, Record<string, string>>"))]
+    credential_bindings: HashMap<String, HashMap<String, String>>,
     integration_matches: HashMap<String, String>,
     matching_integrations: HashMap<String, Vec<SetupIntegrationMatch>>,
 }
@@ -216,6 +245,8 @@ pub struct SetupUpdate {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SetupCredentialChange {
     item_id: String,
+    #[serde(default = "legacy_field")]
+    field: String,
     base_url: String,
     secret: Option<String>,
 }
@@ -296,8 +327,26 @@ fn view(
     config: &crate::config::Config,
 ) -> Result<SetupDraft, ApiError> {
     let mut stmt =
-        conn.prepare("SELECT item_id, origin FROM setup_credentials WHERE user_id=?1")?;
-    let origins = stmt.query_map([owner], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        conn.prepare("SELECT item_id, field, origin FROM setup_credentials WHERE user_id=?1")?;
+    let rows = stmt.query_map([owner], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut credential_origins = HashMap::new();
+    let mut credential_bindings = HashMap::<_, HashMap<_, _>>::new();
+    for row in rows {
+        let (item, field, origin) = row?;
+        if field == "secret" {
+            credential_origins.insert(item.clone(), origin.clone());
+        }
+        credential_bindings
+            .entry(item)
+            .or_default()
+            .insert(field, origin);
+    }
     let mut integration_matches = HashMap::new();
     let mut matching_integrations = HashMap::new();
     if saved.board_id.is_none() && saved.document.step == SetupStep::Review {
@@ -308,8 +357,11 @@ fn view(
             .iter()
             .filter(|i| i.included && !i.incomplete())
         {
-            if let SetupTarget::Http { base_url, .. } = &item.target {
-                if let Some(matches) = endpoint_key(base_url)
+            if let SetupTarget::Provider {
+                provider, base_url, ..
+            } = &item.target
+            {
+                if let Some(matches) = endpoint_key(provider, base_url)
                     .ok()
                     .and_then(|key| endpoints.get(&key))
                 {
@@ -329,7 +381,8 @@ fn view(
         board_id: saved.board_id,
         document: saved.document,
         theme_default: dashboard_settings::theme(conn, config)?,
-        credential_origins: origins.collect::<rusqlite::Result<_>>()?,
+        credential_origins,
+        credential_bindings,
         integration_matches,
         matching_integrations,
     })
@@ -375,45 +428,73 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
         draft_lengths(item).map_err(|error| item_error(&item.id, error))?;
     }
     // An omitted item or one converted to another kind cannot retain a token.
-    let mut stmt = conn.prepare("SELECT item_id FROM setup_credentials WHERE user_id=?1")?;
+    let mut stmt = conn.prepare("SELECT item_id,field FROM setup_credentials WHERE user_id=?1")?;
+    let prior_providers: HashMap<_, _> = saved
+        .document
+        .items
+        .iter()
+        .filter_map(|item| match &item.target {
+            SetupTarget::Provider { provider, .. } => Some((item.id.as_str(), provider)),
+            _ => None,
+        })
+        .collect();
     let keys = stmt
-        .query_map([owner], |row| row.get::<_, String>(0))?
+        .query_map([owner], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for key in keys {
-        if !matches!(items.get(key.as_str()), Some(SetupTarget::Http { .. })) {
+    for (item, field) in keys {
+        let valid = match items.get(item.as_str()) {
+            Some(SetupTarget::Provider { provider, .. })
+                if prior_providers.get(item.as_str()) == Some(&provider) =>
+            {
+                integrations::credential_field(integrations::provider(provider)?, &field, None)
+                    .is_ok()
+            }
+            _ => false,
+        };
+        if !valid {
             conn.execute(
-                "DELETE FROM setup_credentials WHERE user_id=?1 AND item_id=?2",
-                params![owner, key],
+                "DELETE FROM setup_credentials WHERE user_id=?1 AND item_id=?2 AND field=?3",
+                params![owner, item, field],
             )?;
         }
     }
     for change in update.credentials {
         let local = |error| item_error(&change.item_id, error);
-        let Some(SetupTarget::Http { base_url, .. }) = items.get(change.item_id.as_str()) else {
+        let Some(SetupTarget::Provider {
+            provider, base_url, ..
+        }) = items.get(change.item_id.as_str())
+        else {
             return Err(local(ApiError::bad_request(
-                "select an HTTP connection for this credential",
-                Some("secret"),
+                "Choose a provider for this credential.",
+                Some("credentials"),
             )));
         };
+        let field = integrations::credential_field(
+            integrations::provider(provider).map_err(local)?,
+            &change.field,
+            change.secret.as_deref(),
+        )
+        .map_err(local)?;
         field_length(&change.base_url, "base_url", URL_BYTES).map_err(local)?;
         if let Some(secret) = change.secret {
-            integrations::secret_value(&secret).map_err(local)?;
             let origin = integration_origin(&change.base_url).map_err(local)?;
             if client::origin(base_url).as_deref() != Some(&origin) {
                 return Err(local(ApiError::bad_request(
-                    "enter the credential for the current service origin",
-                    Some("secret"),
+                    "Enter the credential for the current service origin.",
+                    Some(field),
                 )));
             }
             conn.execute(
-                "INSERT INTO setup_credentials (user_id,item_id,origin,secret) VALUES (?1,?2,?3,?4)
-                 ON CONFLICT(user_id,item_id) DO UPDATE SET origin=excluded.origin,secret=excluded.secret",
-                params![owner, change.item_id, origin, secret],
+                "INSERT INTO setup_credentials (user_id,item_id,field,origin,secret) VALUES (?1,?2,?3,?4,?5)
+                 ON CONFLICT(user_id,item_id,field) DO UPDATE SET origin=excluded.origin,secret=excluded.secret",
+                params![owner, change.item_id, field, origin, secret],
             )?;
         } else {
             conn.execute(
-                "DELETE FROM setup_credentials WHERE user_id=?1 AND item_id=?2",
-                params![owner, change.item_id],
+                "DELETE FROM setup_credentials WHERE user_id=?1 AND item_id=?2 AND field=?3",
+                params![owner, change.item_id, field],
             )?;
         }
     }
@@ -432,18 +513,18 @@ fn integration_origin(url: &str) -> Result<String, ApiError> {
     })
 }
 
-fn endpoint_key(url: &str) -> Result<String, ApiError> {
+fn endpoint_key(provider: &str, url: &str) -> Result<String, ApiError> {
     let origin = integration_origin(url)?;
     let uri: hyper::Uri = url.parse().expect("validated HTTP URL");
-    Ok(format!("{origin}{}", uri.path()))
+    Ok(format!("{provider}:{origin}{}", uri.path()))
 }
 
 fn saved_endpoints(
     conn: &Connection,
 ) -> Result<HashMap<String, Vec<SetupIntegrationMatch>>, ApiError> {
     let mut endpoints = HashMap::<_, Vec<_>>::new();
-    for (id, name, url) in integrations::endpoints(conn)? {
-        if let Ok(key) = endpoint_key(&url) {
+    for (id, name, kind, url) in integrations::endpoints(conn)? {
+        if let Ok(key) = endpoint_key(&kind, &url) {
             endpoints
                 .entry(key)
                 .or_default()
@@ -468,32 +549,57 @@ fn reused_integration<'a>(
     }
 }
 
-fn credential(
+fn integration_input(
     conn: &Connection,
     owner: i64,
-    item_id: &str,
-    url: &str,
-) -> Result<Option<client::BoundCredential>, ApiError> {
-    let origin = integration_origin(url)?;
-    let saved = conn
-        .query_row(
-            "SELECT origin,secret FROM setup_credentials WHERE user_id=?1 AND item_id=?2",
-            params![owner, item_id],
-            |row| {
-                Ok(client::BoundCredential {
-                    origin: row.get(0)?,
-                    token: row.get(1)?,
-                })
-            },
-        )
-        .optional()?;
-    if saved.as_ref().is_some_and(|value| value.origin != origin) {
-        return Err(ApiError::bad_request(
-            "Enter the credential again for the new origin or clear the saved credential.",
-            Some("secret"),
-        ));
+    item: &SetupItem,
+) -> Result<IntegrationInput, ApiError> {
+    let SetupTarget::Provider {
+        provider,
+        options,
+        base_url,
+        enabled,
+        fingerprint,
+    } = &item.target
+    else {
+        unreachable!("provider connection");
+    };
+    let origin = integration_origin(base_url)?;
+    let mut stmt = conn.prepare(
+        "SELECT field,origin,secret FROM setup_credentials WHERE user_id=?1 AND item_id=?2",
+    )?;
+    let rows = stmt.query_map(params![owner, item.id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut credentials = BTreeMap::new();
+    let descriptor = integrations::provider(provider)?;
+    for row in rows {
+        let (field, bound, secret) = row?;
+        let field = integrations::credential_field(descriptor, &field, Some(&secret))?;
+        if bound != origin {
+            return Err(ApiError::bad_request(
+                "Enter the credential again for the new origin or clear the saved credential.",
+                Some(field),
+            ));
+        }
+        credentials.insert(field.into(), Some(secret));
     }
-    Ok(saved)
+    Ok(IntegrationInput {
+        name: item.name.trim().to_owned(),
+        kind: provider.clone(),
+        base_url: base_url.clone(),
+        enabled: *enabled,
+        fingerprint: fingerprint.clone(),
+        icon: None,
+        options: options.clone(),
+        credentials,
+        secret: None,
+        clear_secret: false,
+    })
 }
 
 fn target(
@@ -516,27 +622,15 @@ fn target(
         .into_iter()
         .find(|item| item.id == test.item_id && item.included)
         .ok_or_else(ApiError::not_found)?;
-    let result = (|| match item.target {
-        SetupTarget::Http {
-            base_url,
-            enabled: true,
-            fingerprint,
-        } => {
-            let secret = credential(conn, user.id, &item.id, &base_url)?;
-            let mut target = crate::providers::Target::link(base_url, secret);
-            target.internet_enabled = dashboard_settings::internet(conn)?;
-            target.fingerprint = crate::providers::fingerprint(&target.url, fingerprint.as_deref())
-                .map_err(|message| ApiError::bad_request(message, Some("fingerprint")))?;
-            state.provider_connections.bind(&mut target, None, false);
-            Ok((crate::providers::get("http"), target))
+    let result = (|| match &item.target {
+        SetupTarget::Provider { .. } => {
+            let input = integration_input(conn, user.id, &item)?;
+            integrations::draft_target(state, conn, None, input)
+                .map(|(provider, target)| (Some(provider), target))
         }
-        SetupTarget::Http { enabled: false, .. } => Err(ApiError::bad_request(
-            "Enable this integration before testing its connection.",
-            None,
-        )),
         SetupTarget::Board {
             payload: BoardPayload::Integration { integration_id, .. },
-        } => integrations::target(state, conn, &integration_id)
+        } => integrations::target(state, conn, integration_id)
             .map(|(provider, target)| (Some(provider), target)),
         SetupTarget::Board {
             payload:
@@ -545,11 +639,11 @@ fn target(
                     link: Some(url), ..
                 },
         } => {
-            boards::check_test_link(&url)?;
-            let mut target = crate::providers::Target::link(url, None);
-            target.internet_enabled = dashboard_settings::internet(conn)?;
-            state.provider_connections.bind(&mut target, None, false);
-            Ok((None, target))
+            boards::check_test_link(url)?;
+            Ok((
+                None,
+                crate::providers::Target::new(url.clone(), Default::default(), true),
+            ))
         }
         _ => Err(ApiError::bad_request(
             "This item has no HTTP connection to test.",
@@ -572,27 +666,9 @@ fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPaylo
             }
             payload
         }
-        SetupTarget::Http {
-            base_url,
-            enabled,
-            fingerprint,
-        } => {
-            let secret = credential(conn, owner, &item.id, base_url)?.map(|value| value.token);
-            let integration = integrations::save(
-                conn,
-                None,
-                IntegrationInput {
-                    name,
-                    kind: "http".into(),
-                    fingerprint: fingerprint.clone(),
-                    options: Default::default(),
-                    base_url: base_url.clone(),
-                    icon: None,
-                    enabled: *enabled,
-                    secret,
-                    clear_secret: false,
-                },
-            )?;
+        SetupTarget::Provider { .. } => {
+            let integration =
+                integrations::save(conn, None, integration_input(conn, owner, item)?)?;
             BoardPayload::Integration {
                 integration_id: integration.id,
                 title: None,
@@ -632,8 +708,10 @@ fn commit(
     {
         let local = |error| item_error(&item.id, error);
         let (reuse, unique) = match &item.target {
-            SetupTarget::Http { base_url, .. } => {
-                let key = endpoint_key(base_url).map_err(local)?;
+            SetupTarget::Provider {
+                provider, base_url, ..
+            } => {
+                let key = endpoint_key(provider, base_url).map_err(local)?;
                 let matches = endpoints.get(&key).map(Vec::as_slice).unwrap_or_default();
                 let reuse = reused_integration(matches, item.integration_choice.as_deref())
                     .map_err(local)?;

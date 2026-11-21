@@ -23,6 +23,7 @@ import { Note } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
+import { connectionValues, initial as defaults } from "../../configuration/schema.ts";
 import type { Provider } from "../../api/gen/Provider.ts";
 import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
 import { incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
@@ -155,7 +156,15 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     if (next === draft.document && !changes.length) return draft;
     savingRef.current = true;
     setSaving(true);
-    const body: SetupUpdate = { revision: draft.revision, document: next, credentials: changes };
+    const body: SetupUpdate = { revision: draft.revision, document: {
+      ...next, items: next.items.map((item) => {
+        const target = item.target;
+        if (target.kind === "board") return item;
+        const schema = providers.find((entry) => entry.id === target.provider)?.fields ?? [];
+        const { options } = connectionValues(schema, { ...target.options, ...target });
+        return { ...item, target: { ...target, options: { ...target.options, ...options } } };
+      }),
+    }, credentials: changes };
     const response = await api.request<SetupDraft>("PUT", `${PATH}/draft`, { body });
     savingRef.current = false;
     setSaving(false);
@@ -199,15 +208,19 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   }
 
   function changeTarget(item: SetupItem, target: SetupTarget) {
-    const changedEndpoint = item.target.kind === "http" && target.kind === "http" && item.target.base_url !== target.base_url;
+    const changedEndpoint = item.target.kind === "provider" && target.kind === "provider" && item.target.base_url !== target.base_url;
     update(item.id, changedEndpoint ? { target, integration_choice: undefined } : { target });
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
 
-  function changeSecret(item: SetupItem, base_url: string, secret: string | null) {
+  function itemChanges(id: string) {
+    return Object.values(credentials).filter((change) => change.item_id === id);
+  }
+
+  function changeSecret(item: SetupItem, field: string, base_url: string, secret: string | null) {
     clearItemFailure(item.id);
-    setCredentials(({ [item.id]: _previous, ...others }) =>
-      secret === "" ? others : { ...others, [item.id]: { item_id: item.id, base_url, secret } });
+    setCredentials(({ [`${item.id}:${field}`]: _previous, ...others }) =>
+      secret === "" ? others : { ...others, [`${item.id}:${field}`]: { item_id: item.id, field, base_url, secret } });
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
 
@@ -223,8 +236,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
 
   async function test(item: SetupItem) {
     setBusy(true);
-    const change = credentials[item.id];
-    const current = await persist(doc, change ? [change] : []);
+    const current = await persist(doc, itemChanges(item.id));
     if (current) {
       const response = await api.post<IntegrationVerdict>(`${PATH}/test`, { revision: current.revision, item_id: item.id });
       if (response.kind === "invalid" && response.field?.startsWith(`items.${item.id}.`)) {
@@ -264,30 +276,38 @@ function Wizard({ initial }: { initial: SetupDraft }) {
 
   function connection(item: SetupItem) {
     const { target, id } = item;
-    const change = credentials[id];
+    const changes = itemChanges(id);
     const result = verdicts[id];
     let content: ReactNode;
     let canTest = true;
-    if (target.kind === "http") {
-      const bound = change?.secret === null ? null : draft.credential_origins[id];
+    if (target.kind === "provider") {
+      const schema = providers.find((entry) => entry.id === target.provider)?.fields ?? [];
+      const bound = draft.credential_bindings[id];
+      const values = { ...target.options, ...target, ...Object.fromEntries(changes.map((entry) => [entry.field ?? "", entry.secret])) };
       canTest = !!target.base_url && target.enabled;
       content = <>
-        <SchemaForm id={id} schema={[...(providers.find((provider) => provider.id === target.kind)?.fields ?? []), pinField]}
-          values={{ ...target, secret: change?.secret ?? "" }} bound={bound}
-          errors={Object.fromEntries(["base_url", "secret", "fingerprint"].map((key) => [key, fieldError(id, key) ?? ""]))}
+        <SchemaForm id={id} schema={[...schema, pinField]} values={values} bound={bound}
+          cleared={Object.fromEntries(changes.map((entry) => [entry.field ?? "", entry.secret === null]))}
+          errors={Object.fromEntries([...schema, pinField].map(({ id: key }) => [key, fieldError(id, key) ?? ""]))}
           onChange={(key, value) => {
-            if (key === "secret") changeSecret(item, target.base_url, String(value));
-            if (key === "enabled") changeTarget(item, { ...target, enabled: value === true });
-            if (key === "fingerprint") changeTarget(item, { ...target, fingerprint: String(value) || null });
-            if (key === "base_url") {
-              const base_url = String(value);
-              const changedOrigin = origin(base_url) !== origin(target.base_url);
-              if (changedOrigin) changeSecret(item, base_url, "");
-              changeTarget(item, { ...target, base_url, fingerprint: changedOrigin ? null : target.fingerprint });
+            if (schema.some((field) => field.id === key && field.kind === "secret")) {
+              changeSecret(item, key, target.base_url, String(value));
+              return;
             }
-          }} onClear={() => changeSecret(item, target.base_url, null)} />
-        {change && <Button disabled={controlsDisabled} onClick={() => void persist(doc, [change])}>
-          {change.secret === null ? "Confirm credential removal" : "Save credential"}
+            if (key === "fingerprint") {
+              changeTarget(item, { ...target, fingerprint: String(value) || null });
+              return;
+            }
+            const base_url = key === "base_url" ? String(value) : target.base_url;
+            const enabled = key === "enabled" ? value === true : target.enabled;
+            const options = key === "base_url" || key === "enabled" ? target.options : { ...target.options, [key]: value };
+            const changedOrigin = origin(base_url) !== origin(target.base_url);
+            if (changedOrigin) setCredentials((latest) => Object.fromEntries(Object.entries(latest).filter(([, entry]) => entry.item_id !== id)));
+            changeTarget(item, { ...target, base_url, enabled, options,
+              fingerprint: changedOrigin ? null : target.fingerprint });
+          }} onClear={(key) => changeSecret(item, key, target.base_url, changes.some((entry) => entry.field === key && entry.secret === null) ? "" : null)} />
+        {changes.length > 0 && <Button disabled={controlsDisabled} onClick={() => void persist(doc, changes)}>
+          {changes.every((entry) => entry.secret === null) ? "Confirm credential removal" : "Save credential"}
         </Button>}
       </>;
     } else {
@@ -305,7 +325,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     return <section className="setup-item" key={id}>
       <h3>{item.name || "Unnamed service"}</h3>
       {content}
-      <Button data-testid="setup-test" disabled={controlsDisabled || !canTest} onClick={() => void test(item)}>{change ? "Save and test connection" : "Test connection"}</Button>
+      <Button data-testid="setup-test" disabled={controlsDisabled || !canTest} onClick={() => void test(item)}>{changes.length ? "Save and test connection" : "Test connection"}</Button>
       {result && <Note kind={typeof result !== "string" && result.ok ? "ok" : "warn"} testId="setup-verdict">
         {typeof result === "string" ? result : result.message}
         {typeof result !== "string" && result.fingerprint && target.kind !== "board" && <>
@@ -344,11 +364,19 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             <p>Include the services you want, then give them names and place them in sections.</p>
             <div className="acts">
               <Button disabled={itemLimit} onClick={() => add(newItem({ kind: "board", payload: { kind: "link", title: "", url: "" } }, "New link"))}>Add a link</Button>
-              <Button disabled={itemLimit} onClick={() => add(newItem({ kind: "http", base_url: "", enabled: true }, "New HTTP integration"))}>Add an HTTP integration</Button>
+              <Select label="Add an integration" placeholder="Add an integration" value="" disabled={itemLimit}
+                options={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+                onChange={(id) => {
+                  const provider = providers.find((entry) => entry.id === id);
+                  if (provider) {
+                    const { base_url, enabled, options } = connectionValues(provider.fields, defaults(provider.fields));
+                    add(newItem({ kind: "provider", provider: id, base_url, enabled, options }, provider.name));
+                  }
+                }} />
             </div>
             {doc.items.map((item) => <section className="setup-item" key={item.id} data-testid="setup-selection">
               <Field id={`${item.id}-include`} label={null}
-                error={failure?.item === item.id && !["name", "group", "url", "base_url", "secret", "fingerprint"].includes(failure.field ?? "") ? failure.message : undefined}>
+                error={failure?.item === item.id && !["name", "group", "url", "base_url", "fingerprint", ...providers.flatMap((p) => p.fields.map((f) => f.id))].includes(failure.field ?? "") ? failure.message : undefined}>
                 <Checkbox checked={item.included} onChange={(included) => update(item.id, { included })}
                   label={`Include ${item.name || "unnamed service"}`} />
               </Field>
@@ -389,7 +417,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                   const matchError = error?.field === "integration_choice";
                   const fix = matchError ? (!matches ? "base_url" : undefined) : error?.field ?? incomplete;
                   return <li key={item.id}>{item.name || "Unnamed service"}
-                    {item.target.kind === "http" ? " · HTTP integration" : item.target.payload.kind === "link" ? " · Link" : ""}
+                    {item.target.kind === "provider" ? " · Integration" : item.target.payload.kind === "link" ? " · Link" : ""}
                     {incomplete && " · incomplete — will not be added"}
                     {matches && <Field id={`${item.id}-match`} label={`Connection for ${item.name}`}
                       hint={`Matches existing ${matches.map(({ name }) => name).join(", ")}. Reuse keeps the saved connection and its credential.`}
@@ -400,7 +428,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                     </Field>}
                     {error && (!matchError || !matches) && <p className="bad-fg" role="alert">{error.message}</p>}
                     {fix && <Button variant="link" disabled={controlsDisabled} onClick={() => void goTo({
-                      ...doc, step: ["url", "base_url", "secret", "fingerprint"].includes(fix) ? "connections" : "select",
+                      ...doc, step: ["url", "base_url", "fingerprint", ...providers.flatMap((p) => p.fields.map((f) => f.id))].includes(fix) ? "connections" : "select",
                     })}>Fix {item.name || "unnamed service"}</Button>}
                   </li>;
                 })}</ul>

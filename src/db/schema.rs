@@ -194,6 +194,34 @@ CREATE TABLE provider_widgets (
   UNIQUE (integration_id, widget)
 );
 ",
+    "
+CREATE UNIQUE INDEX integrations_id_origin ON integrations(id,origin);
+CREATE TABLE integration_credentials (
+  integration_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (integration_id, field),
+  FOREIGN KEY (integration_id, origin) REFERENCES integrations(id,origin) ON DELETE CASCADE
+) WITHOUT ROWID;
+INSERT INTO integration_credentials (integration_id,field,origin,secret)
+  SELECT id,'secret',secret_origin,secret FROM integrations WHERE secret IS NOT NULL;
+UPDATE integrations SET secret=NULL,secret_origin=NULL WHERE secret IS NOT NULL;
+",
+    "
+ALTER TABLE setup_credentials RENAME TO setup_credentials_before_fields;
+CREATE TABLE setup_credentials (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_id, field)
+) WITHOUT ROWID;
+INSERT INTO setup_credentials (user_id,item_id,field,origin,secret)
+  SELECT user_id,item_id,'secret',origin,secret FROM setup_credentials_before_fields;
+DROP TABLE setup_credentials_before_fields;
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
@@ -312,7 +340,10 @@ mod tests {
     fn provider_upgrade_preserves_existing_http_connections_and_board_targets() {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn, false).unwrap();
-        let previous = MIGRATIONS.len() - 1;
+        let previous = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE integration_credentials"))
+            .unwrap();
         for sql in &MIGRATIONS[..previous] {
             conn.execute_batch(sql).unwrap();
         }
@@ -329,10 +360,21 @@ mod tests {
                 ('old-widget','old-board','widget','{"kind":"widget","widget_id":"local-toml"}',NULL);"#,
         ).unwrap();
         migrate(&mut conn).unwrap();
-        let saved = conn.query_row(
-            "SELECT json_extract(config,'$.base_url'), secret, secret_origin FROM integrations WHERE id='legacy'",
-            [], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
-        ).unwrap();
+        let saved = conn
+            .query_row(
+                "SELECT json_extract(config,'$.base_url'), c.secret, c.origin
+             FROM integrations JOIN integration_credentials c ON integration_id=id
+             WHERE id='legacy' AND field='secret' ",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
         assert_eq!(
             saved,
             (
@@ -374,15 +416,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(items, 0);
-        let integration: String = conn
-            .query_row(
-                "INSERT INTO integrations (name, kind, origin, secret, secret_origin)
-             VALUES ('Example', 'example', 'https://example.test', 'secret', 'https://example.test')
-             RETURNING id",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let integration: String = conn.query_row(
+            "INSERT INTO integrations (name,kind,origin) VALUES ('Example','http','https://example.test')
+             RETURNING id", [], |row| row.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO integration_credentials (integration_id,field,origin,secret)
+                      VALUES (?1,'secret','https://example.test','fixture')",
+            [&integration],
+        )
+        .unwrap();
         assert_eq!(integration.len(), 32);
         assert!(conn
             .execute(
@@ -390,11 +432,22 @@ mod tests {
                 [&integration],
             )
             .is_err());
+        assert!(conn
+            .execute(
+                "INSERT INTO integration_credentials (integration_id,field,origin,secret)
+                      VALUES (?1,'other','https://wrong.test','fixture')",
+                [&integration]
+            )
+            .is_err());
+        conn.execute(
+            "DELETE FROM integration_credentials WHERE integration_id=?1",
+            [&integration],
+        )
+        .unwrap();
         assert_eq!(
             conn.execute(
-                "UPDATE integrations SET origin = 'https://new.example.test', secret = NULL,
-             secret_origin = NULL WHERE id = ?1",
-                [&integration],
+                "UPDATE integrations SET origin='https://new.example.test' WHERE id=?1",
+                [&integration]
             )
             .unwrap(),
             1

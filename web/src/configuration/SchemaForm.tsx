@@ -14,7 +14,7 @@ export const pinField: Spec = {
 export function SchemaForm({ id, schema, values, errors, onChange, bound, cleared, onClear }: {
   id: string; schema: Spec[]; values: Values; errors?: Record<string, string>;
   onChange: (id: string, value: string | boolean) => void;
-  bound?: string | null; cleared?: boolean; onClear?: () => void;
+  bound?: Record<string, string>; cleared?: Record<string, boolean>; onClear?: (key: string) => void;
 }) {
   return <>{schema.map((field) => {
     const { kind, label, help } = field;
@@ -25,7 +25,7 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
     const change = (next: string | boolean) => onChange(key, next);
     const secret = kind === "secret";
     const url = String(values.base_url ?? "");
-    const hint = (secret && secretHint(bound, url, cleared)) || help;
+    const hint = (secret && secretHint(bound?.[key], url, cleared?.[key])) || help;
     return <div key={key}>
       <Field id={name} label={kind === "bool" ? null : label} error={errors?.[key]} hint={hint}>
         {kind === "bool" ? <Switch label={label} checked={value === true || value === "true"} onChange={change} />
@@ -36,7 +36,7 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
             min={field.min ?? undefined} max={field.max ?? undefined} value={text} onChange={(e) => change(e.target.value)} />}
       </Field>
       {secret && text && url.toLowerCase().startsWith("http://") && <p className="warn-fg">This HTTP connection sends the credential unencrypted.</p>}
-      {secret && bound && onClear && <Button onClick={onClear}>{cleared ? "Keep saved credential" : "Clear saved credential"}</Button>}
+      {secret && bound?.[key] && onClear && <Button onClick={() => onClear(key)}>{cleared?.[key] ? "Keep saved credential" : "Clear saved credential"}</Button>}
     </div>;
   })}</>;
 }

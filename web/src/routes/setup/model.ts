@@ -32,6 +32,6 @@ export function selectedGroups(document: SetupDocument) {
 
 export function incompleteField({ name, target }: SetupItem): "name" | "url" | undefined {
   if (!name.trim()) return "name";
-  if (target.kind === "http" && !target.base_url.trim()) return "url";
+  if (target.kind === "provider" && !target.base_url.trim()) return "url";
   if (target.kind === "board" && target.payload.kind === "link" && !target.payload.url.trim()) return "url";
 }

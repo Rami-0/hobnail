@@ -1,6 +1,9 @@
 //! Saved dashboard connections and bounded connection tests.
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 use hyper::{body::Incoming, Request, Response, StatusCode};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -13,7 +16,7 @@ use super::{
 use crate::{
     db::accounts::Role,
     http::{client, server::Body},
-    providers::{self, Class as VerdictClass, Target},
+    providers::{self, Class as VerdictClass, Credentials, Target},
     state::AppState,
 };
 
@@ -30,7 +33,12 @@ pub struct IntegrationInput {
     #[cfg_attr(test, ts(optional = nullable))]
     pub secret: Option<String>,
     #[serde(default)]
+    #[cfg_attr(test, ts(skip))]
     pub clear_secret: bool,
+    /// Omitted fields keep their saved value. Null explicitly removes a field.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional, type = "Record<string, string | null>"))]
+    pub credentials: BTreeMap<String, Option<String>>,
     #[cfg_attr(test, ts(optional = nullable))]
     pub fingerprint: Option<String>,
     #[serde(default)]
@@ -69,6 +77,8 @@ pub struct IntegrationDetails {
     icon: Option<String>,
     enabled: bool,
     secret_origin: Option<String>,
+    #[cfg_attr(test, ts(type = "Record<string, string>"))]
+    credentials: BTreeMap<String, String>,
     fingerprint: Option<String>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     options: providers::Values,
@@ -128,7 +138,9 @@ impl CheckSlot {
     }
 }
 
-const SELECT: &str = "SELECT id, name, kind, origin, config, secret_origin FROM integrations";
+const SELECT: &str = "SELECT id, name, kind, origin, config,
+    (SELECT json_group_object(field, origin) FROM integration_credentials WHERE integration_id=integrations.id)
+    FROM integrations";
 
 fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationView> {
     let origin: String = row.get(3)?;
@@ -140,13 +152,16 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
         fingerprint: None,
         options: Default::default(),
     });
-    let secret_origin: Option<String> = row.get(5)?;
+    let bindings: String = row.get(5)?;
+    let credentials: BTreeMap<String, String> =
+        serde_json::from_str(&bindings).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let secret_origin = credentials.get("secret").cloned();
     Ok(IntegrationView {
         id: row.get(0)?,
         name: row.get(1)?,
         kind: row.get(2)?,
         origin,
-        has_secret: secret_origin.is_some(),
+        has_secret: !credentials.is_empty(),
         enabled: config.enabled,
         check: None,
         admin: admin.then_some(IntegrationDetails {
@@ -154,6 +169,7 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
             icon: config.icon,
             enabled: config.enabled,
             secret_origin,
+            credentials,
             fingerprint: config.fingerprint,
             options: config.options,
         }),
@@ -225,11 +241,35 @@ pub(super) fn provider(kind: &str) -> Result<&'static providers::Provider, ApiEr
         .ok_or_else(|| ApiError::bad_request("Choose a supported provider.", Some("kind")))
 }
 
-pub(super) fn validate_input(input: &IntegrationInput) -> Result<(), ApiError> {
+pub(super) fn credential_field(
+    provider: &'static providers::Provider,
+    field: &str,
+    value: Option<&str>,
+) -> Result<&'static str, ApiError> {
+    let spec = provider
+        .fields
+        .iter()
+        .find(|spec| spec.id == field && spec.kind == providers::Kind::Secret)
+        .ok_or_else(|| ApiError::bad_request("Choose a credential field.", Some("credentials")))?;
+    if let Some(value) = value {
+        if provider.id == "http" {
+            secret_value(value)?;
+        }
+        if !spec.accepts(&serde_json::Value::from(value)) || value.len() > 4096 {
+            return Err(ApiError::bad_request(
+                "Enter a valid credential.",
+                Some(spec.id),
+            ));
+        }
+    }
+    Ok(spec.id)
+}
+
+fn validated_options(input: &IntegrationInput) -> Result<providers::Values, ApiError> {
     let provider = provider(&input.kind)?;
     let mut values = input.options.clone();
     if values.keys().any(|key| {
-        matches!(key.as_str(), "base_url" | "enabled" | "secret")
+        matches!(key.as_str(), "base_url" | "enabled")
             || provider
                 .fields
                 .iter()
@@ -242,28 +282,107 @@ pub(super) fn validate_input(input: &IntegrationInput) -> Result<(), ApiError> {
     }
     values.insert("base_url".into(), input.base_url.clone().into());
     values.insert("enabled".into(), input.enabled.into());
-    if input.clear_secret && input.secret.is_some() {
-        return Err(ApiError::bad_request(
-            "Choose either replacement or removal.",
-            Some("secret"),
-        ));
-    }
-    if let Some(secret) = &input.secret {
-        secret_value(secret)?;
-        values.insert("secret".into(), secret.clone().into());
-    }
-    providers::validate(provider.fields, &mut values).map_err(|field| {
+    let fields: Vec<_> = provider
+        .fields
+        .iter()
+        .copied()
+        .filter(|field| field.kind != providers::Kind::Secret)
+        .collect();
+    providers::validate(&fields, &mut values).map_err(|field| {
         ApiError::bad_request("Enter a valid value for this field.", Some(&field))
     })?;
     providers::fingerprint(&input.base_url, input.fingerprint.as_deref())
         .map_err(|message| ApiError::bad_request(message, Some("fingerprint")))?;
-    Ok(())
+    values.remove("base_url");
+    values.remove("enabled");
+    Ok(values)
+}
+
+fn effective_credentials(
+    conn: &Connection,
+    id: Option<&str>,
+    input: &mut IntegrationInput,
+    origin: &str,
+) -> Result<Credentials, ApiError> {
+    let provider = provider(&input.kind)?;
+    let mut saved = if let Some(id) = id {
+        if get(conn, id, true)?.kind != input.kind {
+            return Err(ApiError::bad_request(
+                "The provider of a saved integration is fixed.",
+                Some("kind"),
+            ));
+        }
+        read_credentials(conn, id)?
+    } else {
+        Credentials::new()
+    };
+    if input.secret.is_some() || input.clear_secret {
+        if input.secret.is_some() && input.clear_secret || input.credentials.contains_key("secret")
+        {
+            return Err(ApiError::bad_request(
+                "Choose either replacement or removal.",
+                Some("secret"),
+            ));
+        }
+        input
+            .credentials
+            .insert("secret".into(), input.secret.take());
+    }
+    for (field, change) in std::mem::take(&mut input.credentials) {
+        credential_field(provider, &field, change.as_deref())?;
+        if let Some(token) = change {
+            saved.insert(
+                field,
+                client::BoundCredential {
+                    origin: origin.into(),
+                    token,
+                },
+            );
+        } else {
+            saved.remove(&field);
+        }
+    }
+    for field in provider
+        .fields
+        .iter()
+        .filter(|spec| spec.kind == providers::Kind::Secret)
+    {
+        match saved.get(field.id) {
+            Some(value) if value.origin != origin => {
+                return Err(ApiError::bad_request(
+                    "Enter the credential again for the new origin or clear the saved credential.",
+                    Some(field.id),
+                ))
+            }
+            None if field.required => {
+                return Err(ApiError::bad_request("Enter a credential.", Some(field.id)))
+            }
+            _ => {}
+        }
+    }
+    Ok(saved)
+}
+
+pub(super) fn connection_changed(
+    conn: &Connection,
+    id: &str,
+    input: &IntegrationInput,
+) -> Result<bool, ApiError> {
+    Ok(input.secret.is_some()
+        || input.clear_secret
+        || !input.credentials.is_empty()
+        || get(conn, id, true)?.admin.is_some_and(|old| {
+            old.base_url != input.base_url
+                || old.enabled != input.enabled
+                || old.fingerprint != input.fingerprint
+                || old.options != input.options
+        }))
 }
 
 pub(super) fn save(
     conn: &Connection,
     id: Option<&str>,
-    input: IntegrationInput,
+    mut input: IntegrationInput,
 ) -> Result<IntegrationView, ApiError> {
     super::validate_label(&input.name, "name")?;
     super::validate_icon(input.icon.as_deref())?;
@@ -273,8 +392,9 @@ pub(super) fn save(
             Some("base_url"),
         )
     })?;
+    input.options = validated_options(&input)?;
+    let credentials = effective_credentials(conn, id, &mut input, &origin)?;
     let kind = &input.kind;
-    validate_input(&input)?;
     let config = serde_json::to_string(&Config {
         base_url: input.base_url,
         icon: input.icon,
@@ -283,41 +403,14 @@ pub(super) fn save(
         options: input.options,
     })
     .expect("serializable integration config");
-    let binding = input.secret.as_ref().map(|_| &origin);
     let id = if let Some(id) = id {
-        let previous = get(conn, id, true)?;
-        if previous.kind != input.kind {
-            return Err(ApiError::bad_request(
-                "The provider of a saved integration is fixed.",
-                Some("kind"),
-            ));
-        }
-        if previous
-            .admin
-            .and_then(|a| a.secret_origin)
-            .is_some_and(|bound| bound != origin)
-            && input.secret.is_none()
-            && !input.clear_secret
-        {
-            return Err(ApiError::bad_request(
-                "enter a new secret for the changed origin, or clear the stored secret first",
-                Some("secret"),
-            ));
-        }
         conn.execute(
-            "UPDATE integrations SET name=?2, kind=?3, origin=?4, config=?5,
-             secret=CASE WHEN ?8 THEN NULL ELSE coalesce(?6,secret) END,
-             secret_origin=CASE WHEN ?8 THEN NULL ELSE coalesce(?7,secret_origin) END WHERE id=?1",
-            params![
-                id,
-                input.name,
-                kind,
-                origin,
-                config,
-                input.secret,
-                binding,
-                input.clear_secret
-            ],
+            "DELETE FROM integration_credentials WHERE integration_id=?1",
+            [id],
+        )?;
+        conn.execute(
+            "UPDATE integrations SET name=?2, origin=?3, config=?4 WHERE id=?1",
+            params![id, input.name, origin, config],
         )?;
         id.to_string()
     } else {
@@ -330,22 +423,42 @@ pub(super) fn save(
             ));
         }
         conn.query_row(
-            "INSERT INTO integrations (name,kind,origin,config,secret,secret_origin)
-             VALUES (?1,?2,?3,?4,?5,?6) RETURNING id",
-            params![input.name, kind, origin, config, input.secret, binding],
+            "INSERT INTO integrations (name,kind,origin,config) VALUES (?1,?2,?3,?4) RETURNING id",
+            params![input.name, kind, origin, config],
             |r| r.get(0),
         )?
     };
+    for (field, credential) in credentials {
+        write_credential(conn, &id, &field, &credential.origin, &credential.token)?;
+    }
     get(conn, &id, true)
 }
 
-pub(super) fn endpoints(conn: &Connection) -> Result<Vec<(String, String, String)>, ApiError> {
+fn write_credential(
+    conn: &Connection,
+    id: &str,
+    field: &str,
+    origin: &str,
+    token: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO integration_credentials (integration_id,field,origin,secret) VALUES (?1,?2,?3,?4)
+         ON CONFLICT(integration_id,field) DO UPDATE SET origin=excluded.origin,secret=excluded.secret",
+        params![id, field, origin, token],
+    )?;
+    Ok(())
+}
+
+pub(super) fn endpoints(
+    conn: &Connection,
+) -> Result<Vec<(String, String, String, String)>, ApiError> {
     let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY name, id"))?;
     let rows = stmt.query_map([], |row| {
         let view = read(row, true)?;
         Ok((
             view.id,
             view.name,
+            view.kind,
             view.admin.expect("admin details").base_url,
         ))
     })?;
@@ -366,42 +479,43 @@ pub(super) fn target(
             None,
         ));
     }
-    let credential = read_credential(conn, id)?;
-    let mut target = Target::link(details.base_url, credential);
+    let mut target = Target::new(
+        details.base_url,
+        read_credentials(conn, id)?,
+        super::dashboard_settings::internet(conn)?,
+    );
     target.fingerprint = details
         .fingerprint
         .as_deref()
         .and_then(crate::http::pin::parse);
-    target.internet_enabled = super::dashboard_settings::internet(conn)?;
     target.options = details.options;
     state.provider_connections.bind(&mut target, Some(id), true);
     Ok((provider, target))
 }
 
-fn read_credential(
-    conn: &Connection,
-    id: &str,
-) -> rusqlite::Result<Option<client::BoundCredential>> {
-    conn.query_row(
-        "SELECT secret_origin,secret FROM integrations WHERE id=?1 AND secret IS NOT NULL",
-        [id],
-        |row| {
-            Ok(client::BoundCredential {
-                origin: row.get(0)?,
-                token: row.get(1)?,
-            })
-        },
-    )
-    .optional()
+fn read_credentials(conn: &Connection, id: &str) -> rusqlite::Result<Credentials> {
+    let mut stmt = conn.prepare(
+        "SELECT field,origin,secret FROM integration_credentials WHERE integration_id=?1",
+    )?;
+    let rows = stmt.query_map([id], |row| {
+        Ok((
+            row.get(0)?,
+            client::BoundCredential {
+                origin: row.get(1)?,
+                token: row.get(2)?,
+            },
+        ))
+    })?;
+    rows.collect()
 }
 
 pub(super) fn draft_target(
     state: &AppState,
     conn: &Connection,
     id: Option<&str>,
-    input: IntegrationInput,
+    mut input: IntegrationInput,
 ) -> Result<(&'static providers::Provider, Target), ApiError> {
-    validate_input(&input)?;
+    input.options = validated_options(&input)?;
     if !input.enabled {
         return Err(ApiError::bad_request(
             "Enable this integration before testing its connection.",
@@ -409,36 +523,16 @@ pub(super) fn draft_target(
         ));
     }
     let origin = client::origin(&input.base_url).expect("validated origin");
-    let credential = match (input.secret, id) {
-        (Some(token), _) => Some(client::BoundCredential { origin, token }),
-        (None, Some(id)) if !input.clear_secret => {
-            let saved = get(conn, id, true)?;
-            if saved.kind != input.kind {
-                return Err(ApiError::bad_request(
-                    "Choose the saved provider.",
-                    Some("kind"),
-                ));
-            }
-            let credential = read_credential(conn, id)?;
-            if credential
-                .as_ref()
-                .is_some_and(|value| value.origin != origin)
-            {
-                return Err(ApiError::bad_request(
-                    "Enter the credential again for the new origin.",
-                    Some("secret"),
-                ));
-            }
-            credential
-        }
-        _ => None,
-    };
-    let mut target = Target::link(input.base_url, credential);
+    let credentials = effective_credentials(conn, id, &mut input, &origin)?;
+    let mut target = Target::new(
+        input.base_url,
+        credentials,
+        super::dashboard_settings::internet(conn)?,
+    );
     target.fingerprint = input
         .fingerprint
         .as_deref()
         .and_then(crate::http::pin::parse);
-    target.internet_enabled = super::dashboard_settings::internet(conn)?;
     target.options = input.options;
     state.provider_connections.bind(&mut target, id, false);
     Ok((provider(&input.kind)?, target))
@@ -468,7 +562,7 @@ pub(super) async fn test_connection(
     target: Target,
 ) -> IntegrationVerdict {
     let started = Instant::now();
-    let policy = state.config.current();
+    let (policy, revision) = state.config.provider_http();
     let result = async {
         let permit = state
             .provider_requests
@@ -479,7 +573,8 @@ pub(super) async fn test_connection(
             return Err(VerdictClass::InternetOff.into());
         }
         let conn =
-            providers::Conn::new(&target, &policy.http, &state.provider_connections, permit)?;
+            providers::Conn::new(&target, &policy.http, &state.provider_connections, permit)?
+                .with_http_revision(revision);
         conn.run(async {
             match provider {
                 Some(provider) => (provider.test)(&conn).await,
@@ -530,15 +625,7 @@ pub(super) async fn route(
             let create = m.route.handler == Handler::IntegrationCreate;
             let input: IntegrationInput = super::read_json(req, 16384).await?;
             let saved = db.dashboard(|c| {
-                let connection_changed = !create
-                    && (input.secret.is_some()
-                        || input.clear_secret
-                        || get(c, id, true)?.admin.is_some_and(|old| {
-                            old.base_url != input.base_url
-                                || old.enabled != input.enabled
-                                || old.fingerprint != input.fingerprint
-                                || old.options != input.options
-                        }));
+                let connection_changed = !create && connection_changed(c, id, &input)?;
                 let mut view = save(c, (!create).then_some(id), input)?;
                 if connection_changed {
                     super::provider_widgets::invalidate(state, c, Some(id))?;
@@ -574,28 +661,18 @@ pub(super) async fn route(
                 None
             };
             db.dashboard(|c| {
-                let saved: String = c
-                    .query_row("SELECT origin FROM integrations WHERE id=?1", [id], |r| {
-                        r.get(0)
-                    })
-                    .optional()?
-                    .ok_or_else(ApiError::not_found)?;
+                let saved = get(c, id, true)?;
+                credential_field(provider(&saved.kind)?, "secret", None)?;
                 if let Some((origin, token)) = replacement {
-                    if saved != origin {
+                    if saved.origin != origin {
                         return Err(ApiError::bad_request(
                             "the integration origin changed; reload it before entering a token",
                             Some("base_url"),
                         ));
                     }
-                    c.execute(
-                        "UPDATE integrations SET secret=?2, secret_origin=?3 WHERE id=?1",
-                        params![id, token, origin],
-                    )?;
+                    write_credential(c, id, "secret", &origin, &token)?;
                 } else {
-                    c.execute(
-                        "UPDATE integrations SET secret=NULL, secret_origin=NULL WHERE id=?1",
-                        [id],
-                    )?;
+                    c.execute("DELETE FROM integration_credentials WHERE integration_id=?1 AND field='secret'", [id])?;
                 }
                 super::provider_widgets::invalidate(state, c, Some(id))?;
                 state.integration_checks.lock().unwrap().remove(id);

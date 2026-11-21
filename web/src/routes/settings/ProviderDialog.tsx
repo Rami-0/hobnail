@@ -5,9 +5,9 @@ import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
 import type { Provider } from "../../api/gen/Provider.ts";
 import { api } from "../../api/session.ts";
-import { origin, needsSecret } from "../../boards/document.ts";
+import { origin } from "../../boards/document.ts";
 import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
-import { initial, schemaValues, type Values } from "../../configuration/schema.ts";
+import { connectionValues, initial, schemaValues, type Values } from "../../configuration/schema.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -28,8 +28,8 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
     ...item?.admin?.options, base_url: item?.admin?.base_url,
     enabled: item?.enabled, fingerprint: item?.admin?.fingerprint,
   });
-  const bound = item?.admin?.secret_origin;
-  const [cleared, setCleared] = useState(false);
+  const bound = item?.admin?.credentials;
+  const [cleared, setCleared] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [verdict, setVerdict] = useState<IntegrationVerdict>();
   const [busy, setBusy] = useState(false);
@@ -71,10 +71,10 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
 
   function change(key: string, value: string | boolean) {
     setVerdict(undefined);
-    if (key === "secret" && value) setCleared(false);
+    if (value && cleared[key]) setCleared({ ...cleared, [key]: false });
     setConfig((previous) => {
       if (key === "base_url" && origin(String(previous.base_url ?? "")) !== origin(String(value))) {
-        return { ...previous, base_url: value, secret: "", fingerprint: "" };
+        return { ...previous, ...Object.fromEntries(provider?.fields.filter((f) => f.kind === "secret").map((f) => [f.id, ""]) ?? []), base_url: value, fingerprint: "" };
       }
       return { ...previous, [key]: value };
     });
@@ -82,16 +82,14 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
 
   async function submit(test: boolean) {
     if (!provider || busy) return;
-    const parsed = schemaValues(provider.fields, config);
-    const { base_url, secret, enabled, ...options } = parsed.values;
+    const { errors: connectionErrors, ...connection } = connectionValues(provider.fields, config, bound, cleared);
     const fingerprint = String(config.fingerprint ?? "").trim();
-    if (fingerprint && (!/^[0-9a-f]{64}$/i.test(fingerprint) || !String(base_url).startsWith("https://"))) {
-      parsed.errors.fingerprint = "Use HTTPS and enter 64 hexadecimal digits.";
+    if (fingerprint && (!/^[0-9a-f]{64}$/i.test(fingerprint) || !connection.base_url.startsWith("https://"))) {
+      connectionErrors.fingerprint = "Use HTTPS and enter 64 hexadecimal digits.";
     }
-    if (!name.trim()) parsed.errors.name = "Enter an instance name.";
-    if (needsSecret(bound, String(base_url)) && !secret && !cleared) parsed.errors.secret = "Enter the credential again for the new origin, or clear it.";
-    setErrors(parsed.errors);
-    if (Object.keys(parsed.errors).length) return;
+    if (!name.trim()) connectionErrors.name = "Enter an instance name.";
+    setErrors(connectionErrors);
+    if (Object.keys(connectionErrors).length) return;
 
     const widgetFields: Record<string, Record<string, string>> = {};
     const widgets = choosing && board ? provider.widgets.flatMap((w) => {
@@ -104,8 +102,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
     if (Object.keys(widgetFields).length) return;
 
     const integration: IntegrationInput = {
-      kind: provider.id, name: name.trim(), base_url: String(base_url), enabled: enabled === true,
-      icon: icon || null, clear_secret: cleared, fingerprint: fingerprint || null, secret: typeof secret === "string" ? secret : undefined, options,
+      kind: provider.id, name: name.trim(), ...connection, icon: icon || null, fingerprint: fingerprint || null,
     };
     setBusy(true);
     if (test) {
@@ -155,9 +152,9 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
         <Field label="Name" id="integration-name" error={errors.name}><TextInput name="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
         <SchemaForm id="integration" schema={[...provider.fields, pinField]} values={config} errors={errors}
-          onChange={change} bound={bound} cleared={cleared} onClear={item ? () => {
-            change("secret", "");
-            setCleared(!cleared);
+          onChange={change} bound={bound} cleared={cleared} onClear={item ? (key) => {
+            change(key, "");
+            setCleared({ ...cleared, [key]: !cleared[key] });
           } : undefined} />
         {verdict && <Note testId="provider-draft-verdict" kind={verdict.ok ? "ok" : "warn"}>{verdict.message}
           {verdict.fingerprint && <><p>Compare this fingerprint with the certificate on your service.</p><p className="wrap"><code>{verdict.fingerprint}</code></p>

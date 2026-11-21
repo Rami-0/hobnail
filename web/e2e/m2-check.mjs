@@ -203,11 +203,13 @@ try {
     await step(2);
     await require("same login in a new browser context resumes selections and edits", `${el(name)}?.value === ${q(readingTitle)} && ${el(group)}?.value === "Home tools" && document.querySelectorAll(${q(selected)}).length === 2`);
     await click(".setup-fields .acts button:first-child");
-    await click(".setup-fields .acts button:nth-child(2)");
+    await click('button[aria-label="Add an integration"]');
+    await click('[role="option"][data-value="http"]');
     await fill(`${selected}:nth-of-type(3) input[id$="-name"]`, linkTitle);
     await click(".setup-fields .acts button:first-child");
     await fill(`${selected}:nth-of-type(5) input[id$="-name"]`, "Unfinished link");
-    await click(".setup-fields .acts button:nth-child(2)");
+    await click('button[aria-label="Add an integration"]');
+    await click('[role="option"][data-value="http"]');
     await fill(`${selected}:nth-of-type(6) input[id$="-name"]`, "Unfinished integration");
   }
   await capture(shots[2], wizard);
@@ -273,7 +275,7 @@ try {
   await require("review reflects selected groups or the real empty board", text(wizard, empty ? "Your board will be empty" : "Home tools"));
   if (!empty) {
     await require("Review offers a match to an already saved integration", text(wizard, "Matches existing Z Existing fixture"));
-    await click('button[aria-label="Connection for New HTTP integration"]');
+    await click('button[aria-label="Connection for Generic HTTP"]');
     await require("matching saved integration can be reused", text('[role="option"]:not([data-value="new"])', "Reuse Z Existing fixture"));
     await click('[role="option"][data-value="new"]');
     await require("Add anyway is autosaved", text(".setup-actions [role=status]", "Draft saved"));

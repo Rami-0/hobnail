@@ -17,14 +17,14 @@ export function secretHint(bound: string | null | undefined, url: string, cleare
     : "Origin changed. Enter a replacement or clear the saved credential.";
 }
 
-export function schemaValues(fields: Field[], input: Values) {
+export function schemaValues(fields: Field[], input: Values, bound?: Record<string, string>) {
   const values: Values = {};
   const errors: Record<string, string> = {};
   for (const field of fields) {
     const { id, kind, max_length: max } = field;
     const value = input[id];
     if (value === undefined || value === "" || value === null) {
-      if (field.required) errors[id] = "This field is required.";
+      if (field.required && !bound?.[id]) errors[id] = "This field is required.";
       continue;
     }
     if (kind === "list") {
@@ -42,11 +42,33 @@ export function schemaValues(fields: Field[], input: Values) {
     } else {
       const s = String(value);
       if (kind === "url" && !origin(s)) errors[id] = "Enter an HTTP or HTTPS URL without credentials, query, or fragment.";
-      if (kind === "secret" && !/^[!-~]+$/.test(s)) errors[id] = "Use printable ASCII characters without spaces.";
+      if (kind === "secret" && Array.from(s).some((ch) => {
+        const n = ch.charCodeAt(0);
+        return n < 32 || (n >= 127 && n < 160);
+      })) errors[id] = "Remove control characters.";
       if (kind === "select" && !field.choices.includes(s)) errors[id] = "Choose a listed value.";
       if (max !== null && s.length > max) errors[id] = `Use at most ${max} characters.`;
       values[id] = value;
     }
   }
   return { values, errors };
+}
+
+export function connectionValues(fields: Field[], input: Values, bound?: Record<string, string>, cleared?: Record<string, boolean>) {
+  const { values, errors } = schemaValues(fields, input, bound);
+  const { base_url, enabled, ...options } = values;
+  const credentials: Record<string, string | null> = {};
+  for (const { id, kind, required } of fields) {
+    if (kind !== "secret") continue;
+    const value = options[id];
+    delete options[id];
+    if (typeof value === "string") credentials[id] = value;
+    else if (cleared?.[id]) {
+      credentials[id] = null;
+      if (required) errors[id] = "This field is required.";
+    } else if (bound?.[id] && bound[id] !== origin(String(base_url))) {
+      errors[id] = "Enter the credential again for the new origin, or clear it.";
+    }
+  }
+  return { base_url: String(base_url ?? ""), enabled: enabled === true, options, credentials, errors };
 }

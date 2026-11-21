@@ -2,4 +2,4 @@
 import type { SetupDocument } from "./SetupDocument.ts";
 import type { SetupIntegrationMatch } from "./SetupIntegrationMatch.ts";
 
-export type SetupDraft = { revision: number, board_id: string | null, document: SetupDocument, theme_default: string, credential_origins: { [key in string]: string }, integration_matches: { [key in string]: string }, matching_integrations: { [key in string]: Array<SetupIntegrationMatch> }, };
+export type SetupDraft = { revision: number, board_id: string | null, document: SetupDocument, theme_default: string, credential_origins: { [key in string]: string }, credential_bindings: Record<string, Record<string, string>>, integration_matches: { [key in string]: string }, matching_integrations: { [key in string]: Array<SetupIntegrationMatch> }, };

@@ -887,7 +887,7 @@ pub(super) async fn route(
                 &integrations::test_connection(
                     state,
                     None,
-                    crate::providers::Target::link(url, None),
+                    crate::providers::Target::new(url, Default::default(), true),
                 )
                 .await,
             )
