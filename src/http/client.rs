@@ -534,8 +534,13 @@ fn http_request(
         .method(method)
         .uri(path_and_query)
         .header("host", host_header)
-        .header("user-agent", concat!("hobnail/", env!("CARGO_PKG_VERSION")))
-        .header("accept", "application/json, text/plain, */*");
+        .header("user-agent", concat!("hobnail/", env!("CARGO_PKG_VERSION")));
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("accept"))
+    {
+        b = b.header("accept", "application/json, text/plain, */*");
+    }
     for (k, v) in headers {
         b = b.header(k.as_str(), v.as_str());
     }

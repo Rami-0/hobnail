@@ -246,6 +246,8 @@ pub struct Step<'a> {
     pub response_headers: &'a [&'a str],
     pub target_headers: &'a [TargetHeader],
     pub status_only: bool,
+    /// Request only application/json instead of the HTTP client’s default media types.
+    pub accept_json: bool,
 }
 
 impl<'a> Step<'a> {
@@ -259,6 +261,7 @@ impl<'a> Step<'a> {
             response_headers: &[],
             target_headers: &[],
             status_only: false,
+            accept_json: false,
         }
     }
 }
@@ -404,6 +407,11 @@ impl<'a> Conn<'a> {
             Verb::Put => Method::PUT,
             Verb::Delete => Method::DELETE,
         };
+        if step.accept_json {
+            request
+                .headers
+                .push(("accept".into(), "application/json".into()));
+        }
         for header in step.target_headers {
             let (name, value) = match header {
                 TargetHeader::Origin => ("origin", self.origin.as_str()),

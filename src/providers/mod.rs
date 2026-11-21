@@ -41,6 +41,7 @@ mod jellyfin;
 mod jellyseerr;
 mod nginx_proxy_manager;
 mod pihole;
+mod plex;
 mod prowlarr;
 mod qbittorrent;
 mod radarr;
@@ -76,6 +77,7 @@ pub const REGISTRY: &[Provider] = &[
     wg_easy::WG_EASY,
     nginx_proxy_manager::NGINX_PROXY_MANAGER,
     glances::GLANCES,
+    plex::PLEX,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

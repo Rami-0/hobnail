@@ -323,6 +323,26 @@ Verified from:
 
 UNVERIFIED: v5, platform-specific plugins and live reverse proxies.
 
+## Plex
+
+Enter your Plex Media Server URL and a Plex access token for that server.
+An owner token is needed for full session visibility. Use a token limited
+to the libraries you need when only reading their data. Hobnail sends
+`X-Plex-Token` and requests JSON.
+
+**Active streams** shows the session count and up to ten titles. **Library
+counts** shows the number of visible libraries and up to five library item
+totals using first-page count metadata. **Recently added** shows up to ten
+items. An oversized response leaves independent data available and marks
+the affected widget or count unavailable.
+
+Verified from:
+
+- [Upstream Media Server API 1.2.3 reference](https://developer.plex.tv/pms/)
+- [Upstream Media Server diagnostic trace for the global recently-added route](https://forums.plex.tv/t/library-scan-not-recognizing-video-files-after-update/898898)
+
+UNVERIFIED: Live token privilege combinations and pagination support on older recently-added routes.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
