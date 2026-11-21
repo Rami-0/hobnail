@@ -11,16 +11,19 @@ for (const url of [base, fixture]) {
   assert.equal(url.hostname, "127.0.0.1");
   assert.notEqual(url.port, "3300");
 }
-assert.ok(password?.length >= 8 && out, "Supply HB_PASSWORD and OUT");
-const credentials = { username: "m3-owner", password };
 const jsonHeaders = { Origin: base.origin, "Content-Type": "application/json" };
-const session = await fetch(new URL("/api/v1/session", base)).then((r) => r.json());
-const signIn = await fetch(new URL(session.owner_exists ? "/api/login" : "/api/v1/onboarding/owner", base), {
-  method: "POST", headers: jsonHeaders, body: JSON.stringify(credentials),
-});
-assert.ok(signIn.ok, "Fixture owner can sign in");
-const cookie = signIn.headers.get("set-cookie").split(";")[0];
-const csrf = (await signIn.json()).csrf;
+let cookie = process.env.HB_COOKIE;
+assert.ok((cookie || password?.length >= 8) && out, "Supply HB_PASSWORD or a fixture HB_COOKIE, and OUT");
+if (!cookie) {
+  const session = await fetch(new URL("/api/v1/session", base)).then((r) => r.json());
+  const signIn = await fetch(new URL(session.owner_exists ? "/api/login" : "/api/v1/onboarding/owner", base), {
+    method: "POST", headers: jsonHeaders, body: JSON.stringify({ username: "m3-owner", password }),
+  });
+  assert.ok(signIn.ok, "Fixture owner can sign in");
+  cookie = signIn.headers.get("set-cookie").split(";")[0];
+}
+const { csrf } = await fetch(new URL("/api/v1/session", base), { headers: { Cookie: cookie } }).then((r) => r.json());
+assert.ok(csrf, "Fixture session is authenticated");
 const api = (method, route, body) => fetch(new URL(`/api/v1${route}`, base), {
   method, headers: { ...jsonHeaders, Cookie: cookie, "X-RH-CSRF": csrf },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -49,6 +52,7 @@ for (const width of [390, 1440]) {
       for (const domain of ["Page", "Runtime", "Network", "Log"]) await tab.send(`${domain}.enable`);
       await tab.send("Runtime.addBinding", { name: "__hbCsp" });
       await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: CSP_LISTENER });
+      await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `localStorage.setItem("rh-theme", ${q(theme)});` });
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: user.touch });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
       await tab.send("Network.setCookie", {
@@ -76,7 +80,7 @@ for (const width of [390, 1440]) {
       };
 
       await tab.send("Page.navigate", { url: new URL(`/app/settings/integrations?board=${board}`, base).href });
-      await check(`document.documentElement.dataset.theme === ${q(theme)} || document.documentElement.dataset.theme === "auto"`, "theme applied");
+      await check(`document.documentElement.dataset.theme === ${q(theme)}`, "theme applied");
       await click(attr("integration-create"));
       await check(`!!${el(dialog)}`, "catalog opened");
       await fill("#provider-search", "zz-no-match");
@@ -87,6 +91,8 @@ for (const width of [390, 1440]) {
       await click(`${dialog} .settings-row button`);
       await fill("#integration-url", "http://127.0.0.1:8081/fixture/m2/reading");
       await fill("#integration-name", `Fixture ${profile}`);
+      await fill('input[name="secret"]', "m3-fake-bearer");
+      await check(`${el('input[name="secret"]')}.type === "password"`, "credential is masked");
       await fixtureState("fail");
       await click(attr("provider-draft-test"));
       await check(`${el(attr("provider-draft-verdict"))}?.textContent.includes("non-success")`, "actionable failure");
