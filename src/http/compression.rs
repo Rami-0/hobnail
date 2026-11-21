@@ -4,11 +4,16 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Body as _;
 use hyper::header::{HeaderValue, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, VARY};
 use hyper::Response;
-use miniz_oxide::deflate::compress_to_vec;
+use miniz_oxide::deflate::core::{
+    compress_to_output, create_comp_flags_from_zip_params, CompressorOxide, TDEFLFlush, TDEFLStatus,
+};
 
 use super::server::{set, Body};
 
 const THRESHOLD: u64 = 1024;
+// Bound the raw body and compression work done on the sole async thread;
+// larger responses can still be delivered as identity.
+const MAX_INPUT: u64 = 256 * 1024;
 
 pub(super) async fn negotiate(mut response: Response<Body>, accepts_gzip: bool) -> Response<Body> {
     if response.headers().contains_key(CONTENT_ENCODING)
@@ -16,7 +21,7 @@ pub(super) async fn negotiate(mut response: Response<Body>, accepts_gzip: bool) 
             .body()
             .size_hint()
             .exact()
-            .is_some_and(|n| n > THRESHOLD)
+            .is_some_and(|n| (THRESHOLD + 1..=MAX_INPUT).contains(&n))
         || !response
             .headers()
             .get(CONTENT_TYPE)
@@ -48,10 +53,20 @@ pub(super) async fn negotiate(mut response: Response<Body>, accepts_gzip: bool) 
 fn gzip(raw: &[u8]) -> Vec<u8> {
     // RFC 1952: raw DEFLATE, preceded by a fixed header (no name or timestamp)
     // and followed by CRC-32 and uncompressed length modulo 2^32.
-    let deflate = compress_to_vec(raw, 1);
-    let mut out = Vec::with_capacity(deflate.len() + 18);
+    let mut out = Vec::with_capacity(raw.len() / 4 + 18);
     out.extend_from_slice(&[0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 4, 255]);
-    out.extend_from_slice(&deflate);
+    let flags = create_comp_flags_from_zip_params(1, 0, 0);
+    let (status, consumed) = compress_to_output(
+        &mut CompressorOxide::new(flags),
+        raw,
+        TDEFLFlush::Finish,
+        |block| {
+            out.extend_from_slice(block);
+            true
+        },
+    );
+    assert_eq!(status, TDEFLStatus::Done);
+    debug_assert_eq!(consumed, raw.len());
     out.extend_from_slice(&crc32(raw).to_le_bytes());
     out.extend_from_slice(&(raw.len() as u32).to_le_bytes());
     out
@@ -112,6 +127,26 @@ mod tests {
                 assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
             } else {
                 assert_eq!(body, raw);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn json_above_the_input_ceiling_keeps_identity() {
+        for size in [MAX_INPUT as usize, MAX_INPUT as usize + 1] {
+            let raw = format!(r#"{{"data":"{}"}}"#, "x".repeat(size - 11));
+            assert_eq!(raw.len(), size);
+            let mut response = full(StatusCode::OK, raw.clone());
+            set(&mut response, CONTENT_TYPE, "application/json");
+            let response = negotiate(response, true).await;
+            let eligible = size as u64 == MAX_INPUT;
+            assert_eq!(response.headers().contains_key(CONTENT_ENCODING), eligible);
+            assert_eq!(response.headers().contains_key(VARY), eligible);
+            if !eligible {
+                assert_eq!(
+                    response.into_body().collect().await.unwrap().to_bytes(),
+                    raw
+                );
             }
         }
     }

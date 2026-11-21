@@ -13,10 +13,10 @@ host-wide pages or administrative configuration. Viewer responses omit
 credentials, integration paths, environment values and administrative diagnostics.
 See [login](features/login.md), [boards](features/boards.md) and
 [integrations](features/integrations.md). JSON responses are `no-store`.
-Buffered `application/json` bodies larger than 1,024 bytes carry
+Buffered API `application/json` bodies from 1,025 to 262,144 bytes carry
 `Vary: Accept-Encoding` and use gzip when the request accepts it. An
-explicit `gzip;q=0` disables gzip. The event streams and log downloads
-bypass this negotiation.
+explicit `gzip;q=0` selects identity. Larger JSON responses use identity.
+Event streams, log downloads, and static assets bypass runtime gzip.
 
 The session cookie uses `HttpOnly; SameSite=Strict; Path=/` with a seven-day
 sliding expiry. Issuing, renewing or clearing it adds `Secure` when a

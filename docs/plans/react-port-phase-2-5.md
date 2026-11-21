@@ -239,10 +239,19 @@ No container-membership change occurred during this capture, so it does not
 measure a `containers` event. A 40-widget/container board and a mature history
 can be larger. [Raw responses/event sizes](react-port-raw/m5/json-sizes.log).
 
-**D9 built in M1.** Buffered JSON bodies above 1,024 B use level-1 gzip
-when accepted and carry `Vary: Accept-Encoding` for either representation.
-An explicit `gzip;q=0` selects identity. Both SSE endpoints and the log
-download bypass negotiation. Responses with an existing encoding keep it.
+**D9 built in M1.** Buffered API JSON from 1,025 through 262,144 B uses
+level-1 gzip when accepted and carries `Vary: Accept-Encoding` for either
+representation. An explicit `gzip;q=0` selects identity. Both SSE endpoints,
+the log download and static assets bypass runtime gzip. Responses with an
+existing encoding keep it.
+
+The 256 KiB ceiling keeps the raw compression input at 1.25% of the
+20 MiB container budget and bounds compression work on the sole async
+thread. It covers the measured dashboard responses below and sends
+larger payloads as identity. The gzip output starts with a capacity of
+one quarter of the input plus the 18-byte wrapper. The deflater appends
+blocks to that vector, so wrapping them does not allocate a second
+compressed body.
 
 **[exp]** Ran the static musl x86-64 M1 release binary on loopback port 3300
 on an Intel i5-7200U, with a fresh scratch database and an authenticated
@@ -267,6 +276,35 @@ that `gzip;q=0` suppressed compression even with a wildcard and that eligible
 responses varied in both cases. The 22 B settings response stayed below the
 threshold. These figures cover local request handling and depend on the
 payload and host. They exclude client decoding and LAN transfer time.
+
+**M1 review follow-up.** On the same i5-7200U, a Python standard library
+client compared the previous and updated static musl x86-64 release binaries
+over loopback. Two boards in a scratch database each had 200 links with
+seeded random alphanumeric URL suffixes of 980 or 1,300 characters. Four
+keep-alive clients repeatedly fetched one board at a time. The client
+verified wire lengths, gzip decoding, and that the updated server sent the
+oversized board as identity even when offered gzip.
+
+Each row used a fresh server process with a fake Docker Unix socket and a
+session created beforehand. After the readers completed their first GETs,
+the client made 120 metadata PATCHes to a separate board, with a 25 ms
+pause between probes. Latency runs from sending each PATCH to reading the
+matching `boards` event on an open SSE connection, including the PATCH and
+loopback delivery. Peak RSS is Linux `VmHWM` from `/proc/<pid>/status` at the
+end of the run. These are process peaks during dashboard use. Container
+memory and overlapping Argon2 work were outside this measurement.
+
+| Build and response mode | Identity / wire B | GETs | Peak RSS (KiB) | SSE p50 / p95 / max (ms) |
+|---|---:|---:|---:|---:|
+| Updated, idle SSE baseline | — | 0 | 5,120 | 1.31 / 2.90 / 4.78 |
+| Updated, near ceiling, identity | 259,664 / 259,664 | 1,907 | 6,348 | 23.58 / 26.94 / 36.20 |
+| Previous, near ceiling, gzip | 259,664 / 163,074 | 1,447 | 6,244 | 51.38 / 57.74 / 79.34 |
+| Updated, near ceiling, gzip | 259,664 / 163,146 | 1,452 | 6,248 | 50.03 / 58.85 / 64.45 |
+| Previous, above ceiling, gzip | 323,665 / 211,429 | 1,436 | 6,560 | 65.32 / 71.51 / 76.05 |
+| Updated, above ceiling, identity | 323,665 / 323,665 | 1,804 | 6,372 | 27.38 / 34.69 / 41.24 |
+
+Near the ceiling, gzip saved 37% of wire bytes and p95 SSE latency was
+about 32 ms higher than identity during this run.
 
 ## Browser performance
 
