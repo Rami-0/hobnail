@@ -37,6 +37,7 @@ mod arr;
 mod connection;
 mod generic;
 mod glances;
+mod immich;
 mod jellyfin;
 mod jellyseerr;
 mod nginx_proxy_manager;
@@ -78,6 +79,7 @@ pub const REGISTRY: &[Provider] = &[
     nginx_proxy_manager::NGINX_PROXY_MANAGER,
     glances::GLANCES,
     plex::PLEX,
+    immich::IMMICH,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

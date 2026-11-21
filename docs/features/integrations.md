@@ -343,6 +343,22 @@ Verified from:
 
 UNVERIFIED: Live token privilege combinations and pagination support on older recently-added routes.
 
+## Immich
+
+Enter your Immich server URL and an API key from an administrator account.
+Grant only `server.statistics`, `server.storage` and `job.read`. Hobnail sends
+the key in the `x-api-key` header.
+
+**Immich overview** shows instance photo and video counts, used and available
+disk space, and active, waiting and failed jobs across the queues. If a
+response exceeds the cap, the other endpoints can still supply their data.
+
+Verified from:
+
+- [Upstream v2.5.6 OpenAPI schemas and permissions](https://github.com/immich-app/immich/blob/v2.5.6/open-api/immich-openapi-specs.json)
+
+UNVERIFIED: Releases without the legacy GET /api/jobs endpoint, which v2.5.6 marks deprecated, and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
