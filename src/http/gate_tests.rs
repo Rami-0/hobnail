@@ -2292,11 +2292,22 @@ async fn large_api_json_negotiates_gzip_over_the_listener() {
     let (encoding, gzip) = request("gzip").await;
     assert_eq!(encoding.as_deref(), Some("gzip"));
     assert_eq!(&gzip[..3], &[0x1f, 0x8b, 8]);
-    assert_eq!(
-        miniz_oxide::inflate::decompress_to_vec(&gzip[10..gzip.len() - 8]).unwrap(),
-        identity
-    );
-    assert_eq!(request("gzip;q=0").await, (None, identity));
+    // Each request carries the server's current Unix second.
+    let payload = |body: &[u8]| {
+        let mut json: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert!(json
+            .as_object_mut()
+            .unwrap()
+            .remove("now")
+            .unwrap()
+            .is_i64());
+        json
+    };
+    let decoded = miniz_oxide::inflate::decompress_to_vec(&gzip[10..gzip.len() - 8]).unwrap();
+    assert_eq!(payload(&decoded), payload(&identity));
+    let (encoding, refused) = request("gzip;q=0").await;
+    assert_eq!(encoding, None);
+    assert_eq!(payload(&refused), payload(&identity));
 }
 
 #[tokio::test]
