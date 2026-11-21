@@ -1083,3 +1083,26 @@ findings. Current measured passes and misses are in the
 | ROB-10 | A fresh React load needs its JS and CSS before content. Immutable assets help repeat visits; cold-browser LCP still misses budgets. A 400 kbit/s first visit was not measured in M5. |
 | ROB-14 | Structured widget bodies and plain errors are rendered by React, with result age. Read refresh retains the current result, but an error replaces it: a separate last-good-value cache and raw-error disclosure are not built. Partly addressed. |
 | ROB-17 | Superseded by D6: the application requires JavaScript and says so in noscript. Health, API and authenticated log downloads still answer; old no-script UI controls are deleted. |
+
+### M2 guided setup and first-board verification
+
+Run `web/e2e/m2-check.mjs` through `scripts/e2e.sh` against a fresh
+`web/e2e/fake-instance.sh start <image> <port> --m2-fixtures` instance.
+Pass the application URL, the printed fixture control URL, a width (390 or
+1440), a theme (light or dark) and `selected` or `empty`. For `empty`, start
+the fixture with `--docker-unavailable`. Use a fresh instance for each case,
+set `HB_PASSWORD` to a test password and set `OUT` for screenshots.
+
+The selected path exercises every wizard step and its navigation, draft
+recovery after reload and sign-in in a fresh browser context, a failed connection
+test, and the board with the exact selection. The empty path exercises
+unavailable Docker, completing setup without selections, and the normal
+board picker. Both paths check the tour, keyboard focus, clipping, page
+overflow, and Chromium console, CSP, exception and request diagnostics.
+The fake upstream cycles through initial failure, success, failed refresh and
+recovery for widgets and manual integration tests.
+
+Run `web/e2e/settings-check.mjs` separately for SET-42. It accepts an optional
+profile such as `390-dark` after the application URL. The revision assertions
+start from an already recorded config. On the first edit of a file, the
+existing history mechanism can also capture the pre-edit file as a checkpoint.
