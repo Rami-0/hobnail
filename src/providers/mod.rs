@@ -35,6 +35,7 @@ use crate::{
 mod adguard_home;
 mod arr;
 mod connection;
+mod duplicati;
 mod generic;
 mod glances;
 mod home_assistant;
@@ -90,6 +91,7 @@ pub const REGISTRY: &[Provider] = &[
     home_assistant::HOME_ASSISTANT,
     nextcloud::NEXTCLOUD,
     syncthing::SYNCTHING,
+    duplicati::DUPLICATI,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

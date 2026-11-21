@@ -448,6 +448,26 @@ and [folder summary](https://github.com/syncthing/syncthing/blob/v2.0.11/lib/mod
 
 UNVERIFIED: older releases and remote-device folder completion.
 
+## Duplicati
+
+Enter your Duplicati 2.1 server URL and its web interface password. Hobnail
+sends the password in JSON to `POST /api/v1/auth/login`, uses the returned
+JWT as a Bearer token, and tests `GET /api/v1/serverstate`. Duplicati web
+credentials permit server administration. The provider makes read requests
+after login.
+
+**Recent backups** reads `GET /api/v1/backups` and shows the latest recorded
+completion and examined source size for up to ten jobs. An oversized backup
+list is shown as unavailable. A recorded completion alone cannot establish a
+job's success, warning or error result.
+
+Verified from Duplicati 2.1.0.5 [login](https://github.com/duplicati/duplicati/blob/d41bac323831c7490b27c8ae1a8028d81a524417/Duplicati/WebserverCore/Endpoints/V1/Auth.cs),
+[backups](https://github.com/duplicati/duplicati/blob/d41bac323831c7490b27c8ae1a8028d81a524417/Duplicati/WebserverCore/Endpoints/V1/Backups.cs)
+and [metadata writer](https://github.com/duplicati/duplicati/blob/d41bac323831c7490b27c8ae1a8028d81a524417/Duplicati/Library/RestAPI/Runner.cs).
+
+UNVERIFIED: job result (the backup metadata has no authoritative per-run
+result), legacy 2.0 authentication and deployments using a pre-shared key.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
