@@ -79,8 +79,8 @@ async fn activity(conn: &Conn<'_>) -> Result<widgets::StructuredBody, Fault> {
         return result;
     }
     conn.retry_session(
-        || login(conn),
-        |sid| async move { v6(conn, Some(&sid)).await },
+        || async { login(conn).await.map(Some) },
+        |sid| async move { v6(conn, sid.as_ref()).await },
     )
     .await
 }

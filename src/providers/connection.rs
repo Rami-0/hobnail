@@ -508,8 +508,8 @@ impl<'a> Conn<'a> {
 
     pub async fn get_or_create_session(
         &self,
-        create: impl Future<Output = Result<Session, Fault>>,
-    ) -> Result<Session, Fault> {
+        create: impl Future<Output = Result<Option<Session>, Fault>>,
+    ) -> Result<Option<Session>, Fault> {
         let Some(key) = &self.target.session_key else {
             return create.await;
         };
@@ -527,10 +527,12 @@ impl<'a> Conn<'a> {
             .iter()
             .find(|(entry, _)| entry == key)
         {
-            return Ok(session.clone());
+            return Ok(Some(session.clone()));
         }
         let session = create.await?;
-        self.store_session(key, &session)?;
+        if let Some(session) = &session {
+            self.store_session(key, session)?;
+        }
         Ok(session)
     }
 
@@ -561,10 +563,10 @@ impl<'a> Conn<'a> {
     pub async fn retry_session<T, C, R>(
         &self,
         mut create: impl FnMut() -> C,
-        mut request: impl FnMut(Session) -> R,
+        mut request: impl FnMut(Option<Session>) -> R,
     ) -> Result<T, Fault>
     where
-        C: Future<Output = Result<Session, Fault>>,
+        C: Future<Output = Result<Option<Session>, Fault>>,
         R: Future<Output = Result<T, Fault>>,
     {
         let session = self.get_or_create_session(create()).await?;
@@ -572,16 +574,20 @@ impl<'a> Conn<'a> {
             Err(error) if matches!(error.class, Class::Auth | Class::Conflict) => error,
             result => return result,
         };
-        self.discard_session(&session);
+        if let Some(session) = &session {
+            self.discard_session(session);
+        }
         let next = if let Some(replacement) = error.session {
             if let Some(key) = &self.target.session_key {
                 self.store_session(key, &replacement)?;
             }
             replacement
+        } else if let Some(next) = self.get_or_create_session(create()).await? {
+            next
         } else {
-            self.get_or_create_session(create()).await?
+            return Err(error);
         };
-        let result = request(next.clone()).await;
+        let result = request(Some(next.clone())).await;
         if result
             .as_ref()
             .is_err_and(|error| matches!(error.class, Class::Auth | Class::Conflict))

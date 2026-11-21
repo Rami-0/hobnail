@@ -411,13 +411,16 @@ async fn session_cache_is_bounded_revision_bound_and_can_retry_a_409_with_its_he
         respond(&mut socket, 200, "", "").await;
     });
     conn.run(conn.retry_session(
-        || async { conn.session("old") },
+        || async { conn.session("old").map(Some) },
         |session| {
             let conn = &conn;
             async move {
                 let response = conn
                     .request(Step {
-                        auth: &[Auth::Header("x-session", Input::Session(&session))],
+                        auth: &[Auth::Header(
+                            "x-session",
+                            Input::Session(session.as_ref().unwrap()),
+                        )],
                         response_headers: &["x-session"],
                         ..Step::get("/rpc")
                     })
@@ -439,7 +442,7 @@ async fn session_cache_is_bounded_revision_bound_and_can_retry_a_409_with_its_he
         conn.get_or_create_session(async { panic!("cached session") })
             .await
             .unwrap(),
-        conn.session("new").unwrap()
+        Some(conn.session("new").unwrap())
     );
     assert!(conn.session(&"s".repeat(MAX_SESSION + 1)).is_err());
     for i in 0..MAX_SESSIONS {
@@ -452,7 +455,7 @@ async fn session_cache_is_bounded_revision_bound_and_can_retry_a_409_with_its_he
         )
         .unwrap();
         other
-            .get_or_create_session(async { other.session(&"s".repeat(MAX_SESSION)) })
+            .get_or_create_session(async { other.session(&"s".repeat(MAX_SESSION)).map(Some) })
             .await
             .unwrap();
     }
@@ -553,4 +556,78 @@ fn rejects_ambiguous_paths_in_saved_targets() {
             "{path}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_cold_transmission_session_starts_with_the_real_rpc() {
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connections = Connections::default();
+    let policy = policy();
+    let mut target = Target::new(
+        format!("http://{}", upstream.local_addr().unwrap()),
+        Credentials::new(),
+        false,
+    );
+    connections.bind(&mut target, Some("transmission"), true);
+    let permit = std::sync::Arc::new(Semaphore::new(1))
+        .try_acquire_owned()
+        .unwrap();
+    let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+    const HEADER: &str = "x-transmission-session-id";
+    let fake = tokio::spawn(async move {
+        for (session, status, headers) in [
+            (false, 200, ""),
+            (false, 409, "X-Transmission-Session-Id: challenge\r\n"),
+            (true, 200, ""),
+            (true, 200, ""),
+            (true, 409, "X-Transmission-Session-Id: replacement\r\n"),
+            (true, 409, "X-Transmission-Session-Id: third\r\n"),
+        ] {
+            let (mut socket, request) = receive(&upstream).await;
+            assert!(request.starts_with("POST /transmission/rpc HTTP/1.1"));
+            assert_eq!(request.contains(HEADER), session);
+            assert!(request.ends_with(r#"{"method":"session-get"}"#));
+            respond(&mut socket, status, headers, "{}").await;
+        }
+    });
+    let request = |session: Option<Session>| {
+        let conn = &conn;
+        async move {
+            let headers = session
+                .as_ref()
+                .map(|session| [Auth::Header(HEADER, Input::Session(session))]);
+            let response = conn
+                .request(Step {
+                    verb: Verb::Post,
+                    auth: headers.as_ref().map_or(&[], |headers| headers.as_slice()),
+                    body: Some(Body::Json(
+                        serde_json::from_str(r#"{"method":"session-get"}"#).unwrap(),
+                        &[],
+                    )),
+                    response_headers: &[HEADER],
+                    ..Step::get("/transmission/rpc")
+                })
+                .await?;
+            if response.status == 409 {
+                Err(Fault::session_conflict(
+                    conn.session_header(&response, HEADER)?,
+                ))
+            } else {
+                success(response)
+            }
+        }
+    };
+    for _ in 0..3 {
+        assert!(conn
+            .run(conn.retry_session(|| async { Ok(None) }, request))
+            .await
+            .is_ok());
+    }
+    let error = conn
+        .run(conn.retry_session(|| async { Ok(None) }, request))
+        .await
+        .unwrap_err();
+    assert!(matches!(error.class, Class::Conflict));
+    assert!(connections.sessions.lock().unwrap().is_empty());
+    fake.await.unwrap();
 }
