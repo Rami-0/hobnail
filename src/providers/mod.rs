@@ -36,6 +36,7 @@ mod adguard_home;
 mod arr;
 mod connection;
 mod generic;
+mod glances;
 mod jellyfin;
 mod jellyseerr;
 mod nginx_proxy_manager;
@@ -74,6 +75,7 @@ pub const REGISTRY: &[Provider] = &[
     tailscale::TAILSCALE,
     wg_easy::WG_EASY,
     nginx_proxy_manager::NGINX_PROXY_MANAGER,
+    glances::GLANCES,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
@@ -245,6 +247,35 @@ const ENABLED: Field = Field {
     default: Some("true"),
     ..Field::new("enabled", "Enabled", Kind::Bool, "")
 };
+
+const OPTIONAL_BASIC_USER: Field = Field {
+    max_length: Some(256),
+    ..Field::new(
+        "username",
+        "Username",
+        Kind::Secret,
+        "Leave both credential fields blank if the service has no HTTP Basic authentication.",
+    )
+};
+
+const OPTIONAL_BASIC_PASSWORD: Field = Field {
+    max_length: Some(4096),
+    ..Field::new("password", "Password", Kind::Secret, "")
+};
+
+fn optional_basic(conn: &Conn<'_>) -> Result<Option<Auth<'static>>, Fault> {
+    match (
+        conn.has_credential("username"),
+        conn.has_credential("password"),
+    ) {
+        (false, false) => Ok(None),
+        (true, true) => Ok(Some(Auth::Basic(
+            Input::Credential("username"),
+            Input::Credential("password"),
+        ))),
+        _ => Err(Class::Auth.into()),
+    }
+}
 
 fn parse_json<T: serde::de::DeserializeOwned>(
     response: crate::http::client::Response,

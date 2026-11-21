@@ -305,6 +305,24 @@ Verified from:
 
 UNVERIFIED: Other releases, database-specific display formats and live reverse proxies.
 
+## Glances
+
+Enter the Glances web server URL. If authentication is enabled, enter both
+the username and password for HTTP Basic authentication. Glances does
+not expose a plugin-specific account scope.
+
+**Host resources** shows CPU and memory usage and up to five filesystems
+and five sensors. Hobnail uses the REST API v4 and falls back to v3 if
+the v4 CPU route returns 404. Missing or oversized optional plugin data
+shows as Unavailable.
+
+Verified from:
+
+- [Upstream v4 REST API](https://glances.readthedocs.io/en/latest/api/restful.html)
+- [Upstream v3.4.0 REST API](https://glances.readthedocs.io/en/v3.4.0/api.html)
+
+UNVERIFIED: v5, platform-specific plugins and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
