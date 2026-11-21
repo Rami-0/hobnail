@@ -50,6 +50,7 @@ mod qbittorrent;
 mod radarr;
 mod sabnzbd;
 mod sonarr;
+mod syncthing;
 mod tailscale;
 mod technitium;
 mod transmission;
@@ -88,6 +89,7 @@ pub const REGISTRY: &[Provider] = &[
     sabnzbd::SABNZBD,
     home_assistant::HOME_ASSISTANT,
     nextcloud::NEXTCLOUD,
+    syncthing::SYNCTHING,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

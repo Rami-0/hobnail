@@ -430,6 +430,24 @@ and the [Nextcloud 32 controller](https://github.com/nextcloud/serverinfo/blob/6
 UNVERIFIED: other Nextcloud generations and storage backends, quota-derived
 used space and the separate Activity app.
 
+## Syncthing
+
+Enter the GUI URL and the API Key from Settings → GUI. The key has Syncthing
+GUI API access. Hobnail sends it in `X-API-Key` and checks
+`GET /rest/system/status`.
+
+**Synchronization** counts online peer devices and checks the first ten
+configured folders in ID order. A folder is locally in sync when idle with
+no pending changes or errors. Paused folders are included in the checked
+count. The widget reports partial coverage and keeps device counts if the
+folder list is oversized, or folder status if the device list is oversized.
+
+Verified from: [REST API](https://docs.syncthing.net/dev/rest.html),
+[v2.0.11 API source](https://github.com/syncthing/syncthing/blob/v2.0.11/lib/api/api.go)
+and [folder summary](https://github.com/syncthing/syncthing/blob/v2.0.11/lib/model/folder_summary.go).
+
+UNVERIFIED: older releases and remote-device folder completion.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
