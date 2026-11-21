@@ -41,6 +41,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/icons/<name>` | Viewer | Dashboard icon. |
 | GET | `/api/v1/boards` | Viewer | Boards. |
 | POST | `/api/v1/boards` | Admin | Board create. |
+| POST | `/api/v1/boards/test-link` | Admin | Test a service URL entered in the board editor using the connection policy. |
 | GET | `/api/v1/boards/<id>` | Viewer | Board. |
 | PUT | `/api/v1/boards/<id>` | Admin | Board save. |
 | PATCH | `/api/v1/boards/<id>` | Admin | Board update. |
@@ -76,6 +77,11 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/host` | Viewer | Host. |
 | GET | `/api/v1/host/history` | Viewer | Host history. |
 | GET | `/api/v1/stream` | Viewer | Stream. |
+| GET | `/api/v1/onboarding/draft` | Owner | Read the guided setup draft or its completed board ID. |
+| PUT | `/api/v1/onboarding/draft` | Owner | Save draft fields and write-only credential changes. |
+| GET | `/api/v1/onboarding/discovery` | Owner | Read service suggestions and source availability. |
+| POST | `/api/v1/onboarding/test` | Owner | Test an included item from the saved draft. |
+| POST | `/api/v1/onboarding/commit` | Owner | Create the first board and mark the draft complete atomically. |
 | POST | `/api/v1/onboarding/owner` | Public | Onboard. |
 | POST | `/api/v1/invites/accept` | Public | Invite accept. |
 | GET | `/api/v1/invites/validate` | Public | Invite validate. |
@@ -92,6 +98,37 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/account/sessions` | Viewer | Sessions. |
 | DELETE | `/api/v1/account/sessions/<id>` | Viewer | Session revoke. |
 | DELETE | `/api/v1/account/sessions` | Viewer | Sessions revoke. |
+
+### Guided setup
+
+Browser owner creation initializes one setup draft for the new owner. A signed-in
+owner with unfinished setup gets `setup_pending: true` in the session response.
+Existing owners and owners created through host recovery keep their current
+landing page.
+
+- Read `/onboarding/draft` for the current revision, document, effective theme,
+  and any staged credential origins. A completed draft carries its `board_id`.
+- PUT the current `revision`, the complete `document` and a list of `credentials`
+  changes to `/onboarding/draft`. Item IDs are 32 lowercase hexadecimal digits.
+  The document contains the current step, an optional theme and the included or
+  excluded items. Each credential change supplies `item_id`, `base_url` and a
+  write-only `secret`. Omit the change to retain a credential, or send a null
+  secret to clear it. SQLite stores staged tokens separately with their bound
+  origin. Draft responses return only the origins.
+- GET `/onboarding/discovery` for Docker availability, config status and the
+  regular board suggestions. Docker failure leaves the other sources usable.
+- POST `revision` and `item_id` to `/onboarding/test` to test a saved, included
+  item. It uses the existing connection policy, rate limit and verdict format.
+  A test verdict does not affect whether setup can be committed. Link tests from
+  setup and the board editor use the same outbound policy. Test URLs must use
+  HTTP or HTTPS and omit query strings and fragments.
+- POST `revision` to `/onboarding/commit` from Review. A single transaction creates
+  the board and any new integrations, sets the default board and optional theme,
+  clears staged credentials and records the resulting `board_id`. Repeated
+  commits return that ID. A stale save, test, or first commit returns 409.
+- Dashboard settings accept either `default_board` or `default_theme`, or both,
+  in a PATCH. Null clears the corresponding setting. A cleared theme falls
+  back to `[page].theme` in the configuration file.
 
 ## Kept legacy routes
 

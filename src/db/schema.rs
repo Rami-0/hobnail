@@ -175,6 +175,15 @@ ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE boards ADD COLUMN sections TEXT NOT NULL DEFAULT '[]'
   CHECK (json_valid(sections) AND json_type(sections) = 'array');
 ",
+    "
+CREATE TABLE setup_credentials (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_id)
+) WITHOUT ROWID;
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.

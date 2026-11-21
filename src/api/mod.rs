@@ -29,6 +29,7 @@ mod integrations;
 mod logs;
 mod overview;
 pub mod session;
+mod setup;
 pub mod stream;
 pub mod strips;
 #[cfg(test)]
@@ -75,6 +76,7 @@ pub(crate) async fn route(
         | Handler::BoardUpdate
         | Handler::BoardDelete
         | Handler::BoardSuggestions
+        | Handler::BoardLinkTest
         | Handler::BoardDraft
         | Handler::BoardDraftSave
         | Handler::BoardDraftDelete => {
@@ -96,6 +98,15 @@ pub(crate) async fn route(
                 return ApiError::not_found().response();
             }
             crate::http::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
+        }
+        handler @ (Handler::SetupDraft
+        | Handler::SetupSave
+        | Handler::SetupDiscover
+        | Handler::SetupTest
+        | Handler::SetupCommit) => {
+            setup::route(state, req, handler, &principal.expect("owner gate").account)
+                .await
+                .unwrap_or_else(ApiError::response)
         }
         Handler::Onboard => {
             crate::auth::credential_route(state, req, CredentialAction::Onboard).await

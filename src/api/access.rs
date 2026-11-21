@@ -64,7 +64,7 @@ impl Principal {
         conn: &rusqlite::Connection,
     ) -> Result<Option<HashSet<String>>, ApiError> {
         self.scoped_targets(conn, "widget", |item| match item {
-            super::boards::BoardPayload::Widget { widget_id } => Some(widget_id),
+            super::boards::BoardPayload::Widget { widget_id, .. } => Some(widget_id),
             _ => None,
         })
     }
@@ -273,6 +273,7 @@ pub enum Handler {
     BoardUpdate,
     BoardDelete,
     BoardSuggestions,
+    BoardLinkTest,
     BoardDraft,
     BoardDraftSave,
     BoardDraftDelete,
@@ -298,6 +299,11 @@ pub enum Handler {
     Strips,
     Stream,
     Onboard,
+    SetupDraft,
+    SetupSave,
+    SetupDiscover,
+    SetupTest,
+    SetupCommit,
     InviteAccept,
     InviteValidate,
     Invites,
@@ -362,6 +368,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/boards",
         access: Access::Admin,
         handler: Handler::BoardCreate,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/boards/test-link",
+        access: Access::Admin,
+        handler: Handler::BoardLinkTest,
     },
     Route {
         method: "GET",
@@ -572,6 +584,36 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/stream",
         access: Access::Viewer,
         handler: Handler::Stream,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/onboarding/draft",
+        access: Access::Owner,
+        handler: Handler::SetupDraft,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/onboarding/draft",
+        access: Access::Owner,
+        handler: Handler::SetupSave,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/onboarding/discovery",
+        access: Access::Owner,
+        handler: Handler::SetupDiscover,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/onboarding/test",
+        access: Access::Owner,
+        handler: Handler::SetupTest,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/onboarding/commit",
+        access: Access::Owner,
+        handler: Handler::SetupCommit,
     },
     Route {
         method: "POST",

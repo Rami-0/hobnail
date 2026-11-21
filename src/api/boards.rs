@@ -52,8 +52,8 @@ pub struct BoardDocument {
 pub struct BoardSection {
     #[cfg_attr(test, ts(optional = nullable))]
     pub id: Option<String>,
-    title: String,
-    position: u32,
+    pub title: String,
+    pub position: u32,
     pub items: Vec<BoardItem>,
 }
 
@@ -62,10 +62,10 @@ pub struct BoardSection {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardItem {
     #[cfg_attr(test, ts(optional = nullable))]
-    id: Option<String>,
-    position: u32,
-    spans: GridSpans,
-    payload: BoardPayload,
+    pub id: Option<String>,
+    pub position: u32,
+    pub spans: GridSpans,
+    pub payload: BoardPayload,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -76,6 +76,17 @@ pub struct GridSpans {
     tablet: u8,
     desktop: u8,
     rows: u8,
+}
+
+impl Default for GridSpans {
+    fn default() -> Self {
+        Self {
+            mobile: 4,
+            tablet: 4,
+            desktop: 4,
+            rows: 1,
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -100,9 +111,15 @@ pub enum BoardPayload {
     },
     Widget {
         widget_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        title: Option<String>,
     },
     Integration {
         integration_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        title: Option<String>,
     },
 }
 
@@ -152,8 +169,8 @@ pub struct ResolvedItem {
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardSuggestion {
-    title: String,
-    payload: BoardPayload,
+    pub title: String,
+    pub payload: BoardPayload,
 }
 
 #[derive(Serialize)]
@@ -229,7 +246,32 @@ pub(super) fn list(conn: &Connection, user: &Principal) -> Result<Vec<BoardSumma
         .collect())
 }
 
-fn get(conn: &Connection, id: &str) -> Result<BoardSummary, ApiError> {
+pub(super) fn create(
+    conn: &Connection,
+    name: &str,
+    icon: Option<&str>,
+    now: i64,
+) -> Result<BoardSummary, ApiError> {
+    super::validate_label(name, "name")?;
+    super::validate_icon(icon)?;
+    let count: u32 = conn.query_row("SELECT count(*) FROM boards", [], |row| row.get(0))?;
+    if count >= 64 {
+        return Err(ApiError::bad_request(
+            "at most 64 boards are supported",
+            None,
+        ));
+    }
+    let id: String = conn.query_row(
+        "INSERT INTO boards (name,icon,position,created,updated)
+         VALUES (?1,?2,(SELECT min(coalesce(max(position)+1,0),4294967295) FROM boards),?3,?3)
+         RETURNING id",
+        params![name, icon, now],
+        |row| row.get(0),
+    )?;
+    get(conn, &id)
+}
+
+pub(super) fn get(conn: &Connection, id: &str) -> Result<BoardSummary, ApiError> {
     conn.query_row(
         &format!("SELECT {SUMMARY} FROM boards WHERE id=?1"),
         [id],
@@ -307,7 +349,17 @@ fn safe_link(link: &str, field: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn validate(
+pub(super) fn check_test_link(url: &str) -> Result<(), ApiError> {
+    if crate::http::client::origin(url).is_none() {
+        return Err(ApiError::bad_request(
+            "Enter an HTTP or HTTPS test URL without user information, a query or a fragment.",
+            Some("url"),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate(
     doc: &BoardDocument,
     existing: &BoardDocument,
     user: &Principal,
@@ -402,9 +454,12 @@ fn validate(
                     safe_link(url, "url")?;
                     super::validate_icon(icon.as_deref())?;
                 }
-                BoardPayload::Widget { widget_id } => {
+                BoardPayload::Widget { widget_id, title } => {
+                    if let Some(title) = title {
+                        super::validate_label(title, "title")?;
+                    }
                     super::validate_label(widget_id, "widget_id")?;
-                    let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old }) if old == widget_id);
+                    let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old, .. }) if old == widget_id);
                     if !unchanged
                         && (visible_widgets
                             .as_ref()
@@ -417,8 +472,14 @@ fn validate(
                         ));
                     }
                 }
-                BoardPayload::Integration { integration_id } => {
-                    let unchanged = matches!(previous, Some(BoardPayload::Integration { integration_id: old }) if old == integration_id);
+                BoardPayload::Integration {
+                    integration_id,
+                    title,
+                } => {
+                    if let Some(title) = title {
+                        super::validate_label(title, "title")?;
+                    }
+                    let unchanged = matches!(previous, Some(BoardPayload::Integration { integration_id: old, .. }) if old == integration_id);
                     if !super::valid_id(integration_id)
                         || (!unchanged
                             && (!user.can_see_integration(integration_id)
@@ -447,7 +508,12 @@ fn next_id(conn: &Connection, existing: Option<String>) -> Result<String, ApiErr
     }
 }
 
-fn store(conn: &Connection, id: &str, doc: BoardDocument, now: i64) -> Result<(), ApiError> {
+pub(super) fn store(
+    conn: &Connection,
+    id: &str,
+    doc: BoardDocument,
+    now: i64,
+) -> Result<(), ApiError> {
     conn.execute("DELETE FROM board_items WHERE board_id=?1", [id])?;
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
@@ -458,7 +524,7 @@ fn store(conn: &Connection, id: &str, doc: BoardDocument, now: i64) -> Result<()
                 BoardPayload::Container { .. } => ("container", None),
                 BoardPayload::Link { .. } => ("link", None),
                 BoardPayload::Widget { .. } => ("widget", None),
-                BoardPayload::Integration { integration_id } => {
+                BoardPayload::Integration { integration_id, .. } => {
                     ("integration", Some(integration_id))
                 }
             };
@@ -557,7 +623,7 @@ fn resolve(
                 });
                 container.is_none()
             }
-            BoardPayload::Widget { widget_id } => {
+            BoardPayload::Widget { widget_id, .. } => {
                 widget = config
                     .widgets
                     .iter()
@@ -565,7 +631,7 @@ fn resolve(
                     .map(|config| super::widgets::view(state, config));
                 widget.is_none()
             }
-            BoardPayload::Integration { integration_id } => {
+            BoardPayload::Integration { integration_id, .. } => {
                 integration = integrations
                     .iter()
                     .find(|i| i.id == *integration_id)
@@ -589,7 +655,19 @@ fn resolve(
     }
 }
 
-fn suggestions(
+pub(super) fn identity(payload: &BoardPayload) -> (u8, String) {
+    match payload {
+        BoardPayload::Container { target, .. } => (
+            0,
+            serde_json::to_string(target).expect("container identity"),
+        ),
+        BoardPayload::Link { url, .. } => (1, url.clone()),
+        BoardPayload::Widget { widget_id, .. } => (2, widget_id.clone()),
+        BoardPayload::Integration { integration_id, .. } => (3, integration_id.clone()),
+    }
+}
+
+pub(super) fn suggestions(
     state: &AppState,
     now: i64,
     doc: &BoardDocument,
@@ -601,20 +679,16 @@ fn suggestions(
         .sections
         .iter()
         .flat_map(|s| &s.items)
-        .filter_map(|i| encode(&i.payload).ok())
+        .map(|item| identity(&item.payload))
         .collect();
-    let mut containers = HashSet::new();
     let mut out = Vec::new();
-    let mut add = |title: String, payload| {
-        if encode(&payload).is_ok_and(|key| existing.insert(key)) {
+    let mut add = |title, payload| {
+        if existing.insert(identity(&payload)) {
             out.push(BoardSuggestion { title, payload });
         }
     };
     for (target, row) in live_containers(state, now) {
-        let present = doc.sections.iter().flat_map(|s| &s.items).any(
-            |i| matches!(&i.payload, BoardPayload::Container { target: t,.. } if *t == target),
-        );
-        if !present && visible.allows(&row.name) && containers.insert(target.clone()) {
+        if visible.allows(&row.name) {
             add(
                 row.title,
                 BoardPayload::Container {
@@ -647,6 +721,7 @@ fn suggestions(
             widget.title.clone().unwrap_or_else(|| widget.id.clone()),
             BoardPayload::Widget {
                 widget_id: widget.id.clone(),
+                title: None,
             },
         );
     }
@@ -655,6 +730,7 @@ fn suggestions(
             integration.name,
             BoardPayload::Integration {
                 integration_id: integration.id,
+                title: None,
             },
         );
     }
@@ -669,6 +745,13 @@ fn conflict(version: u32) -> Response<Body> {
             current_version: version,
         },
     )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct LinkTestInput {
+    url: String,
 }
 
 pub(super) async fn route(
@@ -686,6 +769,15 @@ pub(super) async fn route(
     let draft_key = format!("board:{id}");
     let handler = m.route.handler;
     let response = match handler {
+        Handler::BoardLinkTest => {
+            let LinkTestInput { url } = super::read_json(req, 8192).await?;
+            check_test_link(&url)?;
+            integrations::limit_test(state, user.id)?;
+            super::json(
+                StatusCode::OK,
+                &integrations::test_connection(state, url, None).await,
+            )
+        }
         Handler::Boards => super::json(StatusCode::OK, &db.dashboard(|c| list(c, user))?),
         Handler::Board | Handler::BoardSuggestions => {
             let (board, doc, visible) = db.dashboard(|c| -> Result<_, ApiError> {
@@ -707,18 +799,7 @@ pub(super) async fn route(
         }
         Handler::BoardCreate => {
             let BoardCreate { name, icon } = super::read_json(req, 8192).await?;
-            super::validate_label(&name, "name")?;
-            super::validate_icon(icon.as_deref())?;
-            let board = db.dashboard(|c| -> Result<_, ApiError> {
-                let count: u32 = c.query_row("SELECT count(*) FROM boards", [], |row| row.get(0))?;
-                if count >= 64 {
-                    return Err(ApiError::bad_request("at most 64 boards are supported", None));
-                }
-                let id: String = c.query_row("INSERT INTO boards (name,icon,position,created,updated)
-                    VALUES (?1,?2,(SELECT min(coalesce(max(position)+1,0),4294967295) FROM boards),?3,?3) RETURNING id",
-                    params![name,icon,now], |r| r.get(0))?;
-                get(c,&id)
-            })?;
+            let board = db.dashboard(|c| create(c, &name, icon.as_deref(), now))?;
             publish(state, &board.id, board.version);
             super::json(StatusCode::CREATED, &board)
         }
@@ -847,7 +928,7 @@ pub(super) async fn route(
     Ok(response)
 }
 
-fn publish(state: &AppState, id: &str, version: u32) {
+pub(super) fn publish(state: &AppState, id: &str, version: u32) {
     let _ = state.events.send(format!("board:{id}:{version}").into());
 }
 
@@ -900,6 +981,7 @@ mod tests {
             assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("url"));
             board.sections[0].items[0].payload = BoardPayload::Widget {
                 widget_id: "unknown".into(),
+                title: None,
             };
             assert_eq!(
                 check(&board).unwrap_err().field.as_deref(),
@@ -907,6 +989,7 @@ mod tests {
             );
             board.sections[0].items[0].payload = BoardPayload::Integration {
                 integration_id: "a".repeat(32),
+                title: None,
             };
             assert_eq!(
                 check(&board).unwrap_err().field.as_deref(),

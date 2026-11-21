@@ -359,7 +359,7 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         .await;
     assert_eq!(
         viewer.json("GET", settings, Value::Null, 200).await,
-        json!({"default_board":null})
+        json!({"default_board":null,"default_theme":null})
     );
     let bootstrap = viewer
         .json("GET", "/api/v1/bootstrap", Value::Null, 200)
@@ -1156,4 +1156,245 @@ async fn outbound_client_checks_origin_before_connecting() {
             .await
             .is_err()
     );
+}
+
+async fn browser_owner(addr: std::net::SocketAddr) -> Client {
+    let response = req(
+        addr,
+        "POST",
+        "/api/v1/onboarding/owner",
+        &[
+            ("Origin", &format!("http://{addr}")),
+            ("Content-Type", "application/json"),
+        ],
+        &json!({"username":"admin","password":PW}).to_string(),
+    )
+    .await;
+    assert_eq!(response.status, 201);
+    let (cookie, csrf) = credentials_of(&response);
+    Client { addr, cookie, csrf }
+}
+
+const SETUP_DRAFT: &str = "/api/v1/onboarding/draft";
+const SETUP_DISCOVERY: &str = "/api/v1/onboarding/discovery";
+const SETUP_TEST: &str = "/api/v1/onboarding/test";
+const SETUP_COMMIT: &str = "/api/v1/onboarding/commit";
+
+#[tokio::test]
+async fn setup_resumes_and_commits_once_with_a_failing_connection() {
+    let st = state();
+    let addr = start(st.clone()).await;
+    let owner = browser_owner(addr).await;
+    assert_eq!(
+        owner.json("GET", "/api/v1/session", Value::Null, 200).await["setup_pending"],
+        true
+    );
+    let initial = owner.json("GET", SETUP_DRAFT, Value::Null, 200).await;
+    assert_eq!(initial["document"]["step"], "appearance");
+    assert_eq!(initial["theme_default"], "auto");
+    let discovery = owner.json("GET", SETUP_DISCOVERY, Value::Null, 200).await;
+    assert_eq!(discovery["docker"], "reachable");
+    let item = |name: &str, id: &str| {
+        json!({
+            "id":id,"included":name != "db","name":if name == "web" { "Shop web" } else { name },
+            "group":"Shop","target":{"kind":"board","payload":{
+                "kind":"container","target":{"by":"compose","project":"shop","service":name}
+            }}
+        })
+    };
+    let http_id = "00000000000000000000000000000003";
+    let http_item = json!({"id":http_id,"included":true,"name":"Private service","group":"Tools",
+        "target":{"kind":"http","base_url":"http://127.0.0.1:1/","enabled":true}});
+    let mut document = json!({
+        "theme":"ember","step":"connections","items":[
+            item("web","00000000000000000000000000000001"),
+            item("db","00000000000000000000000000000002"),http_item
+        ]
+    });
+    let update = json!({"revision":0,"document":document,"credentials":[{
+        "item_id":http_id,"base_url":"http://127.0.0.1:1/","secret":"setup-test-only"
+    }]});
+    let saved = owner.json("PUT", SETUP_DRAFT, update, 200).await;
+    assert_eq!(saved["revision"], 1);
+    assert_eq!(saved["credential_origins"][http_id], "http://127.0.0.1:1");
+    assert!(!saved.to_string().contains("setup-test-only"));
+
+    // Reopen the file and sign in with a new session. No browser storage is
+    // needed for the step, editing choices or the staged credential.
+    let reopened = AppState::new(st.env.clone());
+    let new_addr = start(reopened.clone()).await;
+    let resumed = Client::owner(new_addr).await;
+    assert_eq!(
+        resumed.json("GET", SETUP_DRAFT, Value::Null, 200).await,
+        saved
+    );
+    let result = resumed
+        .json(
+            "POST",
+            SETUP_TEST,
+            json!({"revision":1,"item_id":http_id}),
+            200,
+        )
+        .await;
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["class"], "blocked");
+    assert!(!result.to_string().contains("setup-test-only"));
+
+    document["step"] = json!("review");
+    document["items"][2]["target"]["base_url"] = json!("http://127.0.0.1:2/");
+    resumed
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":1,"document":document,"credentials":[]}),
+            200,
+        )
+        .await;
+    assert_eq!(
+        resumed
+            .call("POST", SETUP_COMMIT, json!({"revision":2}))
+            .await
+            .status,
+        400
+    );
+    assert_eq!(
+        resumed
+            .json("GET", "/api/v1/boards", Value::Null, 200)
+            .await,
+        json!([])
+    );
+    assert_eq!(
+        resumed
+            .json("GET", "/api/v1/integrations", Value::Null, 200)
+            .await,
+        json!([])
+    );
+    assert_eq!(
+        resumed
+            .call(
+                "PUT",
+                SETUP_DRAFT,
+                json!({"revision":1,"document":document,"credentials":[]})
+            )
+            .await
+            .status,
+        409
+    );
+    document["items"][2]["target"]["base_url"] = json!("http://127.0.0.1:1/");
+    resumed
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":2,"document":document,"credentials":[]}),
+            200,
+        )
+        .await;
+
+    let (first, second) = tokio::join!(
+        resumed.json("POST", SETUP_COMMIT, json!({"revision":3}), 200),
+        resumed.json("POST", SETUP_COMMIT, json!({"revision":3}), 200),
+    );
+    assert_eq!(first, second);
+    assert_eq!(
+        first,
+        resumed
+            .json("POST", SETUP_COMMIT, json!({"revision":3}), 200)
+            .await
+    );
+    let id = first["board_id"].as_str().unwrap();
+    let boards = resumed
+        .json("GET", "/api/v1/boards", Value::Null, 200)
+        .await;
+    assert_eq!(boards.as_array().unwrap().len(), 1);
+    let view = resumed
+        .json("GET", &format!("/api/v1/boards/{id}"), Value::Null, 200)
+        .await;
+    let sections = view["document"]["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 2);
+    assert_eq!(sections[0]["title"], "Shop");
+    assert_eq!(sections[0]["items"][0]["payload"]["title"], "Shop web");
+    assert_eq!(sections[0]["items"].as_array().unwrap().len(), 1);
+    let connections = resumed
+        .json("GET", "/api/v1/integrations", Value::Null, 200)
+        .await;
+    assert_eq!(connections.as_array().unwrap().len(), 1);
+    assert_eq!(connections[0]["has_secret"], true);
+    assert!(!connections.to_string().contains("setup-test-only"));
+    let done = resumed.json("GET", SETUP_DRAFT, Value::Null, 200).await;
+    assert_eq!(done["board_id"], id);
+    assert_eq!(done["credential_origins"], json!({}));
+    let boot = resumed
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(boot["default_board"], id);
+    assert_eq!(boot["theme_default"], "ember");
+    assert_eq!(
+        resumed
+            .json("GET", "/api/v1/session", Value::Null, 200)
+            .await["setup_pending"],
+        false
+    );
+    resumed
+        .json(
+            "PATCH",
+            "/api/v1/settings",
+            json!({"default_theme":null}),
+            200,
+        )
+        .await;
+    let boot = resumed
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(boot["default_board"], id);
+    assert_eq!(boot["theme_default"], "auto");
+}
+
+#[tokio::test]
+async fn setup_allows_empty_board_when_docker_is_unavailable_and_rejects_non_owners() {
+    let st = state();
+    st.containers.send_replace(Arc::new(crate::model::Snapshot {
+        error: Some("test socket unavailable".into()),
+        ..Default::default()
+    }));
+    let owner = browser_owner(start(st).await).await;
+    let discovery = owner.json("GET", SETUP_DISCOVERY, Value::Null, 200).await;
+    assert_eq!(discovery["docker"], "unavailable");
+    assert_eq!(discovery["suggestions"], json!([]));
+    for role in ["admin", "viewer"] {
+        let guest = owner
+            .guest(&format!("guest-{role}"), role, Value::Null)
+            .await;
+        for (method, path) in [
+            ("GET", SETUP_DRAFT),
+            ("GET", SETUP_DISCOVERY),
+            ("PUT", SETUP_DRAFT),
+            ("POST", SETUP_TEST),
+            ("POST", SETUP_COMMIT),
+        ] {
+            assert_eq!(guest.call(method, path, Value::Null).await.status, 403);
+        }
+    }
+    let draft = owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({
+                "revision":0,"document":{"step":"review","theme":null,"items":[]},"credentials":[]
+            }),
+            200,
+        )
+        .await;
+    let result = owner
+        .json(
+            "POST",
+            SETUP_COMMIT,
+            json!({"revision":draft["revision"]}),
+            200,
+        )
+        .await;
+    let id = result["board_id"].as_str().unwrap();
+    let board = owner
+        .json("GET", &format!("/api/v1/boards/{id}"), Value::Null, 200)
+        .await;
+    assert_eq!(board["document"]["sections"], json!([]));
 }

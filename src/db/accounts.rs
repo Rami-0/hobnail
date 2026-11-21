@@ -1,4 +1,6 @@
 //! Account and dashboard access persistence.
+pub(crate) const SETUP_DRAFT_KEY: &str = "owner-setup";
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
@@ -314,6 +316,10 @@ impl Db {
                 return Ok(Err(AccountError::OnboardingLocked));
             }
             let id = insert_user(&tx, name, hash, Role::Owner, now)?;
+            tx.execute(
+                "INSERT INTO drafts (user_id,key,value,updated) VALUES (?1,?2,'{}',?3)",
+                params![id, SETUP_DRAFT_KEY, now],
+            )?;
             insert_session(&tx, id, session, now, expires)?;
             tx.commit()?;
             Ok(Ok(()))

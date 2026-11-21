@@ -29,14 +29,14 @@ pub enum IntegrationKind {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct IntegrationInput {
-    name: String,
-    kind: IntegrationKind,
-    base_url: String,
+    pub name: String,
+    pub kind: IntegrationKind,
+    pub base_url: String,
     #[cfg_attr(test, ts(optional = nullable))]
-    icon: Option<String>,
-    enabled: bool,
+    pub icon: Option<String>,
+    pub enabled: bool,
     #[cfg_attr(test, ts(optional = nullable))]
-    secret: Option<String>,
+    pub secret: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -155,14 +155,14 @@ fn get(conn: &Connection, id: &str, admin: bool) -> Result<IntegrationView, ApiE
         .ok_or_else(ApiError::not_found)
 }
 
-fn secret_value(value: &str) -> Result<(), ApiError> {
+pub(super) fn secret_value(value: &str) -> Result<(), ApiError> {
     if value.is_empty() || value.len() > 4096 || !value.bytes().all(|b| b.is_ascii_graphic()) {
         return Err(ApiError::bad_request("enter a non-empty bearer token of up to 4096 printable ASCII characters without spaces", Some("secret")));
     }
     Ok(())
 }
 
-fn save(
+pub(super) fn save(
     conn: &Connection,
     id: Option<&str>,
     input: IntegrationInput,
@@ -226,7 +226,11 @@ fn save(
     get(conn, &id, true)
 }
 
-fn target(
+pub(super) fn base_url(conn: &Connection, id: &str) -> Result<String, ApiError> {
+    Ok(get(conn, id, true)?.admin.expect("admin details").base_url)
+}
+
+pub(super) fn target(
     conn: &Connection,
     id: &str,
 ) -> Result<(String, Option<client::BoundCredential>), ApiError> {
@@ -252,7 +256,7 @@ fn target(
     Ok((details.base_url, credential))
 }
 
-fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
+pub(super) fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
     let mut attempts = state.integration_tests.lock().unwrap();
     let now = Instant::now();
     let recent = |time: &Instant| now.duration_since(*time) < Duration::from_secs(10);
@@ -270,7 +274,7 @@ fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError> {
     Ok(())
 }
 
-async fn test_connection(
+pub(super) async fn test_connection(
     state: &AppState,
     url: String,
     credential: Option<client::BoundCredential>,

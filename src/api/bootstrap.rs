@@ -67,7 +67,7 @@ pub struct Refresh {
 
 fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, ApiError> {
     let role = user.role;
-    let (boards, default_board) = state.db.dashboard(|c| -> Result<_, ApiError> {
+    let (boards, settings) = state.db.dashboard(|c| -> Result<_, ApiError> {
         let boards = super::boards::list(c, user)?
             .into_iter()
             .map(|b| BoardNavigation {
@@ -76,23 +76,16 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
                 icon: b.icon,
             })
             .collect();
-        Ok((
-            boards,
-            super::dashboard_settings::get(c, user)?.default_board,
-        ))
+        Ok((boards, super::dashboard_settings::get(c, user)?))
     })?;
     let loaded = state.config.snapshot();
     let cfg = &loaded.config;
-    let theme = match cfg.page.theme.as_str() {
-        t @ ("dark" | "light" | "ember" | "contrast") => t,
-        _ => "auto",
-    };
     let snap = state.snapshot();
     Ok(Bootstrap {
         role,
         scoped: user.is_scoped(),
         boards,
-        default_board,
+        default_board: settings.default_board,
         remote_icons: cfg.icons.remote,
         title: cfg
             .page
@@ -100,7 +93,9 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
             .clone()
             .unwrap_or_else(|| state.env.hostname.clone()),
         hostname: state.env.hostname.clone(),
-        theme_default: theme.into(),
+        theme_default: settings
+            .default_theme
+            .unwrap_or_else(|| super::dashboard_settings::config_theme(cfg).into()),
         search_url: Some(cfg.page.search_url.clone()).filter(|s| !s.trim().is_empty()),
         features: Features {
             stats: cfg.page.show_stats,

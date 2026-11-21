@@ -22,6 +22,7 @@ pub struct Session {
     pub database: bool,
     pub owner_exists: bool,
     pub onboarding_locked: bool,
+    pub setup_pending: bool,
     pub build: BuildInfoView,
     pub api: u32,
 }
@@ -62,6 +63,13 @@ fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Sessio
         database: state.db.is_enabled(),
         owner_exists: state.db.owner_exists(),
         onboarding_locked: state.db.onboarding_locked(),
+        setup_pending: principal.is_some_and(|session| {
+            session.account.role == Role::Owner
+                && state
+                    .db
+                    .dashboard(|conn| super::setup::pending(conn, session.account.id))
+                    .unwrap_or(false)
+        }),
         build: BuildInfoView {
             version: b.version.to_string(),
             sha: b.sha.to_string(),
