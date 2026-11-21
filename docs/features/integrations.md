@@ -54,8 +54,9 @@ Enter the service root URL with any reverse-proxy prefix. Leave off the
   rejected. Draft tests attempt to close their temporary session.
 - **v5** uses the API token from Pi-hole when authentication is enabled.
   Hobnail calls `GET /admin/api.php` with `summaryRaw` and, when set, the
-  encoded `auth` query parameter. Configure reverse proxies with care
-  because they may record query strings in access logs.
+  encoded `auth` query parameter. The token can appear in Pi-hole or proxy
+  access logs that record query strings. Prefer v6, which sends its session
+  credential in a header.
 
 The **DNS activity** widget shows queries, blocked queries, percentage
 blocked and blocking status. The v6 widget reads `/api/stats/summary`
