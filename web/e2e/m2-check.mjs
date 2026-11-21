@@ -203,6 +203,10 @@ try {
     await click(".setup-fields .acts button:first-child");
     await click(".setup-fields .acts button:nth-child(2)");
     await fill(`${selected}:nth-of-type(3) input[id$="-name"]`, linkTitle);
+    await click(".setup-fields .acts button:first-child");
+    await fill(`${selected}:nth-of-type(5) input[id$="-name"]`, "Unfinished link");
+    await click(".setup-fields .acts button:nth-child(2)");
+    await fill(`${selected}:nth-of-type(6) input[id$="-name"]`, "Unfinished integration");
   }
   await capture(shots[2], wizard);
   await move("continue", 3);
@@ -213,6 +217,15 @@ try {
     const url = `${items} input[name="base_url"]`;
     const secret = `${items} input[name="secret"]`;
     const endpoint = "http://127.0.0.1:8081/fixture/m2/reading";
+    await fill(link, "invalid");
+    contexts.at(-1).events.allow(({ url, status }) => status === 400 && new URL(url).pathname === "/api/v1/onboarding/test" && "expected invalid test URL");
+    await click(`${items}:has(input[name="url"][required]) ${attr("setup-test")}`);
+    await require("the invalid URL is described by its own field error", `(() => {
+      const field = ${el(link)};
+      const description = document.getElementById(field.id + "-err");
+      return description?.textContent.includes("Enter an HTTP") &&
+        field.getAttribute("aria-describedby")?.split(" ").includes(description.id);
+    })()`);
     await fill(link, "https://example.test/home");
     await fill(url, endpoint);
     await fill(secret, "unsaved-fixture-credential");
@@ -230,10 +243,12 @@ try {
     await require("keeping the draft preserves the pending credential", `!${el(attr("setup-leave") + "[data-open]")} && ${el(secret)}?.value.startsWith("unsaved")`);
     await move("skip", 4);
     await require("pending credentials do not block Skip or save automatically", text(wizard, "Only saved credentials are included"));
-    await move("back", 3);
+    await require("Review identifies both unfinished items", `[...${el(wizard)}.querySelectorAll("li")].filter(li => li.textContent.includes("incomplete — will not be added")).length === 2`);
+    await click(".setup-fields li button");
+    await step(3);
     await require("Skip and Back retain entered connection fields", `${el(link)}?.value === "https://example.test/home" && ${el(url)}?.value === ${q(endpoint)} && ${el(secret)}?.value.startsWith("unsaved")`);
     await fill(secret, "fixture-credential");
-    await click(`${items}:last-of-type ${attr("setup-test")}`);
+    await click(`${items}:has(input[name="base_url"]) ${attr("setup-test")}`);
     testTimes.push(Date.now());
     await require("upstream 503 is explained in the wizard", text(attr("setup-verdict"), "non-success status"));
     await require("saved credential removes unload protection", `window.dispatchEvent(new Event("beforeunload", {cancelable:true}))`);
@@ -243,7 +258,7 @@ try {
     await move("continue", 3);
     await require("the staged connection survives Back and Continue", `${el(url)}?.value === ${q(endpoint)} && ${el(secret)}?.value === ""`);
   }
-  await move("continue", 4, true);
+  await move(empty ? "continue" : "skip", 4, true);
   await require("review reflects selected groups or the real empty board", text(wizard, empty ? "Your board will be empty" : "Home tools"));
   await click(attr("setup-create"));
   await require("first board opens in the requested theme", `location.pathname.startsWith("/app/boards/") && !!${el(board)} && document.documentElement.dataset.theme === ${q(theme)}`);

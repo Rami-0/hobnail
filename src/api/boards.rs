@@ -383,8 +383,7 @@ pub(super) fn validate(
         .flat_map(|s| &s.items)
         .filter_map(|i| Some((i.id.as_deref()?, &i.payload)))
         .collect();
-    let visible_targets = user.container_targets(conn)?;
-    let visible_widgets = user.widget_targets(conn)?;
+    let validator = PayloadValidator::new(user, conn, config)?;
     for section in &doc.sections {
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
             return Err(ApiError::bad_request(
@@ -416,89 +415,128 @@ pub(super) fn validate(
                     Some("spans"),
                 ));
             }
-            match &item.payload {
-                BoardPayload::Container {
-                    target,
-                    title,
-                    icon,
-                    link,
-                } => {
-                    let unchanged = matches!(previous, Some(BoardPayload::Container { target: old, .. }) if old == target);
-                    if !unchanged
-                        && visible_targets
-                            .as_ref()
-                            .is_some_and(|targets| !targets.contains(target))
-                    {
-                        return Err(ApiError::bad_request(
-                            "invalid container reference",
-                            Some("target"),
-                        ));
-                    }
-                    match target {
-                        ContainerMatch::Compose { project, service } => {
-                            super::validate_label(project, "project")?;
-                            super::validate_label(service, "service")?;
-                        }
-                        ContainerMatch::Name { name } => super::validate_label(name, "name")?,
-                    }
-                    if let Some(title) = title {
-                        super::validate_label(title, "title")?;
-                    }
-                    super::validate_icon(icon.as_deref())?;
-                    if let Some(link) = link {
-                        safe_link(link, "link")?;
-                    }
-                }
-                BoardPayload::Link { title, url, icon } => {
-                    super::validate_label(title, "title")?;
-                    safe_link(url, "url")?;
-                    super::validate_icon(icon.as_deref())?;
-                }
-                BoardPayload::Widget { widget_id, title } => {
-                    if let Some(title) = title {
-                        super::validate_label(title, "title")?;
-                    }
-                    super::validate_label(widget_id, "widget_id")?;
-                    let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old, .. }) if old == widget_id);
-                    if !unchanged
-                        && (visible_widgets
-                            .as_ref()
-                            .is_some_and(|targets| !targets.contains(widget_id))
-                            || !config.widgets.iter().any(|widget| widget.id == *widget_id))
-                    {
-                        return Err(ApiError::bad_request(
-                            "invalid widget reference",
-                            Some("widget_id"),
-                        ));
-                    }
-                }
-                BoardPayload::Integration {
-                    integration_id,
-                    title,
-                } => {
-                    if let Some(title) = title {
-                        super::validate_label(title, "title")?;
-                    }
-                    let unchanged = matches!(previous, Some(BoardPayload::Integration { integration_id: old, .. }) if old == integration_id);
-                    if !super::valid_id(integration_id)
-                        || (!unchanged
-                            && (!user.can_see_integration(integration_id)
-                                || !conn.query_row(
-                                    "SELECT EXISTS (SELECT 1 FROM integrations WHERE id=?1)",
-                                    [integration_id],
-                                    |r| r.get::<_, bool>(0),
-                                )?))
-                    {
-                        return Err(ApiError::bad_request(
-                            "invalid integration reference",
-                            Some("integration_id"),
-                        ));
-                    }
-                }
-            }
+            validator.validate(&item.payload, previous)?;
         }
     }
     Ok(())
+}
+
+pub(super) struct PayloadValidator<'a> {
+    user: &'a Principal,
+    conn: &'a Connection,
+    config: &'a crate::config::Config,
+    visible_targets: Option<HashSet<ContainerMatch>>,
+    visible_widgets: Option<HashSet<String>>,
+}
+
+impl<'a> PayloadValidator<'a> {
+    pub(super) fn new(
+        user: &'a Principal,
+        conn: &'a Connection,
+        config: &'a crate::config::Config,
+    ) -> Result<Self, ApiError> {
+        Ok(Self {
+            user,
+            conn,
+            config,
+            visible_targets: user.container_targets(conn)?,
+            visible_widgets: user.widget_targets(conn)?,
+        })
+    }
+
+    pub(super) fn validate(
+        &self,
+        payload: &BoardPayload,
+        previous: Option<&BoardPayload>,
+    ) -> Result<(), ApiError> {
+        match payload {
+            BoardPayload::Container {
+                target,
+                title,
+                icon,
+                link,
+            } => {
+                let unchanged = matches!(previous, Some(BoardPayload::Container { target: old, .. }) if old == target);
+                if !unchanged
+                    && self
+                        .visible_targets
+                        .as_ref()
+                        .is_some_and(|targets| !targets.contains(target))
+                {
+                    return Err(ApiError::bad_request(
+                        "invalid container reference",
+                        Some("target"),
+                    ));
+                }
+                match target {
+                    ContainerMatch::Compose { project, service } => {
+                        super::validate_label(project, "project")?;
+                        super::validate_label(service, "service")?;
+                    }
+                    ContainerMatch::Name { name } => super::validate_label(name, "name")?,
+                }
+                if let Some(title) = title {
+                    super::validate_label(title, "title")?;
+                }
+                super::validate_icon(icon.as_deref())?;
+                if let Some(link) = link {
+                    safe_link(link, "link")?;
+                }
+            }
+            BoardPayload::Link { title, url, icon } => {
+                super::validate_label(title, "title")?;
+                safe_link(url, "url")?;
+                super::validate_icon(icon.as_deref())?;
+            }
+            BoardPayload::Widget { widget_id, title } => {
+                if let Some(title) = title {
+                    super::validate_label(title, "title")?;
+                }
+                super::validate_label(widget_id, "widget_id")?;
+                let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old, .. }) if old == widget_id);
+                if !unchanged
+                    && (self
+                        .visible_widgets
+                        .as_ref()
+                        .is_some_and(|targets| !targets.contains(widget_id))
+                        || !self
+                            .config
+                            .widgets
+                            .iter()
+                            .any(|widget| widget.id == *widget_id))
+                {
+                    return Err(ApiError::bad_request(
+                        "invalid widget reference",
+                        Some("widget_id"),
+                    ));
+                }
+            }
+            BoardPayload::Integration {
+                integration_id,
+                title,
+            } => {
+                if let Some(title) = title {
+                    super::validate_label(title, "title")?;
+                }
+                let unchanged = matches!(previous, Some(BoardPayload::Integration { integration_id: old, .. }) if old == integration_id);
+                if !super::valid_id(integration_id)
+                    || (!unchanged
+                        && (!self.user.can_see_integration(integration_id)
+                            || !self.conn.query_row(
+                                "SELECT EXISTS (SELECT 1 FROM integrations WHERE id=?1)",
+                                [integration_id],
+                                |r| r.get::<_, bool>(0),
+                            )?))
+                {
+                    return Err(ApiError::bad_request(
+                        "invalid integration reference",
+                        Some("integration_id"),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn next_id(conn: &Connection, existing: Option<String>) -> Result<String, ApiError> {

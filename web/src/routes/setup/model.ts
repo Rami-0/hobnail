@@ -1,5 +1,6 @@
 import type { BoardPayload } from "../../api/gen/BoardPayload.ts";
 import type { SetupDocument } from "../../api/gen/SetupDocument.ts";
+import type { SetupItem } from "../../api/gen/SetupItem.ts";
 import type { SetupStep } from "../../api/gen/SetupStep.ts";
 
 export const STEPS = {
@@ -36,4 +37,11 @@ export function selectedGroups(document: SetupDocument) {
     else groups.set(group, [item]);
   }
   return groups;
+}
+
+
+export function incompleteField({ name, target }: SetupItem): "name" | "url" | undefined {
+  if (!name.trim()) return "name";
+  if (target.kind === "http" && !target.base_url.trim()) return "url";
+  if (target.kind === "board" && target.payload.kind === "link" && !target.payload.url.trim()) return "url";
 }

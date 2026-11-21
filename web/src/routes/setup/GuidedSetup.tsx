@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { ApiResult } from "../../api/client.ts";
 import { api } from "../../api/session.ts";
 import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
 import type { SetupCredentialChange } from "../../api/gen/SetupCredentialChange.ts";
@@ -21,7 +22,7 @@ import { Note } from "../../ui/Note.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { HttpConnectionFields } from "../../configuration/HttpConnectionFields.tsx";
 import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
-import { identity, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
+import { identity, incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
 import "./setup.css";
 
 const PATH = "/api/v1/onboarding";
@@ -83,6 +84,13 @@ function newItem(target: SetupTarget, name: string, group = "", source?: string)
   return { id, name, group, target, source, included: true };
 }
 
+type Failure = { message: string; stale?: boolean; draft?: boolean; item?: string; field?: string };
+
+function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft = false): Failure {
+  const [, item, field] = result.kind === "invalid" ? result.field?.split(".") ?? [] : [];
+  return { message: result.message, stale: result.kind === "stale", draft, item, field };
+}
+
 function Wizard({ initial }: { initial: SetupDraft }) {
   const [draft, setDraft] = useState(initial);
   const [doc, setDoc] = useState(initial.document);
@@ -93,7 +101,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<{ message: string; stale?: boolean; draft?: boolean }>();
+  const [failure, setFailure] = useState<Failure>();
   const [verdicts, setVerdicts] = useState<Record<string, IntegrationVerdict | string>>({});
   const [departure, setDeparture] = useState<{ to?: string }>();
   const leaving = useRef(false);
@@ -141,7 +149,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     savingRef.current = false;
     setSaving(false);
     if (response.kind !== "ok") {
-      setFailure({ message: response.message, stale: response.kind === "stale", draft: true });
+      setFailure(setupFailure(response, true));
       return null;
     }
     setDraft(response.data);
@@ -150,7 +158,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     if (changes.length) setCredentials((latest) => Object.fromEntries(
       Object.entries(latest).filter(([, entry]) => !changes.includes(entry)),
     ));
-    setFailure(undefined);
+    setFailure((current) => current?.item && !current.draft ? current : undefined);
     return response.data;
   }
 
@@ -162,7 +170,16 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, draft, dirty, saving, busy, failure]);
 
+  function clearItemFailure(id: string) {
+    setFailure((current) => current?.item === id ? undefined : current);
+  }
+
+  function fieldError(id: string, field: string) {
+    return failure?.item === id && failure.field === field ? failure.message : undefined;
+  }
+
   function update(id: string, replacement: Partial<SetupItem>) {
+    clearItemFailure(id);
     setDoc((previous) => ({ ...previous, items: previous.items.map((item) => item.id === id ? { ...item, ...replacement } : item) }));
   }
 
@@ -176,14 +193,19 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   }
 
   function changeSecret(item: SetupItem, base_url: string, secret: string | null) {
+    clearItemFailure(item.id);
     setCredentials(({ [item.id]: _previous, ...others }) =>
       secret === "" ? others : { ...others, [item.id]: { item_id: item.id, base_url, secret } });
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
 
   async function go(action: "back" | "continue" | "skip") {
+    await goTo(move(doc, action));
+  }
+
+  async function goTo(next: SetupDocument) {
     setBusy(true);
-    await persist(move(doc, action));
+    await persist(next);
     setBusy(false);
   }
 
@@ -193,7 +215,12 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     const current = await persist(doc, change ? [change] : []);
     if (current) {
       const response = await api.post<IntegrationVerdict>(`${PATH}/test`, { revision: current.revision, item_id: item.id });
-      setVerdicts((values) => ({ ...values, [item.id]: response.kind === "ok" ? response.data : response.message }));
+      if (response.kind === "invalid" && response.field?.startsWith(`items.${item.id}.`)) {
+        setFailure(setupFailure(response));
+      } else {
+        clearItemFailure(item.id);
+        setVerdicts((values) => ({ ...values, [item.id]: response.kind === "ok" ? response.data : response.message }));
+      }
     }
     setBusy(false);
   }
@@ -206,7 +233,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       leaving.current = true;
       openBoard(result.data.board_id);
     } else {
-      setFailure({ message: result.message, stale: result.kind === "stale" });
+      setFailure(setupFailure(result));
       setBusy(false);
     }
   }
@@ -227,7 +254,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       canTest = !!target.base_url && target.enabled;
       content = <>
         <HttpConnectionFields id={id} url={target.base_url} enabled={target.enabled} bound={bound}
-          secret={change?.secret ?? ""} busy={busy}
+          secret={change?.secret ?? ""} busy={busy} fields={{ base_url: fieldError(id, "base_url") ?? "", secret: fieldError(id, "secret") ?? "" }}
           setSecret={(secret) => changeSecret(item, target.base_url, secret)}
           setUrl={(base_url) => changeTarget(item, { ...target, base_url })}
           setEnabled={(enabled) => changeTarget(item, { ...target, enabled })}
@@ -241,7 +268,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       if (payload.kind === "link" || payload.kind === "container") {
         const url = (payload.kind === "link" ? payload.url : payload.link) ?? "";
         canTest = !!url;
-        content = <LinkUrl id={id} label="Service URL" value={url} optional={payload.kind === "container"}
+        content = <LinkUrl id={id} label="Service URL" error={fieldError(id, "url")} value={url} optional={payload.kind === "container"}
           onChange={(value) => changeTarget(item, { kind: "board", payload: payload.kind === "link"
             ? { ...payload, url: value } : { ...payload, link: value || null } })} />;
       } else if (payload.kind === "integration") {
@@ -289,11 +316,14 @@ function Wizard({ initial }: { initial: SetupDraft }) {
               <Button disabled={itemLimit} onClick={() => add(newItem({ kind: "http", base_url: "", enabled: true }, "New HTTP integration"))}>Add an HTTP integration</Button>
             </div>
             {doc.items.map((item) => <section className="setup-item" key={item.id} data-testid="setup-selection">
-              <Checkbox checked={item.included} onChange={(included) => update(item.id, { included })}
-                label={`Include ${item.name || "unnamed service"}`} />
+              <Field id={`${item.id}-include`} label={null}
+                error={failure?.item === item.id && !["name", "group", "url", "base_url", "secret"].includes(failure.field ?? "") ? failure.message : undefined}>
+                <Checkbox checked={item.included} onChange={(included) => update(item.id, { included })}
+                  label={`Include ${item.name || "unnamed service"}`} />
+              </Field>
               {item.included && <div className="setup-item-fields">
-                <Field id={`${item.id}-name`} label="Name"><TextInput value={item.name} maxLength={80} onChange={(e) => update(item.id, { name: e.target.value })} /></Field>
-                <Field id={`${item.id}-group`} label="Section" hint="Defaults to Services."><TextInput value={item.group} maxLength={80} onChange={(e) => update(item.id, { group: e.target.value })} /></Field>
+                <Field id={`${item.id}-name`} label="Name" error={fieldError(item.id, "name")}><TextInput value={item.name} maxLength={80} onChange={(e) => update(item.id, { name: e.target.value })} /></Field>
+                <Field id={`${item.id}-group`} label="Section" error={fieldError(item.id, "group")} hint="Defaults to Services."><TextInput value={item.group} maxLength={80} onChange={(e) => update(item.id, { group: e.target.value })} /></Field>
               </div>}
             </section>)}
             {!!discovery?.suggestions.length && <>
@@ -320,13 +350,23 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             {groups.size === 0 ? <p>Your board will be empty. Use Add or Discover when you are ready.</p> :
               [...groups].map(([group, items]) => <section key={group}>
                 <h3>{group}</h3>
-                <ul>{items.map((item) => <li key={item.id}>{item.name || "Unnamed service"}
-                  {item.target.kind === "http" ? " · HTTP integration" : item.target.payload.kind === "link" ? " · Link" : ""}
-                </li>)}</ul>
+                <ul>{items.map((item) => {
+                  const incomplete = incompleteField(item);
+                  const error = failure?.item === item.id ? failure : undefined;
+                  const fix = error?.field ?? incomplete;
+                  return <li key={item.id}>{item.name || "Unnamed service"}
+                    {item.target.kind === "http" ? " · HTTP integration" : item.target.payload.kind === "link" ? " · Link" : ""}
+                    {incomplete && " · incomplete — will not be added"}
+                    {error && <p className="bad-fg" role="alert">{error.message}</p>}
+                    {fix && <Button variant="link" disabled={controlsDisabled} onClick={() => void goTo({
+                      ...doc, step: ["url", "base_url", "secret"].includes(fix) ? "connections" : "select",
+                    })}>Fix {item.name || "unnamed service"}</Button>}
+                  </li>;
+                })}</ul>
               </section>)}
           </>}
         </fieldset>
-        {failure && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
+        {failure && !failure.item && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
           : failure.draft ? <Button disabled={controlsDisabled} onClick={() => void persist(doc)}>Retry save</Button> : undefined}>{failure.message}</Note>}
         <div className="acts setup-actions">
           <Button data-testid="setup-back" disabled={controlsDisabled || stepIndex === 0} onClick={() => void go("back")}>Back</Button>

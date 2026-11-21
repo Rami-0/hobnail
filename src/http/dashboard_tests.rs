@@ -1451,3 +1451,55 @@ async fn board_tour_dismissal_is_idempotent_and_private_to_the_account() {
         false
     );
 }
+
+#[tokio::test]
+async fn setup_keeps_incomplete_entries_and_attributes_invalid_urls() {
+    let owner = browser_owner(start(state()).await).await;
+    let incomplete_link = "00000000000000000000000000000001";
+    let incomplete_http = "00000000000000000000000000000002";
+    let ready = "00000000000000000000000000000003";
+    let mut document = json!({"step":"review","theme":null,"items":[
+        {"id":incomplete_link,"included":true,"name":"Unfinished link","group":"",
+           "target":{"kind":"board","payload":{"kind":"link","title":"","url":""}}},
+        {"id":incomplete_http,"included":true,"name":"Unfinished integration","group":"",
+           "target":{"kind":"http","base_url":"   ","enabled":true}},
+        {"id":ready,"included":true,"name":"Ready link","group":"",
+           "target":{"kind":"board","payload":{"kind":"link","title":"","url":"invalid"}}}
+    ]});
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":0,"document":document,"credentials":[]}),
+            200,
+        )
+        .await;
+    let error = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":1}), 400)
+        .await;
+    assert_eq!(error["error"]["field"], format!("items.{ready}.url"));
+
+    document["items"][2]["target"]["payload"]["url"] = json!("https://example.test/");
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":1,"document":document,"credentials":[]}),
+            200,
+        )
+        .await;
+    let result = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":2}), 200)
+        .await;
+    let path = format!("/api/v1/boards/{}", result["board_id"].as_str().unwrap());
+    let board = owner.json("GET", &path, Value::Null, 200).await;
+    let items = board["document"]["sections"][0]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["payload"]["title"], "Ready link");
+    let done = owner.json("GET", SETUP_DRAFT, Value::Null, 200).await;
+    assert_eq!(done["document"]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(done["document"]["items"][0]["target"]["payload"]["url"], "");
+    assert_eq!(done["document"]["items"][1]["target"]["base_url"], "   ");
+}

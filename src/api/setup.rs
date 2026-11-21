@@ -54,7 +54,33 @@ pub struct SetupItem {
     target: SetupTarget,
 }
 
-#[derive(Serialize, Deserialize)]
+impl SetupItem {
+    fn incomplete(&self) -> bool {
+        self.name.trim().is_empty()
+            || match &self.target {
+                SetupTarget::Board {
+                    payload: BoardPayload::Link { url, .. },
+                } => url.trim().is_empty(),
+                SetupTarget::Http { base_url, .. } => base_url.trim().is_empty(),
+                _ => false,
+            }
+    }
+}
+
+fn item_error(id: &str, mut error: ApiError) -> ApiError {
+    if error.status == StatusCode::BAD_REQUEST {
+        let field = match error.field.as_deref() {
+            Some("title") => "name",
+            Some("link") => "url",
+            Some(field) => field,
+            None => "target",
+        };
+        error.field = Some(format!("items.{id}.{field}"));
+    }
+    error
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(tag = "kind", rename_all = "snake_case"))]
 pub enum SetupTarget {
@@ -230,6 +256,7 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
         }
     }
     for change in update.credentials {
+        let local = |error| item_error(&change.item_id, error);
         let Some(SetupTarget::Http { base_url, .. }) = items.get(change.item_id.as_str()) else {
             return Err(ApiError::bad_request(
                 "select an HTTP connection for this credential",
@@ -237,13 +264,13 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
             ));
         };
         if let Some(secret) = change.secret {
-            integrations::secret_value(&secret)?;
-            let origin = integration_origin(&change.base_url)?;
+            integrations::secret_value(&secret).map_err(local)?;
+            let origin = integration_origin(&change.base_url).map_err(local)?;
             if client::origin(base_url).as_deref() != Some(&origin) {
-                return Err(ApiError::bad_request(
+                return Err(local(ApiError::bad_request(
                     "enter the credential for the current service origin",
                     Some("secret"),
-                ));
+                )));
             }
             conn.execute(
                 "INSERT INTO setup_credentials (user_id,item_id,origin,secret) VALUES (?1,?2,?3,?4)
@@ -319,7 +346,7 @@ fn target(
         .into_iter()
         .find(|item| item.id == test.item_id && item.included)
         .ok_or_else(ApiError::not_found)?;
-    match item.target {
+    let result = (|| match item.target {
         SetupTarget::Http {
             base_url,
             enabled: true,
@@ -348,12 +375,13 @@ fn target(
             "This item has no HTTP connection to test.",
             None,
         )),
-    }
+    })();
+    result.map_err(|error| item_error(&item.id, error))
 }
 
-fn payload(conn: &Connection, owner: i64, item: SetupItem) -> Result<BoardPayload, ApiError> {
+fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPayload, ApiError> {
     let name = item.name.trim().to_owned();
-    Ok(match item.target {
+    Ok(match item.target.clone() {
         SetupTarget::Board { mut payload } => {
             match &mut payload {
                 BoardPayload::Link { title, .. } => *title = name,
@@ -408,16 +436,24 @@ fn commit(
     let mut sources = HashSet::new();
     let mut new_endpoints = HashSet::new();
     let mut saved_endpoints = HashSet::new();
-    for item in saved.document.items.drain(..).filter(|item| item.included) {
+    let validator = boards::PayloadValidator::new(user, conn, config)?;
+    for item in saved
+        .document
+        .items
+        .iter()
+        .filter(|item| item.included && !item.incomplete())
+    {
+        let local = |error| item_error(&item.id, error);
         let unique = match &item.target {
             SetupTarget::Http { base_url, .. } => {
-                let key = endpoint_key(base_url)?;
+                let key = endpoint_key(base_url).map_err(local)?;
                 !saved_endpoints.contains(&key) && new_endpoints.insert(key)
             }
             SetupTarget::Board { payload } => {
                 let new_identity = identities.insert(boards::identity(payload));
                 if let BoardPayload::Integration { integration_id, .. } = payload {
-                    let key = endpoint_key(&integrations::base_url(conn, integration_id)?)?;
+                    let key = endpoint_key(&integrations::base_url(conn, integration_id)?)
+                        .map_err(local)?;
                     let duplicates_new = new_endpoints.contains(&key);
                     saved_endpoints.insert(key);
                     new_identity && !duplicates_new
@@ -432,14 +468,14 @@ fn commit(
                 .as_ref()
                 .is_some_and(|source| !sources.insert(source.clone()))
         {
-            return Err(ApiError::bad_request("This service is selected more than once. Exclude a duplicate before creating the board.", Some("items")));
+            return Err(local(ApiError::bad_request("This service is selected more than once. Exclude a duplicate before creating the board.", Some("included"))));
         }
         let group = item.group.trim();
         let title = if group.is_empty() { "Services" } else { group };
-        let index = sections
-            .iter()
-            .position(|s| s.title == title)
-            .unwrap_or_else(|| {
+        super::validate_label(title, "group").map_err(local)?;
+        let index = match sections.iter().position(|s| s.title == title) {
+            Some(index) => index,
+            None if sections.len() < 64 => {
                 let index = sections.len();
                 sections.push(BoardSection {
                     id: None,
@@ -448,24 +484,28 @@ fn commit(
                     items: Vec::new(),
                 });
                 index
-            });
+            }
+            None => {
+                return Err(local(ApiError::bad_request(
+                    "A board supports up to 64 sections.",
+                    Some("group"),
+                )))
+            }
+        };
+        let payload = payload(conn, user.id, item).map_err(local)?;
+        validator.validate(&payload, None).map_err(local)?;
         let section = &mut sections[index];
         section.items.push(BoardItem {
             id: None,
             position: section.items.len() as u32,
             spans: Default::default(),
-            payload: payload(conn, user.id, item)?,
+            payload,
         });
     }
     let doc = BoardDocument {
         version: 0,
         sections,
     };
-    let empty = BoardDocument {
-        version: 0,
-        sections: Vec::new(),
-    };
-    boards::validate(&doc, &empty, user, conn, config)?;
     let board = boards::create(conn, "Home", None, now)?;
     boards::store(conn, &board.id, doc, now)?;
     dashboard_settings::set_default_board(conn, Some(&board.id))?;
