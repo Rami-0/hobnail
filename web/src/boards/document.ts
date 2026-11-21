@@ -123,8 +123,8 @@ export function payloadIdentity(payload: BoardPayload): string {
     case "container": return JSON.stringify(payload.target);
     case "link": {
       const match = /^(https?):\/\/(\[[^\]]+\]|[^:/?#@]+)(?::(\d+))?([/?#].*|)$/i.exec(payload.url);
-      if (!match) return `link:${payload.url}`;
-      const [, rawScheme, host, port, suffix] = match;
+      const [, rawScheme, host, port, suffix = ""] = match ?? [];
+      if (!rawScheme || !host) return `link:${payload.url}`;
       const scheme = rawScheme.toLowerCase();
       const defaultPort = scheme === "https" ? 443 : 80;
       const authority = port && Number(port) !== defaultPort ? `${host.toLowerCase()}:${Number(port)}` : host.toLowerCase();

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SetupDocument } from "../../api/gen/SetupDocument.ts";
-import { identity, move, selectedGroups } from "./model.ts";
+import { payloadIdentity } from "../../boards/document.ts";
+import { move, selectedGroups } from "./model.ts";
 
 test("back, continue and skip preserve edits and stop at the wizard boundaries", () => {
   const before: SetupDocument = { step: "appearance", theme: "ember", items: [{
@@ -24,9 +25,19 @@ test("back, continue and skip preserve edits and stop at the wizard boundaries",
 
 test("selection excludes unselected services and discovery identity survives renames", () => {
   const payload = { kind: "container", target: { by: "compose", project: "my-stack", service: "web" } } as const;
-  assert.equal(identity({ ...payload, title: "New name", icon: "web" }), identity(payload));
+  assert.equal(payloadIdentity({ ...payload, title: "New name", icon: "web" }), payloadIdentity(payload));
   const document: SetupDocument = { step: "review", theme: null, items: [
     { id: "discovered", included: false, name: "Excluded", group: "Tools", target: { kind: "board", payload } },
   ] };
   assert.deepEqual([...selectedGroups(document)], []);
+});
+
+
+test("link identity normalizes authority while preserving the exact suffix", () => {
+  const key = (url: string) => payloadIdentity({ kind: "link", title: "Fixture", url });
+  assert.equal(key("HTTPS://Example.TEST:443"), key("https://example.test/"));
+  assert.equal(key("http://example.TEST:080?q=x#top"), key("http://example.test/?q=x#top"));
+  for (const path of ["/Path", "/path", "/?a=1&b=2", "/?b=2&a=1", "/#first", "/#second"]) {
+    assert.equal(key(`https://example.test${path}`), `link:https://example.test${path}`);
+  }
 });

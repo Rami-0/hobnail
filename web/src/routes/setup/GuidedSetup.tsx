@@ -363,7 +363,8 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                 <ul>{items.map((item) => {
                   const incomplete = incompleteField(item);
                   const error = failure?.item === item.id ? failure : undefined;
-                  const matches = draft.matching_integrations[draft.integration_matches[item.id]];
+                  const matchId = draft.integration_matches[item.id];
+                  const matches = matchId ? draft.matching_integrations[matchId] : undefined;
                   const matchError = error?.field === "integration_choice";
                   const fix = matchError ? (!matches ? "base_url" : undefined) : error?.field ?? incomplete;
                   return <li key={item.id}>{item.name || "Unnamed service"}
@@ -410,6 +411,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             leaving.current = true;
             setCredentials({});
             navigate(to);
+            if (new URL(to).origin === window.location.origin) leaving.current = false;
           } else void create();
         }}>{departure?.to ? "Discard and leave" : "Discard and create board"}</Button></>}>
       <p>Credential changes in this tab will be lost.</p>
