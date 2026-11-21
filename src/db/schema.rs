@@ -301,7 +301,14 @@ UPDATE boards AS board SET sections=json((
                 WHERE other.board_id=board.id AND json_extract(other.layout,'$.section')=json_extract(section.value,'$.id')
                 AND NOT (other.kind='widget' AND json_extract(other.config,'$.widget_id') LIKE 'provider:%')
             ))
-    ) THEN json_set(section.value,'$.legacy_provider_title',json('true')) ELSE section.value END) ORDER BY section.key)
+    ) THEN json_set(section.value,'$.legacy_provider_title',(
+        SELECT CASE WHEN count(DISTINCT i.id)=1 THEN min(i.id) ELSE '' END
+        FROM board_items item
+        JOIN provider_widgets pw ON pw.id=json_extract(item.config,'$.widget_id')
+        JOIN integrations i ON i.id=pw.integration_id
+        WHERE item.board_id=board.id AND json_extract(item.layout,'$.section')=json_extract(section.value,'$.id')
+            AND item.kind='widget' AND i.name=json_extract(section.value,'$.title')
+    )) ELSE section.value END) ORDER BY section.key)
     FROM json_each(board.sections) section
 )) WHERE sections != '[]';
 ",
@@ -599,7 +606,8 @@ mod tests {
         for migration in &MIGRATIONS[..previous] {
             conn.execute_batch(migration).unwrap();
         }
-        conn.pragma_update(None, "user_version", previous).unwrap();
+        conn.pragma_update(None, "user_version", previous as i64)
+            .unwrap();
         conn.execute_batch(
             r#"
             INSERT INTO integrations(id,name,kind,origin,config)
@@ -631,13 +639,13 @@ mod tests {
                 [],
                 |row| {
                     Ok((
-                        row.get::<_, bool>(0)?,
-                        row.get::<_, bool>(1)?,
-                        row.get::<_, Option<bool>>(2)?,
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
                     ))
                 },
             )
             .unwrap();
-        assert_eq!(markers, (true, true, None));
+        assert_eq!(markers, (String::new(), "provider".into(), None));
     }
 }

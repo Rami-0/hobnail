@@ -208,8 +208,9 @@ pub struct BoardEvent {
 #[derive(Deserialize, Serialize)]
 struct Section {
     id: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    legacy_provider_title: bool,
+    // Empty means the migration identified a candidate with ambiguous origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    legacy_provider_title: Option<String>,
     title: String,
     position: u32,
 }
@@ -615,8 +616,7 @@ pub(super) fn store(
 ) -> Result<(), ApiError> {
     let legacy_titles: HashMap<_, _> = sections(conn, id)?
         .into_iter()
-        .filter(|section| section.legacy_provider_title)
-        .map(|section| (section.id, section.title))
+        .filter_map(|section| Some((section.id, (section.title, section.legacy_provider_title?))))
         .collect();
     let mut sources = HashMap::new();
     for item in doc.sections.iter().flat_map(|section| &section.items) {
@@ -668,7 +668,10 @@ pub(super) fn store(
             )?;
         }
         sections.push(Section {
-            legacy_provider_title: legacy_titles.get(&section_id) == Some(&section.title),
+            legacy_provider_title: legacy_titles
+                .get(&section_id)
+                .filter(|(title, _)| title == &section.title)
+                .map(|(_, origin)| origin.clone()),
             id: section_id,
             title: section.title,
             position: section.position,
@@ -753,16 +756,29 @@ fn mask_provider_widgets(
     user: &Principal,
     doc: &mut BoardDocument,
 ) -> Result<(), ApiError> {
-    let legacy: HashSet<_> = sections(conn, board)?
-        .into_iter()
-        .filter(|section| section.legacy_provider_title)
-        .map(|section| section.id)
-        .collect();
+    let mut invalid_titles = HashMap::new();
+    let mut exists = conn.prepare("SELECT EXISTS (SELECT 1 FROM integrations WHERE id=?1)")?;
+    for section in sections(conn, board)? {
+        if let Some(origin) = section.legacy_provider_title {
+            let hidden = if origin.is_empty() {
+                user.is_scoped()
+            } else {
+                !user.can_see_integration(&origin)
+                    || !exists.query_row([origin], |row| row.get::<_, bool>(0))?
+            };
+            if hidden {
+                invalid_titles.insert(section.id, section.title);
+            }
+        }
+    }
     let mut lookup = conn.prepare(
         "SELECT i.id,i.name FROM provider_widgets pw
          JOIN integrations i ON i.id=pw.integration_id WHERE pw.id=?1",
     )?;
     for section in &mut doc.sections {
+        if section.id.as_ref().and_then(|id| invalid_titles.get(id)) == Some(&section.title) {
+            section.title = "Widgets".into();
+        }
         let provider_only = section.items.iter().all(|item| {
             matches!(&item.payload, BoardPayload::Widget { widget_id, .. } if widget_id.starts_with("provider:"))
         });
@@ -785,10 +801,9 @@ fn mask_provider_widgets(
                 continue;
             }
             *title = Some("Widget unavailable".into());
-            if section.id.as_ref().is_some_and(|id| legacy.contains(id))
-                || integration
-                    .as_ref()
-                    .is_some_and(|(_, name)| section.title == *name)
+            if integration
+                .as_ref()
+                .is_some_and(|(_, name)| section.title == *name)
                 || (integration.is_none() && provider_only)
             {
                 section.title = "Widgets".into();

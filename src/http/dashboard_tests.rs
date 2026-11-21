@@ -2701,9 +2701,9 @@ async fn renaming_and_deleting_an_integration_hide_legacy_widget_titles() {
         .dashboard(|conn| {
             conn.execute(
                 "UPDATE boards SET sections=json_set(sections,
-            '$[0].title','Former private name','$[0].legacy_provider_title',json('true'))
+            '$[0].title','Former private name','$[0].legacy_provider_title',?2)
             WHERE id=?1",
-                [&board],
+                (board.as_str(), integration),
             )?;
             conn.execute(
                 "UPDATE board_items SET config=json_set(config,'$.title','Private widget title')
@@ -2732,6 +2732,15 @@ async fn renaming_and_deleting_an_integration_hide_legacy_widget_titles() {
         !view.to_string().contains("private name")
             && !view.to_string().contains("Private widget title")
     );
+    let mut moved = owner.json("GET", &board_path, Value::Null, 200).await["document"].clone();
+    let items = moved["sections"][0]["items"].take();
+    moved["sections"][0]["items"] = json!([]);
+    moved["sections"].as_array_mut().unwrap().push(json!({
+        "title":"More widgets", "position":1, "items":items
+    }));
+    owner.json("PUT", &board_path, moved, 200).await;
+    let view = shared.json("GET", &board_path, Value::Null, 200).await;
+    assert_eq!(view["document"]["sections"][0]["title"], "Widgets");
     assert_eq!(
         owner
             .call("DELETE", &integration_path, Value::Null)
@@ -2743,7 +2752,7 @@ async fn renaming_and_deleting_an_integration_hide_legacy_widget_titles() {
         let view = reader.json("GET", &board_path, Value::Null, 200).await;
         assert_eq!(view["document"]["sections"][0]["title"], "Widgets");
         assert_eq!(
-            view["document"]["sections"][0]["items"][0]["payload"]["title"],
+            view["document"]["sections"][1]["items"][0]["payload"]["title"],
             "Widget unavailable"
         );
         assert!(
