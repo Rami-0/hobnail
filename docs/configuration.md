@@ -150,12 +150,16 @@ allow_hosts = ["192.168.1.10", "127.0.0.1", "*.example.com"]   # empty = any hos
 ```
 
 Applies to widgets, HTTP checks, icon fetches, notifications and integration
-tests. It matches hostnames (not URL paths). Integration connection tests check
+tests and refreshes. It matches hostnames (not URL paths). Provider requests check
 all resolved addresses and connect using those checked addresses. With no list,
 LAN addresses are allowed but loopback/link-local/metadata, multicast, reserved
 and selected translation addresses are refused. Explicit matching hosts are the
-host operator override; see [integrations](features/integrations.md). Tests stop
-at redirects and trust public certificate roots only; no certificate pinning.
+host operator override. Matching hostnames' DNS answers are trusted for that
+address-policy exemption. Provider requests stop at redirects and use public
+certificate roots by default. The integration editor also supports an explicit
+SHA-256 leaf pin. Public provider HTTP requests require the SQLite dashboard
+setting **Provider internet access**, which is off by default. See
+[Integrations](features/integrations.md).
 
 Widgets, notification channels, `[history]` and `[logs]` are configured in
 the same file: see [features/widgets.md](features/widgets.md),

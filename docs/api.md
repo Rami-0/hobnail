@@ -106,6 +106,41 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 
 ### Board freshness and tour
 
+Provider catalog and installation:
+
+- `GET /api/v1/providers` returns implemented provider descriptors, typed
+  connection fields and per-widget option schemas. The `public_internet` and
+  `contacts` fields describe the provider's outbound behavior.
+- `POST /api/v1/providers/test` accepts `{integration, integration_id?}`.
+  The draft connection uses the integration input below. Supplying an existing
+  ID lets the test reuse its saved credential for the same origin. The
+  response has `ok`, `class`, `message`, `latency_ms` and a `fingerprint` when a
+  failed TLS handshake presented a leaf certificate. The response never
+  includes upstream data. The test does not write the draft or record saved
+  health evidence.
+- `POST /api/v1/providers/install` accepts
+  `{integration, integration_id?, board_id?, widgets?}`. Each selected
+  widget is `{id, options}`, where `id` is a widget descriptor ID. A nonempty
+  selection requires a board. Connection and board updates commit together.
+  When reusing an instance, chosen options update its shared widget and the
+  widget is added if the board does not already contain it. An empty selection
+  saves the connection alone.
+- `GET /api/v1/providers/widgets?integration=<id>` returns a map of widget
+  descriptor IDs to non-secret saved options. Draft tests, installs and this
+  options route require unscoped Admin or Owner access.
+- Integration input uses `name`, `kind` (the provider ID), `base_url`,
+  `enabled`, and optional `icon`, `options`, `fingerprint`, `secret`, and
+  `clear_secret`. A blank/omitted replacement keeps the current credential
+  only for the bound origin. Send `clear_secret: true` for explicit removal.
+  Reads keep the existing `has_secret` status and never return the value.
+  `fingerprint` is 64 hexadecimal digits for an HTTPS URL.
+- Add `board=<id>` to a stream that subscribes to the `widget` topic to
+  receive provider widget updates for that board. The caller must be able
+  to read it. The same widget can be reached from multiple board placements
+  but is polled once. Provider widget views supply a discriminated
+  `structured` display body alongside the existing status and freshness
+  fields.
+
 Widget reads, including board resolution and widget stream events, return
 `status: "stale"` when the latest refresh fails after a successful result.
 `body` and `values` retain that result, `last_good_at` gives its Unix timestamp,
@@ -152,7 +187,7 @@ landing page.
   the board and any new integrations, sets the default board and optional theme,
   clears staged credentials and records the resulting `board_id`. Repeated
   commits return that ID. A stale save, test, or first commit returns 409.
-- Dashboard settings accept either `default_board` or `default_theme`, or both,
+- Dashboard settings accept `default_board`, `default_theme`, and `provider_internet`,
   in a PATCH. Null clears the corresponding setting. A cleared theme falls
   back to `[page].theme` in the configuration file.
 

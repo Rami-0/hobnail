@@ -56,6 +56,14 @@ disabled or deleted. Invitations are single-use, expire, and can be revoked.
   events are administrative data. Streams recheck session validity and grants.
 - Command widgets remain file-only. Config secret references stay destination
   bound; integration credentials are write-only and origin-bound in SQLite.
+- Provider requests never follow redirects. Hobnail checks resolved
+  addresses and connects to those same addresses. A hostname allow-list
+  delegates trust in matching hostnames' DNS answers to the operator.
+  Public provider destinations require a separate Settings opt-in.
+- Provider HTTPS uses public roots by default. A per-integration pin
+  verifies the exact leaf certificate and still requires a valid TLS
+  handshake signature. Compare the presented SHA-256 fingerprint with
+  the service certificate before confirming it. See [Integrations](integrations.md).
 
 **Recovery and upgrades**
 
