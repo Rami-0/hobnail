@@ -48,6 +48,9 @@ export function Collection(props: Props) {
   const [removing, setRemoving] = useState<{ entry: Entry; hash: string }>();
   const [failure, setFailure] = useState<Failure>();
   const [busy, setBusy] = useState(false);
+  const [ordering, setOrdering] = useState<Snapshot>();
+  const displayed = ordering?.entries ?? entries;
+  const orderConflict = !!ordering && (ordering.hash !== hash || failure?.kind === "stale");
   const refs = useRef(new Map<Entry["id"], HTMLElement>());
   const add = useRef<HTMLButtonElement>(null);
   const close = () => setSearch({ add: null, edit: null }, { replace: true });
@@ -58,11 +61,16 @@ export function Collection(props: Props) {
     if (busy) return;
     setBusy(true);
     setFailure(undefined);
-    const result = await api.post<Save>(endpoint(path), { base_hash: operation.action === "delete" ? removing?.hash ?? hash : hash, ...operation });
+    const base = operation.action === "reorder" ? ordering : removing;
+    const result = await api.post<Save>(endpoint(path), { base_hash: base?.hash ?? hash, ...operation });
     if (result.kind === "ok") {
       const undo = result.data.undo_token;
       setRemoving(undefined);
       const latest = await refresh();
+      if (operation.action === "reorder") {
+        setOrdering(undefined);
+        focus();
+      }
       if (undo) {
         const owner = getSession().session?.user?.name;
         const dismiss = toast(result.data.revision ? `Deleted in revision #${result.data.revision}.` : "Deleted.", {
@@ -79,41 +87,64 @@ export function Collection(props: Props) {
           }) },
         });
       } else saved(result.data);
-      focus(operation.action === "delete" ? latest?.entries[0]?.id : operation.id);
+      if (operation.action === "delete") focus(latest?.entries[0]?.id);
+      else if (operation.action === "edit") focus(operation.id);
     } else setFailure(result);
     setBusy(false);
   }
   function move(index: number, offset: number) {
-    const order = entries.map((item) => item.id);
-    const from = order[index];
-    const to = order[index + offset];
-    if (from === undefined || to === undefined) return;
-    order[index] = to;
-    order[index + offset] = from;
-    void run({ action: "reorder", id: typeof from === "number" ? to : from, order });
+    const next = [...displayed];
+    const from = next[index];
+    const to = next[index + offset];
+    if (!from || !to) return;
+    next[index] = to;
+    next[index + offset] = from;
+    setOrdering({ hash: ordering?.hash ?? hash, entries: next });
+    setFailure(undefined);
   }
-  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy} retry={() => { void refreshEditingSession().then((session) => { if (session) { setFailure(undefined); void refresh(); } else setFailure({ kind: "sign_in", status: 401, message: editingSessionRequired }); }); }} rebase={() => { void refresh().then(() => setFailure(undefined)); }} />;
+  function cancelOrder() {
+    setOrdering(undefined);
+    setFailure(undefined);
+    if (orderConflict) void refresh();
+    focus();
+  }
+  function saveOrder() {
+    if (ordering && !orderConflict) void run({ action: "reorder", order: ordering.entries.map((entry) => entry.id) });
+  }
+  const feedback = <FailureNote failure={failure?.kind === "invalid" ? { ...failure, field: undefined } : failure} busy={busy}
+    retry={() => { void refreshEditingSession().then((session) => {
+      if (!session) setFailure({ kind: "sign_in", status: 401, message: editingSessionRequired });
+      else if (ordering) saveOrder();
+      else { setFailure(undefined); void refresh(); }
+    }); }}
+    rebase={ordering ? undefined : () => { void refresh().then(() => setFailure(undefined)); }} />;
   return <section className="settings-section" data-testid={`settings-${kind}-list`}>
     {!editorOnly && <>
-      <CardHeader title={title} action={<Button ref={add} variant={props.secondaryAction ? "outline" : "default"} onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>} />
+      <CardHeader title={title} action={<Button disabled={!!ordering} ref={add} variant={props.secondaryAction ? "outline" : "default"} onClick={() => setSearch({ add: kind, edit: null })}>Add {kind}</Button>} />
       {!removing && feedback}
+      {ordering && <div className="settings-actions">
+        <span role="status">{orderConflict ? "The collection changed. Cancel and reorder the latest list." : "Order changes are unsaved."}</span>
+        <Button disabled={busy} data-testid="collection-order-cancel" onClick={cancelOrder}>Cancel</Button>
+        <Button busy={busy} disabled={orderConflict || displayed.every((item, index) => item.id === entries[index]?.id)}
+          variant="default" data-testid="collection-order-save" onClick={saveOrder}>Save order</Button>
+      </div>}
       {entries.length === 0 && <p className="muted">No entries yet.</p>}
-      <div className="settings-list">{entries.map((item, index) => {
+      <div className="settings-list">{displayed.map((item, index) => {
         const name = String(item.item.name ?? item.item.title ?? item.item.pattern ?? item.id);
         return <div className="settings-row" key={item.id} tabIndex={-1} ref={(element) => {
           if (element) refs.current.set(item.id, element); else refs.current.delete(item.id);
         }}>
           <div><h3>{name}</h3>{row?.(item)}{item.locked && <p>{item.locked_reason ?? "Read-only"}</p>}</div>
           <div className="settings-actions">
-            {item.enabled !== undefined && <Switch label="Enabled" checked={item.enabled} busy={busy} disabled={item.locked}
+            {!ordering && item.enabled !== undefined && <Switch label="Enabled" checked={item.enabled} busy={busy} disabled={item.locked}
               onChange={(enabled) => { void run({ action: "edit", id: item.id, item: props.body?.({ enabled }, item.item) ?? { enabled } }); }} />}
             {reorder && <>
-              <Button variant="ghost" size="icon" aria-label={`Move ${name} up`} disabled={busy || index === 0} onClick={() => move(index, -1)}>↑</Button>
-              <Button variant="ghost" size="icon" aria-label={`Move ${name} down`} disabled={busy || index === entries.length - 1} onClick={() => move(index, 1)}>↓</Button>
+              <Button variant="ghost" size="icon" aria-label={`Move ${name} up`} disabled={busy || orderConflict || index === 0} onClick={() => move(index, -1)}>↑</Button>
+              <Button variant="ghost" size="icon" aria-label={`Move ${name} down`} disabled={busy || orderConflict || index === displayed.length - 1} onClick={() => move(index, 1)}>↓</Button>
             </>}
-            {extra?.(item)}
+            {!ordering && <>{extra?.(item)}
             <Button variant="ghost" aria-label={`Edit ${name}`} disabled={item.locked || busy} onClick={() => setSearch({ add: null, edit: `${kind}:${item.id}` })}>Edit</Button>
-            <Button variant="ghost" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving({ entry: item, hash }); }}>Delete</Button>
+            <Button variant="ghost" aria-label={`Delete ${name}`} disabled={item.locked || busy} onClick={() => { setFailure(undefined); setRemoving({ entry: item, hash }); }}>Delete</Button></>}
           </div>
         </div>;
       })}</div>

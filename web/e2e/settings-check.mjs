@@ -179,9 +179,30 @@ try {
       const marks = ok(await call("/api/settings/bookmarks", "GET", undefined, owner), "read bookmarks for ordering");
       ok(await call("/api/settings/bookmarks", "POST", { base_hash: marks.hash, action: "add", item: { name: `Order target ${label}`, url: "https://example.com/order" } }, owner), "seed reorder target");
       await go("/app/settings/bookmarks", text(".settings-row", `Order target ${label}`));
-      const beforeOrder = await tab.ev(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].map(e=>e.textContent)`);
-      await inp.click(`button[aria-label=${q("Move " + name + " down")}]`);
-      await wait(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].findIndex(e=>e.textContent===${q(name)}) === ${beforeOrder.indexOf(name)+1}`, "bookmark moves down");
+      const order = () => tab.ev(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].map(e=>e.textContent)`);
+      const revisions = async () => ok(await call("/api/settings/revisions", "GET", undefined, owner), "read reorder revision history").revisions;
+      const beforeOrder = await order();
+      const beforeRevision = (await revisions())[0].id;
+      const moves = async () => {
+        for (const direction of ["down", "up", "down"]) {
+          await inp.click(`button[aria-label=${q("Move " + name + " " + direction)}]`);
+        }
+        const staged = await order();
+        assert.equal(staged.indexOf(name), beforeOrder.indexOf(name) + 1, "all arrow clicks stage a single final order");
+        assert.equal((await revisions())[0].id, beforeRevision, "moving entries creates no revisions");
+        return staged;
+      };
+      await moves();
+      await inp.click('[data-testid="collection-order-cancel"]');
+      assert.deepEqual(await order(), beforeOrder, "Cancel restores the original order");
+      assert.equal((await revisions())[0].id, beforeRevision, "Cancel creates no revisions");
+      const staged = await moves();
+      await inp.click('[data-testid="collection-order-save"]');
+      await wait(`!${present('[data-testid="collection-order-save"]')}`, "reorder save ends the editing session");
+      assert.deepEqual(await order(), staged, "Save keeps the staged order");
+      const after = await revisions();
+      assert.equal(after[0].note, "bookmarks: reordered");
+      assert.equal(after[1].id, beforeRevision, "one Save creates exactly one revision");
       await go("/app/overview?add=widget", present(editor));
       await inp.key("Escape");
       await go("/app/alerts?add=channel", present(editor));
