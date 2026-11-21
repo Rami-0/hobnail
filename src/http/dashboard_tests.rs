@@ -1835,6 +1835,106 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
 }
 
 #[tokio::test]
+async fn provider_widgets_require_board_and_integration_grants() {
+    use std::time::Duration;
+
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let state = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    let run = tokio::spawn(crate::live::run(state.clone()));
+    let board = owner.board("Shared board").await;
+    let integration = owner.json("POST", "/api/v1/providers/install", json!({
+        "integration":{"name":"Private service name","kind":"http","enabled":true,
+                       "base_url":format!("http://{}", upstream.local_addr().unwrap()),"secret":"fake-token"},
+        "board_id":board,"widgets":[{"id":"json","options":{"paths":["value"]}}]
+    }), 201).await;
+    let id = &integration["id"];
+    let board_only = json!({"boards":[board],"integrations":[]});
+    let both = json!({"boards":[board],"integrations":[id]});
+    let viewer = owner
+        .guest("provider-viewer", "viewer", board_only.clone())
+        .await;
+    let admin = owner
+        .guest("provider-editor", "admin", board_only.clone())
+        .await;
+    let viewer_id = state
+        .db
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .find(|account| account.name == "provider-viewer")
+        .unwrap()
+        .id;
+    let scopes = format!("/api/v1/users/{viewer_id}/scopes");
+    let path = format!("/api/v1/boards/{board}");
+    let stream_path = format!("/api/v1/stream?topics=widget,boards&board={board}");
+    let redacted = viewer.json("GET", &path, Value::Null, 200).await;
+    assert_eq!(redacted["resolved"][0]["widget"], Value::Null);
+    assert!(!redacted.to_string().contains("Private service name"));
+    assert!(redacted.to_string().contains("Widget unavailable"));
+    let mut doc = admin.json("GET", &path, Value::Null, 200).await["document"].clone();
+    let mut copied = doc["sections"][0]["items"][0].clone();
+    let widget = copied["payload"]["widget_id"].as_str().unwrap().to_owned();
+    copied.as_object_mut().unwrap().remove("id");
+    doc["sections"][0]["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(copied);
+    let refused = admin.json("PUT", &path, doc, 400).await;
+    assert_eq!(refused["error"]["field"], "widget_id");
+
+    let (mut stream, _) = Stream::open(viewer.addr, &stream_path, &viewer.cookie).await;
+    assert_eq!(stream.next().await.0, "hello");
+    assert!(stream.quiet(100).await);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), upstream.accept())
+            .await
+            .is_err()
+    );
+
+    owner
+        .json("PUT", &scopes, json!({"scopes":both}), 200)
+        .await;
+    assert_eq!(stream.next().await.0, "config");
+    let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(upstream_request(&mut socket)
+        .await
+        .contains("authorization: Bearer fake-token"));
+    let body = r#"{"value":"private reading"}"#;
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let (topic, body) = stream.next().await;
+    assert_eq!(topic, "widget");
+    assert_eq!(
+        body["structured"]["rows"],
+        json!([["value", "private reading"]])
+    );
+
+    owner
+        .json("PUT", &scopes, json!({"scopes":board_only}), 200)
+        .await;
+    assert_eq!(stream.next().await.0, "config");
+    let _ = state.events.send(format!("w-{widget}").into());
+    assert!(stream.quiet(150).await);
+    let hidden = viewer.json("GET", &path, Value::Null, 200).await;
+    assert_eq!(hidden["resolved"][0]["widget"], Value::Null);
+    assert!(!hidden.to_string().contains("private reading"));
+    run.abort();
+}
+
+#[tokio::test]
 async fn provider_requests_are_capped_in_size_and_time_and_block_public_addresses() {
     use std::time::Duration;
     let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();

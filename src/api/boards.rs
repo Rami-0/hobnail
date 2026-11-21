@@ -542,22 +542,30 @@ impl<'a> PayloadValidator<'a> {
                 }
                 super::validate_label(widget_id, "widget_id")?;
                 let unchanged = matches!(previous, Some(BoardPayload::Widget { widget_id: old, .. }) if old == widget_id);
-                if !unchanged
-                    && (self
-                        .visible_widgets
-                        .as_ref()
-                        .is_some_and(|targets| !targets.contains(widget_id))
-                        || !self
-                            .config
-                            .widgets
-                            .iter()
-                            .any(|widget| widget.id == *widget_id)
-                            && !super::provider_widgets::exists(self.conn, widget_id)?)
-                {
-                    return Err(ApiError::bad_request(
-                        "invalid widget reference",
-                        Some("widget_id"),
-                    ));
+                if !unchanged {
+                    let allowed = if widget_id.starts_with("provider:") {
+                        super::provider_widgets::placement_scope(self.conn, widget_id)?.is_some_and(
+                            |(board, integration)| {
+                                self.user.can_see_board(&board)
+                                    && self.user.can_see_integration(&integration)
+                            },
+                        )
+                    } else {
+                        self.visible_widgets
+                            .as_ref()
+                            .is_none_or(|targets| targets.contains(widget_id))
+                            && self
+                                .config
+                                .widgets
+                                .iter()
+                                .any(|widget| widget.id == *widget_id)
+                    };
+                    if !allowed {
+                        return Err(ApiError::bad_request(
+                            "invalid widget reference",
+                            Some("widget_id"),
+                        ));
+                    }
                 }
             }
             BoardPayload::Integration {
@@ -674,12 +682,93 @@ fn live_containers(state: &AppState, now: i64) -> Vec<(ContainerMatch, Container
     rows
 }
 
+// Keep the placement IDs so a scoped editor can round-trip the board.
+fn mask_provider_widgets(
+    conn: &Connection,
+    user: &Principal,
+    doc: &mut BoardDocument,
+) -> Result<(), ApiError> {
+    if !user.is_scoped() {
+        return Ok(());
+    }
+    let mut lookup = conn.prepare(
+        "SELECT i.id,i.name FROM provider_widgets pw
+         JOIN integrations i ON i.id=pw.integration_id WHERE pw.id=?1",
+    )?;
+    for section in &mut doc.sections {
+        for item in &mut section.items {
+            let BoardPayload::Widget { widget_id, title } = &mut item.payload else {
+                continue;
+            };
+            if !widget_id.starts_with("provider:") {
+                continue;
+            }
+            let integration = lookup
+                .query_row([widget_id.as_str()], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .optional()?;
+            if let Some((_, name)) = integration.filter(|(id, _)| !user.can_see_integration(id)) {
+                *title = Some("Widget unavailable".into());
+                if section.title == name {
+                    section.title = "Widgets".into();
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn restore_masked_titles(
+    input: &mut BoardDocument,
+    original: &BoardDocument,
+    masked: &BoardDocument,
+) {
+    let originals: HashMap<_, _> = original.sections.iter().map(|s| (&s.id, s)).collect();
+    let projections: HashMap<_, _> = masked.sections.iter().map(|s| (&s.id, s)).collect();
+    let mut titles = HashMap::new();
+    for (original, masked) in original.sections.iter().zip(&masked.sections) {
+        for (original, masked) in original.items.iter().zip(&masked.items) {
+            if let (
+                BoardPayload::Widget { widget_id, title },
+                BoardPayload::Widget {
+                    title: projected, ..
+                },
+            ) = (&original.payload, &masked.payload)
+            {
+                if title != projected {
+                    titles.insert(&original.id, (widget_id, title, projected));
+                }
+            }
+        }
+    }
+    for section in &mut input.sections {
+        if let (Some(original), Some(masked)) =
+            (originals.get(&section.id), projections.get(&section.id))
+        {
+            if section.title == masked.title {
+                section.title.clone_from(&original.title);
+            }
+        }
+        for item in &mut section.items {
+            if let (BoardPayload::Widget { widget_id, title }, Some((old_id, original, masked))) =
+                (&mut item.payload, titles.get(&item.id))
+            {
+                if widget_id == *old_id && title == *masked {
+                    title.clone_from(original);
+                }
+            }
+        }
+    }
+}
+
 fn resolve(
     state: &AppState,
     now: i64,
     board: BoardSummary,
     document: BoardDocument,
     integrations: Vec<IntegrationView>,
+    user: &Principal,
 ) -> BoardView {
     let config = state.config.current();
     let mut containers = HashMap::new();
@@ -720,12 +809,15 @@ fn resolve(
                 container.is_none()
             }
             BoardPayload::Widget { widget_id, .. } => {
-                widget = config
-                    .widgets
-                    .iter()
-                    .find(|w| w.id == *widget_id)
-                    .map(|config| super::widgets::view(state, config))
-                    .or_else(|| super::provider_widgets::view(state, widget_id));
+                widget = if widget_id.starts_with("provider:") {
+                    super::provider_widgets::view(state, user, &board.id, widget_id)
+                } else {
+                    config
+                        .widgets
+                        .iter()
+                        .find(|w| w.id == *widget_id)
+                        .map(|config| super::widgets::view(state, config))
+                };
                 widget.is_none()
             }
             BoardPayload::Integration { integration_id, .. } => {
@@ -901,10 +993,14 @@ pub(super) async fn route(
         Handler::Board => {
             let (board, doc, visible) = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c, id)?;
-                let doc = document(c, &board)?;
+                let mut doc = document(c, &board)?;
+                mask_provider_widgets(c, user, &mut doc)?;
                 Ok((board, doc, integrations::list(state, c, user)?))
             })?;
-            super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
+            super::json(
+                StatusCode::OK,
+                &resolve(state, now, board, doc, visible, user),
+            )
         }
         Handler::BoardSuggestions => {
             let (doc, integrations, targets) = db.dashboard(|c| -> Result<_, ApiError> {
@@ -927,36 +1023,37 @@ pub(super) async fn route(
             super::json(StatusCode::CREATED, &board)
         }
         Handler::BoardSave => {
-            let input: BoardDocument = super::read_json(req, MAX_DOCUMENT).await?;
+            let mut input: BoardDocument = super::read_json(req, MAX_DOCUMENT).await?;
             let result = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c, id)?;
                 if board.version != input.version {
                     return Ok(Err(board.version));
                 }
-                validate(
-                    &input,
-                    &document(c, &board)?,
-                    user,
-                    c,
-                    &state.config.current(),
-                )?;
+                let original = document(c, &board)?;
+                validate(&input, &original, user, c, &state.config.current())?;
+                if user.is_scoped() {
+                    let mut masked = original.clone();
+                    mask_provider_widgets(c, user, &mut masked)?;
+                    restore_masked_titles(&mut input, &original, &masked);
+                }
                 store(c, id, input, now)?;
                 c.execute(
                     "DELETE FROM drafts WHERE user_id=?1 AND key=?2",
                     params![user.id, draft_key],
                 )?;
                 let board = get(c, id)?;
-                Ok(Ok((
-                    document(c, &board)?,
-                    integrations::list(state, c, user)?,
-                    board,
-                )))
+                let mut doc = document(c, &board)?;
+                mask_provider_widgets(c, user, &mut doc)?;
+                Ok(Ok((doc, integrations::list(state, c, user)?, board)))
             })?;
             match result {
                 Ok((doc, visible, board)) => {
                     publish(state, id, board.version);
                     state.changed("groups");
-                    super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
+                    super::json(
+                        StatusCode::OK,
+                        &resolve(state, now, board, doc, visible, user),
+                    )
                 }
                 Err(version) => conflict(version),
             }
@@ -1010,17 +1107,16 @@ pub(super) async fn route(
                     params![user.id,draft_key,now-7*86400], |r| Ok((r.get(0)?,r.get(1)?)),
                 ).optional()?;
                 row.map(|(value, updated)| {
-                    Ok(BoardDraft {
-                        document: decode(&value)?,
-                        updated,
-                    })
+                    let mut document = decode(&value)?;
+                    mask_provider_widgets(c, user, &mut document)?;
+                    Ok(BoardDraft { document, updated })
                 })
                 .transpose()
             })?;
             super::json(StatusCode::OK, &draft)
         }
         Handler::BoardDraftSave => {
-            let input: BoardDocument = super::read_json(req, MAX_DOCUMENT).await?;
+            let mut input: BoardDocument = super::read_json(req, MAX_DOCUMENT).await?;
             let result = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c,id)?;
                 if board.version != input.version { return Ok(Err(board.version)); }
@@ -1028,6 +1124,7 @@ pub(super) async fn route(
                 c.execute("INSERT INTO drafts (user_id,key,value,updated) VALUES (?1,?2,?3,?4)
                     ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value,updated=excluded.updated",
                     params![user.id,draft_key,encode(&input)?,now])?;
+                mask_provider_widgets(c, user, &mut input)?;
                 Ok(Ok(BoardDraft { document:input,updated:now }))
             })?;
             match result {

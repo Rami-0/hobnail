@@ -338,10 +338,16 @@ async fn run(
         )
     };
     provider_viewer.set(provider_targets(&principal));
-    for id in provider_viewer.ids() {
-        if let Some(view) = super::provider_widgets::view(&st, id) {
-            if tx.send(event("widget", &view)).await.is_err() {
+    if let Some(board) = &board {
+        for id in provider_viewer.ids() {
+            let Ok(permit) = tx.reserve().await else {
                 return;
+            };
+            let Some(account) = account(&st, &session_hash).await else {
+                return;
+            };
+            if let Some(view) = super::provider_widgets::view(&st, &account, board, id) {
+                permit.send(event("widget", &view));
             }
         }
     }
@@ -411,8 +417,13 @@ async fn run(
                         event("alerts", &serde_json::json!({"firing": super::alerts::firing(&st).len()}))
                     }
                     raw if raw.starts_with("w-provider:") && provider_viewer.includes(&raw[2..]) => {
-                        let Some(widget) = super::provider_widgets::view(&st, &raw[2..]) else { continue };
-                        event("widget", &widget)
+                        let Some(board) = &board else { continue };
+                        let Ok(permit) = tx.reserve().await else { break };
+                        let Some(account) = self::account(&st, &session_hash).await else { break };
+                        if let Some(widget) = super::provider_widgets::view(&st, &account, board, &raw[2..]) {
+                            permit.send(event("widget", &widget));
+                        }
+                        continue;
                     }
                     raw if topics.widget && raw.starts_with("w-") && visible_widget(&targets, &raw[2..]) => {
                         let config = st.config.current();
@@ -432,7 +443,7 @@ async fn run(
                     let Some(account) = account(&st, &session_hash).await else { break };
                     targets = widget_targets(&st, &account, topics.widget).await;
                     guard.set_widgets(widget_viewer(&targets));
-                        provider_viewer.set(provider_targets(&account));
+                    provider_viewer.set(provider_targets(&account));
                     principal = account;
                     sig = None;
                     event("resync", &serde_json::json!({}))
@@ -451,7 +462,7 @@ async fn run(
                 let Some(account) = account(&st, &session_hash).await else { break };
                 targets = widget_targets(&st, &account, topics.widget).await;
                 guard.set_widgets(widget_viewer(&targets));
-                        provider_viewer.set(provider_targets(&account));
+                provider_viewer.set(provider_targets(&account));
                 principal = account;
                 Bytes::from_static(b": ping\n\n")
             },

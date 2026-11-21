@@ -247,12 +247,16 @@ fn validate_options(widget: &providers::Widget, options: &mut Values) -> Result<
         .map_err(|field| ApiError::bad_request("Enter a valid widget option.", Some(field)))
 }
 
-pub(super) fn exists(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+pub(super) fn placement_scope(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<(String, String)>> {
     conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM provider_widgets WHERE id=?1)",
+        "SELECT board_id, integration_id FROM provider_widgets WHERE id=?1",
         [id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )
+    .optional()
 }
 
 /// Copies a provider widget's options when an existing widget is used in a new
@@ -289,8 +293,13 @@ fn cache_key(provider: &str, integration: &str, widget: &str, options: &Values) 
     )
 }
 
-pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
-    if !id.starts_with("provider:") {
+pub(super) fn view(
+    state: &AppState,
+    user: &Principal,
+    board: &str,
+    id: &str,
+) -> Option<WidgetView> {
+    if !id.starts_with("provider:") || !user.can_see_board(board) {
         return None;
     }
     state
@@ -300,8 +309,12 @@ pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
                 .query_row(
                     "SELECT i.name, i.kind, json_extract(i.config,'$.icon'), pw.widget,
                     coalesce(json_extract(i.config,'$.enabled'),1), pw.integration_id, pw.options
-             FROM provider_widgets pw JOIN integrations i ON i.id=pw.integration_id WHERE pw.id=?1",
-                    [id],
+             FROM provider_widgets pw JOIN integrations i ON i.id=pw.integration_id
+             WHERE pw.id=?1 AND pw.board_id=?2 AND EXISTS (
+                SELECT 1 FROM board_items item WHERE item.board_id=?2 AND item.kind='widget'
+                AND json_extract(item.config,'$.widget_id')=pw.id
+             )",
+                    [id, board],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
@@ -318,6 +331,9 @@ pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
             let Some((name, provider, icon, widget, enabled, integration, options)) = entry else {
                 return Ok(None);
             };
+            if !user.can_see_integration(&integration) {
+                return Ok(None);
+            }
             let Some(provider) = providers::get(&provider) else {
                 return Ok(None);
             };
@@ -354,12 +370,21 @@ pub(super) fn board_targets(
         .db
         .dashboard(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT DISTINCT pw.id FROM board_items item
+                "SELECT DISTINCT pw.id, pw.integration_id FROM board_items item
              JOIN provider_widgets pw ON pw.id=json_extract(item.config,'$.widget_id')
-             WHERE item.board_id=?1 AND item.kind='widget'",
+             WHERE item.board_id=?1 AND pw.board_id=?1 AND item.kind='widget'",
             )?;
-            let rows = stmt.query_map([board], |row| row.get(0))?;
-            rows.collect::<rusqlite::Result<_>>()
+            let rows = stmt.query_map([board], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut targets = HashSet::new();
+            for row in rows {
+                let (id, integration) = row?;
+                if user.can_see_integration(&integration) {
+                    targets.insert(id);
+                }
+            }
+            Ok::<_, rusqlite::Error>(targets)
         })
         .unwrap_or_default()
 }

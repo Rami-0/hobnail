@@ -105,6 +105,13 @@ require the switch even if the hostname is in `allow_hosts`. Hostname
 resolution still uses the server's DNS. The switch is for catalog providers,
 independent of file-configured widgets or dashboard-icons.
 
+Provider widgets require access to both the board and the integration. A board
+viewer without the integration grant sees a neutral **Widget unavailable**
+placeholder. That viewer's live stream does not receive widget data or start
+polling. Removing the integration grant also removes access on open streams.
+An admin can add a provider widget only when granted access to its integration
+and the board.
+
 Provider widgets refresh only while a live board subscription includes them.
 Multiple viewers share a fetch with the same effective inputs. Closing the
 last subscription stops polling and cancels its in-flight fetch. Hobnail
