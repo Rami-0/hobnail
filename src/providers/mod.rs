@@ -49,6 +49,7 @@ mod radarr;
 mod sonarr;
 mod tailscale;
 mod technitium;
+mod transmission;
 mod uptime_kuma;
 mod wg_easy;
 
@@ -80,6 +81,7 @@ pub const REGISTRY: &[Provider] = &[
     glances::GLANCES,
     plex::PLEX,
     immich::IMMICH,
+    transmission::TRANSMISSION,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

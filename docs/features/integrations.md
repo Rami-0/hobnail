@@ -359,6 +359,26 @@ Verified from:
 
 UNVERIFIED: Releases without the legacy GET /api/jobs endpoint, which v2.5.6 marks deprecated, and live reverse proxies.
 
+## Transmission
+
+Enter the Web UI origin, including any reverse-proxy prefix before
+`/transmission/rpc`. Supply the RPC username and password if the daemon
+uses HTTP Basic authentication. The RPC credential has no read-only scope.
+
+**Torrent activity** shows global transfer speeds and the exact active
+torrent count reported by `session-stats`. It lists up to ten downloading,
+seeding or verifying torrents from the `recently-active` RPC subset.
+If that subset exceeds the cap, speeds and the total remain available.
+Hobnail sends the real RPC on a cold connection and retries once with
+the session ID supplied by an HTTP 409 response.
+
+Verified from:
+
+- [Upstream 4.0.6 RPC specification](https://github.com/transmission/transmission/blob/4.0.6/docs/rpc-spec.md)
+- [Upstream 4.0.6 statistics and torrent selection implementation](https://github.com/transmission/transmission/blob/4.0.6/libtransmission/rpcimpl.cc)
+
+UNVERIFIED: Nonstandard RPC path suffixes, releases that remove legacy RPC and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
