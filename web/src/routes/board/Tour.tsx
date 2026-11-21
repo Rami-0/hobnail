@@ -90,7 +90,7 @@ export default function Tour({ admin, empty, onClose }: { admin: boolean; empty:
 
   return <Card ref={panel} className="board-tour" aria-labelledby="board-tour-title" data-testid="board-tour">
     <h2 id="board-tour-title">Board tour · {index + 1} of {steps.length}</h2>
-    <p id="board-tour-description">{description}</p>
+    <p id="board-tour-description" aria-live="polite">{description}</p>
     {error && <p role="alert" className="bad-fg">{error}</p>}
     <div className="acts">
       <Button ref={next} variant="default" busy={busy} data-testid="tour-next" onClick={() => last ? void finish() : setIndex(index + 1)}>{last ? "Finish" : "Next"}</Button>

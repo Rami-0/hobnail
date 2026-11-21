@@ -117,7 +117,11 @@ async function capture(label, root, anchor) {
 }
 async function step(index, shot) {
   await require(steps[index], `${el(attr("setup-step"))}?.textContent === ${q(steps[index])}`);
-  await require("wizard moves focus to the step heading", `document.activeElement === ${el(attr("setup-step"))}`);
+  await require("wizard moves focus to the visible step heading", `(() => {
+    const heading = ${el(attr("setup-step"))};
+    const r = heading.getBoundingClientRect();
+    return document.activeElement === heading && r.top >= 0 && r.bottom <= innerHeight;
+  })()`);
   if (shot) await capture(shots[index], wizard);
 }
 async function move(action, index, shot) {
@@ -166,9 +170,9 @@ try {
   for (let index = 0; index < 4; index++) {
     await move("skip", index + 1);
     await move("back", index);
+    await move("continue", index + 1);
   }
-
-  await move("continue", 1);
+  for (let index = 3; index >= 1; index--) await move("back", index);
   await require("Docker discovery result is explicit", text(wizard, empty ? "cannot reach Docker" : "Docker is reachable"));
   await capture(shots[1], wizard);
   await move("continue", 2);
@@ -177,12 +181,12 @@ try {
   const readingTitle = "Fixture reading";
   const name = `${selected} input[id$="-name"]`;
   const group = `${selected} input[id$="-group"]`;
-  let lastTest = 0;
+  const testTimes = [];
   if (!empty) {
     await fill("#setup-search", readingTitle);
     await click(".suggestions .cb");
     await fill(group, "Home tools");
-    await fill("#setup-search", "svc001");
+    await fill("#setup-search", "Service 1");
     await click(".suggestions .cb");
     await fill(`${selected}:nth-of-type(2) input[id$="-name"]`, "Selected service");
     await require("discovery edits autosave", text(".setup-actions [role=status]", "Draft saved"));
@@ -218,10 +222,13 @@ try {
     await require("Skip and Back retain entered connection fields", `${el(link)}?.value === "https://example.test/home" && ${el(url)}?.value === ${q(endpoint)} && ${el(secret)}?.value.startsWith("unsaved")`);
     await fill(secret, "fixture-credential");
     await click(`${items}:last-of-type ${attr("setup-test")}`);
-    lastTest = Date.now();
+    testTimes.push(Date.now());
     await require("upstream 503 is explained in the wizard", text(attr("setup-verdict"), "non-success status"));
     await require("stored credential is masked", `${el(secret)}?.value === "" && ${text(wizard, "A credential is saved for")}`);
     await capture("failed-connection", wizard, attr("setup-verdict"));
+    await move("back", 2);
+    await move("continue", 3);
+    await require("the staged connection survives Back and Continue", `${el(url)}?.value === ${q(endpoint)} && ${el(secret)}?.value === ""`);
   }
   await move("continue", 4, true);
   await require("review reflects selected groups or the real empty board", text(wizard, empty ? "Your board will be empty" : "Home tools"));
@@ -265,16 +272,17 @@ try {
     const integrationTest = attr("integration-test");
     const settings = "/app/settings/integrations";
     const test = async (state, description, expression) => {
+      if (testTimes.length === 3) await sleep(Math.max(0, 10500 - (Date.now() - testTimes.shift())));
       await fixtureState(state);
       await click(integrationTest);
       await require(description, expression);
+      testTimes.push(Date.now());
     };
     await navigate(settings);
     await test("fail", "initial integration failure has no success or stale data",
       `${text(integration, "non-success status")} && !${text(integration, "Last success")} && !${el(stale)}`);
     await test("good", "integration records a successful connection and latency", `${text(integration, "Connection succeeded")} && ${text(integration, "Last success")}`);
     const latency = (await tab.ev(`${el(integration)}.querySelector("small").textContent`)).split(" · ").at(-1);
-    await sleep(Math.max(0, 10500 - (Date.now() - lastTest)));
     await test("fail", "failed integration refresh retains previous latency under a stale badge",
       `${text(stale, "stale · ")} && ${el(stale)}.title.includes("non-success status") && ${text(integration, latency)}`);
     await navigate(route);

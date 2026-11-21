@@ -82,6 +82,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   const chosenTheme = doc.theme ?? draft.theme_default;
 
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
     heading.current?.focus({ preventScroll: true });
   }, [step]);
 
