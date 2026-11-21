@@ -208,6 +208,8 @@ pub struct BoardEvent {
 #[derive(Deserialize, Serialize)]
 struct Section {
     id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    legacy_provider_title: bool,
     title: String,
     position: u32,
 }
@@ -289,13 +291,15 @@ fn encode(value: &impl Serialize) -> Result<String, ApiError> {
     serde_json::to_string(value).map_err(|_| rusqlite::Error::InvalidQuery.into())
 }
 
+fn sections(conn: &Connection, board: &str) -> Result<Vec<Section>, ApiError> {
+    let raw: String = conn.query_row("SELECT sections FROM boards WHERE id=?1", [board], |r| {
+        r.get(0)
+    })?;
+    decode(&raw)
+}
+
 pub(super) fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardDocument, ApiError> {
-    let raw: String = conn.query_row(
-        "SELECT sections FROM boards WHERE id=?1",
-        [&board.id],
-        |r| r.get(0),
-    )?;
-    let mut sections: Vec<_> = decode::<Vec<Section>>(&raw)?
+    let mut sections: Vec<_> = sections(conn, &board.id)?
         .into_iter()
         .map(|s| BoardSection {
             id: Some(s.id),
@@ -609,6 +613,11 @@ pub(super) fn store(
     doc: BoardDocument,
     now: i64,
 ) -> Result<(), ApiError> {
+    let legacy_titles: HashMap<_, _> = sections(conn, id)?
+        .into_iter()
+        .filter(|section| section.legacy_provider_title)
+        .map(|section| (section.id, section.title))
+        .collect();
     conn.execute("DELETE FROM board_items WHERE board_id=?1", [id])?;
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
@@ -645,6 +654,7 @@ pub(super) fn store(
             )?;
         }
         sections.push(Section {
+            legacy_provider_title: legacy_titles.get(&section_id) == Some(&section.title),
             id: section_id,
             title: section.title,
             position: section.position,
@@ -738,17 +748,23 @@ fn repair_legacy_draft(
 // Keep the placement IDs so a scoped editor can round-trip the board.
 fn mask_provider_widgets(
     conn: &Connection,
+    board: &str,
     user: &Principal,
     doc: &mut BoardDocument,
 ) -> Result<(), ApiError> {
-    if !user.is_scoped() {
-        return Ok(());
-    }
+    let legacy: HashSet<_> = sections(conn, board)?
+        .into_iter()
+        .filter(|section| section.legacy_provider_title)
+        .map(|section| section.id)
+        .collect();
     let mut lookup = conn.prepare(
         "SELECT i.id,i.name FROM provider_widgets pw
          JOIN integrations i ON i.id=pw.integration_id WHERE pw.id=?1",
     )?;
     for section in &mut doc.sections {
+        let provider_only = section.items.iter().all(|item| {
+            matches!(&item.payload, BoardPayload::Widget { widget_id, .. } if widget_id.starts_with("provider:"))
+        });
         for item in &mut section.items {
             let BoardPayload::Widget { widget_id, title } = &mut item.payload else {
                 continue;
@@ -761,11 +777,20 @@ fn mask_provider_widgets(
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
                 .optional()?;
-            if let Some((_, name)) = integration.filter(|(id, _)| !user.can_see_integration(id)) {
-                *title = Some("Widget unavailable".into());
-                if section.title == name {
-                    section.title = "Widgets".into();
-                }
+            if integration
+                .as_ref()
+                .is_some_and(|(id, _)| user.can_see_integration(id))
+            {
+                continue;
+            }
+            *title = Some("Widget unavailable".into());
+            if section.id.as_ref().is_some_and(|id| legacy.contains(id))
+                || integration
+                    .as_ref()
+                    .is_some_and(|(_, name)| section.title == *name)
+                || (integration.is_none() && provider_only)
+            {
+                section.title = "Widgets".into();
             }
         }
     }
@@ -1047,7 +1072,7 @@ pub(super) async fn route(
             let (board, doc, visible) = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c, id)?;
                 let mut doc = document(c, &board)?;
-                mask_provider_widgets(c, user, &mut doc)?;
+                mask_provider_widgets(c, id, user, &mut doc)?;
                 Ok((board, doc, integrations::list(state, c, user)?))
             })?;
             super::json(
@@ -1086,7 +1111,7 @@ pub(super) async fn route(
                 validate(&input, &original, user, c, &state.config.current())?;
                 if user.is_scoped() {
                     let mut masked = original.clone();
-                    mask_provider_widgets(c, user, &mut masked)?;
+                    mask_provider_widgets(c, id, user, &mut masked)?;
                     restore_masked_titles(&mut input, &original, &masked);
                 }
                 store(c, id, input, now)?;
@@ -1096,7 +1121,7 @@ pub(super) async fn route(
                 )?;
                 let board = get(c, id)?;
                 let mut doc = document(c, &board)?;
-                mask_provider_widgets(c, user, &mut doc)?;
+                mask_provider_widgets(c, id, user, &mut doc)?;
                 Ok(Ok((doc, integrations::list(state, c, user)?, board)))
             })?;
             match result {
@@ -1162,7 +1187,7 @@ pub(super) async fn route(
                 row.map(|(value, updated)| {
                     let mut document = decode(&value)?;
                     repair_legacy_draft(c, &board, &mut document)?;
-                    mask_provider_widgets(c, user, &mut document)?;
+                    mask_provider_widgets(c, id, user, &mut document)?;
                     Ok(BoardDraft { document, updated })
                 })
                 .transpose()
@@ -1178,7 +1203,7 @@ pub(super) async fn route(
                 c.execute("INSERT INTO drafts (user_id,key,value,updated) VALUES (?1,?2,?3,?4)
                     ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value,updated=excluded.updated",
                     params![user.id,draft_key,encode(&input)?,now])?;
-                mask_provider_widgets(c, user, &mut input)?;
+                mask_provider_widgets(c, id, user, &mut input)?;
                 Ok(Ok(BoardDraft { document:input,updated:now }))
             })?;
             match result {

@@ -180,7 +180,6 @@ fn install(
         })?;
         options.push((widget.id, selection.placement, selection.options));
     }
-    let name = input.integration.name.clone();
     let changed = if let Some(id) = &input.integration_id {
         integrations::connection_changed(conn, id, &input.integration)?
     } else {
@@ -201,7 +200,7 @@ fn install(
         let mut doc = previous.clone();
         let mut section = boards::BoardSection {
             id: None,
-            title: name,
+            title: "Widgets".into(),
             position: doc.sections.len() as u32,
             items: Vec::new(),
         };

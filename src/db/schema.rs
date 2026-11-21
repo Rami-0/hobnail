@@ -285,6 +285,26 @@ UPDATE board_items SET config=json_set(config,'$.widget_id','provider:' || id)
     SELECT 1 FROM provider_widgets WHERE provider_widgets.id='provider:' || board_items.id);
 DROP TABLE provider_widgets_before_placements;
 ",
+    "
+-- Old installs stored a copied integration name with no provenance. Mark
+-- sections matching the current name and provider-only legacy sections,
+-- which may already have been renamed or lost their integration.
+UPDATE boards AS board SET sections=json((
+    SELECT json_group_array(json(CASE WHEN EXISTS (
+        SELECT 1 FROM board_items item
+        LEFT JOIN provider_widgets pw ON pw.id=json_extract(item.config,'$.widget_id')
+        LEFT JOIN integrations i ON i.id=pw.integration_id
+        WHERE item.board_id=board.id AND json_extract(item.layout,'$.section')=json_extract(section.value,'$.id')
+            AND item.kind='widget' AND json_extract(item.config,'$.widget_id') LIKE 'provider:%'
+            AND (i.name=json_extract(section.value,'$.title') OR NOT EXISTS (
+                SELECT 1 FROM board_items other
+                WHERE other.board_id=board.id AND json_extract(other.layout,'$.section')=json_extract(section.value,'$.id')
+                AND NOT (other.kind='widget' AND json_extract(other.config,'$.widget_id') LIKE 'provider:%')
+            ))
+    ) THEN json_set(section.value,'$.legacy_provider_title',json('true')) ELSE section.value END) ORDER BY section.key)
+    FROM json_each(board.sections) section
+)) WHERE sections != '[]';
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
