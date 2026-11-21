@@ -468,6 +468,27 @@ and [metadata writer](https://github.com/duplicati/duplicati/blob/d41bac323831c7
 UNVERIFIED: job result (the backup metadata has no authoritative per-run
 result), legacy 2.0 authentication and deployments using a pre-shared key.
 
+## Proxmox VE
+
+Enter the Proxmox VE URL (typically HTTPS on port 8006), full token ID
+(`USER@REALM!TOKENID`) and token secret. Grant the token `Sys.Audit` on
+the monitored nodes and `VM.Audit` on the monitored guests. A propagated
+`PVEAuditor` grant on `/` covers the cluster. Privilege-separated tokens
+also require the underlying user to have the corresponding grants. For
+self-signed TLS, check the server's SHA-256 fingerprint and confirm the
+matching leaf pin in Hobnail.
+
+**Cluster overview** checks `/api2/json/version` and uses the filtered
+`/api2/json/cluster/resources` node and VM lists. It counts online nodes and
+running VMs and containers visible to the token, excludes templates, and shows
+CPU and RAM for up to ten nodes. Oversized lists leave the other list visible.
+
+Verified from: [Proxmox VE token and role docs](https://pve.proxmox.com/pve-docs/chapter-pveum.html),
+[version API](https://github.com/proxmox/pve-manager/blob/d147600a85186460650b5c45c453948230e6a0fb/PVE/API2.pm)
+and [cluster API source](https://github.com/proxmox/pve-manager/blob/d147600a85186460650b5c45c453948230e6a0fb/PVE/API2/Cluster.pm).
+
+UNVERIFIED: live clusters and releases with different resource schemas.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

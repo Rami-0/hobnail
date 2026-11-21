@@ -47,6 +47,7 @@ mod nginx_proxy_manager;
 mod pihole;
 mod plex;
 mod prowlarr;
+mod proxmox;
 mod qbittorrent;
 mod radarr;
 mod sabnzbd;
@@ -92,6 +93,7 @@ pub const REGISTRY: &[Provider] = &[
     nextcloud::NEXTCLOUD,
     syncthing::SYNCTHING,
     duplicati::DUPLICATI,
+    proxmox::PROXMOX,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
