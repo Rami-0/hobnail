@@ -1106,3 +1106,18 @@ Run `web/e2e/settings-check.mjs` separately for SET-42. It accepts an optional
 profile such as `390-dark` after the application URL. The revision assertions
 start from an already recorded config. On the first edit of a file, the
 existing history mechanism can also capture the pre-edit file as a checkpoint.
+
+M2 verification passed in all eight Chromium runs across the two widths, two
+themes and two setup paths. The selected path passed 157 assertions per
+profile and the empty path passed 100. All four Settings profiles passed the
+reorder revision assertions, and the separate board regression passed 106
+checks. The phone run initially found that Back from a scrolled Configure
+form focused the next heading above the viewport. The regression now checks
+that focused wizard headings are visible.
+
+A release-image memory smoke kept a stale widget and a stale integration on
+the board with 1, 10 and 25 dashboard clients. It completed 2,160 HTTP reads
+and 36 streams with zero errors. The 25-client phase reached 4.79 MiB sampled
+working set. The lifetime peak was 22,228,992 bytes (21.20 MiB), reached during
+owner credential creation, before guided setup or cached data. The 20 MiB
+lifetime target remains open.
