@@ -86,6 +86,10 @@ pub(crate) async fn route(
         }
         Handler::Alarm => alarm::get(state, &principal.expect("viewer gate").account),
         Handler::Session => session::get(state, &req),
+        Handler::BoardTourDismiss => {
+            session::dismiss_board_tour(state, principal.expect("viewer gate").account.id)
+                .unwrap_or_else(ApiError::response)
+        }
         Handler::Bootstrap => bootstrap::get(state, &principal.expect("viewer gate").account),
         Handler::DashboardSettings => {
             dashboard_settings::route(state, req, &principal.expect("settings gate").account)

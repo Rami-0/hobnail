@@ -1,7 +1,8 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from "react";
 import { reduceDocument } from "../../boards/document.ts";
-import { api } from "../../api/session.ts";
+import { tourBoard } from "../../boards/tour.ts";
+import { api, useSession } from "../../api/session.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardDraft } from "../../api/gen/BoardDraft.ts";
 import { Dialog } from "../../ui/Dialog.tsx";
@@ -19,6 +20,7 @@ import { EmptyState, Note } from "../../ui/Note.tsx";
 import { NotFound } from "../NotFound.tsx";
 import "./board.css";
 
+const Tour = lazy(() => import("./Tour.tsx"));
 const Editor = lazy(() => import("./Editor.tsx"));
 
 export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedItem }) {
@@ -44,12 +46,15 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   </div>;
 }
 export default function BoardPage() {
-  const { route } = useRoute();
+  const { route, search, setSearch } = useRoute();
+  const { session } = useSession();
   const id = route.name === "board" ? route.id : "";
   const b = useBootstrap();
   const live = useContainers();
   const containerNames = live.data?.groups.flatMap((group) => group.containers.map((container) => container.name)).join("\0");
   const admin = b?.role === "admin" || b?.role === "owner";
+  const [tourClosed, setTourClosed] = useState(false);
+  const tourReplay = search.get("tour") === "1";
   const [editing, setEditing] = useState<BoardDocument | null>(null);
   const [picker, setPicker] = useState<"add" | "discover">();
   const [draft, setDraft] = useState<BoardDraft | null>(null);
@@ -106,6 +111,11 @@ export default function BoardPage() {
     <PageHeader title={view.board.name} icon={<ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
       actions={admin && <Button variant="default" data-testid="board-edit" onClick={() => void openEditor()}>Edit board</Button>} />
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) { setPicker(undefined); setEditing(draft.document); } setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
+    {!draft && (tourReplay || (!tourClosed && session?.board_tour_pending && tourBoard(b) === id)) &&
+      <Suspense fallback={null}><Tour admin={admin} empty={view.document.sections.length === 0} onClose={() => {
+        setTourClosed(true);
+        if (tourReplay) setSearch({ tour: null }, { replace: true });
+      }} /></Suspense>}
     {error && <Note kind="bad">{error}</Note>}
     {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty"
       actions={admin && <>

@@ -6,6 +6,7 @@
 use hyper::{Request, Response, StatusCode};
 use serde::Serialize;
 
+use super::error::ApiError;
 use crate::db::accounts::Role;
 use crate::http::server::Body;
 use crate::state::AppState;
@@ -23,6 +24,7 @@ pub struct Session {
     pub owner_exists: bool,
     pub onboarding_locked: bool,
     pub setup_pending: bool,
+    pub board_tour_pending: bool,
     pub build: BuildInfoView,
     pub api: u32,
 }
@@ -56,6 +58,24 @@ fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Sessio
             Some(s.csrf()),
         )
     });
+    let (setup_pending, board_tour_pending) = principal
+        .and_then(|session| {
+            let account = &session.account;
+            state
+                .db
+                .dashboard(|conn| -> Result<_, ApiError> {
+                    let seen: bool = conn.query_row(
+                        "SELECT board_tour_seen FROM users WHERE id=?1",
+                        [account.id],
+                        |row| row.get(0),
+                    )?;
+                    let setup =
+                        account.role == Role::Owner && super::setup::pending(conn, account.id)?;
+                    Ok((setup, !seen))
+                })
+                .ok()
+        })
+        .unwrap_or_default();
     let b = &state.build;
     Session {
         user,
@@ -63,13 +83,8 @@ fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Sessio
         database: state.db.is_enabled(),
         owner_exists: state.db.owner_exists(),
         onboarding_locked: state.db.onboarding_locked(),
-        setup_pending: principal.is_some_and(|session| {
-            session.account.role == Role::Owner
-                && state
-                    .db
-                    .dashboard(|conn| super::setup::pending(conn, session.account.id))
-                    .unwrap_or(false)
-        }),
+        setup_pending,
+        board_tour_pending,
         build: BuildInfoView {
             version: b.version.to_string(),
             sha: b.sha.to_string(),
@@ -88,4 +103,14 @@ pub fn get<B>(state: &AppState, req: &Request<B>) -> Response<Body> {
         crate::auth::refresh_cookie(state, &principal, secure, &mut response);
     }
     response
+}
+
+pub(super) fn dismiss_board_tour(state: &AppState, id: i64) -> Result<Response<Body>, ApiError> {
+    state.db.dashboard::<_, rusqlite::Error>(|conn| {
+        conn.execute(
+            "UPDATE users SET board_tour_seen=1 WHERE id=?1 AND board_tour_seen=0",
+            [id],
+        )
+    })?;
+    Ok(super::no_content())
 }

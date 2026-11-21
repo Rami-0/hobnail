@@ -50,6 +50,7 @@ const WRITES: &[(&str, &str)] = &[
     ("POST", "/api/v1/users/sample-1/sign-out"),
     ("DELETE", "/api/v1/users/sample-1"),
     ("POST", "/api/v1/account/password"),
+    ("POST", "/api/v1/account/board-tour"),
     ("DELETE", "/api/v1/account/sessions/sample-1"),
     ("DELETE", "/api/v1/account/sessions"),
     ("POST", "/api/logout"),

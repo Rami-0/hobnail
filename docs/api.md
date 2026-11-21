@@ -94,10 +94,29 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | PUT | `/api/v1/users/<id>/scopes` | Owner | User scopes. |
 | POST | `/api/v1/users/<id>/sign-out` | Owner | User sign out. |
 | DELETE | `/api/v1/users/<id>` | Owner | User delete. |
+| POST | `/api/v1/account/board-tour` | Viewer | Record completion or dismissal of the board tour for the signed-in account. |
 | POST | `/api/v1/account/password` | Viewer | Password. |
 | GET | `/api/v1/account/sessions` | Viewer | Sessions. |
 | DELETE | `/api/v1/account/sessions/<id>` | Viewer | Session revoke. |
 | DELETE | `/api/v1/account/sessions` | Viewer | Sessions revoke. |
+
+### Board freshness and tour
+
+Widget reads, including board resolution and widget stream events, return
+`status: "stale"` when the latest refresh fails after a successful result.
+`body` and `values` retain that result, `last_good_at` gives its Unix timestamp,
+`fetched_at` gives the latest attempt, and `error` explains the failure. An
+initial failure has `status: "error"`, a null body and empty values.
+
+Integration reads, including board resolution, expose `enabled` and a nullable
+`check`. The check contains the latest manual verdict and the timestamp and
+latency of the last successful test if there was one. Connection changes and
+server restart clear the in-memory test evidence. The test POST still returns
+the single attempt's verdict.
+
+Signed-in sessions return `board_tour_pending: true` until the account dismisses
+or completes its tour. POST `/api/v1/account/board-tour` with the session and CSRF
+token to clear the flag. The write is idempotent and returns 204.
 
 ### Guided setup
 

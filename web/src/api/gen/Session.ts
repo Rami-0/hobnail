@@ -6,4 +6,4 @@ export type Session = { user: SessionUser | null,
 /**
  * The `X-RH-CSRF` token for writes; null when not signed in.
  */
-csrf: string | null, database: boolean, owner_exists: boolean, onboarding_locked: boolean, setup_pending: boolean, build: BuildInfoView, api: number, };
+csrf: string | null, database: boolean, owner_exists: boolean, onboarding_locked: boolean, setup_pending: boolean, board_tour_pending: boolean, build: BuildInfoView, api: number, };

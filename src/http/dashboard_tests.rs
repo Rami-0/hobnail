@@ -1398,3 +1398,36 @@ async fn setup_allows_empty_board_when_docker_is_unavailable_and_rejects_non_own
         .await;
     assert_eq!(board["document"]["sections"], json!([]));
 }
+
+#[tokio::test]
+async fn board_tour_dismissal_is_idempotent_and_private_to_the_account() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let owner = Client::owner(addr).await;
+    let viewer = owner.guest("tour-viewer", "viewer", Value::Null).await;
+    let session = "/api/v1/session";
+    let dismiss = "/api/v1/account/board-tour";
+    assert_eq!(
+        viewer.json("GET", session, Value::Null, 200).await["board_tour_pending"],
+        true
+    );
+    for _ in 0..2 {
+        assert_eq!(viewer.call("POST", dismiss, Value::Null).await.status, 204);
+    }
+    assert_eq!(
+        viewer.json("GET", session, Value::Null, 200).await["board_tour_pending"],
+        false
+    );
+    let new_login = Client::owner(addr).await;
+    assert_eq!(
+        new_login.json("GET", session, Value::Null, 200).await["board_tour_pending"],
+        true
+    );
+    assert_eq!(owner.call("POST", dismiss, Value::Null).await.status, 204);
+    let new_login = Client::owner(addr).await;
+    assert_eq!(
+        new_login.json("GET", session, Value::Null, 200).await["board_tour_pending"],
+        false
+    );
+}

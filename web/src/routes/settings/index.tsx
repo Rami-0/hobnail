@@ -10,6 +10,7 @@ import { local, rememberSettingsTab } from "../../app/prefs.ts";
 import { settingsTabs, type SettingsTab } from "../../app/settings-tabs.ts";
 import { useRoute } from "../../app/router.ts";
 import { fetchBootstrap, onConfigChange, useBootstrap } from "../../live/index.ts";
+import { tourHref } from "../../boards/tour.ts";
 import { needsSecret } from "../../boards/document.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
@@ -60,10 +61,11 @@ export default function SettingsPage() {
   const available = (Object.keys(settingsTabs) as SettingsTab[]).filter((id) =>
     id === "users" ? owner : manage || (!!boot?.scoped && (id === "boards" || id === "integrations")));
   const allowed = available.includes(tab);
+  const tour = tourHref(boot);
   const Panel = tab !== "boards" && tab !== "integrations" ? panels[tab] : null;
   useEffect(() => { if (allowed) rememberSettingsTab(local(), tab); }, [allowed, tab]);
   return <div className={available.length > 0 ? "page set" : "page set locked"}>
-    <PageHeader title="Settings" />
+    <PageHeader title="Settings" actions={allowed && tour && <a className="btn btn-outline" href={tour}>Replay board tour</a>} />
     {available.length > 0 && <TabNav label="Settings sections" current={tab} testId="settings-tabs" layout="settings"
       items={available.map((id) => {
         const Icon = tabIcons[id];

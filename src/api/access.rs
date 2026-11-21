@@ -280,6 +280,7 @@ pub enum Handler {
     DashboardSettings,
     DashboardIcon,
     Session,
+    BoardTourDismiss,
     Bootstrap,
     LogsPicker,
     Containers,
@@ -686,6 +687,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/users/<id>",
         access: Access::Owner,
         handler: Handler::UserDelete,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/account/board-tour",
+        access: Access::Viewer,
+        handler: Handler::BoardTourDismiss,
     },
     Route {
         method: "POST",

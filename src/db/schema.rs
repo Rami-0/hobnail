@@ -184,6 +184,7 @@ CREATE TABLE setup_credentials (
   PRIMARY KEY (user_id, item_id)
 ) WITHOUT ROWID;
 ",
+    "ALTER TABLE users ADD COLUMN board_tour_seen INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
