@@ -283,9 +283,25 @@ try {
   await require("new accounts are offered the tour", `!!${el(tour)}`);
   if (empty) {
     await require("first empty board offers Add and Discover", `!!${el(attr("board-empty-add"))} && !!${el(attr("board-empty-discover"))} && !${el(attr("board-tile"))}`);
+    let dismissalRequest;
+    let dismissalAttempts = 0;
+    contexts.at(-1).events.allow(({ url, status }) =>
+      status === 503 && new URL(url).pathname === "/api/v1/account/board-tour" && "simulated tour save failure");
+    tab.on("Fetch.requestPaused", ({ requestId }) => {
+      dismissalAttempts++;
+      if (dismissalAttempts === 1) dismissalRequest = requestId;
+      else void tab.send("Fetch.continueRequest", { requestId });
+    });
+    await tab.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/v1/account/board-tour" }] });
     await click(attr("tour-skip"));
-    await require("Skip tour closes from the first step", `!${el(tour)}`);
+    await require("Skip tour closes before the save responds", `!${el(tour)}`);
+    for (let index = 0; index < 30 && !dismissalRequest; index++) await sleep(50);
+    assert.ok(dismissalRequest, "tour dismissal request is pending");
+    await tab.send("Fetch.fulfillRequest", { requestId: dismissalRequest, responseCode: 503 });
     await sessionPending(false);
+    assert.equal(dismissalAttempts, 2, "the transient failure is retried");
+    await require("the failed save did not reopen the tour", `!${el(tour)}`);
+    await tab.send("Fetch.disable");
     await navigate(route + "?tour=1");
     await require("replayed tour opens with focus on Next", `document.activeElement === ${el(attr("tour-next"))}`);
     await user.key("Tab");
@@ -294,7 +310,7 @@ try {
       await user.key("Tab");
     }
     await require("Tab can move focus to a control outside the tour", `!${el(tour)}.contains(document.activeElement) && document.activeElement !== document.body`);
-    await tab.ev("window.__m2OutsideTour = document.activeElement");
+    await tab.ev("void (window.__m2OutsideTour = document.activeElement)");
     await user.key("Escape");
     await require("Escape from outside closes the tour without moving focus", `!${el(tour)} && document.activeElement === window.__m2OutsideTour`);
     await capture("first-board", board);
@@ -361,7 +377,7 @@ try {
       assert.deepEqual(events[kind], [], `Unexpected ${kind} in ${prefix}`);
     }
   }
-  console.log(`PASS ${prefix}: ${checks} checks, ${screenshots} screenshots, zero CSP, console, exception or request errors`);
+  console.log(`PASS ${prefix}: ${checks} checks, ${screenshots} screenshots, zero unexpected CSP, console, exception or request errors`);
 } catch (error) {
   if (tab) await tab.shot(path.join(out, `${prefix}-failure.png`)).catch(() => {});
   throw error;
