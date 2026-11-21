@@ -615,7 +615,7 @@ pub(super) async fn route(
             let integrations = db.dashboard(|conn| {
                 let saved = read(conn, user.id)?;
                 require_revision(&saved, saved.revision)?;
-                integrations::list(state, conn, user)
+                integrations::suggestion_targets(conn, user)
             })?;
             let snap = state.snapshot();
             let docker = if !config.docker.enabled {
@@ -627,17 +627,7 @@ pub(super) async fn route(
             } else {
                 SetupDocker::Reachable
             };
-            let doc = BoardDocument {
-                version: 0,
-                sections: Vec::new(),
-            };
-            let suggestions = boards::suggestions(
-                state,
-                now,
-                &doc,
-                integrations,
-                &user.container_visibility(state),
-            );
+            let suggestions = boards::suggestions(state, None, integrations, None);
             super::json(
                 StatusCode::OK,
                 &SetupDiscovery {

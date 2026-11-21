@@ -1626,3 +1626,42 @@ async fn setup_reviews_matches_to_saved_integrations_before_reuse_or_creation() 
         .await;
     assert_eq!(connections.as_array().unwrap().len(), 3);
 }
+
+#[tokio::test]
+async fn discovery_caps_suggestions_before_serializing_container_identity_rows() {
+    let st = state();
+    let mut snapshot = st.snapshot().as_ref().clone();
+    let sample = snapshot.containers[0].clone();
+    snapshot.containers = (0..300)
+        .map(|i| {
+            let mut container = sample.clone();
+            container.name = format!("discovery-{i}");
+            container.project = None;
+            container.service = None;
+            container
+        })
+        .collect();
+    st.containers.send_replace(Arc::new(snapshot));
+    let owner = browser_owner(start(st).await).await;
+    let discovery = owner.json("GET", SETUP_DISCOVERY, Value::Null, 200).await;
+    let board_id = owner.board("Discovery").await;
+    let board = owner
+        .json(
+            "GET",
+            &format!("/api/v1/boards/{board_id}/suggestions"),
+            Value::Null,
+            200,
+        )
+        .await;
+    assert_eq!(discovery["suggestions"], board);
+    let suggestions = board.as_array().unwrap();
+    assert_eq!(suggestions.len(), 256);
+    assert_eq!(
+        suggestions[255]["payload"]["target"]["name"],
+        "discovery-255"
+    );
+    assert!(suggestions
+        .iter()
+        .all(|suggestion| suggestion["payload"]["kind"] == "container"
+            && suggestion.get("stats").is_none()));
+}

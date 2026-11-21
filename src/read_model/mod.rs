@@ -144,7 +144,7 @@ pub fn card_for(
     let c = snap.containers.iter().find(|c| c.name == name)?;
     let ov = cfg.containers.get(&c.name);
     let mut card = container_card(cfg, c, ov, stats, host);
-    card.stack = group_of(cfg, c, ov);
+    card.stack = group_of(cfg, c, ov).to_owned();
     Some(card)
 }
 
@@ -154,12 +154,12 @@ pub fn build_groups(cfg: &Config, snap: &Snapshot, stats: &StatsMap, host: &str)
     if cfg.docker.enabled {
         for c in &snap.containers {
             let ov = cfg.containers.get(&c.name);
-            if is_hidden(cfg, c, ov) {
+            if is_hidden(cfg, c) {
                 continue;
             }
             let group = group_of(cfg, c, ov);
             let card = container_card(cfg, c, ov, stats, host);
-            containers.entry(group).or_default().push(card);
+            containers.entry(group.to_owned()).or_default().push(card);
         }
     }
     let mut bookmarks: BTreeMap<String, Vec<CardView>> = BTreeMap::new();
@@ -274,27 +274,42 @@ pub fn is_excluded(cfg: &Config, c: &Container) -> bool {
     cfg.docker.exclude.iter().any(|p| glob_match(p, &c.name))
 }
 
-fn is_hidden(cfg: &Config, c: &Container, ov: Option<&ContainerOverride>) -> bool {
-    if !cfg.page.show_stopped && !c.is_running() {
-        return true;
-    }
-    if let Some(h) = ov.and_then(|o| o.hide) {
-        return h;
-    }
-    if label(c, LABEL_HIDE)
-        .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes"))
-    {
-        return true;
-    }
-    cfg.docker.exclude.iter().any(|p| glob_match(p, &c.name))
+fn is_hidden(cfg: &Config, c: &Container) -> bool {
+    (!cfg.page.show_stopped && !c.is_running()) || is_excluded(cfg, c)
 }
 
-fn group_of(cfg: &Config, c: &Container, ov: Option<&ContainerOverride>) -> String {
-    ov.and_then(|o| o.group.clone())
+fn group_of<'a>(cfg: &'a Config, c: &'a Container, ov: Option<&'a ContainerOverride>) -> &'a str {
+    ov.and_then(|o| o.group.as_deref())
         .filter(|g| !g.is_empty())
-        .or_else(|| label(c, LABEL_GROUP).map(str::to_string))
-        .or_else(|| c.project.clone().filter(|p| !p.is_empty()))
-        .unwrap_or_else(|| cfg.docker.standalone_group.clone())
+        .or_else(|| label(c, LABEL_GROUP))
+        .or_else(|| c.project.as_deref().filter(|p| !p.is_empty()))
+        .unwrap_or(&cfg.docker.standalone_group)
+}
+
+fn container_title<'a>(c: &'a Container, ov: Option<&'a ContainerOverride>) -> &'a str {
+    ov.and_then(|o| o.name.as_deref())
+        .filter(|s| !s.is_empty())
+        .or_else(|| label(c, LABEL_NAME))
+        .or_else(|| c.service.as_deref().filter(|s| !s.is_empty()))
+        .unwrap_or(&c.name)
+}
+
+/// A visible container's display name without constructing a card or reading stats.
+pub(crate) fn suggestion_title<'a>(cfg: &'a Config, c: &'a Container) -> Option<&'a str> {
+    if !cfg.docker.enabled || is_hidden(cfg, c) {
+        return None;
+    }
+    let ov = cfg.containers.get(&c.name);
+    let group = group_of(cfg, c, ov);
+    if cfg
+        .groups
+        .iter()
+        .find(|g| g.name == group)
+        .is_some_and(|g| g.hide)
+    {
+        return None;
+    }
+    Some(container_title(c, ov))
 }
 
 fn container_card(
@@ -305,12 +320,7 @@ fn container_card(
     host: &str,
 ) -> CardView {
     let id12: String = c.id.chars().take(12).collect();
-    let title = ov
-        .and_then(|o| o.name.clone())
-        .filter(|s| !s.is_empty())
-        .or_else(|| label(c, LABEL_NAME).map(str::to_string))
-        .or_else(|| c.service.clone().filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| c.name.clone());
+    let title = container_title(c, ov).to_owned();
     let sub = ov
         .and_then(|o| o.description.clone())
         .filter(|s| !s.is_empty())

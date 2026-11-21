@@ -313,7 +313,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             {discovery && <>
               <Note kind={discovery.docker === "reachable" ? "info" : "warn"}>{dockerMessage[discovery.docker]}</Note>
               <p>{discovery.config_stale ? "Bookmarks and widgets use the last valid configuration." : "Bookmarks and widgets come from your configuration."}</p>
-              <p>{discovery.suggestions.length} suggestions available.</p>
+              <p>{discovery.suggestions.length} suggestions available (up to 256 shown).</p>
             </>}
             {!discovery && !discoveryError && <p role="status">Looking for suggestions…</p>}
             {discoveryError && <Note kind="warn">Discovery failed. You can continue with manual setup. {discoveryError}</Note>}

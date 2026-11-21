@@ -46,7 +46,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | PUT | `/api/v1/boards/<id>` | Admin | Board save. |
 | PATCH | `/api/v1/boards/<id>` | Admin | Board update. |
 | DELETE | `/api/v1/boards/<id>` | Admin | Board delete. |
-| GET | `/api/v1/boards/<id>/suggestions` | Admin | Board suggestions. |
+| GET | `/api/v1/boards/<id>/suggestions` | Admin | Board suggestions, capped at 256. |
 | GET | `/api/v1/boards/<id>/draft` | Admin | Board draft. |
 | PUT | `/api/v1/boards/<id>/draft` | Admin | Board draft save. |
 | DELETE | `/api/v1/boards/<id>/draft` | Admin | Board draft delete. |
@@ -79,7 +79,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/stream` | Viewer | Stream. |
 | GET | `/api/v1/onboarding/draft` | Owner | Read the guided setup draft or its completed board ID. |
 | PUT | `/api/v1/onboarding/draft` | Owner | Save draft fields and write-only credential changes. |
-| GET | `/api/v1/onboarding/discovery` | Owner | Read service suggestions and source availability. |
+| GET | `/api/v1/onboarding/discovery` | Owner | Read at most 256 service suggestions and source availability. |
 | POST | `/api/v1/onboarding/test` | Owner | Test an included item from the saved draft. |
 | POST | `/api/v1/onboarding/commit` | Owner | Create the first board and mark the draft complete atomically. |
 | POST | `/api/v1/onboarding/owner` | Public | Onboard. |

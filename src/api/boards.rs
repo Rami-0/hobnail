@@ -753,74 +753,95 @@ pub(super) fn identity(payload: &BoardPayload) -> (u8, String) {
     }
 }
 
+pub(super) const SUGGESTION_LIMIT: usize = 256;
+
 pub(super) fn suggestions(
     state: &AppState,
-    now: i64,
-    doc: &BoardDocument,
-    integrations: Vec<IntegrationView>,
-    visible: &super::access::ContainerVisibility,
+    doc: Option<&BoardDocument>,
+    integrations: Vec<(String, String)>,
+    container_targets: Option<HashSet<ContainerMatch>>,
 ) -> Vec<BoardSuggestion> {
     let cfg = state.config.current();
+    let snap = state.snapshot();
+    let scoped = container_targets.is_some();
     let mut existing: HashSet<_> = doc
-        .sections
-        .iter()
-        .flat_map(|s| &s.items)
+        .into_iter()
+        .flat_map(|doc| &doc.sections)
+        .flat_map(|section| &section.items)
         .map(|item| identity(&item.payload))
         .collect();
-    let mut out = Vec::new();
-    let mut add = |title, payload| {
-        if existing.insert(identity(&payload)) {
-            out.push(BoardSuggestion { title, payload });
-        }
-    };
-    for (target, row) in live_containers(state, now) {
-        if visible.allows(&row.name) {
-            add(
-                row.title,
-                BoardPayload::Container {
-                    target,
-                    title: None,
-                    icon: None,
-                    link: None,
-                },
-            );
-        }
-    }
-    for b in cfg.bookmarks.iter().filter(|_| !visible.is_scoped()) {
-        if safe_link(&b.url, "url").is_ok() && super::validate_label(&b.name, "title").is_ok() {
-            let icon = b
-                .icon
-                .clone()
-                .filter(|i| super::validate_icon(Some(i)).is_ok());
-            add(
-                b.name.clone(),
-                BoardPayload::Link {
-                    title: b.name.clone(),
-                    url: b.url.clone(),
-                    icon,
-                },
-            );
-        }
-    }
-    for widget in cfg.widgets.iter().filter(|_| !visible.is_scoped()) {
-        add(
-            widget.title.clone().unwrap_or_else(|| widget.id.clone()),
-            BoardPayload::Widget {
+    let integrations = integrations.into_iter().map(|(id, name)| BoardSuggestion {
+        title: name,
+        payload: BoardPayload::Integration {
+            integration_id: id,
+            title: None,
+        },
+    });
+    let widgets = cfg.widgets.iter().filter(|_| !scoped).filter_map(|widget| {
+        let title = widget.title.as_deref().unwrap_or(&widget.id);
+        super::validate_label(title, "title").ok()?;
+        Some(BoardSuggestion {
+            title: title.to_owned(),
+            payload: BoardPayload::Widget {
                 widget_id: widget.id.clone(),
                 title: None,
             },
-        );
-    }
-    for integration in integrations {
-        add(
-            integration.name,
-            BoardPayload::Integration {
-                integration_id: integration.id,
+        })
+    });
+    let bookmarks = cfg
+        .bookmarks
+        .iter()
+        .filter(|_| !scoped)
+        .filter_map(|bookmark| {
+            safe_link(&bookmark.url, "url").ok()?;
+            super::validate_label(&bookmark.name, "title").ok()?;
+            Some(BoardSuggestion {
+                title: bookmark.name.clone(),
+                payload: BoardPayload::Link {
+                    title: bookmark.name.clone(),
+                    url: bookmark.url.clone(),
+                    icon: bookmark
+                        .icon
+                        .as_ref()
+                        .filter(|icon| super::validate_icon(Some(icon)).is_ok())
+                        .cloned(),
+                },
+            })
+        });
+    let containers = snap.containers.iter().filter_map(|container| {
+        let title = crate::read_model::suggestion_title(&cfg, container)?;
+        super::validate_label(title, "title").ok()?;
+        let target = ContainerMatch::from(container);
+        match &target {
+            ContainerMatch::Compose { project, service } => {
+                super::validate_label(project, "project").ok()?;
+                super::validate_label(service, "service").ok()?;
+            }
+            ContainerMatch::Name { name } => super::validate_label(name, "name").ok()?,
+        }
+        if container_targets
+            .as_ref()
+            .is_some_and(|targets| !targets.contains(&target))
+        {
+            return None;
+        }
+        Some(BoardSuggestion {
+            title: title.to_owned(),
+            payload: BoardPayload::Container {
+                target,
                 title: None,
+                icon: None,
+                link: None,
             },
-        );
-    }
-    out
+        })
+    });
+    integrations
+        .chain(widgets)
+        .chain(bookmarks)
+        .chain(containers)
+        .filter(|suggestion| existing.insert(identity(&suggestion.payload)))
+        .take(SUGGESTION_LIMIT)
+        .collect()
 }
 
 fn conflict(version: u32) -> Response<Body> {
@@ -865,23 +886,27 @@ pub(super) async fn route(
             )
         }
         Handler::Boards => super::json(StatusCode::OK, &db.dashboard(|c| list(c, user))?),
-        Handler::Board | Handler::BoardSuggestions => {
+        Handler::Board => {
             let (board, doc, visible) = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c, id)?;
+                let doc = document(c, &board)?;
+                Ok((board, doc, integrations::list(state, c, user)?))
+            })?;
+            super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
+        }
+        Handler::BoardSuggestions => {
+            let (doc, integrations, targets) = db.dashboard(|c| -> Result<_, ApiError> {
+                let doc = document(c, &get(c, id)?)?;
                 Ok((
-                    board.clone(),
-                    document(c, &board)?,
-                    integrations::list(state, c, user)?,
+                    doc,
+                    integrations::suggestion_targets(c, user)?,
+                    user.container_targets(c)?,
                 ))
             })?;
-            if handler == Handler::Board {
-                super::json(StatusCode::OK, &resolve(state, now, board, doc, visible))
-            } else {
-                super::json(
-                    StatusCode::OK,
-                    &suggestions(state, now, &doc, visible, &user.container_visibility(state)),
-                )
-            }
+            super::json(
+                StatusCode::OK,
+                &suggestions(state, Some(&doc), integrations, targets),
+            )
         }
         Handler::BoardCreate => {
             let BoardCreate { name, icon } = super::read_json(req, 8192).await?;
