@@ -73,6 +73,28 @@ window, so the widget labels that count **Queries**. Request flow and response
 parsing were exercised against fakes. Compatibility across older minor
 releases and live reverse-proxy configurations remains unverified.
 
+## Uptime Kuma
+
+Enter the service URL and the slug from a published status page, such as
+`home` from `/status/home`. Use letters, digits and hyphens for the slug.
+The status page grants read access without credentials.
+
+**Monitor status** shows up, down, pending, maintenance or unknown based on
+the latest heartbeat, along with the upstream 24-hour uptime percentage. It
+shows up to 24 monitors and the current pinned incident when present. Kuma's
+public JSON routes supply these together. Its documented Prometheus metrics
+expose monitor state and response time, but do not include the status page's
+uptime or pinned incident.
+
+Verified from:
+
+- [Kuma 1.23.16 status-page router](https://github.com/louislam/uptime-kuma/blob/1.23.16/server/routers/status-page-router.js)
+- [Kuma 2.0.2 status-page router](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/routers/status-page-router.js)
+- [Status page model](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/model/status_page.js), [heartbeat model](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/model/heartbeat.js) and [incident model](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/model/incident.js)
+- [Prometheus setup](https://github.com/louislam/uptime-kuma/wiki/Prometheus-Integration) and [exported metrics](https://github.com/louislam/uptime-kuma/blob/2.0.2/server/prometheus.js)
+
+UNVERIFIED: Compatibility outside the inspected releases and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

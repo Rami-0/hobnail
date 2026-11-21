@@ -35,6 +35,10 @@ use crate::{
 mod connection;
 mod generic;
 mod pihole;
+mod uptime_kuma;
+
+#[cfg(test)]
+mod batch_test;
 
 #[allow(unused_imports)] // Available to credential-free probe providers.
 pub use crate::http::probe::{HttpProbe, SubjectAltName, TcpProbe, TlsLeaf, TlsVerification};
@@ -43,7 +47,7 @@ pub use connection::TargetHeader;
 pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
 pub(crate) use connection::{success_status, Connections, Credentials, Revision, Target};
 
-pub const REGISTRY: &[Provider] = &[generic::HTTP, pihole::PI_HOLE];
+pub const REGISTRY: &[Provider] = &[generic::HTTP, pihole::PI_HOLE, uptime_kuma::UPTIME_KUMA];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
 pub const MAX_RESPONSE: usize = 128 * 1024;
@@ -196,6 +200,41 @@ pub fn validate(schema: &[Field], values: &mut Values) -> Result<(), String> {
             return Err(field.id.into());
         }
     }
+    Ok(())
+}
+
+const SERVICE_URL: Field = Field {
+    required: true,
+    max_length: Some(2048),
+    ..Field::new(
+        "base_url",
+        "Service URL",
+        Kind::Url,
+        "Include any reverse-proxy prefix. Use an address reachable from Hobnail.",
+    )
+};
+
+const ENABLED: Field = Field {
+    default: Some("true"),
+    ..Field::new("enabled", "Enabled", Kind::Bool, "")
+};
+
+fn parse_json<T: serde::de::DeserializeOwned>(
+    response: crate::http::client::Response,
+) -> Result<T, Fault> {
+    serde_json::from_slice(&success(response)?.body).map_err(|_| Class::Protocol.into())
+}
+
+fn display_text(conn: &Conn<'_>, mut text: String) -> String {
+    conn.output_redactor().redact(&mut text);
+    if let Some((end, _)) = text.char_indices().nth(160) {
+        text.truncate(end);
+        text.push('…');
+    }
+    text
+}
+
+fn no_widget_options(_: &Values) -> Result<(), &'static str> {
     Ok(())
 }
 
