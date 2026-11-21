@@ -103,10 +103,10 @@ pub fn lookup<'a>(table: &'a [Asset], path: &str) -> Option<&'a Asset> {
 
 /// Whether the request's `Accept-Encoding` allows gzip (RFC 9110 12.5.3):
 /// `gzip`/`x-gzip` with q > 0, or `*` with q > 0 when gzip is not listed.
-pub fn accepts_gzip(header: Option<&str>) -> bool {
-    let Some(h) = header else { return false };
+pub fn accepts_gzip<'a>(headers: impl IntoIterator<Item = &'a str>) -> bool {
+    let mut gzip = None;
     let mut star = None;
-    for item in h.split(',') {
+    for item in headers.into_iter().flat_map(|value| value.split(',')) {
         let mut parts = item.split(';');
         let coding = parts.next().unwrap_or("").trim().to_ascii_lowercase();
         let mut q = 1.0f32;
@@ -118,12 +118,12 @@ pub fn accepts_gzip(header: Option<&str>) -> bool {
             }
         }
         match coding.as_str() {
-            "gzip" | "x-gzip" => return q > 0.0,
-            "*" => star = Some(q > 0.0),
+            "gzip" | "x-gzip" => gzip = Some(gzip.unwrap_or(true) && q > 0.0 && q <= 1.0),
+            "*" => star = Some(star.unwrap_or(true) && q > 0.0 && q <= 1.0),
             _ => {}
         }
     }
-    star.unwrap_or(false)
+    gzip.or(star).unwrap_or(false)
 }
 
 /// The whole decision: entry, encoding, headers, body (empty for HEAD).
@@ -241,6 +241,7 @@ mod tests {
         );
         assert!(accepts_gzip(Some("gzip;q=1, *;q=0")));
         assert!(!accepts_gzip(Some("gzip;q=bogus")));
+        assert!(!accepts_gzip(["gzip", "gzip;q=0"]));
     }
 
     #[test]

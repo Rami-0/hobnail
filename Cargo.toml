@@ -13,6 +13,7 @@ http-body-util = "0.1.5"
 hyper = { version = "1.12.0", default-features = false, features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 libc = "0.2.191"
+miniz_oxide = "=0.8.9"
 ring = "0.17"
 argon2 = "=0.5.3"
 rusqlite = { version = "0.42.0", default-features = false, features = ["bundled"] }

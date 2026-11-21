@@ -276,11 +276,13 @@ async fn download_streams_text_with_disposition() {
     // download uses follow=0, and the fake closes nothing; read a bit.
     let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(format!("GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
+    s.write_all(format!("GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\nAccept-Encoding: gzip\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "line 2", Duration::from_secs(8)).await;
     assert!(got.starts_with("HTTP/1.1 200"), "{got}");
+    assert!(!got.contains("content-encoding:"));
+    assert!(!got.contains("vary:"));
     assert!(
         got.contains("content-type: text/plain; charset=utf-8"),
         "{got}"

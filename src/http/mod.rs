@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod client;
+mod compression;
 pub mod server;
 
 #[cfg(test)]

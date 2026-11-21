@@ -41,7 +41,7 @@ pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Resu
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
                 req.extensions_mut().insert(Peer(peer));
-                async move { Ok::<_, Infallible>(route(st, req).await) }
+                async move { Ok::<_, Infallible>(respond(st, req).await) }
             });
             let _ = hyper::server::conn::http1::Builder::new()
                 .keep_alive(true)
@@ -91,6 +91,23 @@ pub fn host_allowed(host: &str, env: &crate::state::Env) -> bool {
 /// The peer address of the connection, stored in request extensions.
 #[derive(Debug, Clone, Copy)]
 pub struct Peer(pub SocketAddr);
+
+async fn respond(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
+    // Keep stream and download responses out of content negotiation entirely.
+    if matches!(
+        req.uri().path(),
+        "/api/v1/stream" | "/api/logs/stream" | "/api/logs/download"
+    ) {
+        return route(state, req).await;
+    }
+    let accepts_gzip = super::assets::accepts_gzip(
+        req.headers()
+            .get_all(hyper::header::ACCEPT_ENCODING)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+    );
+    super::compression::negotiate(route(state, req).await, accepts_gzip).await
+}
 
 async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     let host = request_host(&req);

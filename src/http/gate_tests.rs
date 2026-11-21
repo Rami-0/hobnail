@@ -1227,7 +1227,7 @@ impl Stream {
     async fn open(addr: std::net::SocketAddr, path: &str, cookie: &str) -> (Stream, String) {
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_all(
-            format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nCookie: {cookie}\r\n\r\n").as_bytes(),
+            format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nCookie: {cookie}\r\nAccept-Encoding: gzip\r\n\r\n").as_bytes(),
         )
         .await
         .unwrap();
@@ -1334,6 +1334,8 @@ async fn api_v1_stream_events_and_viewer_count() {
         Some("text/event-stream")
     );
     assert_eq!(header(&head, "cache-control").as_deref(), Some("no-store"));
+    assert!(header(&head, "content-encoding").is_none());
+    assert!(header(&head, "vary").is_none());
     let (name, v) = s.next().await;
     assert_eq!(name, "hello");
     assert_eq!(v["sha"], st.build.sha);
