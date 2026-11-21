@@ -50,8 +50,10 @@ All **[exp]**. Image display size is the `docker images` figure; content is
 | phase 1 | 7,780,784 | 13.3 MB / 4,448,685 |
 | M5 (`b93b92e`) | **7,694,768** | **13.3 MB / 4,578,941** |
 
-The **≤ 13 MB after-removal image budget is missed**, despite removing the old
-UI. The binary is smaller than phase 1 but larger than main. Evidence:
+M5 exceeded the original **13 MB** budget. The owner accepted the roughly
+13.3 MB image on 2026-11-20. M1 enforces the signed-off **13,500,000 B** limit
+using the exact Docker image-list size in `scripts/check-image-size.py`,
+called before deployment. Historical M5 evidence:
 [startup and size output](react-port-raw/m5/startup.log).
 
 ## Bundle
@@ -391,8 +393,9 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    (`a5c0de5`, `ef54589`); accepted by the owner on 2026-11-20. Original caps
    are missed. Chart chunks are split and individually capped at 60 KB; their
    aggregate named payload is 115,235 B gzip, above a combined 110 KB allowance.
-2. Image **13.3 MB >13 MB** after old UI removal. Lower idle memory does not
-   cancel the image miss. Lifetime peaks including login exceed **20 MiB**.
+2. The **13.3 MB** M5 image exceeded the original 13 MB after-removal
+   budget. The owner accepted it and set a 13.5 MB gate. Lifetime memory
+   peaks including login exceed **20 MiB**.
 3. Browser LCP, load-task/live-task, one INP and log-burst budgets are missed,
    as recorded above; they are not rounded into passes. Full chart first mount
    remains a long task. CLS passes these two runs.
@@ -438,7 +441,6 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 
 ## Budgets still missed
 
-- Image ≤13 MB after removal: 13.3 MB.
 - Original whole-dist ≤1.3 MB raw /400 KB gzip: 1,344,189 /449,533 B.
 - Combined chart payload interpreted as ≤110 KB: 115,235 B; per-chunk gates pass.
 - Container lifetime peak ≤20 MiB, including sign-in; see exact final run bytes

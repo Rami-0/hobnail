@@ -270,7 +270,7 @@ v3: make it the one tool you keep open.
 | W2 | Breadth | Endpoint and uptime monitors, alert rule builder with silences, images/volumes/networks/disk pages, read-only compose view with drift. |
 | W3 | Reach and control | Owner decides on container actions; arrangeable Overview and pages; Glance-style widgets; Prometheus `/metrics`; multi-host design note. |
 
-Budgets for v3 are in the plan (idle 8 MiB or less, image 13 MB or less after old UI removal).
+Budgets for v3 are in the plan (idle 8 MiB or less, image 13.5 MB or less per the 2026-11-20 sign-off).
 
 Until M6, it runs **alongside** Homepage on a different port. Homepage stays
 untouched. Idle RAM is measured at every milestone, and M4 specifically checks the
