@@ -674,20 +674,7 @@ pub(super) fn store(
             position: section.position,
         });
     }
-    conn.execute(
-        "DELETE FROM provider_widgets WHERE board_id=?1 AND NOT EXISTS (
-           SELECT 1 FROM board_items WHERE board_id=?1 AND kind='widget'
-           AND json_extract(board_items.config,'$.widget_id')=provider_widgets.id)
-           AND NOT EXISTS (
-             SELECT 1 FROM drafts draft
-             CROSS JOIN json_each(draft.value,'$.sections') section
-             CROSS JOIN json_each(section.value,'$.items') item
-             WHERE draft.key='board:' || ?1 AND draft.updated>=?2
-               AND json_extract(item.value,'$.payload.kind')='widget'
-               AND json_extract(item.value,'$.payload.widget_id')=provider_widgets.id
-           )",
-        params![id, now - 7 * 86400],
-    )?;
+    crate::db::maintain::prune_provider_placements(conn, Some(id), now)?;
     conn.execute(
         "UPDATE boards SET sections=?2,version=version+1,updated=?3 WHERE id=?1",
         params![id, encode(&sections)?, now],
