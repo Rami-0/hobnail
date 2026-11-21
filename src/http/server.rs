@@ -200,9 +200,10 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     }
     let dashboard_icon = matches!(&lookup, Some(Lookup::Found(m))
         if m.route.handler == access::Handler::DashboardIcon);
+    let secure = session.is_some() && super::proxy::is_https(&req, &state.env);
     let mut response = dispatch(&state, req, &path, read, lookup, session.as_ref()).await;
     if let Some(session) = session {
-        crate::auth::refresh_cookie(&state, &session, &mut response);
+        crate::auth::refresh_cookie(&state, &session, secure, &mut response);
         if dashboard_icon && response.status().is_success() {
             set(&mut response, CACHE_CONTROL, "private, max-age=86400");
             set(&mut response, hyper::header::VARY, "Cookie");
@@ -347,6 +348,7 @@ mod tests {
             host_sys: "/sys".into(),
             hostname: "homelab".into(),
             allowed_hosts: vec!["*.tail1234.ts.net".into()],
+            trusted_proxies: vec![],
         }
     }
 

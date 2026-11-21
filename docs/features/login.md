@@ -39,8 +39,9 @@ disabled or deleted. Invitations are single-use, expire, and can be revoked.
   bounds concurrency; a simultaneous credential request can return 429.
 - Sessions use 32 random bytes; only their SHA-256 is stored. The cookie is
   `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`. Database expiry and cookie
-  slide on authenticated responses. The cookie has no `Secure` flag with the
-  plain-HTTP default. Use an encrypted access path for credentials.
+  slide on authenticated responses. Hobnail adds `Secure` when a
+  [trusted proxy](../configuration.md#incoming-reverse-proxy) reports HTTPS.
+  Plain HTTP continues to work.
 - Failed logins use per-peer-IP and global exponential back-off (1, 2, 4 …
   60 seconds; five global failures are free). The limiter uses the connection
   peer, so users behind one proxy share its IP. Password changes have separate

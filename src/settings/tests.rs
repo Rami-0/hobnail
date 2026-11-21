@@ -43,6 +43,7 @@ fn state_with(text: Option<&str>) -> (PathBuf, Arc<AppState>) {
         host_sys: "/nonexistent-sys".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
     };
     (dir, AppState::new(env))
 }

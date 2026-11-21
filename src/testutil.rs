@@ -25,6 +25,7 @@ pub fn state_with(containers: Vec<Container>, toml: &str) -> Arc<AppState> {
         host_sys: "/nonexistent".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
     };
     let st = AppState::new(env);
     st.containers.send_replace(Arc::new(Snapshot {

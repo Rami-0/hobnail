@@ -2,7 +2,7 @@
 //! tasks. Locks are std (short critical sections, never held across .await).
 
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -45,6 +45,8 @@ pub struct Env {
     /// Extra Host header values (globs) accepted besides IPs, localhost and
     /// `hostname` (RH_ALLOWED_HOSTS, comma-separated). DNS-rebinding guard.
     pub allowed_hosts: Vec<String>,
+    /// Exact socket peer IPs allowed to supply forwarding headers.
+    pub trusted_proxies: Vec<IpAddr>,
 }
 
 impl Env {
@@ -85,6 +87,16 @@ impl Env {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            trusted_proxies: var("RH_TRUSTED_PROXIES", "")
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.parse::<IpAddr>()
+                        .map(|ip| ip.to_canonical())
+                        .map_err(|_| "RH_TRUSTED_PROXIES: expected comma-separated IP addresses")
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         })
     }
 }

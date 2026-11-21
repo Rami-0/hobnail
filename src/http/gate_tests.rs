@@ -932,6 +932,7 @@ async fn privacy_state(tag: &str) -> Arc<AppState> {
         host_sys: "/nonexistent".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
     });
     assert!(
         st.config.snapshot().error.is_none(),
@@ -2236,6 +2237,87 @@ async fn viewer_cannot_read_administrative_details() {
     let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
     assert_eq!(owner_history.status, 200);
     assert!(owner_history.body.contains("auth.login_failed"));
+}
+
+#[tokio::test]
+async fn only_trusted_proxy_https_sets_secure_session_cookies() {
+    let untrusted = state();
+    crate::auth::set_password_for_tests(&untrusted.db, PW);
+    let direct = start(untrusted).await;
+    let mut trusted = state();
+    Arc::get_mut(&mut trusted).unwrap().env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+    crate::auth::set_password_for_tests(&trusted.db, PW);
+    let proxied = start(trusted.clone()).await;
+
+    for (addr, proto, secure) in [
+        (direct, "https", false),
+        (proxied, "http", false),
+        (proxied, "https,http", false),
+        (proxied, "https", true),
+    ] {
+        let origin = format!("https://{addr}");
+        let response = req(
+            addr,
+            "POST",
+            "/api/login",
+            &[
+                ("Content-Type", "application/json"),
+                ("Origin", &origin),
+                ("X-Forwarded-Proto", proto),
+            ],
+            &serde_json::json!({"username": "admin", "password": PW}).to_string(),
+        )
+        .await;
+        assert_eq!(response.status, 200);
+        let cookie = header(&response.head, "set-cookie").unwrap();
+        assert_eq!(cookie.ends_with("; Secure"), secure);
+        if secure {
+            let csrf: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+            let response = req(
+                addr,
+                "POST",
+                "/api/logout",
+                &[
+                    ("Origin", &origin),
+                    ("X-Forwarded-Proto", proto),
+                    ("Cookie", cookie.split(';').next().unwrap()),
+                    ("X-RH-CSRF", csrf["csrf"].as_str().unwrap()),
+                ],
+                "",
+            )
+            .await;
+            assert_eq!(response.status, 200);
+            assert!(header(&response.head, "set-cookie")
+                .unwrap()
+                .ends_with("Max-Age=0; Secure"));
+        }
+    }
+
+    for (index, path) in ["/api/v1/session", "/api/v1/bootstrap"]
+        .into_iter()
+        .enumerate()
+    {
+        let token = format!("{index:064x}");
+        let hash = crate::auth::sha256_hex(token.as_bytes());
+        let now = crate::auth::now_s();
+        let ttl = crate::auth::SESSION_TTL_SECS;
+        assert!(trusted
+            .db
+            .create_session(&hash, now - 7200, now + ttl - 7200));
+        let cookie = format!("rh_session={token}");
+        let response = req(
+            proxied,
+            "GET",
+            path,
+            &[("Cookie", &cookie), ("X-Forwarded-Proto", "https")],
+            "",
+        )
+        .await;
+        assert_eq!(response.status, 200);
+        assert!(header(&response.head, "set-cookie")
+            .unwrap()
+            .ends_with("; Secure"));
+    }
 }
 
 #[tokio::test]

@@ -121,6 +121,19 @@ load. Example:
 :root { --accent: #2f81f7; --r: 4px; --font: "Inter", system-ui, sans-serif; }
 ```
 
+## Incoming reverse proxy
+
+Set `RH_TRUSTED_PROXIES` to a comma-separated list of exact IPv4 or IPv6
+addresses and restart Hobnail. The default is empty. List only the immediate
+TCP peer IPs of proxies you control, as Hobnail sees them. A shared address
+such as a Docker gateway can also represent direct clients. Use a dedicated
+proxy address and restrict direct access to the backend.
+
+Hobnail serves HTTP. Configure the trusted proxy to overwrite
+`X-Forwarded-Proto` with a single `https` or `http` value based on the
+external connection. HTTPS requests then receive a Secure session cookie.
+Preserve the external Host and add it to `RH_ALLOWED_HOSTS` if necessary.
+
 ## Outgoing HTTP
 
 ```toml

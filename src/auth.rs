@@ -103,7 +103,8 @@ pub(crate) async fn route(
         return r;
     }
     if req.uri().path() == "/api/logout" {
-        return logout(state, session.expect("logout gate"));
+        let secure = crate::http::proxy::is_https(&req, &state.env);
+        return logout(state, session.expect("logout gate"), secure);
     }
     credential_route(state, req, CredentialAction::Login).await
 }
@@ -415,7 +416,12 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     std::hint::black_box(d) == 0
 }
 
-pub(crate) fn refresh_cookie(state: &AppState, session: &Session, response: &mut Response<Body>) {
+pub(crate) fn refresh_cookie(
+    state: &AppState,
+    session: &Session,
+    secure: bool,
+    response: &mut Response<Body>,
+) {
     if response.headers().contains_key(SET_COOKIE) {
         return;
     }
@@ -427,13 +433,14 @@ pub(crate) fn refresh_cookie(state: &AppState, session: &Session, response: &mut
         set(
             response,
             SET_COOKIE,
-            &session_cookie(&session.token, expires - now),
+            &session_cookie(&session.token, expires - now, secure),
         );
     }
 }
 
-fn session_cookie(token: &str, max_age: i64) -> String {
-    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}")
+fn session_cookie(token: &str, max_age: i64, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}")
 }
 
 /// `host[:port]` of an `http(s)://` Origin or Referer value.
@@ -665,6 +672,7 @@ pub(crate) async fn credential_route(
             "send application/json",
         );
     }
+    let secure = crate::http::proxy::is_https(&req, &state.env);
     let ip = peer_ip(&req);
     if let Err(secs) = state
         .login_limiter
@@ -746,7 +754,7 @@ pub(crate) async fn credential_route(
     set(
         &mut response,
         SET_COOKIE,
-        &session_cookie(&token, SESSION_TTL_SECS),
+        &session_cookie(&token, SESSION_TTL_SECS, secure),
     );
     response
 }
@@ -861,14 +869,10 @@ fn authenticate(
     }
 }
 
-fn logout(state: &AppState, session: &Session) -> Response<Body> {
+fn logout(state: &AppState, session: &Session, secure: bool) -> Response<Body> {
     state.db.delete_session(&session.hash);
     let mut r = json_response(StatusCode::OK, &serde_json::json!({ "ok": true }));
-    set(
-        &mut r,
-        SET_COOKIE,
-        &format!("{COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
-    );
+    set(&mut r, SET_COOKIE, &session_cookie("", 0, secure));
     r
 }
 
@@ -1078,9 +1082,15 @@ mod tests {
 
     #[test]
     fn cookie_format() {
-        let c = session_cookie(&"aa".repeat(32), SESSION_TTL_SECS);
+        let c = session_cookie(&"aa".repeat(32), SESSION_TTL_SECS, true);
         assert!(c.starts_with("rh_session="));
-        for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"] {
+        for part in [
+            "HttpOnly",
+            "SameSite=Strict",
+            "Path=/",
+            "Max-Age=604800",
+            "Secure",
+        ] {
             assert!(c.contains(part), "{c}");
         }
     }

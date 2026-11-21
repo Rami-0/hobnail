@@ -26,6 +26,7 @@ fn app(dir: &std::path::Path, config: &str) -> Arc<AppState> {
         host_sys: "/sys".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
     });
     assert!(
         st.config.snapshot().error.is_none(),

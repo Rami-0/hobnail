@@ -18,6 +18,11 @@ Buffered `application/json` bodies larger than 1,024 bytes carry
 explicit `gzip;q=0` disables gzip. The event streams and log downloads
 bypass this negotiation.
 
+The session cookie uses `HttpOnly; SameSite=Strict; Path=/` with a seven-day
+sliding expiry. Issuing, renewing or clearing it adds `Secure` when a
+[trusted proxy](configuration.md#incoming-reverse-proxy) reports HTTPS.
+Plain HTTP uses the same session flow without the flag.
+
 ## Version 1
 
 | Method | Path | Access | Purpose |

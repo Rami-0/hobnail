@@ -7,5 +7,6 @@ pub mod server;
 mod gate_tests;
 
 pub(crate) mod icons;
+pub(crate) mod proxy;
 mod pwa;
 pub(crate) mod query;

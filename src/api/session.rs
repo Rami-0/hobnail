@@ -3,7 +3,7 @@
 //! `user` and `csrf` are null unless the request carries a valid session
 //! cookie. Uses only the public contract of `auth`.
 
-use hyper::{HeaderMap, Response, StatusCode};
+use hyper::{Request, Response, StatusCode};
 use serde::Serialize;
 
 use crate::db::accounts::Role;
@@ -72,11 +72,12 @@ fn session(state: &AppState, principal: Option<&crate::auth::Session>) -> Sessio
     }
 }
 
-pub fn get(state: &AppState, headers: &HeaderMap) -> Response<Body> {
-    let principal = crate::auth::request_session(state, headers);
+pub fn get<B>(state: &AppState, req: &Request<B>) -> Response<Body> {
+    let principal = crate::auth::request_session(state, req.headers());
     let mut response = super::json(StatusCode::OK, &session(state, principal.as_ref()));
     if let Some(principal) = principal {
-        crate::auth::refresh_cookie(state, &principal, &mut response);
+        let secure = crate::http::proxy::is_https(req, &state.env);
+        crate::auth::refresh_cookie(state, &principal, secure, &mut response);
     }
     response
 }
