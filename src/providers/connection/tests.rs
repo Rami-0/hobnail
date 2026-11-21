@@ -129,7 +129,7 @@ async fn shared_fetch_redacts_all_emitted_auth_representations() {
                         Auth::Bearer(Input::Credential("token")),
                         Auth::Basic(Input::Credential("user"), Input::Credential("password")),
                         Auth::Header("x-api-key", Input::Credential("header")),
-                        Auth::Header("cookie", Input::Session(&session)),
+                        Auth::Header("x-session", Input::Session(&session)),
                     ],
                     query: &[("auth", Input::Credential("query"))],
                     ..Step::get("")
@@ -246,7 +246,7 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
         respond(
             &mut socket,
             200,
-            "Set-Cookie: sid=fixture\r\nSet-Cookie: second=fixture\r\nX-Hidden: private\r\n",
+            "Set-Cookie: sid=fixture; Path=/; HttpOnly\r\nSet-Cookie: second=ignored\r\nX-Hidden: private\r\n",
             "",
         )
         .await;
@@ -255,6 +255,7 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
         assert!(wire.contains("x-api-key: opaque-token\r\n"));
         assert!(wire.contains("authorization: PVEAPIToken=test@realm!id=opaque-token\r\n"));
         assert!(wire.contains("cookie: sid=fixture\r\n"));
+        assert!(!wire.contains("ignored") && !wire.contains("HttpOnly"));
         respond(
             &mut socket,
             302,
@@ -288,14 +289,18 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
             .await?;
         assert_eq!(reply.headers.len(), 2);
         assert!(!reply.headers.contains_key("x-hidden"));
-        let session = conn.session_header(&reply, "set-cookie")?;
+        let session = conn.session_cookie(&reply, "sid")?;
+        assert!(conn.session_cookie(&reply, "missing").is_err());
+        let mut echoed = "bare fixture value".to_owned();
+        assert!(conn.output_redactor().redact(&mut echoed));
+        assert_eq!(echoed, "bare <redacted> value");
         let response = conn
             .request(Step {
                 verb: Verb::Put,
                 auth: &[
                     Auth::Header("x-api-key", Input::Credential("token")),
                     Auth::Authorization("PVEAPIToken=test@realm!id=", Input::Credential("token")),
-                    Auth::Header("cookie", Input::Session(&session)),
+                    Auth::Cookie(&session),
                 ],
                 query: &[
                     ("auth", Input::Credential("token")),
@@ -321,7 +326,7 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
         )?;
         for auth in [
             Auth::Header("x-api-key", Input::Credential("token")),
-            Auth::Header("cookie", Input::Session(&session)),
+            Auth::Cookie(&session),
         ] {
             let denied = other
                 .request(Step {

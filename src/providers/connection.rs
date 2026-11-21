@@ -172,6 +172,7 @@ impl Connections {
 pub struct Session {
     scope: u64,
     value: String,
+    cookie_value_start: Option<usize>,
 }
 
 impl fmt::Debug for Session {
@@ -196,6 +197,8 @@ impl fmt::Debug for Input<'_> {
 pub enum Auth<'a> {
     Header(&'a str, Input<'a>),
     Bearer(Input<'a>),
+    #[allow(dead_code)] // Available to providers with cookie-based login.
+    Cookie(&'a Session),
     #[allow(dead_code)] // Available to providers that use HTTP Basic.
     Basic(Input<'a>, Input<'a>),
     #[allow(dead_code)] // Available to providers with custom authorization schemes.
@@ -340,7 +343,9 @@ impl<'a> Conn<'a> {
     fn resolve<'b>(&'b self, input: &'b Input<'_>) -> Result<&'b str, Fault> {
         match input {
             Input::Text(text) => Ok(text),
-            Input::Session(session) if session.scope == self.session_scope => {
+            Input::Session(session)
+                if session.scope == self.session_scope && session.cookie_value_start.is_none() =>
+            {
                 self.remember_auth(&session.value);
                 Ok(&session.value)
             }
@@ -380,7 +385,20 @@ impl<'a> Conn<'a> {
         };
         for auth in step.auth {
             let (name, value) = match auth {
-                Auth::Header(name, input) => (*name, self.auth_value(input)?.to_owned()),
+                Auth::Header(name, input) => {
+                    if name.eq_ignore_ascii_case("cookie") {
+                        return Err(Class::Protocol.into());
+                    }
+                    (*name, self.auth_value(input)?.to_owned())
+                }
+                Auth::Cookie(session) => {
+                    let start = session
+                        .cookie_value_start
+                        .filter(|_| session.scope == self.session_scope)
+                        .ok_or(Class::Blocked)?;
+                    self.remember_auth(session.value[start..].trim_matches('"'));
+                    ("cookie", session.value.clone())
+                }
                 Auth::Bearer(input) => (
                     "authorization",
                     format!("Bearer {}", self.auth_value(input)?),
@@ -488,6 +506,7 @@ impl<'a> Conn<'a> {
         Ok(Session {
             scope: self.session_scope,
             value: value.into(),
+            cookie_value_start: None,
         })
     }
 
@@ -500,6 +519,46 @@ impl<'a> Conn<'a> {
                 .and_then(|value| value.to_str().ok())
                 .ok_or(Class::Protocol)?,
         )
+    }
+
+    /// Parse just the selected cookie from requested Set-Cookie headers.
+    /// The session can only be attached through Auth::Cookie.
+    #[allow(dead_code)] // Available to providers with cookie-based login.
+    pub fn session_cookie(&self, response: &Response, name: &str) -> Result<Session, Fault> {
+        HeaderName::try_from(name).map_err(|_| Class::Protocol)?;
+        let mut selected = response
+            .headers
+            .get_all(hyper::header::SET_COOKIE)
+            .iter()
+            .filter_map(|header| header.to_str().ok())
+            .filter_map(|value| value.split(';').next().map(str::trim))
+            .filter(|pair| pair.split_once('=').is_some_and(|(key, _)| key == name));
+        let pair = selected.next().ok_or(Class::Protocol)?;
+        if pair.len() > MAX_SESSION || selected.next().is_some() {
+            return Err(Class::Protocol.into());
+        }
+        let start = name.len() + 1;
+        let value = &pair[start..];
+        let bare = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(value);
+        if bare.is_empty()
+            || !bare.bytes().all(|b| {
+                matches!(b,
+                    0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e
+                )
+            })
+        {
+            return Err(Class::Protocol.into());
+        }
+        self.remember_auth(bare);
+        self.remember_auth(pair);
+        Ok(Session {
+            scope: self.session_scope,
+            value: pair.into(),
+            cookie_value_start: Some(start),
+        })
     }
 
     pub fn uses_session_cache(&self) -> bool {
