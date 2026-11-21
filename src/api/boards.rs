@@ -330,17 +330,38 @@ fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardDocument, Ap
     })
 }
 
+fn link_key(link: &str) -> Option<String> {
+    if link.len() > 2048 || link.contains('\\') {
+        return None;
+    }
+    let (scheme, rest) = link.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let default = match scheme.as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let split = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, suffix) = rest.split_at(split);
+    let parsed: hyper::Uri = format!("{scheme}://{rest}").parse().ok()?;
+    let host = parsed.host()?;
+    if host.is_empty() || authority.contains('@') {
+        return None;
+    }
+    let port = parsed.port_u16();
+    let authority = match port {
+        Some(port) if port == default => host.to_ascii_lowercase(),
+        Some(port) => format!("{}:{port}", host.to_ascii_lowercase()),
+        None => authority.to_ascii_lowercase(),
+    };
+    let slash = if suffix.starts_with('/') { "" } else { "/" };
+    // The HTTP URI parser drops the fragment. Preserve the original suffix,
+    // including its path spelling, query order and fragment.
+    Some(format!("{scheme}://{authority}{slash}{suffix}"))
+}
+
 fn safe_link(link: &str, field: &str) -> Result<(), ApiError> {
-    let parsed = link.parse::<hyper::Uri>().ok();
-    if link.len() > 2048
-        || link.contains('\\')
-        || !parsed.is_some_and(|uri| {
-            matches!(uri.scheme_str(), Some("http" | "https"))
-                && uri
-                    .authority()
-                    .is_some_and(|a| !a.host().is_empty() && !a.as_str().contains('@'))
-        })
-    {
+    if link_key(link).is_none() {
         return Err(ApiError::bad_request(
             "enter an absolute HTTP or HTTPS URL without user information",
             Some(field),
@@ -383,6 +404,24 @@ pub(super) fn validate(
         .flat_map(|s| &s.items)
         .filter_map(|i| Some((i.id.as_deref()?, &i.payload)))
         .collect();
+    // Grandfather duplicate links already saved on a board, but reject
+    // new duplicates regardless of which section comes first.
+    let unchanged_link = |item: &BoardItem, previous: Option<&BoardPayload>| {
+        matches!((&item.payload, previous), (BoardPayload::Link { url, .. }, Some(BoardPayload::Link { url: old, .. }))
+            if link_key(url) == link_key(old))
+    };
+    let mut links: HashSet<_> = doc
+        .sections
+        .iter()
+        .flat_map(|s| &s.items)
+        .filter(|item| {
+            unchanged_link(
+                item,
+                item.id.as_deref().and_then(|id| items.get(id).copied()),
+            )
+        })
+        .map(|item| identity(&item.payload))
+        .collect();
     let validator = PayloadValidator::new(user, conn, config)?;
     for section in &doc.sections {
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
@@ -416,6 +455,15 @@ pub(super) fn validate(
                 ));
             }
             validator.validate(&item.payload, previous)?;
+            if matches!(item.payload, BoardPayload::Link { .. })
+                && !unchanged_link(item, previous)
+                && !links.insert(identity(&item.payload))
+            {
+                return Err(ApiError::bad_request(
+                    "This link is already on the board.",
+                    Some("url"),
+                ));
+            }
         }
     }
     Ok(())
@@ -699,7 +747,7 @@ pub(super) fn identity(payload: &BoardPayload) -> (u8, String) {
             0,
             serde_json::to_string(target).expect("container identity"),
         ),
-        BoardPayload::Link { url, .. } => (1, url.clone()),
+        BoardPayload::Link { url, .. } => (1, link_key(url).unwrap_or_else(|| url.clone())),
         BoardPayload::Widget { widget_id, .. } => (2, widget_id.clone()),
         BoardPayload::Integration { integration_id, .. } => (3, integration_id.clone()),
     }

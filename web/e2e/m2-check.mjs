@@ -217,6 +217,15 @@ try {
     const url = `${items} input[name="base_url"]`;
     const secret = `${items} input[name="secret"]`;
     const endpoint = "http://127.0.0.1:8081/fixture/m2/reading";
+    assert.equal(await tab.ev(`(async () => {
+      const { csrf } = await fetch("/api/v1/session").then(r => r.json());
+      const response = await fetch("/api/v1/integrations", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-RH-CSRF": csrf },
+        body: JSON.stringify({ kind: "http", name: "Z Existing fixture", base_url: ${q(endpoint)}, enabled: true }),
+      });
+      return response.status;
+    })()`), 201);
+
     await fill(link, "invalid");
     contexts.at(-1).events.allow(({ url, status }) => status === 400 && new URL(url).pathname === "/api/v1/onboarding/test" && "expected invalid test URL");
     await click(`${items}:has(input[name="url"][required]) ${attr("setup-test")}`);
@@ -260,6 +269,14 @@ try {
   }
   await move(empty ? "continue" : "skip", 4, true);
   await require("review reflects selected groups or the real empty board", text(wizard, empty ? "Your board will be empty" : "Home tools"));
+  if (!empty) {
+    await require("Review offers a match to an already saved integration", text(wizard, "Matches existing Z Existing fixture"));
+    await click('button[aria-label="Connection for New HTTP integration"]');
+    await require("matching saved integration can be reused", text('[role="option"]:not([data-value="new"])', "Reuse Z Existing fixture"));
+    await click('[role="option"][data-value="new"]');
+    await require("Add anyway is autosaved", text(".setup-actions [role=status]", "Draft saved"));
+    await capture("review-match", wizard);
+  }
   await click(attr("setup-create"));
   await require("first board opens in the requested theme", `location.pathname.startsWith("/app/boards/") && !!${el(board)} && document.documentElement.dataset.theme === ${q(theme)}`);
   const route = await tab.ev("location.pathname");

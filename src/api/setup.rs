@@ -52,6 +52,9 @@ pub struct SetupItem {
     name: String,
     group: String,
     target: SetupTarget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    integration_choice: Option<String>,
 }
 
 impl SetupItem {
@@ -80,7 +83,7 @@ fn item_error(id: &str, mut error: ApiError) -> ApiError {
     error
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(tag = "kind", rename_all = "snake_case"))]
 pub enum SetupTarget {
@@ -98,12 +101,21 @@ struct Saved {
 
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
+pub struct SetupIntegrationMatch {
+    id: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SetupDraft {
     revision: u32,
     board_id: Option<String>,
     document: SetupDocument,
     theme_default: String,
     credential_origins: HashMap<String, String>,
+    integration_matches: HashMap<String, String>,
+    matching_integrations: HashMap<String, Vec<SetupIntegrationMatch>>,
 }
 
 #[derive(Deserialize)]
@@ -202,12 +214,40 @@ fn view(
     let mut stmt =
         conn.prepare("SELECT item_id, origin FROM setup_credentials WHERE user_id=?1")?;
     let origins = stmt.query_map([owner], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let mut integration_matches = HashMap::new();
+    let mut matching_integrations = HashMap::new();
+    if saved.board_id.is_none() && saved.document.step == SetupStep::Review {
+        let endpoints = saved_endpoints(conn)?;
+        for item in saved
+            .document
+            .items
+            .iter()
+            .filter(|i| i.included && !i.incomplete())
+        {
+            if let SetupTarget::Http { base_url, .. } = &item.target {
+                if let Some(matches) = endpoint_key(base_url)
+                    .ok()
+                    .and_then(|key| endpoints.get(&key))
+                {
+                    integration_matches.insert(item.id.clone(), matches[0].id.clone());
+                }
+            }
+        }
+        let referenced: HashSet<_> = integration_matches.values().collect();
+        matching_integrations = endpoints
+            .into_values()
+            .filter(|group| referenced.contains(&group[0].id))
+            .map(|group| (group[0].id.clone(), group))
+            .collect();
+    }
     Ok(SetupDraft {
         revision: saved.revision,
         board_id: saved.board_id,
         document: saved.document,
         theme_default: dashboard_settings::theme(conn, config)?,
         credential_origins: origins.collect::<rusqlite::Result<_>>()?,
+        integration_matches,
+        matching_integrations,
     })
 }
 
@@ -235,6 +275,11 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
         || items.len() != update.document.items.len()
         || items.keys().any(|id| !super::valid_id(id))
         || update.credentials.len() > 128
+        || update.document.items.iter().any(|item| {
+            item.integration_choice
+                .as_deref()
+                .is_some_and(|choice| choice != "new" && !super::valid_id(choice))
+        })
     {
         return Err(ApiError::bad_request(
             "invalid or too many setup items",
@@ -303,6 +348,36 @@ fn endpoint_key(url: &str) -> Result<String, ApiError> {
     let origin = integration_origin(url)?;
     let uri: hyper::Uri = url.parse().expect("validated HTTP URL");
     Ok(format!("{origin}{}", uri.path()))
+}
+
+fn saved_endpoints(
+    conn: &Connection,
+) -> Result<HashMap<String, Vec<SetupIntegrationMatch>>, ApiError> {
+    let mut endpoints = HashMap::<_, Vec<_>>::new();
+    for (id, name, url) in integrations::endpoints(conn)? {
+        if let Ok(key) = endpoint_key(&url) {
+            endpoints
+                .entry(key)
+                .or_default()
+                .push(SetupIntegrationMatch { id, name });
+        }
+    }
+    Ok(endpoints)
+}
+
+fn reused_integration<'a>(
+    matches: &'a [SetupIntegrationMatch],
+    choice: Option<&str>,
+) -> Result<Option<&'a str>, ApiError> {
+    match choice {
+        Some("new") => Ok(None),
+        None if matches.is_empty() => Ok(None),
+        Some(id) if let Some(m) = matches.iter().find(|m| m.id == id) => Ok(Some(&m.id)),
+        _ => Err(ApiError::bad_request(
+            "Review the matching integrations and choose whether to reuse one or add a new integration.",
+            Some("integration_choice"),
+        )),
+    }
 }
 
 fn credential(
@@ -381,8 +456,9 @@ fn target(
 
 fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPayload, ApiError> {
     let name = item.name.trim().to_owned();
-    Ok(match item.target.clone() {
-        SetupTarget::Board { mut payload } => {
+    Ok(match &item.target {
+        SetupTarget::Board { payload } => {
+            let mut payload = payload.clone();
             match &mut payload {
                 BoardPayload::Link { title, .. } => *title = name,
                 BoardPayload::Container { title, .. }
@@ -392,16 +468,16 @@ fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPaylo
             payload
         }
         SetupTarget::Http { base_url, enabled } => {
-            let secret = credential(conn, owner, &item.id, &base_url)?.map(|value| value.token);
+            let secret = credential(conn, owner, &item.id, base_url)?.map(|value| value.token);
             let integration = integrations::save(
                 conn,
                 None,
                 IntegrationInput {
                     name,
                     kind: IntegrationKind::Http,
-                    base_url,
+                    base_url: base_url.clone(),
                     icon: None,
-                    enabled,
+                    enabled: *enabled,
                     secret,
                 },
             )?;
@@ -433,9 +509,8 @@ fn commit(
     }
     let mut sections: Vec<BoardSection> = Vec::new();
     let mut identities = HashSet::new();
-    let mut sources = HashSet::new();
     let mut new_endpoints = HashSet::new();
-    let mut saved_endpoints = HashSet::new();
+    let endpoints = saved_endpoints(conn)?;
     let validator = boards::PayloadValidator::new(user, conn, config)?;
     for item in saved
         .document
@@ -444,30 +519,21 @@ fn commit(
         .filter(|item| item.included && !item.incomplete())
     {
         let local = |error| item_error(&item.id, error);
-        let unique = match &item.target {
+        let (reuse, unique) = match &item.target {
             SetupTarget::Http { base_url, .. } => {
                 let key = endpoint_key(base_url).map_err(local)?;
-                !saved_endpoints.contains(&key) && new_endpoints.insert(key)
+                let matches = endpoints.get(&key).map(Vec::as_slice).unwrap_or_default();
+                let reuse = reused_integration(matches, item.integration_choice.as_deref())
+                    .map_err(local)?;
+                let unique = match reuse {
+                    Some(id) => identities.insert((3, id.to_owned())),
+                    None => new_endpoints.insert(key),
+                };
+                (reuse, unique)
             }
-            SetupTarget::Board { payload } => {
-                let new_identity = identities.insert(boards::identity(payload));
-                if let BoardPayload::Integration { integration_id, .. } = payload {
-                    let key = endpoint_key(&integrations::base_url(conn, integration_id)?)
-                        .map_err(local)?;
-                    let duplicates_new = new_endpoints.contains(&key);
-                    saved_endpoints.insert(key);
-                    new_identity && !duplicates_new
-                } else {
-                    new_identity
-                }
-            }
+            SetupTarget::Board { payload } => (None, identities.insert(boards::identity(payload))),
         };
-        if !unique
-            || item
-                .source
-                .as_ref()
-                .is_some_and(|source| !sources.insert(source.clone()))
-        {
+        if !unique {
             return Err(local(ApiError::bad_request("This service is selected more than once. Exclude a duplicate before creating the board.", Some("included"))));
         }
         let group = item.group.trim();
@@ -492,7 +558,13 @@ fn commit(
                 )))
             }
         };
-        let payload = payload(conn, user.id, item).map_err(local)?;
+        let payload = match reuse {
+            Some(id) => BoardPayload::Integration {
+                integration_id: id.to_owned(),
+                title: Some(item.name.trim().to_owned()),
+            },
+            None => payload(conn, user.id, item).map_err(local)?,
+        };
         validator.validate(&payload, None).map_err(local)?;
         let section = &mut sections[index];
         section.items.push(BoardItem {

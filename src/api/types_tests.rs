@@ -132,6 +132,7 @@ fn files() -> Vec<(String, String)> {
         render::<super::setup::SetupItem>(),
         render::<super::setup::SetupTarget>(),
         render::<super::setup::SetupDraft>(),
+        render::<super::setup::SetupIntegrationMatch>(),
         render::<super::setup::SetupUpdate>(),
         render::<super::setup::SetupCredentialChange>(),
         render::<super::setup::SetupCommit>(),

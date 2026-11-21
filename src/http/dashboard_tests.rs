@@ -1503,3 +1503,126 @@ async fn setup_keeps_incomplete_entries_and_attributes_invalid_urls() {
     assert_eq!(done["document"]["items"][0]["target"]["payload"]["url"], "");
     assert_eq!(done["document"]["items"][1]["target"]["base_url"], "   ");
 }
+
+#[tokio::test]
+async fn setup_deduplicates_links_by_canonical_identity() {
+    let owner = browser_owner(start(state()).await).await;
+    let links = [
+        "HTTPS://Example.TEST:443",
+        "https://example.test/",
+        "https://example.test/Path",
+        "https://example.test/path",
+        "https://example.test/?q=1",
+        "https://example.test/?q=2",
+        "https://example.test/#first",
+        "https://example.test/#second",
+    ];
+    let mut items: Vec<_> = links.iter().enumerate().map(|(index, url)| json!({
+        "id":format!("{index:032x}"),"included":true,"name":format!("Link {index}"),"group":"",
+        "target":{"kind":"board","payload":{"kind":"link","title":"","url":url}}
+    })).collect();
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":0,"document":{"step":"review","items":items},"credentials":[]}),
+            200,
+        )
+        .await;
+    let error = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":1}), 400)
+        .await;
+    assert_eq!(
+        error["error"]["field"],
+        format!("items.{:032x}.included", 1)
+    );
+    items[1]["included"] = json!(false);
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":1,"document":{"step":"review","items":items},"credentials":[]}),
+            200,
+        )
+        .await;
+    let result = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":2}), 200)
+        .await;
+    let path = format!("/api/v1/boards/{}", result["board_id"].as_str().unwrap());
+    let mut document = owner.json("GET", &path, Value::Null, 200).await["document"].clone();
+    let items = document["sections"][0]["items"].as_array_mut().unwrap();
+    assert_eq!(items.len(), links.len() - 1);
+    items.push(json!({"position":items.len(),"payload":{"kind":"link","title":"Duplicate","url":links[1]}}));
+    let error = owner.json("PUT", &path, document, 400).await;
+    assert_eq!(error["error"]["field"], "url");
+}
+
+#[tokio::test]
+async fn setup_reviews_matches_to_saved_integrations_before_reuse_or_creation() {
+    let owner = browser_owner(start(state()).await).await;
+    let existing = owner.json("POST", "/api/v1/integrations", json!({
+        "kind":"http","name":"Saved service","base_url":"https://Example.test:443/path","enabled":true
+    }), 201).await;
+    let id = existing["id"].as_str().unwrap();
+    let reuse = "00000000000000000000000000000001";
+    let add = "00000000000000000000000000000002";
+    let different = "00000000000000000000000000000003";
+    let mut items: Vec<_> = [
+        (reuse, "Reused", "/path"),
+        (add, "New", "/path"),
+        (different, "Different", "/Path"),
+    ]
+    .into_iter()
+    .map(|(id, name, path)| {
+        json!({
+            "id":id,"included":true,"name":name,"group":"",
+            "target":{"kind":"http","base_url":format!("https://example.test{path}"),"enabled":true}
+        })
+    })
+    .collect();
+    let saved = owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":0,"document":{"step":"review","items":items},"credentials":[]}),
+            200,
+        )
+        .await;
+    assert_eq!(saved["integration_matches"], json!({(reuse):id,(add):id}));
+    assert_eq!(
+        saved["matching_integrations"],
+        json!({(id):[{"id":id,"name":"Saved service"}]})
+    );
+    let error = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":1}), 400)
+        .await;
+    assert_eq!(
+        error["error"]["field"],
+        format!("items.{reuse}.integration_choice")
+    );
+    items[0]["integration_choice"] = json!(id);
+    items[1]["integration_choice"] = json!("new");
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":1,"document":{"step":"review","items":items},"credentials":[]}),
+            200,
+        )
+        .await;
+    let result = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":2}), 200)
+        .await;
+    let path = format!("/api/v1/boards/{}", result["board_id"].as_str().unwrap());
+    let board = owner.json("GET", &path, Value::Null, 200).await;
+    let payloads = board["document"]["sections"][0]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(payloads[0]["payload"]["integration_id"], id);
+    assert_eq!(payloads[0]["payload"]["title"], "Reused");
+    assert_ne!(payloads[1]["payload"]["integration_id"], id);
+    let connections = owner
+        .json("GET", "/api/v1/integrations", Value::Null, 200)
+        .await;
+    assert_eq!(connections.as_array().unwrap().len(), 3);
+}

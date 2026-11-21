@@ -5,7 +5,7 @@ import type { BoardView } from "../../api/gen/BoardView.ts";
 import type { BoardSuggestion } from "../../api/gen/BoardSuggestion.ts";
 import type { GridSpans } from "../../api/gen/GridSpans.ts";
 import { api } from "../../api/session.ts";
-import { dirty, rebase, recoveryBase, reduceDocument, type Action } from "../../boards/document.ts";
+import { dirty, payloadIdentity, rebase, recoveryBase, reduceDocument, type Action } from "../../boards/document.ts";
 import { navigate } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -152,6 +152,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     });
     return () => controller.abort();
   }, [path, picker]);
+  const selectedTargets = new Set(doc.sections.flatMap(({ items }) => items.map(({ payload }) => payloadIdentity(payload))));
   return <div ref={root} className="board-editor" data-testid="board-editor">
     <PageHeader title={`Edit ${view.board.name}`}
       description={<p role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p>}
@@ -201,7 +202,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     </section>)}
     <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
     <Dialog open={picker !== null} title="Add item" initialFocus={manual ? linkTitle : undefined} onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
-      <div className="suggestions">{suggestions.filter((suggestion) => suggestion.title.toLowerCase().includes(query.toLowerCase()) && !doc.sections.some((section) => section.items.some((item) => JSON.stringify(item.payload) === JSON.stringify(suggestion.payload)))).map((suggestion) => <Button variant="ghost" data-testid="board-suggestion" key={JSON.stringify(suggestion.payload)} onClick={() => { if (picker !== null) change({ type: "add", section: picker, payload: suggestion.payload }, "Item added"); setPicker(null); }}>{suggestion.title}</Button>)}</div>
+      <div className="suggestions">{suggestions.filter((suggestion) => suggestion.title.toLowerCase().includes(query.toLowerCase()) && !selectedTargets.has(payloadIdentity(suggestion.payload))).map((suggestion) => <Button variant="ghost" data-testid="board-suggestion" key={payloadIdentity(suggestion.payload)} onClick={() => { if (picker !== null) change({ type: "add", section: picker, payload: suggestion.payload }, "Item added"); setPicker(null); }}>{suggestion.title}</Button>)}</div>
       <h3>Add a link</h3><form data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); if (picker === null) return; const data = new FormData(e.currentTarget); change({ type: "add", section: picker, payload: { kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null } }, "Link added"); setPicker(null); }}>
         <Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} /></Field><LinkUrl id="link-url" value={link} onChange={setLink} />{!scoped && <LinkTest url={link} />}<Field id="link-icon" label="Icon name"><TextInput name="icon" /></Field><Button type="submit" variant="default">Add link</Button>
       </form>

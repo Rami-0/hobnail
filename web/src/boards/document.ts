@@ -117,3 +117,21 @@ export function recoveryBase(draft: BoardDocument, current: BoardDocument): Boar
   const itemIds = new Set(draft.sections.flatMap((s) => s.items).map((i) => i.id).filter(Boolean));
   return { version: draft.version, sections: current.sections.filter((s) => sectionIds.has(s.id)).map((s) => ({ id: s.id, title: s.title, position: s.position, items: s.items.filter((i) => itemIds.has(i.id)) })) };
 }
+
+export function payloadIdentity(payload: BoardPayload): string {
+  switch (payload.kind) {
+    case "container": return JSON.stringify(payload.target);
+    case "link": {
+      const match = /^(https?):\/\/(\[[^\]]+\]|[^:/?#@]+)(?::(\d+))?([/?#].*|)$/i.exec(payload.url);
+      if (!match) return `link:${payload.url}`;
+      const [, rawScheme, host, port, suffix] = match;
+      const scheme = rawScheme.toLowerCase();
+      const defaultPort = scheme === "https" ? 443 : 80;
+      const authority = port && Number(port) !== defaultPort ? `${host.toLowerCase()}:${Number(port)}` : host.toLowerCase();
+      return `link:${scheme}://${authority}${suffix.startsWith("/") ? "" : "/"}${suffix}`;
+    }
+    case "widget": return `widget:${payload.widget_id}`;
+    case "integration": return `integration:${payload.integration_id}`;
+  }
+}
+

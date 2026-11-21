@@ -277,8 +277,17 @@ pub(super) fn save(
     get(conn, &id, true)
 }
 
-pub(super) fn base_url(conn: &Connection, id: &str) -> Result<String, ApiError> {
-    Ok(get(conn, id, true)?.admin.expect("admin details").base_url)
+pub(super) fn endpoints(conn: &Connection) -> Result<Vec<(String, String, String)>, ApiError> {
+    let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY name, id"))?;
+    let rows = stmt.query_map([], |row| {
+        let view = read(row, true)?;
+        Ok((
+            view.id,
+            view.name,
+            view.admin.expect("admin details").base_url,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 pub(super) fn target(

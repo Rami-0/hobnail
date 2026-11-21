@@ -1,4 +1,3 @@
-import type { BoardPayload } from "../../api/gen/BoardPayload.ts";
 import type { SetupDocument } from "../../api/gen/SetupDocument.ts";
 import type { SetupItem } from "../../api/gen/SetupItem.ts";
 import type { SetupStep } from "../../api/gen/SetupStep.ts";
@@ -16,15 +15,6 @@ export function move(document: SetupDocument, action: "back" | "continue" | "ski
   const index = stepOrder.indexOf(document.step);
   const step = stepOrder[index + (action === "back" ? -1 : 1)];
   return step ? { ...document, step } : document;
-}
-
-export function identity(payload: BoardPayload): string {
-  switch (payload.kind) {
-    case "container": return JSON.stringify(payload.target);
-    case "link": return `link:${payload.url}`;
-    case "widget": return `widget:${payload.widget_id}`;
-    case "integration": return `integration:${payload.integration_id}`;
-  }
 }
 
 export function selectedGroups(document: SetupDocument) {

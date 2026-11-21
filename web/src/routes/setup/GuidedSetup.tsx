@@ -12,6 +12,7 @@ import type { SetupTarget } from "../../api/gen/SetupTarget.ts";
 import type { SetupUpdate } from "../../api/gen/SetupUpdate.ts";
 import { navigate } from "../../app/router.ts";
 import { applyTheme, currentTheme, isTheme } from "../../app/theme.ts";
+import { payloadIdentity } from "../../boards/document.ts";
 import { LinkUrl } from "../../boards/LinkUrl.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Card, CardContent } from "../../ui/Card.tsx";
@@ -19,10 +20,11 @@ import { Checkbox } from "../../ui/Checkbox.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
 import { Note } from "../../ui/Note.tsx";
+import { Select } from "../../ui/Select.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { HttpConnectionFields } from "../../configuration/HttpConnectionFields.tsx";
 import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
-import { identity, incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
+import { incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
 import "./setup.css";
 
 const PATH = "/api/v1/onboarding";
@@ -59,9 +61,9 @@ const dockerMessage: Record<SetupDiscovery["docker"], string> = {
   waiting: "Hobnail is waiting for the first response from Docker. You can refresh or add services manually.",
 };
 
-function newItem(target: SetupTarget, name: string, group = "", source?: string): SetupItem {
+function newItem(target: SetupTarget, name: string, group = ""): SetupItem {
   const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) => n.toString(16).padStart(2, "0")).join("");
-  return { id, name, group, target, source, included: true };
+  return { id, name, group, target, included: true };
 }
 
 type Failure = { message: string; stale?: boolean; draft?: boolean; item?: string; field?: string };
@@ -188,7 +190,8 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   }
 
   function changeTarget(item: SetupItem, target: SetupTarget) {
-    update(item.id, { target });
+    const changedEndpoint = item.target.kind === "http" && target.kind === "http" && item.target.base_url !== target.base_url;
+    update(item.id, changedEndpoint ? { target, integration_choice: undefined } : { target });
     setVerdicts(({ [item.id]: _previous, ...others }) => others);
   }
 
@@ -233,14 +236,21 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       leaving.current = true;
       openBoard(result.data.board_id);
     } else {
-      setFailure(setupFailure(result));
+      const problem = setupFailure(result);
+      if (problem.field === "integration_choice") {
+        const latest = await api.get<SetupDraft>(`${PATH}/draft`);
+        if (latest.kind === "ok" && latest.data.revision === draft.revision) {
+          setDraft({ ...latest.data, document: draft.document });
+        }
+      }
+      setFailure(problem);
       setBusy(false);
     }
   }
 
   const controlsDisabled = busy || saving || !!failure?.stale;
   const itemLimit = doc.items.length >= 512;
-  const known = new Set(doc.items.flatMap(({ source, target }) => target.kind === "board" ? [source ?? identity(target.payload)] : []));
+  const known = new Set(doc.items.flatMap(({ target }) => target.kind === "board" ? [payloadIdentity(target.payload)] : []));
   const groups = selectedGroups(doc);
 
   function connection(item: SetupItem) {
@@ -329,11 +339,11 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             {!!discovery?.suggestions.length && <>
               <Field id="setup-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
               <div className="suggestions">{discovery.suggestions
-                .filter(({ title, payload }) => !known.has(identity(payload)) && title.toLowerCase().includes(query.trim().toLowerCase()))
-                .map(({ title, payload }) => <Checkbox key={identity(payload)} checked={false} disabled={itemLimit} label={title}
+                .filter(({ title, payload }) => !known.has(payloadIdentity(payload)) && title.toLowerCase().includes(query.trim().toLowerCase()))
+                .map(({ title, payload }) => <Checkbox key={payloadIdentity(payload)} checked={false} disabled={itemLimit} label={title}
                   onChange={(checked) => {
                     if (checked) add(newItem({ kind: "board", payload }, title,
-                      payload.kind === "container" && payload.target.by === "compose" ? payload.target.project : "", identity(payload)));
+                      payload.kind === "container" && payload.target.by === "compose" ? payload.target.project : ""));
                   }} />)}
               </div>
             </>}
@@ -353,11 +363,20 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                 <ul>{items.map((item) => {
                   const incomplete = incompleteField(item);
                   const error = failure?.item === item.id ? failure : undefined;
-                  const fix = error?.field ?? incomplete;
+                  const matches = draft.matching_integrations[draft.integration_matches[item.id]];
+                  const matchError = error?.field === "integration_choice";
+                  const fix = matchError ? (!matches ? "base_url" : undefined) : error?.field ?? incomplete;
                   return <li key={item.id}>{item.name || "Unnamed service"}
                     {item.target.kind === "http" ? " · HTTP integration" : item.target.payload.kind === "link" ? " · Link" : ""}
                     {incomplete && " · incomplete — will not be added"}
-                    {error && <p className="bad-fg" role="alert">{error.message}</p>}
+                    {matches && <Field id={`${item.id}-match`} label={`Connection for ${item.name}`}
+                      hint={`Matches existing ${matches.map(({ name }) => name).join(", ")}. Reuse keeps the saved connection and its credential.`}
+                      error={matchError ? error.message : undefined}>
+                      <Select label={`Connection for ${item.name}`} value={item.integration_choice ?? ""} placeholder="Choose a connection"
+                        disabled={controlsDisabled} onChange={(integration_choice) => update(item.id, { integration_choice })}
+                        options={[...matches.map(({ id, name }) => ({ value: id, label: `Reuse ${name}` })), { value: "new", label: "Add anyway" }]} />
+                    </Field>}
+                    {error && (!matchError || !matches) && <p className="bad-fg" role="alert">{error.message}</p>}
                     {fix && <Button variant="link" disabled={controlsDisabled} onClick={() => void goTo({
                       ...doc, step: ["url", "base_url", "secret"].includes(fix) ? "connections" : "select",
                     })}>Fix {item.name || "unnamed service"}</Button>}
