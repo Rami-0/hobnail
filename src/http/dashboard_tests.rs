@@ -1552,7 +1552,11 @@ async fn setup_deduplicates_links_by_canonical_identity() {
     let mut document = owner.json("GET", &path, Value::Null, 200).await["document"].clone();
     let items = document["sections"][0]["items"].as_array_mut().unwrap();
     assert_eq!(items.len(), links.len() - 1);
-    items.push(json!({"position":items.len(),"payload":{"kind":"link","title":"Duplicate","url":links[1]}}));
+    items.push(json!({
+        "position":items.len(),
+        "spans":{"mobile":4,"tablet":8,"desktop":12,"rows":1},
+        "payload":{"kind":"link","title":"Duplicate","url":links[1]}
+    }));
     let error = owner.json("PUT", &path, document, 400).await;
     assert_eq!(error["error"]["field"], "url");
 }
