@@ -193,6 +193,24 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
 
+## Jellyseerr / Overseerr
+
+Enter the Jellyseerr or Overseerr service URL and the instance API key
+from Settings → General. Both use API v1 and accept the key in
+`X-Api-Key`. The shared key acts as the original administrator and has
+no read-only scope. Hobnail uses only the request-count endpoint.
+
+**Media requests** shows the instance totals for pending and approved
+requests. Approved includes requests still being processed and those
+already available.
+
+Verified from:
+
+- [Jellyseerr 2.7.3 OpenAPI](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/jellyseerr-api.yml), [request counts](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/server/routes/request.ts) and [key authentication](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/server/middleware/auth.ts)
+- [Overseerr 1.35.0 OpenAPI](https://github.com/sct/overseerr/blob/v1.35.0/overseerr-api.yml), [request counts](https://github.com/sct/overseerr/blob/v1.35.0/server/routes/request.ts) and [key authentication](https://github.com/sct/overseerr/blob/v1.35.0/server/middleware/auth.ts)
+
+UNVERIFIED: Compatibility outside the inspected releases and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

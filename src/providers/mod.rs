@@ -36,6 +36,7 @@ mod arr;
 mod connection;
 mod generic;
 mod jellyfin;
+mod jellyseerr;
 mod pihole;
 mod prowlarr;
 mod qbittorrent;
@@ -62,6 +63,7 @@ pub const REGISTRY: &[Provider] = &[
     sonarr::SONARR,
     radarr::RADARR,
     prowlarr::PROWLARR,
+    jellyseerr::JELLYSEERR,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
