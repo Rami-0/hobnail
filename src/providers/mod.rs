@@ -46,6 +46,7 @@ mod plex;
 mod prowlarr;
 mod qbittorrent;
 mod radarr;
+mod sabnzbd;
 mod sonarr;
 mod tailscale;
 mod technitium;
@@ -82,6 +83,7 @@ pub const REGISTRY: &[Provider] = &[
     plex::PLEX,
     immich::IMMICH,
     transmission::TRANSMISSION,
+    sabnzbd::SABNZBD,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

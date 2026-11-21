@@ -379,6 +379,24 @@ Verified from:
 
 UNVERIFIED: Nonstandard RPC path suffixes, releases that remove legacy RPC and live reverse proxies.
 
+## SABnzbd
+
+Enter the SABnzbd Web UI URL and the full API Key from Config → General.
+The NZB Key lacks queue access. Hobnail uses only the queue read call.
+Query parameters may be recorded by the service and its reverse proxies.
+
+**Download queue** shows the total number of queued jobs, download speed
+and free space on the incomplete-download drive. It requests only one
+queue entry and reads the summary.
+
+Verified from:
+
+- [Upstream queue API reference](https://sabnzbd.org/wiki/advanced/api)
+- [Upstream v4.5.5 queue response and units](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/api.py)
+- [Upstream v4.5.5 API key validation](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/interface.py)
+
+UNVERIFIED: Releases outside v4.5.5 and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
