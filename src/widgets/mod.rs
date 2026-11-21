@@ -425,6 +425,23 @@ impl WidgetCache {
     }
 
     pub(crate) fn begin(&mut self, id: &str) -> u64 {
+        const PROVIDER_PREFIX: &str = "provider-fetch:";
+        const MAX_PROVIDER_SLOTS: usize = 128;
+        if id.starts_with(PROVIDER_PREFIX) && !self.slots.contains_key(id) {
+            let mut providers = self
+                .slots
+                .iter()
+                .filter(|(id, _)| id.starts_with(PROVIDER_PREFIX));
+            if providers.clone().count() >= MAX_PROVIDER_SLOTS {
+                if let Some(oldest) = providers
+                    .by_ref()
+                    .min_by_key(|(_, slot)| slot.completed.map(|(_, at)| at))
+                    .map(|(id, _)| id.clone())
+                {
+                    self.retained_bytes -= self.slots.remove(&oldest).expect("cache slot").bytes;
+                }
+            }
+        }
         self.next_attempt += 1;
         self.slots
             .entry(id.to_owned())
@@ -435,10 +452,14 @@ impl WidgetCache {
         self.next_attempt
     }
 
-    pub(crate) fn remove(&mut self, id: &str) {
-        if let Some(slot) = self.slots.remove(id) {
-            self.retained_bytes -= slot.bytes;
-        }
+    pub(crate) fn remove_prefix(&mut self, prefix: &str) {
+        self.slots.retain(|id, slot| {
+            let remove = id.starts_with(prefix);
+            if remove {
+                self.retained_bytes -= slot.bytes;
+            }
+            !remove
+        });
     }
 
     pub(crate) fn record(

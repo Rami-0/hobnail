@@ -139,12 +139,15 @@ pub(super) async fn route(
                 set_theme(conn, theme.as_deref())?;
             }
             if let Some(enabled) = input.provider_internet {
+                let changed = internet(conn)? != enabled;
                 conn.execute(
                     "INSERT INTO settings (key,value) VALUES ('provider_internet',?1)
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     [if enabled { "true" } else { "false" }],
                 )?;
-                super::provider_widgets::invalidate(state, conn, None)?;
+                if changed {
+                    super::provider_widgets::invalidate(state, None);
+                }
             }
             get(conn, user)
         })?;

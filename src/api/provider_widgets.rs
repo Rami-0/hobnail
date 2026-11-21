@@ -8,7 +8,7 @@ use std::{
 
 use hyper::{body::Incoming, Request, Response, StatusCode};
 use rusqlite::{Connection, OptionalExtension};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use super::{
@@ -46,7 +46,14 @@ struct Install {
 #[serde(deny_unknown_fields)]
 struct Selection {
     id: String,
+    placement: Option<String>,
     #[serde(default)]
+    options: Values,
+}
+
+#[derive(Serialize)]
+struct PlacementOptions {
+    id: String,
     options: Values,
 }
 
@@ -57,20 +64,23 @@ pub(super) async fn route(
     user: &Principal,
 ) -> Result<Response<Body>, ApiError> {
     if handler == Handler::ProviderWidgetOptions {
-        let id = crate::http::query::parse_query(req.uri().query().unwrap_or_default());
+        let query = crate::http::query::parse_query(req.uri().query().unwrap_or_default());
         let id =
-            crate::http::query::query_get(&id, "integration").ok_or_else(ApiError::not_found)?;
+            crate::http::query::query_get(&query, "integration").ok_or_else(ApiError::not_found)?;
+        let board =
+            crate::http::query::query_get(&query, "board").ok_or_else(ApiError::not_found)?;
         let options = state.db.dashboard(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT widget, options FROM provider_widgets WHERE integration_id=?1")?;
-            let rows = stmt.query_map([id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            let mut stmt = conn.prepare(
+                "SELECT widget, id, options FROM provider_widgets WHERE integration_id=?1 AND board_id=?2 ORDER BY id",
+            )?;
+            let rows = stmt.query_map([id, board], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
             })?;
-            let mut options = HashMap::new();
+            let mut options = HashMap::<_, Vec<_>>::new();
             for row in rows {
-                let (widget, value) = row?;
+                let (widget, id, value) = row?;
                 if let Ok(value) = serde_json::from_str::<Values>(&value) {
-                    options.insert(widget, value);
+                    options.entry(widget).or_default().push(PlacementOptions { id, options: value });
                 }
             }
             Ok::<_, rusqlite::Error>(options)
@@ -111,9 +121,7 @@ fn install(
     user: &Principal,
 ) -> Result<(IntegrationView, Option<(String, u32)>), ApiError> {
     let provider = integrations::provider(&input.integration.kind)?;
-    if input.widgets.len() > provider.widgets.len()
-        || !input.widgets.is_empty() && input.board_id.is_none()
-    {
+    if input.widgets.len() > 512 || !input.widgets.is_empty() && input.board_id.is_none() {
         return Err(ApiError::bad_request(
             "Choose a board and supported widgets.",
             Some("widgets"),
@@ -126,23 +134,20 @@ fn install(
             .widgets
             .iter()
             .find(|w| w.id == selection.id)
-            .filter(|widget| seen.insert(widget.id))
+            .filter(|widget| seen.insert((widget.id, selection.placement.clone())))
             .ok_or_else(|| {
                 ApiError::bad_request("Choose a supported widget once.", Some("widgets"))
             })?;
         validate_options(widget, &mut selection.options)?;
-        options.push((widget.id, selection.options));
+        options.push((widget.id, selection.placement, selection.options));
     }
     let name = input.integration.name.clone();
+    let changed = if let Some(id) = &input.integration_id {
+        integrations::connection_changed(conn, id, &input.integration)?
+    } else {
+        false
+    };
     let integration = integrations::save(conn, input.integration_id.as_deref(), input.integration)?;
-    if input.integration_id.is_some() {
-        invalidate(state, conn, Some(&integration.id))?;
-        state
-            .integration_checks
-            .lock()
-            .unwrap()
-            .remove(&integration.id);
-    }
     let board = if let Some(id) = input.board_id.filter(|_| !options.is_empty()) {
         if !user.can_see_board(&id) {
             return Err(ApiError::not_found());
@@ -156,18 +161,39 @@ fn install(
             position: doc.sections.len() as u32,
             items: Vec::new(),
         };
-        for (widget, options) in options {
-            let widget_id = conn.query_row(
-                "INSERT INTO provider_widgets (integration_id,widget,options) VALUES (?1,?2,?3)
-                 ON CONFLICT(integration_id,widget) DO UPDATE SET options=excluded.options RETURNING id",
-                (&integration.id, widget, options_to_json(&options)),
-                |row| row.get(0),
-            )?;
-            if doc.sections.iter().flat_map(|section| &section.items).any(|item| matches!(
-                &item.payload, boards::BoardPayload::Widget { widget_id: old, .. } if old == &widget_id
-            )) {
+        let mut placements = Vec::new();
+        let mut updated = HashSet::new();
+        for (widget, placement, options) in options {
+            let existing = conn.query_row(
+                "SELECT id FROM provider_widgets WHERE integration_id=?1 AND board_id=?2 AND widget=?3 AND (?4 IS NULL OR id=?4) ORDER BY id LIMIT 1",
+                (&integration.id, &id, widget, &placement), |row| row.get::<_, String>(0),
+            ).optional()?;
+            if let Some(widget_id) = existing {
+                if !updated.insert(widget_id.clone()) {
+                    return Err(ApiError::bad_request(
+                        "Choose a widget placement once.",
+                        Some("widgets"),
+                    ));
+                }
+                conn.execute(
+                    "UPDATE provider_widgets SET options=?2 WHERE id=?1",
+                    (&widget_id, options_to_json(&options)),
+                )?;
                 continue;
             }
+            if placement.is_some() {
+                return Err(ApiError::bad_request(
+                    "The widget placement has changed. Reload the board and try again.",
+                    Some("widgets"),
+                ));
+            }
+            let item_id = boards::next_id(conn, None)?;
+            let widget_id = format!("provider:{item_id}");
+            conn.execute(
+                "INSERT INTO provider_widgets (id,integration_id,board_id,widget,options) VALUES (?1,?2,?3,?4,?5)",
+                (&widget_id, &integration.id, &id, widget, options_to_json(&options)),
+            )?;
+            placements.push(item_id);
             section.items.push(boards::BoardItem {
                 id: None,
                 position: section.items.len() as u32,
@@ -179,15 +205,34 @@ fn install(
             });
         }
         if section.items.is_empty() {
-            return Ok((integration, None));
+            None
+        } else {
+            doc.sections.push(section);
+            boards::validate(&doc, &previous, user, conn, &state.config.current())?;
+            for (item, placement) in doc
+                .sections
+                .last_mut()
+                .expect("new widget section")
+                .items
+                .iter_mut()
+                .zip(placements)
+            {
+                item.id = Some(placement);
+            }
+            boards::store(conn, &id, doc, crate::auth::now_s())?;
+            Some((id, board.version.saturating_add(1)))
         }
-        doc.sections.push(section);
-        boards::validate(&doc, &previous, user, conn, &state.config.current())?;
-        boards::store(conn, &id, doc, crate::auth::now_s())?;
-        Some((id, board.version.saturating_add(1)))
     } else {
         None
     };
+    if changed {
+        invalidate(state, Some(&integration.id));
+        state
+            .integration_checks
+            .lock()
+            .unwrap()
+            .remove(&integration.id);
+    }
     Ok((integration, board))
 }
 
@@ -210,6 +255,40 @@ pub(super) fn exists(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     )
 }
 
+/// Copies a provider widget's options when an existing widget is used in a new
+/// board item. The board item ID makes the placement stable across reorders.
+pub(super) fn place(
+    conn: &Connection,
+    board: &str,
+    item: &str,
+    widget_id: &mut String,
+) -> rusqlite::Result<()> {
+    if !widget_id.starts_with("provider:") {
+        return Ok(());
+    }
+    let id = format!("provider:{item}");
+    if *widget_id != id && conn.execute(
+        "INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+         SELECT ?1,integration_id,?2,widget,options FROM provider_widgets WHERE id=?3
+         ON CONFLICT(id) DO UPDATE SET integration_id=excluded.integration_id,widget=excluded.widget,options=excluded.options",
+        (&id, board, &*widget_id),
+    )? > 0 {
+        *widget_id = id;
+    }
+    Ok(())
+}
+
+fn cache_key(provider: &str, integration: &str, widget: &str, options: &Values) -> String {
+    let mut inputs = options.clone();
+    inputs.remove("refresh");
+    let material =
+        serde_json::to_vec(&(provider, integration, widget, inputs)).expect("fetch inputs");
+    format!(
+        "provider-fetch:{integration}:{}",
+        crate::auth::sha256_hex(&material)
+    )
+}
+
 pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
     if !id.starts_with("provider:") {
         return None;
@@ -220,7 +299,7 @@ pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
             let entry = conn
                 .query_row(
                     "SELECT i.name, i.kind, json_extract(i.config,'$.icon'), pw.widget,
-                    coalesce(json_extract(i.config,'$.enabled'),1)
+                    coalesce(json_extract(i.config,'$.enabled'),1), pw.integration_id, pw.options
              FROM provider_widgets pw JOIN integrations i ON i.id=pw.integration_id WHERE pw.id=?1",
                     [id],
                     |row| {
@@ -230,11 +309,13 @@ pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, String>(3)?,
                             row.get::<_, bool>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, String>(6)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((name, provider, icon, widget, enabled)) = entry else {
+            let Some((name, provider, icon, widget, enabled, integration, options)) = entry else {
                 return Ok(None);
             };
             let Some(provider) = providers::get(&provider) else {
@@ -245,9 +326,13 @@ pub(super) fn view(state: &AppState, id: &str) -> Option<WidgetView> {
             };
             let enabled =
                 enabled && (!provider.public_internet || dashboard_settings::internet(conn)?);
+            let options = serde_json::from_str::<Values>(&options)
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let key = cache_key(provider.id, &integration, spec.id, &options);
             Ok::<_, rusqlite::Error>(Some(widgets::provider_view(
                 state,
                 id,
+                &key,
                 format!("{name} · {}", spec.name),
                 icon.or_else(|| Some(provider.icon.into())),
                 enabled,
@@ -279,32 +364,32 @@ pub(super) fn board_targets(
         .unwrap_or_default()
 }
 
-pub(super) fn invalidate(
-    state: &AppState,
-    conn: &Connection,
-    integration: Option<&str>,
-) -> rusqlite::Result<()> {
+pub(super) fn invalidate(state: &AppState, integration: Option<&str>) {
     state.provider_connections.invalidate(integration);
-    let mut stmt =
-        conn.prepare("SELECT id FROM provider_widgets WHERE ?1 IS NULL OR integration_id=?1")?;
-    let mut cache = state.widgets.lock().unwrap();
-    for id in stmt.query_map([integration], |row| row.get::<_, String>(0))? {
-        cache.remove(&id?);
-    }
-    Ok(())
+    let prefix = integration.map_or_else(
+        || "provider-fetch:".into(),
+        |id| format!("provider-fetch:{id}:"),
+    );
+    state.widgets.lock().unwrap().remove_prefix(&prefix);
 }
 
-#[derive(Default)]
-pub(crate) struct Viewers(Mutex<HashMap<String, (usize, watch::Sender<bool>)>>);
+pub(crate) struct Viewers {
+    ids: Mutex<HashMap<String, usize>>,
+    changed: watch::Sender<()>,
+}
+
+impl Default for Viewers {
+    fn default() -> Self {
+        Self {
+            ids: Mutex::default(),
+            changed: watch::channel(()).0,
+        }
+    }
+}
 
 impl Viewers {
-    fn active(&self) -> Vec<(String, watch::Receiver<bool>)> {
-        self.0
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(id, (_, tx))| (id.clone(), tx.subscribe()))
-            .collect()
+    fn active(&self) -> Vec<String> {
+        self.ids.lock().unwrap().keys().cloned().collect()
     }
 }
 
@@ -322,22 +407,22 @@ impl Subscription {
     }
 
     pub(super) fn set(&mut self, ids: HashSet<String>) {
-        let mut viewers = self.state.provider_viewers.0.lock().unwrap();
+        if ids == self.ids {
+            return;
+        }
+        let viewers = &self.state.provider_viewers;
+        let mut counts = viewers.ids.lock().unwrap();
         for id in ids.difference(&self.ids) {
-            viewers
-                .entry(id.clone())
-                .or_insert_with(|| (0, watch::channel(true).0))
-                .0 += 1;
+            *counts.entry(id.clone()).or_default() += 1;
         }
         for id in self.ids.difference(&ids) {
-            if let Some((count, tx)) = viewers.get_mut(id) {
-                *count -= 1;
-                if *count == 0 {
-                    tx.send_replace(false);
-                    viewers.remove(id);
-                }
+            let count = counts.get_mut(id).expect("subscribed placement");
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(id);
             }
         }
+        viewers.changed.send_replace(());
         self.ids = ids;
         self.state.wake.notify_one();
     }
@@ -358,18 +443,15 @@ impl Drop for Subscription {
 }
 
 struct Poll {
+    key: String,
+    provider: &'static str,
+    integration: String,
     target: Target,
     widget: &'static providers::Widget,
     options: Values,
-    attempt: u64,
 }
 
-fn due(
-    state: &AppState,
-    id: &str,
-    config: &Arc<crate::config::Config>,
-    now: Instant,
-) -> Option<Poll> {
+fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
     state
         .db
         .dashboard(|conn| -> Result<_, ApiError> {
@@ -398,27 +480,68 @@ fn due(
             let Some(widget) = provider.widgets.iter().find(|w| w.id == widget) else {
                 return Ok(None);
             };
-            let Ok(options) = serde_json::from_str::<Values>(&options) else {
+            let Ok(mut options) = serde_json::from_str::<Values>(&options) else {
                 return Ok(None);
             };
+            let key = cache_key(provider.id, &integration, widget.id, &options);
             if state
                 .widgets
                 .lock()
                 .unwrap()
-                .deadline(id, providers::refresh(&options))
+                .deadline(&key, providers::refresh(&options))
                 .is_some_and(|at| now < at)
             {
                 return Ok(None);
             }
-            Ok(state.begin_widget(config, id).map(|attempt| Poll {
+            options.remove("refresh");
+            Ok(Some(Poll {
+                key,
+                provider: provider.id,
+                integration,
                 target,
                 widget,
                 options,
-                attempt,
             }))
         })
         .ok()
         .flatten()
+}
+
+fn matching_placements(conn: &Connection, poll: &Poll) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn
+        .prepare("SELECT id,options FROM provider_widgets WHERE integration_id=?1 AND widget=?2")?;
+    let rows = stmt.query_map((&poll.integration, poll.widget.id), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (id, options) = row?;
+        if serde_json::from_str(&options).is_ok_and(|options| {
+            cache_key(poll.provider, &poll.integration, poll.widget.id, &options) == poll.key
+        }) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+async fn unviewed(state: &AppState, poll: &Poll, mut changed: watch::Receiver<()>) {
+    loop {
+        let placements = state
+            .db
+            .dashboard(|conn| matching_placements(conn, poll))
+            .unwrap_or_default();
+        let viewed = {
+            let active = state.provider_viewers.ids.lock().unwrap();
+            placements.iter().any(|id| active.contains_key(id))
+        };
+        if !viewed {
+            return;
+        }
+        if changed.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 /// Runs from the existing live tick. A dropped last subscription cancels the
@@ -429,32 +552,37 @@ pub(crate) fn poll(
     running: &Arc<Mutex<HashSet<String>>>,
     now: Instant,
 ) {
-    let mut active = state.provider_viewers.active();
-    // IDs with no completion are served first, then the oldest completion.
-    {
-        let cache = state.widgets.lock().unwrap();
-        active.sort_unstable_by_key(|(id, _)| cache.deadline(id, std::time::Duration::ZERO));
+    let (current, revision) = state.config.provider_http();
+    if !Arc::ptr_eq(config, &current) {
+        return;
     }
-    for (id, mut visible) in active {
+    let visible = state.provider_viewers.changed.subscribe();
+    for id in state.provider_viewers.active() {
         let Ok(permit) = state.provider_requests.clone().try_acquire_owned() else {
             break;
         };
-        let mut running_ids = running.lock().unwrap();
-        if running_ids.contains(&id) || !*visible.borrow() {
-            continue;
-        }
-        let Some(poll) = due(state, &id, config, now) else {
+        let Some(poll) = due(state, &id, now) else {
             continue;
         };
-        running_ids.insert(id.clone());
+        let mut running_ids = running.lock().unwrap();
+        if running_ids.contains(&poll.key) {
+            continue;
+        }
+        let Some(attempt) = state.begin_widget(config, &poll.key) else {
+            continue;
+        };
+        running_ids.insert(poll.key.clone());
         let (state, config, running) = (state.clone(), config.clone(), running.clone());
+        let revision = revision.clone();
+        let visible = visible.clone();
         tokio::spawn(async move {
             let start = Instant::now();
             let result = tokio::select! {
                 biased;
-                _ = visible.changed() => None,
+                _ = unviewed(&state, &poll, visible) => None,
                 result = async {
-                    let conn = providers::Conn::new(&poll.target, &config.http, &state.provider_connections, permit)?;
+                    let conn = providers::Conn::new(&poll.target, &config.http, &state.provider_connections, permit)?
+                        .with_http_revision(revision);
                     conn.run((poll.widget.fetch)(&conn, &poll.options)).await
                 } => Some(result),
             };
@@ -468,9 +596,21 @@ pub(crate) fn poll(
                     Ok(body) => output.structured = Some(body),
                     Err(error) => output.error = Some(error.class.message().into()),
                 }
-                state.record_widget(&config, &id, poll.attempt, Instant::now(), output);
+                let _ = state.db.dashboard(|conn| -> rusqlite::Result<()> {
+                    if poll.target.revision.check().is_err() {
+                        return Ok(());
+                    }
+                    if state.record_widget(&config, &poll.key, attempt, Instant::now(), output) {
+                        let ids = matching_placements(conn, &poll)?;
+                        let active = state.provider_viewers.ids.lock().unwrap();
+                        for id in ids.into_iter().filter(|id| active.contains_key(id)) {
+                            state.changed(&format!("w-{id}"));
+                        }
+                    }
+                    Ok(())
+                });
             }
-            running.lock().unwrap().remove(&id);
+            running.lock().unwrap().remove(&poll.key);
         });
     }
 }

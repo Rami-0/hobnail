@@ -368,6 +368,7 @@ pub(super) fn connection_changed(
     id: &str,
     input: &IntegrationInput,
 ) -> Result<bool, ApiError> {
+    let options = validated_options(input)?;
     Ok(input.secret.is_some()
         || input.clear_secret
         || !input.credentials.is_empty()
@@ -375,7 +376,7 @@ pub(super) fn connection_changed(
             old.base_url != input.base_url
                 || old.enabled != input.enabled
                 || old.fingerprint != input.fingerprint
-                || old.options != input.options
+                || old.options != options
         }))
 }
 
@@ -628,7 +629,7 @@ pub(super) async fn route(
                 let connection_changed = !create && connection_changed(c, id, &input)?;
                 let mut view = save(c, (!create).then_some(id), input)?;
                 if connection_changed {
-                    super::provider_widgets::invalidate(state, c, Some(id))?;
+                    super::provider_widgets::invalidate(state, Some(id));
                     state.integration_checks.lock().unwrap().remove(id);
                 } else {
                     attach_check(state, &mut view);
@@ -674,14 +675,14 @@ pub(super) async fn route(
                 } else {
                     c.execute("DELETE FROM integration_credentials WHERE integration_id=?1 AND field='secret'", [id])?;
                 }
-                super::provider_widgets::invalidate(state, c, Some(id))?;
+                super::provider_widgets::invalidate(state, Some(id));
                 state.integration_checks.lock().unwrap().remove(id);
                 get(c, id, true)
             })?
         }
         Handler::IntegrationDelete => {
             db.dashboard(|c| -> Result<_, ApiError> {
-                super::provider_widgets::invalidate(state, c, Some(id))?;
+                super::provider_widgets::invalidate(state, Some(id));
                 if c.execute("DELETE FROM integrations WHERE id=?1", [id])? == 0 {
                     return Err(ApiError::not_found());
                 }

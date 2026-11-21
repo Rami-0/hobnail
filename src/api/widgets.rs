@@ -74,12 +74,13 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
 pub(super) fn provider_view(
     state: &AppState,
     id: &str,
+    cache_key: &str,
     title: String,
     icon: Option<String>,
     enabled: bool,
 ) -> WidgetView {
     let cache = state.widgets.lock().unwrap();
-    let output = cache.get(id).filter(|_| enabled);
+    let output = cache.get(cache_key).filter(|_| enabled);
     let error = output.and_then(|out| out.error.clone());
     let last_good_at = output.and_then(|out| out.stale_since);
     let status = if !enabled {

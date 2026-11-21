@@ -37,6 +37,9 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [board, setBoard] = useState(preferredBoard);
   const [selected, setSelected] = useState<Record<string, Values | undefined>>({});
+  const [placements, setPlacements] = useState<Record<string, { id: string; options: Values }[]>>({});
+  const [loadedBoard, setLoadedBoard] = useState("");
+  const loadingWidgets = !!item && loadedBoard !== board;
   const [widgetErrors, setWidgetErrors] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
@@ -49,16 +52,32 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
         setBoard(result.data.find((b) => b.id === preferredBoard)?.id ?? result.data[0]?.id ?? "");
       } else setErrors({ form: result.message });
     });
-    if (item) void api.get<Record<string, Values>>(`/api/v1/providers/widgets?integration=${item.id}`).then((result) => {
+    return () => { active = false; };
+  }, [preferredBoard, manage]);
+
+  useEffect(() => {
+    if (!choosing || !item || !board || !provider) return;
+    let active = true;
+    void api.get<Record<string, { id: string; options: Values }[]>>(`/api/v1/providers/widgets?integration=${item.id}&board=${board}`).then((result) => {
       if (!active) return;
       if (result.kind === "ok") {
-        setSelected(Object.fromEntries((providers.find((p) => p.id === item.kind)?.widgets ?? [])
-          .filter((widget) => widget.id in result.data || widget.recommended)
-          .map((widget) => [widget.id, result.data[widget.id] ?? initial(widget.fields)])));
+        setPlacements(result.data);
+        setSelected(Object.fromEntries(provider.widgets.flatMap((widget) => {
+          const saved = result.data[widget.id];
+          return saved ? saved.map(({ id, options }) => [id, options])
+            : widget.recommended ? [[widget.id, initial(widget.fields)]] : [];
+        })));
+        setLoadedBoard(board);
       } else setErrors({ form: result.message });
     });
     return () => { active = false; };
-  }, [item, preferredBoard, providers, manage]);
+  }, [item, board, provider, choosing]);
+
+  const rows = provider?.widgets.flatMap((widget) => {
+    const instances = placements[widget.id] ?? [{ id: widget.id, options: initial(widget.fields) }];
+    return instances.map(({ id, options }, index) => ({ widget, id, options,
+      label: instances.length > 1 ? `${widget.name} ${index + 1}` : widget.name }));
+  }) ?? [];
 
   function choose(entry: Provider) {
     setProvider(entry);
@@ -81,7 +100,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
   }
 
   async function submit(test: boolean) {
-    if (!provider || busy) return;
+    if (!provider || busy || (choosing && board && loadingWidgets)) return;
     const { errors: connectionErrors, ...connection } = connectionValues(provider.fields, config, bound, cleared);
     const fingerprint = String(config.fingerprint ?? "").trim();
     if (fingerprint && (!/^[0-9a-f]{64}$/i.test(fingerprint) || !connection.base_url.startsWith("https://"))) {
@@ -92,11 +111,11 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
     if (Object.keys(connectionErrors).length) return;
 
     const widgetFields: Record<string, Record<string, string>> = {};
-    const widgets = choosing && board ? provider.widgets.flatMap((w) => {
-      if (!selected[w.id]) return [];
-      const fields = schemaValues(w.fields, selected[w.id] ?? {});
-      if (Object.keys(fields.errors).length) widgetFields[w.id] = fields.errors;
-      return [{ id: w.id, options: fields.values }];
+    const widgets = choosing && board ? rows.flatMap(({ widget, id }) => {
+      if (!selected[id]) return [];
+      const fields = schemaValues(widget.fields, selected[id] ?? {});
+      if (Object.keys(fields.errors).length) widgetFields[id] = fields.errors;
+      return [{ id: widget.id, placement: id === widget.id ? undefined : id, options: fields.values }];
     }) : [];
     setWidgetErrors(widgetFields);
     if (Object.keys(widgetFields).length) return;
@@ -125,8 +144,8 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
         {choosing || provider && !item ? "Back" : "Cancel"}
       </Button>
       {provider && !choosing && manage && <Button busy={busy} disabled={config.enabled === false} data-testid="provider-draft-test" onClick={() => void submit(true)}>Test connection</Button>}
-      {provider && !choosing && manage && verdict?.ok && <Button variant="default" onClick={() => setChoosing(true)} disabled={busy}>Choose widgets</Button>}
-      {provider && <Button type="submit" form="integration-form" variant="default" busy={busy}>{choosing && board ? "Save widgets to board" : item ? "Save" : "Save connection"}</Button>}
+      {provider && !choosing && manage && verdict?.ok && <Button variant="default" onClick={() => { setLoadedBoard(""); setChoosing(true); }} disabled={busy}>Choose widgets</Button>}
+      {provider && <Button type="submit" form="integration-form" variant="default" busy={busy} disabled={choosing && !!board && loadingWidgets}>{choosing && board ? "Save widgets to board" : item ? "Save" : "Save connection"}</Button>}
     </>}>
     <form id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       {!provider ? <>
@@ -140,12 +159,14 @@ export default function ProviderDialog({ providers, item, preferredBoard, manage
           </div>
         ))}
       </> : choosing ? <>
-        <Select label="Board" value={board} options={[{ value: "", label: "Save connection only" }, ...boards.map((b) => ({ value: b.id, label: b.name }))]} onChange={setBoard} />
-        {board && provider.widgets.map((w) => <div key={w.id}>
-          <Switch checked={!!selected[w.id]} label={w.name} onChange={(checked) => setSelected({ ...selected, [w.id]: checked ? initial(w.fields) : undefined })} />
-          <p className="muted">{w.description}</p>
-          {selected[w.id] && <SchemaForm id={w.id} schema={w.fields} values={selected[w.id] ?? {}} errors={widgetErrors[w.id]}
-            onChange={(key, value) => setSelected({ ...selected, [w.id]: { ...selected[w.id], [key]: value } })} />}
+        <Select label="Board" value={board} options={[{ value: "", label: "Save connection only" }, ...boards.map((b) => ({ value: b.id, label: b.name }))]} onChange={(next) => { setLoadedBoard(""); setBoard(next); }} />
+        {board && !loadingWidgets && rows.map(({ widget, id, label, options }) => <div key={id}>
+          <Switch checked={!!selected[id]} label={label} onChange={(checked) => setSelected({
+            ...selected, [id]: checked ? options : undefined,
+          })} />
+          <p className="muted">{widget.description}</p>
+          {selected[id] && <SchemaForm id={id} schema={widget.fields} values={selected[id] ?? {}} errors={widgetErrors[id]}
+            onChange={(key, value) => setSelected({ ...selected, [id]: { ...selected[id], [key]: value } })} />}
         </div>)}
       </> : <>
         {!item && <p><a href={provider.docs}>Provider documentation</a></p>}

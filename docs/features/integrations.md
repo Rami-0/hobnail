@@ -16,9 +16,11 @@ evidence.
 After a successful test, choose a board and review the recommended widgets.
 Each selected widget has its own options and refresh interval. Use **Edit** on
 a saved integration to test changes, configure its widgets, or place them on
-another board. Widget settings are shared wherever that instance's widget is
-placed. To use different credentials, URLs or widget options, create another
-instance. Remove a widget from a board in its board editor. Deleting an
+another board. Each placement stores its own widget options and refresh
+interval. Placements share the saved connection. Open boards with identical
+fetch options share one cached result, even when their refresh intervals
+differ. Create a separate integration for different URLs or credentials.
+Remove a widget from a board in its board editor. Deleting an
 integration deletes its credentials and widgets and leaves missing targets in
 existing layouts.
 
@@ -36,12 +38,12 @@ layout and settings. Open a saved connection to add a JSON values widget.
 
 ## Credentials and transport
 
-Hobnail stores a bearer credential in SQLite alongside the exact origin
-(scheme, hostname and port). Same-origin path changes keep the binding.
-For an origin change, enter a replacement or explicitly clear the existing
-credential. Forms indicate when a credential is saved and always leave the
-password input blank on reopen. API responses provide status and binding,
-never the credential. Protect the data volume and backups, which hold
+Hobnail stores credentials in SQLite by integration and schema field, each
+with its exact origin (scheme, hostname and port). Same-origin path changes
+keep the bindings. On an origin change, replace or clear each saved field.
+Forms show the saved origin and reopen with blank password inputs. API
+responses expose each field's presence and binding. An omitted credential
+field keeps its value, a string replaces it, and null clears it. Protect the data volume and backups, which hold
 credentials in plaintext. HTTP sends credentials unencrypted.
 
 By default HTTPS verifies the peer against public certificate roots and checks
@@ -73,14 +75,25 @@ resolution still uses the server's DNS. The switch is for catalog providers,
 independent of file-configured widgets or dashboard-icons.
 
 Provider widgets refresh only while a live board subscription includes them.
-Multiple viewers share the same fetch and cached output. Closing the last
-subscription stops polling and cancels its in-flight fetch. Hobnail allows four
-provider requests at once and five seconds per request, with a 128 KiB response
-cap. Widget refresh defaults to 60 seconds and can range from 15 seconds to
+Multiple viewers share a fetch with the same effective inputs. Closing the
+last subscription stops polling and cancels its in-flight fetch. Hobnail
+allows four provider operations at once. Each operation has five seconds
+total, including logins, DNS, TLS and retries. Each step caps the response
+body at 128 KiB and the request body at 16 KiB. Changing the outbound
+policy, service URL, credentials or TLS pin cancels affected operations
+and closes their upstream sockets. Widget refresh defaults to 60 seconds and can range from 15 seconds to
 one hour. A failed refresh keeps the last good data with its stale timestamp
 and error. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
-file-configured widgets. Browser background tabs release their subscriptions
-after the normal live-stream delay.
+file-configured widgets, with up to 128 provider fetch slots. Browser background
+tabs release their subscriptions after the normal live-stream delay.
+
+Providers may cache up to 16 sessions, each at most 1 KiB (16 KiB of session
+material plus keys and metadata). This budget keeps process-local session
+reuse small within the 20 MiB application budget. A session belongs to
+one integration, canonical origin and revision. Credential and pin changes
+rotate that revision. Edits, deletion and changes to provider internet
+access evict affected sessions. A rejected session can be renewed and retried
+once within the operation deadline.
 
 ## How to add a provider
 
@@ -90,15 +103,26 @@ connection fields, test function and widget descriptors. Add it to `REGISTRY`
 in `src/providers/mod.rs`. Document the actual destinations in `contacts` and
 set `public_internet` if the provider intrinsically requires a public service.
 
-Use the shared field kinds for connection and widget options. The base URL,
-enabled flag and optional bearer credential use the existing connection
-storage. Keep sensitive values in the write-only credential field and keep
-widget options free of secrets. Use the bound client through `Target` for
-outbound calls and return a typed `Fault` with actionable wording. Never put
-upstream response text or credentials in errors or logs. A widget returns a
-`StructuredBody` with display data. Choose among a stat, stat grid, status list,
-item list, meter, table or unavailable message. The React client renders these
-shapes from the schema and registry, so a provider needs no React code.
-Exercise the test and widget fetches against a local fake service.
+Declare any number of secret fields alongside the URL, enabled flag and
+provider options. Settings and Guided Setup render the same schema. Keep
+sensitive values out of ordinary options. The Test and Fetch functions receive
+a `Conn`; Fetch also receives the effective widget options, with the refresh
+interval handled by the scheduler.
+
+Use `Conn::request(Step)` for each HTTP step. Use the empty path for the exact
+configured endpoint, or append a provider-relative path to the configured
+prefix. Pass query parameters separately. Resolve stored credentials by
+schema field ID for Bearer, Basic, custom headers, a custom Authorization
+prefix, query parameters, or JSON and form bodies. Request only the response
+headers you need. Handle status codes and parse bounded response data locally.
+Use `Conn::session` or `Conn::session_header` to turn session material into an
+opaque value and `retry_session` for a single 401, 403 or 409 retry. A 409 can
+carry a replacement session in `Fault::session_conflict`.
+
+Return a typed `Fault`. Keep raw responses, credentials and sessions out of
+errors and logs. A widget returns a `StructuredBody` with display data. Choose
+among a stat, stat grid, status list, item list, meter, table or unavailable
+message. The React client renders these shapes from the schema and registry.
+Exercise connection tests and fetches against a local fake service.
 
 See [Boards](boards.md), [Login and security](login.md) and [API](../api.md).

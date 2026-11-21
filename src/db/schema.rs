@@ -222,6 +222,26 @@ INSERT INTO setup_credentials (user_id,item_id,field,origin,secret)
   SELECT user_id,item_id,'secret',origin,secret FROM setup_credentials_before_fields;
 DROP TABLE setup_credentials_before_fields;
 ",
+    "
+ALTER TABLE provider_widgets RENAME TO provider_widgets_before_placements;
+CREATE TABLE provider_widgets (
+  id TEXT PRIMARY KEY NOT NULL,
+  integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  widget TEXT NOT NULL,
+  options TEXT NOT NULL CHECK (json_valid(options))
+);
+CREATE INDEX provider_widgets_integration ON provider_widgets(integration_id, widget);
+CREATE INDEX provider_widgets_board ON provider_widgets(board_id);
+INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+  SELECT 'provider:' || item.id, pw.integration_id, item.board_id, pw.widget, pw.options
+  FROM board_items item JOIN provider_widgets_before_placements pw
+    ON item.kind='widget' AND pw.id=json_extract(item.config,'$.widget_id');
+UPDATE board_items SET config=json_set(config,'$.widget_id','provider:' || id)
+  WHERE kind='widget' AND EXISTS (
+    SELECT 1 FROM provider_widgets WHERE provider_widgets.id='provider:' || board_items.id);
+DROP TABLE provider_widgets_before_placements;
+",
 ];
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
@@ -357,7 +377,13 @@ mod tests {
                INSERT INTO boards (id,name,created,updated) VALUES ('old-board','Board',1,1);
                INSERT INTO board_items (id,board_id,kind,config,integration_id) VALUES
                 ('old-link','old-board','integration','{"kind":"integration","integration_id":"legacy"}','legacy'),
-                ('old-widget','old-board','widget','{"kind":"widget","widget_id":"local-toml"}',NULL);"#,
+                ('old-widget','old-board','widget','{"kind":"widget","widget_id":"local-toml"}',NULL);
+               INSERT INTO boards (id,name,created,updated) VALUES ('other-board','Other',1,1);
+               INSERT INTO provider_widgets(id,integration_id,widget,options)
+                   VALUES ('provider:old','legacy','json','{"paths":["value"],"refresh":30}');
+               INSERT INTO board_items(id,board_id,kind,config) VALUES
+                   ('provider-a','old-board','widget','{"kind":"widget","widget_id":"provider:old"}'),
+                   ('provider-b','other-board','widget','{"kind":"widget","widget_id":"provider:old"}');"#,
         ).unwrap();
         migrate(&mut conn).unwrap();
         let saved = conn
@@ -387,7 +413,14 @@ mod tests {
             "SELECT group_concat(id) FROM (SELECT id FROM board_items WHERE board_id='old-board' ORDER BY id)",
             [], |r| r.get(0),
         ).unwrap();
-        assert_eq!(targets, "old-link,old-widget");
+        assert_eq!(targets, "old-link,old-widget,provider-a");
+        let placements: i64 = conn.query_row(
+            "SELECT count(*) FROM provider_widgets pw JOIN board_items item
+             ON item.board_id=pw.board_id AND json_extract(item.config,'$.widget_id')=pw.id
+             WHERE pw.integration_id='legacy' AND pw.widget='json'
+               AND json_extract(pw.options,'$.paths[0]')='value' AND json_extract(pw.options,'$.refresh')=30",
+             [], |row| row.get(0)).unwrap();
+        assert_eq!(placements, 2);
     }
 
     #[test]

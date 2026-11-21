@@ -588,7 +588,7 @@ impl<'a> PayloadValidator<'a> {
     }
 }
 
-fn next_id(conn: &Connection, existing: Option<String>) -> Result<String, ApiError> {
+pub(super) fn next_id(conn: &Connection, existing: Option<String>) -> Result<String, ApiError> {
     match existing {
         Some(id) => Ok(id),
         None => Ok(conn.query_row("SELECT lower(hex(randomblob(16)))", [], |r| r.get(0))?),
@@ -605,8 +605,11 @@ pub(super) fn store(
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
         let section_id = next_id(conn, section.id)?;
-        for item in section.items {
+        for mut item in section.items {
             let item_id = next_id(conn, item.id)?;
+            if let BoardPayload::Widget { widget_id, .. } = &mut item.payload {
+                super::provider_widgets::place(conn, id, &item_id, widget_id)?;
+            }
             let (kind, target) = match &item.payload {
                 BoardPayload::Container { .. } => ("container", None),
                 BoardPayload::Link { .. } => ("link", None),
@@ -639,6 +642,12 @@ pub(super) fn store(
             position: section.position,
         });
     }
+    conn.execute(
+        "DELETE FROM provider_widgets WHERE board_id=?1 AND NOT EXISTS (
+           SELECT 1 FROM board_items WHERE board_id=?1 AND kind='widget'
+           AND json_extract(board_items.config,'$.widget_id')=provider_widgets.id)",
+        [id],
+    )?;
     conn.execute(
         "UPDATE boards SET sections=?2,version=version+1,updated=?3 WHERE id=?1",
         params![id, encode(&sections)?, now],
@@ -882,14 +891,10 @@ pub(super) async fn route(
             let LinkTestInput { url } = super::read_json(req, 8192).await?;
             check_test_link(&url)?;
             integrations::limit_test(state, user.id)?;
+            let target = crate::providers::Target::new(url, Default::default(), true);
             super::json(
                 StatusCode::OK,
-                &integrations::test_connection(
-                    state,
-                    None,
-                    crate::providers::Target::new(url, Default::default(), true),
-                )
-                .await,
+                &integrations::test_connection(state, None, target).await,
             )
         }
         Handler::Boards => super::json(StatusCode::OK, &db.dashboard(|c| list(c, user))?),

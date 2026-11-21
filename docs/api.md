@@ -113,31 +113,32 @@ Provider catalog and installation:
   `contacts` fields describe the provider's outbound behavior.
 - `POST /api/v1/providers/test` accepts `{integration, integration_id?}`.
   The draft connection uses the integration input below. Supplying an existing
-  ID lets the test reuse its saved credential for the same origin. The
+  ID lets the test reuse its saved credentials for the same origin. The
   response has `ok`, `class`, `message`, `latency_ms` and a `fingerprint` when a
   failed TLS handshake presented a leaf certificate. The response never
   includes upstream data. The test does not write the draft or record saved
   health evidence.
 - `POST /api/v1/providers/install` accepts
   `{integration, integration_id?, board_id?, widgets?}`. Each selected
-  widget is `{id, options}`, where `id` is a widget descriptor ID. A nonempty
+  widget is `{id, placement?, options}`. Use the widget descriptor ID for
+  `id` and the widget's saved placement ID when editing it. A nonempty
   selection requires a board. Connection and board updates commit together.
-  When reusing an instance, chosen options update its shared widget and the
-  widget is added if the board does not already contain it. An empty selection
-  saves the connection alone.
-- `GET /api/v1/providers/widgets?integration=<id>` returns a map of widget
-  descriptor IDs to non-secret saved options. Draft tests, installs and this
-  options route require unscoped Admin or Owner access.
+  The selected board's placement gets the options and refresh interval. An
+  empty selection saves the connection alone.
+- `GET /api/v1/providers/widgets?integration=<id>&board=<id>` returns a map
+  of widget descriptor IDs to arrays of placements `{id, options}`. Draft
+  tests, installs and this options route require unscoped Admin or Owner access.
 - Integration input uses `name`, `kind` (the provider ID), `base_url`,
-  `enabled`, and optional `icon`, `options`, `fingerprint`, `secret`, and
-  `clear_secret`. A blank/omitted replacement keeps the current credential
-  only for the bound origin. Send `clear_secret: true` for explicit removal.
-  Reads keep the existing `has_secret` status and never return the value.
+  `enabled`, and optional `icon`, `options`, `fingerprint`, and
+  `credentials`. Each credential field ID maps to a replacement string or
+  null to clear it. Omit a field to keep its saved value for the same origin.
+  Admin details expose a map of saved field IDs to bound origins. The legacy
+  Generic HTTP `secret` and `clear_secret` inputs still address its bearer
+  field. `has_secret` indicates whether any field is saved.
   `fingerprint` is 64 hexadecimal digits for an HTTPS URL.
 - Add `board=<id>` to a stream that subscribes to the `widget` topic to
   receive provider widget updates for that board. The caller must be able
-  to read it. The same widget can be reached from multiple board placements
-  but is polled once. Provider widget views supply a discriminated
+  to read it. Placements with identical fetch inputs share the result. Provider widget views supply a discriminated
   `structured` display body alongside the existing status and freshness
   fields.
 
@@ -169,10 +170,12 @@ landing page.
 - PUT the current `revision`, the complete `document` and a list of `credentials`
   changes to `/onboarding/draft`. Item IDs are 32 lowercase hexadecimal digits.
   The document contains the current step, an optional theme and the included or
-  excluded items. Each credential change supplies `item_id`, `base_url` and a
-  write-only `secret`. Omit the change to retain a credential, or send a null
-  secret to clear it. SQLite stores staged tokens separately with their bound
-  origin. Draft responses return only the origins.
+  excluded items. Provider targets include `kind: "provider"`, the registry
+  ID in `provider`, plus the same `base_url`, `enabled`, `fingerprint` and
+  `options` as Settings. Each credential change supplies `item_id`, schema
+  `field`, `base_url` and a write-only `secret`. Omit the change to keep that
+  field, or send null to clear it. Draft responses return saved field origins
+  under `credential_bindings`.
   Setup writes accept up to 2 MiB and 512 items. Item names and sections
   accept up to 256 UTF-8 bytes, URLs up to 2,048 bytes, and icon names up to
   96 bytes. The legacy discovery source field accepts up to 4,096 bytes.

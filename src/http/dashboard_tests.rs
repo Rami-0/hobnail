@@ -1938,3 +1938,189 @@ async fn provider_refresh_concurrency_is_global_and_disconnect_releases_slots() 
     );
     run.abort();
 }
+
+#[tokio::test]
+async fn provider_connection_and_policy_edits_close_upstream_sockets() {
+    use std::time::Duration;
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", upstream.local_addr().unwrap());
+    let state = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    owner
+        .json(
+            "PATCH",
+            "/api/v1/settings",
+            json!({"provider_internet":true}),
+            200,
+        )
+        .await;
+    let input = |url: &str| json!({"kind":"http","name":"Fixture","base_url":url,"enabled":true});
+    let saved = owner
+        .json("POST", "/api/v1/integrations", input(&url), 201)
+        .await;
+    let integration = format!("/api/v1/integrations/{}", saved["id"].as_str().unwrap());
+    for change in ["internet", "connection", "allow_hosts"] {
+        let path = format!("{integration}/test");
+        let test = owner.json("POST", &path, Value::Null, 200);
+        let edit = async {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let _ = upstream_request(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\n\r\n{")
+                .await
+                .unwrap();
+            match change {
+                "internet" => {
+                    owner
+                        .json(
+                            "PATCH",
+                            "/api/v1/settings",
+                            json!({"provider_internet":false}),
+                            200,
+                        )
+                        .await;
+                }
+                "connection" => {
+                    owner
+                        .json("PUT", &integration, input(&format!("{url}/edited")), 200)
+                        .await;
+                }
+                "allow_hosts" => {
+                    std::fs::write(
+                        state.config.path(),
+                        "[http]\nallow_hosts=['other.invalid']\n",
+                    )
+                    .unwrap();
+                    assert!(state.config.reload());
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                0
+            );
+        };
+        let (verdict, ()) = tokio::join!(test, edit);
+        assert_eq!(verdict["class"], "changed");
+    }
+    assert_eq!(state.provider_requests.available_permits(), 4);
+}
+
+#[tokio::test]
+async fn provider_placements_keep_options_and_share_only_identical_fetch_inputs() {
+    use std::time::Duration;
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", upstream.local_addr().unwrap());
+    let state = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&state.db, PW);
+    let owner = Client::owner(start(state.clone()).await).await;
+    let a = owner.board("A").await;
+    let b = owner.board("B").await;
+    let c = owner.board("C").await;
+    let input = json!({"kind":"http","name":"Fixture","base_url":url,"enabled":true});
+    let integration = owner
+        .json("POST", "/api/v1/integrations", input.clone(), 201)
+        .await;
+    let install = |board: &str, path: &str, refresh| {
+        json!({
+            "integration":input, "integration_id":integration["id"], "board_id":board,
+            "widgets":[{"id":"json","options":{"paths":[path],"refresh":refresh}}]
+        })
+    };
+    for (board, path, refresh) in [(&a, "one", 15), (&b, "two", 30), (&c, "one", 60)] {
+        owner
+            .json(
+                "POST",
+                "/api/v1/providers/install",
+                install(board, path, refresh),
+                201,
+            )
+            .await;
+        let opts = format!(
+            "/api/v1/providers/widgets?integration={}&board={board}",
+            integration["id"].as_str().unwrap()
+        );
+        let config = owner.json("GET", &opts, Value::Null, 200).await;
+        assert_eq!(
+            config["json"][0]["options"],
+            json!({"paths":[path],"refresh":refresh})
+        );
+    }
+    let stream = |id: &str| format!("/api/v1/stream?topics=widget&board={id}");
+    let (mut a_stream, _) = Stream::open(owner.addr, &stream(&a), &owner.cookie).await;
+    let (mut c_stream, _) = Stream::open(owner.addr, &stream(&c), &owner.cookie).await;
+    let run = tokio::spawn(crate::live::run(state));
+    for stream in [&mut a_stream, &mut c_stream] {
+        assert_eq!(stream.next().await.0, "hello");
+        assert_eq!(stream.next().await.1["status"], "waiting");
+    }
+    let reply = async {
+        let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        upstream_request(&mut socket).await;
+        let body = r#"{"one":"first","two":"second"}"#;
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    };
+    reply.await;
+    let first = a_stream.next().await.1;
+    let shared = c_stream.next().await.1;
+    assert_ne!(first["id"], shared["id"]);
+    assert_eq!(first["structured"]["rows"], json!([["one", "first"]]));
+    assert_eq!(first["structured"], shared["structured"]);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), upstream.accept())
+            .await
+            .is_err()
+    );
+    let other = owner
+        .json("GET", &format!("/api/v1/boards/{b}"), Value::Null, 200)
+        .await;
+    assert_eq!(other["resolved"][0]["widget"]["status"], "waiting");
+    let mut edit = install(&b, "two", 45);
+    edit["widgets"][0]["placement"] = first["id"].clone();
+    assert_eq!(
+        owner
+            .call("POST", "/api/v1/providers/install", edit.clone())
+            .await
+            .status,
+        400
+    );
+    edit["board_id"] = json!(a);
+    owner
+        .json("POST", "/api/v1/providers/install", edit, 201)
+        .await;
+    let config = owner
+        .json(
+            "GET",
+            &format!(
+                "/api/v1/providers/widgets?integration={}&board={b}",
+                integration["id"].as_str().unwrap()
+            ),
+            Value::Null,
+            200,
+        )
+        .await;
+    assert_eq!(
+        config["json"][0]["options"],
+        json!({"paths":["two"],"refresh":30})
+    );
+    run.abort();
+}
