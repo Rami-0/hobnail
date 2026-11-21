@@ -36,6 +36,37 @@ Existing HTTP integrations keep their IDs, configuration and credentials
 through the upgrade. Existing integration links and TOML widgets retain their
 layout and settings. Open a saved connection to add a JSON values widget.
 
+## Pi-hole
+
+Enter the service root URL with any reverse-proxy prefix. Leave off the
+`/admin` and `/api` suffixes. Select the installed API version:
+
+- **v6** uses an application password or the web password. Prefer an
+  application password when the web login uses two-factor authentication.
+  Leave the credential blank if Pi-hole has authentication disabled.
+  Hobnail obtains a session with `POST /api/auth` and sends its SID in
+  `X-FTL-SID`. Saved integrations reuse the session and renew it once if
+  rejected. Draft tests attempt to close their temporary session.
+- **v5** uses the API token from Pi-hole when authentication is enabled.
+  Hobnail calls `GET /admin/api.php` with `summaryRaw` and, when set, the
+  encoded `auth` query parameter. Configure reverse proxies with care
+  because they may record query strings in access logs.
+
+The **DNS activity** widget shows queries, blocked queries, percentage
+blocked and blocking status. The v6 widget reads `/api/stats/summary`
+and `/api/dns/blocking`. The v5 widget reads all four values from the
+legacy summary.
+
+Verified against the public [authentication documentation](https://docs.pi-hole.net/api/auth/),
+the upstream [v6 summary](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/stats.yaml)
+and [blocking](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/dns.yaml)
+schema files, and the tagged [v5.21 summary](https://github.com/pi-hole/web/blob/v5.21/api_FTL.php)
+and [token handling](https://github.com/pi-hole/web/blob/v5.21/scripts/pi-hole/php/password.php)
+source. The v6 summary schema gives totals without specifying a calendar-day
+window, so the widget labels that count **Queries**. Request flow and response
+parsing were exercised against fakes. Compatibility across older minor
+releases and live reverse-proxy configurations remains unverified.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

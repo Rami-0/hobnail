@@ -2124,3 +2124,115 @@ async fn provider_placements_keep_options_and_share_only_identical_fetch_inputs(
     );
     run.abort();
 }
+
+#[tokio::test]
+async fn provider_credentials_keep_replace_and_clear_independently() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let url = "http://pihole.invalid";
+    let input = |url: &str, credentials: Value| {
+        json!({
+            "kind":"pihole","name":"Pi-hole","base_url":url,"enabled":true,"credentials":credentials,
+        })
+    };
+    let saved = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            input(
+                url,
+                json!({"password":"fixture password","api_token":"fixture-token"}),
+            ),
+            201,
+        )
+        .await;
+    assert_eq!(
+        saved["admin"]["credentials"],
+        json!({"password":url,"api_token":url})
+    );
+    assert!(!saved.to_string().contains("fixture"));
+    let path = format!("/api/v1/integrations/{}", saved["id"].as_str().unwrap());
+    let saved = owner
+        .json(
+            "PUT",
+            &path,
+            input(
+                "http://pihole.invalid/prefix",
+                json!({"password":"fixture replacement"}),
+            ),
+            200,
+        )
+        .await;
+    assert_eq!(
+        saved["admin"]["credentials"],
+        json!({"password":url,"api_token":url})
+    );
+    assert!(!saved.to_string().contains("fixture"));
+    let other = "https://other.invalid";
+    let denied = owner
+        .call(
+            "PUT",
+            &path,
+            input(other, json!({"password":"fixture replacement"})),
+        )
+        .await;
+    assert_eq!(denied.status, 400);
+    let saved = owner
+        .json(
+            "PUT",
+            &path,
+            input(
+                other,
+                json!({"password":"fixture replacement","api_token":null}),
+            ),
+            200,
+        )
+        .await;
+    assert_eq!(saved["admin"]["credentials"], json!({"password":other}));
+    let saved = owner
+        .json("PUT", &path, input(other, json!({"password":null})), 200)
+        .await;
+    assert_eq!(saved["admin"]["credentials"], json!({}));
+}
+
+#[tokio::test]
+async fn guided_setup_saves_the_registry_provider_and_all_staged_fields() {
+    let owner = browser_owner(start(state()).await).await;
+    let item = "00000000000000000000000000000001";
+    let url = "http://pihole.invalid";
+    let draft = owner.json("PUT", SETUP_DRAFT, json!({
+        "revision":0,
+        "document":{"step":"review","items":[{
+            "id":item,"included":true,"name":"DNS","group":"Network",
+            "target":{"kind":"provider","provider":"pihole","base_url":url,"enabled":true,"options":{"version":"v5"}}
+        }]},
+        "credentials":[
+            {"item_id":item,"base_url":url,"field":"password","secret":"test-fixture-password"},
+            {"item_id":item,"base_url":url,"field":"api_token","secret":"test-fixture-token"}
+        ]
+    }), 200).await;
+    assert_eq!(
+        draft["credential_bindings"][item],
+        json!({"password":url,"api_token":url})
+    );
+    assert!(!draft.to_string().contains("test-fixture"));
+    owner
+        .json(
+            "POST",
+            SETUP_COMMIT,
+            json!({"revision":draft["revision"]}),
+            200,
+        )
+        .await;
+    let integrations = owner
+        .json("GET", "/api/v1/integrations", Value::Null, 200)
+        .await;
+    assert_eq!(integrations[0]["kind"], "pihole");
+    assert_eq!(integrations[0]["admin"]["options"]["version"], "v5");
+    assert_eq!(
+        integrations[0]["admin"]["credentials"],
+        json!({"password":url,"api_token":url})
+    );
+    assert!(!integrations.to_string().contains("test-fixture"));
+}

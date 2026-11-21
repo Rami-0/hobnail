@@ -355,7 +355,7 @@ process.on("SIGINT", stop);
 // Normally reachable only inside the fake instance's network namespace.
 const m2Fixtures = flag("m2-fixtures");
 let m2Result = "fail";
-http.createServer((req, res) => {
+http.createServer(async (req, res) => {
   if (m2Fixtures && req.url === "/fixture/m2/reading") {
     if (m2Result === "fail") return json(res, 503, { error: "upstream unavailable" });
     return json(res, 200, { reading: m2Result === "recover" ? "73 units" : "42 units" });
@@ -366,6 +366,20 @@ http.createServer((req, res) => {
       m2Result = state;
       return res.writeHead(204).end();
     }
+  }
+  if (m2Fixtures && req.url?.startsWith("/fixture/pihole/api/")) {
+    if (req.method === "POST" && req.url.endsWith("/api/auth")) {
+      let body = "";
+      for await (const data of req) body += data;
+      if (body !== '{"password":"pihole-fixture-password"}') return json(res, 401, {});
+      return json(res, 200, { session: { valid: true, sid: "pihole-fixture-sid" } });
+    }
+    if (req.headers["x-ftl-sid"] !== "pihole-fixture-sid") return json(res, 401, {});
+    if (req.method === "DELETE" && req.url.endsWith("/api/auth")) return res.writeHead(204).end();
+    if (req.method === "GET" && req.url.endsWith("/stats/summary")) {
+      return json(res, 200, { queries: { total: 1234, blocked: 321, percent_blocked: 26 } });
+    }
+    if (req.method === "GET" && req.url.endsWith("/dns/blocking")) return json(res, 200, { blocking: "enabled" });
   }
   if (req.url === "/fixture/health") return res.end("ok");
   if (req.url === "/fixture/session") {
