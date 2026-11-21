@@ -165,7 +165,7 @@ fn install(
     }
     let mut seen = HashSet::new();
     let mut options = Vec::new();
-    for mut selection in input.widgets {
+    for (index, mut selection) in input.widgets.into_iter().enumerate() {
         let widget = provider
             .widgets
             .iter()
@@ -174,7 +174,10 @@ fn install(
             .ok_or_else(|| {
                 ApiError::bad_request("Choose a supported widget once.", Some("widgets"))
             })?;
-        validate_options(widget, &mut selection.options)?;
+        validate_options(widget, &mut selection.options).map_err(|mut error| {
+            error.field = error.field.map(|field| format!("widgets.{index}.{field}"));
+            error
+        })?;
         options.push((widget.id, selection.placement, selection.options));
     }
     let name = input.integration.name.clone();
@@ -184,12 +187,12 @@ fn install(
         false
     };
     let integration = integrations::save(conn, input.integration_id.as_deref(), input.integration)?;
-    if options.iter().any(|(widget, _, values)| {
+    if let Some(index) = options.iter().position(|(widget, _, values)| {
         providers::requires_paths(provider.id, widget, integration.has_secret, values)
     }) {
         return Err(ApiError::bad_request(
             "Choose specific JSON paths for a connection with saved credentials.",
-            Some("paths"),
+            Some(&format!("widgets.{index}.paths")),
         ));
     }
     let board = if let Some(id) = input.board_id.filter(|_| !options.is_empty()) {

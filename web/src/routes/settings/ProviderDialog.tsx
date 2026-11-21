@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { IntegrationInput } from "../../api/gen/IntegrationInput.ts";
 import type { IntegrationVerdict } from "../../api/gen/IntegrationVerdict.ts";
@@ -45,6 +45,13 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
   const [loadedBoard, setLoadedBoard] = useState("");
   const loadingWidgets = !!item && loadedBoard !== board;
   const [widgetErrors, setWidgetErrors] = useState<Record<string, Record<string, string>>>({});
+  const form = useRef<HTMLFormElement>(null);
+
+  useLayoutEffect(() => {
+    if (Object.keys(choosing ? widgetErrors : errors).length) {
+      form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    }
+  }, [errors, widgetErrors, choosing]);
 
   useEffect(() => {
     let active = true;
@@ -113,7 +120,10 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
     }
     if (!name.trim()) connectionErrors.name = "Enter an instance name.";
     setErrors(connectionErrors);
-    if (Object.keys(connectionErrors).length) return;
+    if (Object.keys(connectionErrors).length) {
+      setChoosing(false);
+      return;
+    }
 
     const widgetFields: Record<string, Record<string, string>> = {};
     const widgets = choosing && board ? rows.flatMap(({ widget, id }) => {
@@ -141,7 +151,19 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
         ? await api.request("PUT", `/api/v1/integrations/${item.id}`, { body: integration })
         : await api.post("/api/v1/providers/install", { integration, integration_id: item?.id, board_id: board || null, widgets });
       if (result.kind === "ok") onSaved();
-      else setErrors({ [result.kind === "invalid" && !choosing ? result.field ?? "form" : "form"]: result.message });
+      else {
+        const field = result.kind === "invalid" ? result.field : undefined;
+        const [, index, option] = /^widgets\.(\d+)\.(.+)$/.exec(field ?? "") ?? [];
+        const widget = widgets[Number(index)];
+        if (widget && option) {
+          setWidgetErrors({ [widget.placement ?? widget.id]: { [option]: result.message } });
+        } else if (field && (provider.fields.some((entry) => entry.id === field) || ["fingerprint", "name", "icon"].includes(field))) {
+          setErrors({ [field]: result.message });
+          setChoosing(false);
+        } else {
+          setErrors({ form: result.message });
+        }
+      }
     }
     setBusy(false);
   }
@@ -155,7 +177,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
       {provider && !choosing && boards.length > 0 && (item || verdict?.ok) && <Button variant="default" onClick={() => { setLoadedBoard(""); setChoosing(true); }} disabled={busy}>Choose widgets</Button>}
       {provider && <Button type="submit" form="integration-form" variant="default" busy={busy} disabled={choosing && !!board && loadingWidgets}>{choosing && board ? "Save widgets to board" : item ? "Save" : "Save connection"}</Button>}
     </>}>
-    <form id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
+    <form ref={form} id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       {!provider ? <>
         <Field label="Search integrations" id="provider-search"><TextInput type="search" value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
         {providers.filter((p) => `${p.name} ${p.category} ${p.description}`.toLowerCase().includes(query.trim().toLowerCase())).map((p) => (
@@ -178,7 +200,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
         </div>)}
       </> : <>
         {!item && <p><a href={provider.docs}>Provider documentation</a></p>}
-        <Field label="Name" id="integration-name" error={errors.name}><TextInput name="name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Name" id="integration-name" error={errors.name}><TextInput name="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
         <SchemaForm id="integration" schema={[...provider.fields, pinField]} values={config} errors={errors}
           onChange={change} bound={bound} cleared={cleared} onClear={item ? (key) => {

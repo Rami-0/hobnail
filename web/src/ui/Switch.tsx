@@ -22,6 +22,7 @@ export function Switch({ checked, onChange, label, busy, className, ...rest }: S
         className="sw"
         id={rest.id ?? f?.id}
         aria-describedby={f?.describedBy}
+        aria-invalid={f?.invalid || rest["aria-invalid"] || undefined}
         aria-busy={busy || undefined}
         checked={checked}
         onCheckedChange={(next) => {

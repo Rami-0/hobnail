@@ -54,6 +54,7 @@ for (const width of [390, 1440]) {
       await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: CSP_LISTENER });
       await tab.send("Page.addScriptToEvaluateOnNewDocument", { source: `localStorage.setItem("rh-theme", ${q(theme)});` });
       await tab.send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: user.touch });
+      await tab.send("Emulation.setTouchEmulationEnabled", { enabled: user.touch });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
       await tab.send("Network.setCookie", {
         name: cookie.slice(0, cookie.indexOf("=")), value: cookie.slice(cookie.indexOf("=") + 1), url: base.origin, httpOnly: true,
@@ -92,6 +93,7 @@ for (const width of [390, 1440]) {
       await fill("#provider-search", "Generic");
       await check(`${el(dialog)}.textContent.includes("Utilities") && !${el(dialog + " .service-icon")}.matches("img")`, "category and opt-out monogram");
       await click(`${dialog} .settings-row button`);
+      await check(`${el("#integration-url")}?.required || ${el("#integration-url")}?.getAttribute("aria-required") === "true"`, "service URL is required");
       await fill("#integration-url", "http://127.0.0.1:8081/fixture/m2/reading");
       await fill("#integration-name", `Fixture ${profile}`);
       await fill('input[name="secret"]', "m3-fake-bearer");
@@ -106,6 +108,12 @@ for (const width of [390, 1440]) {
       await shot("connection");
       await click(`${dialog} .dlg-ft .btn-default:not([type="submit"])`);
       await check(`${el(dialog + " [role=switch]")}?.getAttribute("aria-checked") === "true"`, "recommended widget selected");
+      events.allow(({ url, status }) => new URL(url).pathname === "/api/v1/providers/install" && status === 400 && "invalid JSON path");
+      await fill('textarea[name="paths"]', "reading[nope]");
+      await click('button[form="integration-form"][type="submit"]');
+      await check(`(() => { const field = ${el('textarea[name="paths"]')};
+        return document.activeElement === field && field.getAttribute("aria-describedby").split(" ")
+          .some(id => document.getElementById(id)?.textContent.includes("valid widget option")); })()`, "invalid widget field is described and focused");
       await fill('textarea[name="paths"]', "reading");
       await shot("widgets");
       await click('button[form="integration-form"][type="submit"]');

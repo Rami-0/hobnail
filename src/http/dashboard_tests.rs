@@ -1972,7 +1972,7 @@ async fn credentialed_json_widgets_require_specific_paths() {
                 400,
             )
             .await;
-        assert_eq!(error["error"]["field"], "paths");
+        assert_eq!(error["error"]["field"], "widgets.0.paths");
     }
     assert_eq!(
         owner

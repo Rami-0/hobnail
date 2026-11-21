@@ -3,6 +3,7 @@ import { Button } from "../ui/Button.tsx";
 import { Field, Textarea, TextInput } from "../ui/Field.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
+import { origin } from "../boards/document.ts";
 import { secretHint, type Values } from "./schema.ts";
 
 export const pinField: Spec = {
@@ -25,13 +26,14 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
     const change = (next: string | boolean) => onChange(key, next);
     const secret = kind === "secret";
     const url = String(values.base_url ?? "");
+    const required = field.required && (!secret || !bound?.[key] || cleared?.[key] || origin(url) !== bound[key]);
     const hint = (secret && secretHint(bound?.[key], url, cleared?.[key])) || help;
     return <div key={key}>
       <Field id={name} label={kind === "bool" ? null : label} error={errors?.[key]} hint={hint}>
-        {kind === "bool" ? <Switch label={label} checked={value === true || value === "true"} onChange={change} />
-          : kind === "select" ? <Select label={label} options={field.choices.map((option) => ({ value: option, label: option }))} value={text} onChange={change} />
-          : kind === "list" ? <Textarea name={key} rows={3} value={text} onChange={(e) => change(e.target.value)} />
-          : <TextInput name={key} type={secret ? "password" : kind === "url" || kind === "number" ? kind : "text"}
+        {kind === "bool" ? <Switch label={label} aria-required={required || undefined} checked={value === true || value === "true"} onChange={change} />
+          : kind === "select" ? <Select label={label} required={required} options={field.choices.map((option) => ({ value: option, label: option }))} value={text} onChange={change} />
+          : kind === "list" ? <Textarea name={key} required={required} rows={3} value={text} onChange={(e) => change(e.target.value)} />
+          : <TextInput name={key} required={required} type={secret ? "password" : kind === "url" || kind === "number" ? kind : "text"}
             autoComplete={secret ? "new-password" : undefined} maxLength={field.max_length ?? undefined}
             min={field.min ?? undefined} max={field.max ?? undefined} value={text} onChange={(e) => change(e.target.value)} />}
       </Field>
