@@ -33,8 +33,9 @@ test("selection excludes unselected services and discovery identity survives ren
 });
 
 
+const key = (url: string) => payloadIdentity({ kind: "link", title: "Fixture", url });
+
 test("link identity normalizes authority while preserving the exact suffix", () => {
-  const key = (url: string) => payloadIdentity({ kind: "link", title: "Fixture", url });
   assert.equal(key("HTTPS://Example.TEST:443"), key("https://example.test/"));
   assert.equal(key("http://example.TEST:080?q=x#top"), key("http://example.test/?q=x#top"));
   for (const path of ["/Path", "/path", "/?a=1&b=2", "/?b=2&a=1", "/#first", "/#second"]) {
