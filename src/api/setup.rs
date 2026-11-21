@@ -650,7 +650,9 @@ fn target(
             None,
         )),
     })();
-    result.map_err(|error| item_error(&item.id, error))
+    let (provider, mut target) = result.map_err(|error| item_error(&item.id, error))?;
+    state.provider_connections.bind_draft(&mut target, user.id);
+    Ok((provider, target))
 }
 
 fn payload(conn: &Connection, owner: i64, item: &SetupItem) -> Result<BoardPayload, ApiError> {
@@ -797,7 +799,9 @@ pub(super) async fn route(
         Handler::SetupSave => {
             let update = super::read_json(req, 2 * 1024 * 1024).await?;
             let draft = db.dashboard(|conn| {
-                view(conn, user.id, save(conn, user.id, update, now)?, &config)
+                let draft = view(conn, user.id, save(conn, user.id, update, now)?, &config)?;
+                state.provider_connections.invalidate_draft(user.id);
+                Ok::<_, ApiError>(draft)
             })?;
             super::json(StatusCode::OK, &draft)
         }
@@ -838,8 +842,13 @@ pub(super) async fn route(
         }
         Handler::SetupCommit => {
             let input: SetupCommit = super::read_json(req, 8192).await?;
-            let (result, version) =
-                db.dashboard(|conn| commit(conn, user, input.revision, &config, now))?;
+            let (result, version) = db.dashboard(|conn| {
+                let result = commit(conn, user, input.revision, &config, now)?;
+                if result.1.is_some() {
+                    state.provider_connections.invalidate_draft(user.id);
+                }
+                Ok::<_, ApiError>(result)
+            })?;
             if let Some(version) = version {
                 boards::publish(state, &result.board_id, version);
                 state.changed("reload");

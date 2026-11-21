@@ -49,6 +49,7 @@ type Signal = (u64, watch::Sender<()>);
 #[derive(Default)]
 pub(crate) struct Connections {
     revisions: Mutex<Revisions>,
+    drafts: Mutex<HashMap<i64, watch::Sender<()>>>,
     sessions: Mutex<VecDeque<(SessionKey, Session)>>,
     creating: [tokio::sync::Mutex<()>; 4],
 }
@@ -70,11 +71,12 @@ pub(crate) struct Revision {
     http: Option<watch::Receiver<()>>,
     policy: Option<watch::Receiver<()>>,
     integration: Option<watch::Receiver<()>>,
+    draft: Option<watch::Receiver<()>>,
 }
 
 impl Revision {
     pub fn check(&self) -> Result<(), String> {
-        if [&self.http, &self.policy, &self.integration]
+        if [&self.http, &self.policy, &self.integration, &self.draft]
             .into_iter()
             .flatten()
             .any(|rx| rx.has_changed().unwrap_or(true))
@@ -97,6 +99,7 @@ impl Revision {
             _ = wait(self.http.as_mut()) => {},
             _ = wait(self.policy.as_mut()) => {},
             _ = wait(self.integration.as_mut()) => {},
+            _ = wait(self.draft.as_mut()) => {},
         }
     }
 }
@@ -132,6 +135,22 @@ impl Connections {
                 });
             }
         }
+    }
+
+    /// Capture or invalidate a setup draft while its database snapshot is locked.
+    pub(crate) fn bind_draft(&self, target: &mut Target, owner: i64) {
+        let mut drafts = self.drafts.lock().unwrap();
+        drafts.retain(|_, signal| signal.receiver_count() > 0);
+        target.revision.draft = Some(
+            drafts
+                .entry(owner)
+                .or_insert_with(|| watch::channel(()).0)
+                .subscribe(),
+        );
+    }
+
+    pub(crate) fn invalidate_draft(&self, owner: i64) {
+        self.drafts.lock().unwrap().remove(&owner);
     }
 
     pub(crate) fn invalidate(&self, id: Option<&str>) {

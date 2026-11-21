@@ -2607,3 +2607,66 @@ async fn changing_provider_options_cancels_an_unneeded_in_flight_fetch() {
     }
     run.abort();
 }
+
+#[tokio::test]
+async fn editing_and_committing_setup_cancel_in_flight_tests() {
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    let addr = start(st.clone()).await;
+    let owner = browser_owner(addr).await;
+    let item = "11111111111111111111111111111111";
+    let document = json!({"step":"review", "items":[{
+        "id":item, "name":"Fixture", "group":"", "included":true,
+        "target":{"kind":"provider","provider":"http","base_url":url,"enabled":true}
+    }]});
+    owner.json("PUT", SETUP_DRAFT, json!({
+        "revision":0, "document":document, "credentials":[{"item_id":item,"base_url":url,"secret":"fixture-token"}]
+    }), 200).await;
+    let other_tab = Client::owner(addr).await;
+    for revision in [1, 2] {
+        let test = owner.json(
+            "POST",
+            SETUP_TEST,
+            json!({"revision":revision,"item_id":item}),
+            200,
+        );
+        let change = async {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            upstream_request(&mut socket).await;
+            if revision == 1 {
+                other_tab
+                    .json(
+                        "PUT",
+                        SETUP_DRAFT,
+                        json!({
+                            "revision":revision, "document":document,
+                            "credentials":[{"item_id":item,"base_url":url,"secret":null}]
+                        }),
+                        200,
+                    )
+                    .await;
+            } else {
+                other_tab
+                    .json("POST", SETUP_COMMIT, json!({"revision":revision}), 200)
+                    .await;
+            }
+            let closed = tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
+                .await
+                .expect("draft revision cancels the upstream request");
+            match closed {
+                Ok(0) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("upstream socket stayed open: {other:?}"),
+            }
+        };
+        let (verdict, ()) = tokio::join!(test, change);
+        assert_eq!(verdict["class"], "changed");
+    }
+    assert_eq!(st.provider_requests.available_permits(), 4);
+}
