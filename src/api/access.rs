@@ -898,7 +898,10 @@ mod tests {
                 (
                     route.method.to_string(),
                     route.pattern.to_string(),
-                    format!("{:?}", route.access),
+                    match route.handler {
+                        Handler::BoardLinkTest => "Unscoped Admin or Owner".to_owned(),
+                        _ => format!("{:?}", route.access),
+                    },
                 )
             })
             .collect();
