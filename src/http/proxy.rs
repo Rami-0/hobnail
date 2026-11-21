@@ -1,6 +1,6 @@
 //! Forwarding headers are meaningful only on a connection from a trusted peer.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use hyper::Request;
 
@@ -26,4 +26,28 @@ pub(crate) fn is_https<B>(req: &Request<B>, env: &Env) -> bool {
             .is_ok_and(|s| s.trim().eq_ignore_ascii_case("https"))
     });
     https && proto.next().is_none()
+}
+
+/// Walk the proxy chain from the connection back toward the sender. Once
+/// an untrusted hop is found, anything farther left is its own assertion.
+pub(crate) fn client_ip<B>(req: &Request<B>, env: &Env) -> IpAddr {
+    let peer = peer_ip(req).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    if !env.trusted_proxies.contains(&peer) {
+        return peer;
+    }
+    for value in req.headers().get_all("x-forwarded-for").iter().rev() {
+        let Ok(value) = value.to_str() else {
+            return peer;
+        };
+        for hop in value.rsplit(',') {
+            let Ok(ip) = hop.trim().parse::<IpAddr>() else {
+                return peer;
+            };
+            let ip = ip.to_canonical();
+            if !env.trusted_proxies.contains(&ip) {
+                return ip;
+            }
+        }
+    }
+    peer
 }

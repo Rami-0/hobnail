@@ -2240,6 +2240,54 @@ async fn viewer_cannot_read_administrative_details() {
 }
 
 #[tokio::test]
+async fn login_throttles_the_rightmost_untrusted_ip_from_trusted_proxies() {
+    for use_proxy in [false, true] {
+        let mut st = state();
+        if use_proxy {
+            Arc::get_mut(&mut st).unwrap().env.trusted_proxies = ["127.0.0.1", "192.0.2.1"]
+                .map(|s| s.parse().unwrap())
+                .to_vec();
+        }
+        crate::auth::set_password_for_tests(&st.db, PW);
+        let addr = start(st).await;
+        let origin = format!("http://{addr}");
+        let peer = if use_proxy {
+            "198.51.100.2"
+        } else {
+            "127.0.0.1"
+        };
+        let attempt = |client, password| {
+            let chain = format!("203.0.113.1, {client}");
+            let body = serde_json::json!({"username": "admin", "password": password}).to_string();
+            let origin = &origin;
+            async move {
+                req(
+                    addr,
+                    "POST",
+                    "/api/login",
+                    &[
+                        ("Origin", origin),
+                        ("Content-Type", "application/json"),
+                        ("X-Forwarded-For", &chain),
+                        ("X-Forwarded-For", "::ffff:192.0.2.1"),
+                    ],
+                    &body,
+                )
+                .await
+            }
+        };
+
+        let failed = attempt(peer, "wrong password").await;
+        assert_eq!(failed.status, 401);
+        let throttled = attempt(peer, PW).await;
+        assert_eq!(throttled.status, 429);
+        assert!(header(&throttled.head, "retry-after").is_some());
+        let other = attempt("198.51.100.3", PW).await;
+        assert_eq!(other.status, if use_proxy { 200 } else { 429 });
+    }
+}
+
+#[tokio::test]
 async fn only_trusted_proxy_https_sets_secure_session_cookies() {
     let untrusted = state();
     crate::auth::set_password_for_tests(&untrusted.db, PW);

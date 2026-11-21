@@ -134,6 +134,13 @@ Hobnail serves HTTP. Configure the trusted proxy to overwrite
 external connection. HTTPS requests then receive a Secure session cookie.
 Preserve the external Host and add it to `RH_ALLOWED_HOSTS` if necessary.
 
+For login throttling, the trusted proxy must append the IP of its TCP peer to
+`X-Forwarded-For` or replace the header with that IP if it is the edge proxy.
+Hobnail walks the list from right to left, skips configured proxy IPs and
+uses the first other IP. Use bare IPv4 or IPv6 literals without ports.
+A missing list, malformed hop in the trusted part of the chain, or list
+with only trusted IPs falls back to the TCP peer.
+
 ## Outgoing HTTP
 
 ```toml

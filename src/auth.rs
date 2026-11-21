@@ -1,7 +1,7 @@
 //! Account credentials, sessions, CSRF and login throttling.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
@@ -18,7 +18,7 @@ use crate::api::error::ApiError;
 use crate::db::accounts::AccountError;
 
 use crate::db::{Db, EventFilter};
-use crate::http::server::{full, set, Body, Peer};
+use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
 pub const COOKIE_NAME: &str = "rh_session";
@@ -619,14 +619,6 @@ enum Attempt {
 }
 
 /// The client address for the rate limit (IPv4-mapped IPv6 folded to IPv4).
-fn peer_ip<B>(req: &Request<B>) -> IpAddr {
-    req.extensions()
-        .get::<Peer>()
-        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| {
-            p.0.ip().to_canonical()
-        })
-}
-
 pub(crate) async fn credential_route(
     state: &Arc<AppState>,
     req: Request<hyper::body::Incoming>,
@@ -673,7 +665,7 @@ pub(crate) async fn credential_route(
         );
     }
     let secure = crate::http::proxy::is_https(&req, &state.env);
-    let ip = peer_ip(&req);
+    let ip = crate::http::proxy::client_ip(&req, &state.env);
     if let Err(secs) = state
         .login_limiter
         .lock()
@@ -949,6 +941,7 @@ pub(crate) fn set_password_for_tests(db: &Db, password: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn argon2id_hashes_are_salted_and_verifiable() {

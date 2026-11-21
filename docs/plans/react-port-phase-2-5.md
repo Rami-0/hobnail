@@ -408,9 +408,13 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 7. Databases with a legacy shared password set an **upgrade lock**; their old
    hash/sessions are discarded and host `set-password [username]` recovery is
    required (`b6686f8`). Fresh installs use browser owner setup, not that CLI.
-8. Session cookies have **no Secure flag** with the plain-HTTP default. One
-   shared argon2 lock bounds allocations and returns **429** under concurrent
-   credential operations. Peer-IP limits can group users behind one proxy.
+8. M1 adds **Secure** to session cookies when a configured trusted proxy
+   reports HTTPS. Plain HTTP keeps working. For the per-IP login limit, the
+   same trust list enables rightmost-untrusted `X-Forwarded-For` handling.
+   The credential queue is blocked by the lifetime memory budget. A single
+   existing Argon2id hash uses 19 MiB and the M5 benchmark peaked at 22.24 MiB
+   even with one operation at a time. The shared lock and its 429 responses
+   remain in place.
 9. Credentials are bound to **origin, not path**. The database stores plaintext
    tokens with their binding; no token is returned. Tests stop at **any redirect**
    rather than following even same-origin redirects. Public roots only: no

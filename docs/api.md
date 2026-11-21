@@ -23,6 +23,11 @@ sliding expiry. Issuing, renewing or clearing it adds `Secure` when a
 [trusted proxy](configuration.md#incoming-reverse-proxy) reports HTTPS.
 Plain HTTP uses the same session flow without the flag.
 
+Credential-entry throttling returns `429 Too Many Requests` with
+`Retry-After` in seconds. The per-IP limiter uses the TCP peer by default and
+honours `X-Forwarded-For` only from configured trusted proxies. The global
+failed-attempt limit also applies.
+
 ## Version 1
 
 | Method | Path | Access | Purpose |

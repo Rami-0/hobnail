@@ -42,10 +42,12 @@ disabled or deleted. Invitations are single-use, expire, and can be revoked.
   slide on authenticated responses. Hobnail adds `Secure` when a
   [trusted proxy](../configuration.md#incoming-reverse-proxy) reports HTTPS.
   Plain HTTP continues to work.
-- Failed logins use per-peer-IP and global exponential back-off (1, 2, 4 …
+- Failed logins use per-client-IP and global exponential back-off (1, 2, 4 …
   60 seconds; five global failures are free). The limiter uses the connection
-  peer, so users behind one proxy share its IP. Password changes have separate
-  per-account back-off. The client displays the retry countdown.
+  peer by default. A trusted proxy can supply the client IP via
+  [`X-Forwarded-For`](../configuration.md#incoming-reverse-proxy). Password
+  changes have separate per-account back-off. The client displays the retry
+  countdown.
 - Viewers never receive configuration, secrets, integration URL paths, container
   environment values, process commands or probe diagnostics. Authentication
   events are administrative data. Streams recheck session validity and grants.
