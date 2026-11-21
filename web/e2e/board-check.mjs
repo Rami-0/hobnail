@@ -46,7 +46,19 @@ try {
   const onboarding = await tab.ev(visible("onboarding")); const form = onboarding ? "onboarding" : "login";
   await fill(`form[data-testid="${form}"] input[name="username"]`, "admin"); await fill(`form[data-testid="${form}"] input[name="password"]`, PW);
   if (onboarding) await fill('form[data-testid="onboarding"] input[name="confirm"]', PW);
-  await inp.click(`form[data-testid="${form}"] button[type="submit"]`); await wait(visible("user"), "onboard or sign in through the browser"); owner = await login();
+  await inp.click(`form[data-testid="${form}"] button[type="submit"]`);
+  await wait(`${visible("user")} || ${visible("setup-step")}`, "onboard or sign in through the browser");
+  if (await tab.ev(visible("setup-step"))) {
+    for (const title of ["Discover services", "Select what to include", "Configure connections", "Review dashboard"]) {
+      const skip = '[data-testid="setup-skip"]';
+      await wait(`document.querySelector('${skip}')?.matches("button:not(:disabled)")`, "setup step can be skipped");
+      await inp.click(skip);
+      await wait(`document.querySelector('[data-testid="setup-step"]')?.textContent === ${q(title)}`, `guided setup reaches ${title}`);
+    }
+    await inp.click('[data-testid="setup-create"]');
+    await wait(visible("board"), "guided setup creates Home");
+  }
+  owner = await login();
   await go("/app/settings/boards", visible("board-create")); await inp.click('[data-testid="board-create"]'); await wait(visible("board-form"));
   await fill('#board-form input[name="name"]', "M2 browser board"); await inp.click('button[form="board-form"][type="submit"]'); await wait(`!${visible("board-form")}`, "create board closes form");
   boardId = (await api("GET", "/boards")).data.find((board) => board.name === "M2 browser board").id;
@@ -123,7 +135,7 @@ try {
   await inp.click('[data-testid="integration-row"] button'); await wait(visible("integration-form")); check(await tab.ev('document.querySelector("input[name=secret]").value === ""'), "edit credential is never prefilled");
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:2"); await inp.click('button[form="integration-form"][type="submit"]'); await wait('document.querySelector("#integration-secret-err")?.textContent.includes("again")', "origin change requires entering credential again");
   const denied = await api("PUT", `/integrations/${integrationId}`, { name: "M2 HTTP connection", kind: "http", base_url: "http://127.0.0.1:2", enabled: true }); check(denied.status === 400 && denied.data.error.field === "secret", "server enforces origin binding on secret field");
-  await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays verdict class and message");
+  await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays the verdict message");
   await inp.click('[data-testid="integration-row"] button'); await wait(visible("integration-form"));
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:1/updated");
   await inp.click('button[form="integration-form"][type="submit"]'); await wait(`!${visible("integration-form")}`, "same-origin integration update saves without reentering the credential");
