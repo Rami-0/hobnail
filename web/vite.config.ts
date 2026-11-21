@@ -101,17 +101,17 @@ export default defineConfig(({ command }) => {
       assetsDir: "assets",
       emptyOutDir: true,
       sourcemap: false,
-      // Split the chart implementation itself; its former single lazy chunk
-      // exceeded M2b's 60 KB gzip cap. React and SDK imports keep their normal
-      // interaction boundaries instead of joining a global vendor bundle.
+      // Keep Recharts' mutually dependent selectors in one lazy chunk.
+      // Keep its dependencies in a separate lazy chunk so a chart vendor
+      // never has to import an initializer from the chart route itself.
       rolldownOptions: { output: {
-        strictExecutionOrder: true,
         chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
         { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
         { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
-        { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 450_000, includeDependenciesRecursively: false },
+        { name: "charts-vendor-deps", test: /node_modules\/(?:d3-[^/]+|internmap|clsx|eventemitter3|reselect|redux(?:-thunk)?|react-redux|immer|use-sync-external-store|es-toolkit|decimal\.js-light|victory-vendor|@reduxjs\/toolkit|@standard-schema\/[^/]+)\//, includeDependenciesRecursively: false },
+        { name: "charts-vendor", test: /node_modules\/recharts\//, includeDependenciesRecursively: false },
       ] } } },
       // Inline nothing as data: URLs; every asset is a hashed file the
       // server caches for a year.
