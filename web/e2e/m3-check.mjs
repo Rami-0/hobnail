@@ -81,8 +81,10 @@ for (const width of [390, 1440]) {
 
       await tab.send("Page.navigate", { url: new URL(`/app/settings/integrations?board=${board}`, base).href });
       await check(`document.documentElement.dataset.theme === ${q(theme)}`, "theme applied");
+      const catalogCode = 'performance.getEntriesByType("resource").some(entry => entry.name.includes("/assets/ProviderDialog-"))';
+      await check(`!${catalogCode}`, "catalog code is deferred before opening");
       await click(attr("integration-create"));
-      await check(`!!${el(dialog)}`, "catalog opened");
+      await check(`!!${el(dialog)} && ${catalogCode}`, "catalog opened from a lazy chunk");
       await fill("#provider-search", "zz-no-match");
       await check(`!${el(dialog + " .settings-row")}`, "search filters registry");
       await fill("#provider-search", "Generic");
