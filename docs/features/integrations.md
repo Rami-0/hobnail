@@ -127,9 +127,11 @@ configured name, such as `QBT_SID_8080`. Keep WebUI CSRF protection enabled.
 
 **Torrent activity** shows download and upload rates, the WebUI's active
 and seeding counts, queued uploads and downloads, and free space on the
-default save path. A torrent can appear in more than one count. Both
-WebUI API v2 torrent lists and the initial sync snapshot can hit Hobnail's
-128 KiB response limit on large torrent sets.
+default save path. A torrent can appear in more than one count.
+Active and seeding counts use separate filtered first pages and show
+Unavailable when the page fills (32 entries) or reaches the response cap.
+Queued and free-space figures come from the initial sync snapshot and show
+Unavailable if it exceeds 128 KiB. Transfer speeds remain visible.
 
 Verified from:
 

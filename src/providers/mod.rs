@@ -242,6 +242,15 @@ fn parse_json<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(&success(response)?.body).map_err(|_| Class::Protocol.into())
 }
 
+/// Keep independent metrics when one upstream response exceeds the step budget.
+fn within_response_limit<T>(result: Result<T, Fault>) -> Result<Option<T>, Fault> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(fault) if matches!(fault.class, Class::TooLarge) => Ok(None),
+        Err(fault) => Err(fault),
+    }
+}
+
 fn display_text(conn: &Conn<'_>, mut text: String) -> String {
     conn.output_redactor().redact(&mut text);
     if let Some((end, _)) = text.char_indices().nth(160) {

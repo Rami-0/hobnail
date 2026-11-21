@@ -145,18 +145,15 @@ fn transfers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
             |session| async move {
                 let session = session.ok_or(Class::Auth)?;
                 let speed: TransferInfo = get(conn, &session, "api/v2/transfer/info", &[]).await?;
-                let snapshot: Snapshot = get(
-                    conn,
-                    &session,
-                    "api/v2/sync/maindata",
-                    &[("rid", Input::Text("0"))],
-                )
-                .await?;
-                let queued = snapshot
-                    .torrents
-                    .into_values()
-                    .filter(|torrent| matches!(torrent.state.as_str(), "queuedUP" | "queuedDL"))
-                    .count();
+                let snapshot = within_response_limit(
+                    get::<Snapshot>(
+                        conn,
+                        &session,
+                        "api/v2/sync/maindata",
+                        &[("rid", Input::Text("0"))],
+                    )
+                    .await,
+                )?;
                 let mut rows = vec![
                     (
                         "Download".into(),
@@ -168,19 +165,44 @@ fn transfers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                     ),
                 ];
                 for (filter, label) in [("active", "Active"), ("seeding", "Seeding")] {
-                    let torrents: Vec<Torrent> = get(
-                        conn,
-                        &session,
-                        "api/v2/torrents/info",
-                        &[("filter", Input::Text(filter))],
-                    )
-                    .await?;
-                    rows.push((label.into(), torrents.len().to_string()));
+                    const LIMIT: usize = 32;
+                    let limit = LIMIT.to_string();
+                    let torrents = within_response_limit(
+                        get::<Vec<serde::de::IgnoredAny>>(
+                            conn,
+                            &session,
+                            "api/v2/torrents/info",
+                            &[
+                                ("filter", Input::Text(filter)),
+                                ("limit", Input::Text(&limit)),
+                            ],
+                        )
+                        .await,
+                    )?;
+                    let count = torrents
+                        .filter(|page| page.len() < LIMIT)
+                        .map(|page| page.len());
+                    rows.push((
+                        label.into(),
+                        count.map_or_else(unavailable, |n| n.to_string()),
+                    ));
                 }
-                let free = u64::try_from(snapshot.server_state.free_space_on_disk)
-                    .map_or_else(|_| "Unavailable".into(), human_bytes);
-                rows.push(("Queued".into(), queued.to_string()));
-                rows.push(("Free space".into(), free));
+                let queued = snapshot.as_ref().map(|snapshot| {
+                    snapshot
+                        .torrents
+                        .values()
+                        .filter(|torrent| matches!(torrent.state.as_str(), "queuedUP" | "queuedDL"))
+                        .count()
+                        .to_string()
+                });
+                let free = snapshot.and_then(|snapshot| {
+                    u64::try_from(snapshot.server_state.free_space_on_disk).ok()
+                });
+                rows.push(("Queued".into(), queued.unwrap_or_else(unavailable)));
+                rows.push((
+                    "Free space".into(),
+                    free.map_or_else(unavailable, human_bytes),
+                ));
                 Ok(StructuredBody::StatGrid { rows })
             },
         )
@@ -188,11 +210,77 @@ fn transfers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     })
 }
 
+fn unavailable() -> String {
+    "Unavailable".into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::providers::batch_test::{assert_header, assert_test_fault, exercise, Exchange};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn oversized_responses_and_full_pages_preserve_transfer_speeds() {
+        let oversized = format!(r#"{{"padding":"{}"}}"#, "x".repeat(MAX_RESPONSE));
+        let full = format!("[{}]", vec!["{}"; 32].join(","));
+        exercise(
+            &QBITTORRENT,
+            &[(USERNAME, "fake-user"), (PASSWORD, "fake-password")],
+            Values::new(),
+            &[
+                Exchange {
+                    request: "POST /prefix/api/v2/auth/login HTTP/1.1",
+                    status: 200,
+                    body: "Ok.",
+                },
+                Exchange {
+                    request: "GET /prefix/api/v2/transfer/info HTTP/1.1",
+                    status: 200,
+                    body: r#"{"dl_info_speed":1024,"up_info_speed":0}"#,
+                },
+                Exchange {
+                    request: "GET /prefix/api/v2/sync/maindata?rid=0 HTTP/1.1",
+                    status: 200,
+                    body: &oversized,
+                },
+                Exchange {
+                    request: "GET /prefix/api/v2/torrents/info?filter=active&limit=32 HTTP/1.1",
+                    status: 200,
+                    body: &oversized,
+                },
+                Exchange {
+                    request: "GET /prefix/api/v2/torrents/info?filter=seeding&limit=32 HTTP/1.1",
+                    status: 200,
+                    body: &full,
+                },
+            ],
+            |index, _| {
+                if index == 0 {
+                    "Set-Cookie: SID=fake-sid; Path=/\r\n"
+                } else {
+                    ""
+                }
+            },
+            async |conn| {
+                let body = super::super::fetch(conn, &QBITTORRENT.widgets[0], &Values::new())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    serde_json::to_value(body).unwrap()["rows"],
+                    json!([
+                        ["Download", "1.0 KiB/s"],
+                        ["Upload", "0 B/s"],
+                        ["Active", "Unavailable"],
+                        ["Seeding", "Unavailable"],
+                        ["Queued", "Unavailable"],
+                        ["Free space", "Unavailable"],
+                    ])
+                );
+            },
+        )
+        .await;
+    }
 
     #[tokio::test]
     async fn sends_bound_csrf_headers_reuses_sid_and_renews_it_once() {
@@ -209,8 +297,8 @@ mod tests {
             Exchange { request: LOGIN, status: 200, body: "Ok." },
             Exchange { request: INFO, status: 200, body: SPEED },
             Exchange { request: "GET /prefix/api/v2/sync/maindata?rid=0 HTTP/1.1", status: 200, body: r#"{"rid":1,"full_update":true,"server_state":{"free_space_on_disk":2147483648},"torrents":{"hash1":{"state":"queuedDL"},"hash2":{"state":"queuedUP"},"hash3":{"state":"uploading"}}}"# },
-            Exchange { request: "GET /prefix/api/v2/torrents/info?filter=active HTTP/1.1", status: 200, body: r#"[{"hash":"hash3","state":"uploading"}]"# },
-            Exchange { request: "GET /prefix/api/v2/torrents/info?filter=seeding HTTP/1.1", status: 200, body: r#"[{"hash":"hash3","state":"uploading"},{"hash":"hash4","state":"stalledUP"}]"# },
+            Exchange { request: "GET /prefix/api/v2/torrents/info?filter=active&limit=32 HTTP/1.1", status: 200, body: r#"[{"hash":"hash3","state":"uploading"}]"# },
+            Exchange { request: "GET /prefix/api/v2/torrents/info?filter=seeding&limit=32 HTTP/1.1", status: 200, body: r#"[{"hash":"hash3","state":"uploading"},{"hash":"hash4","state":"stalledUP"}]"# },
             Exchange { request: INFO, status: 200, body: "{}" },
             Exchange { request: INFO, status: 403, body: "" },
             Exchange { request: LOGIN, status: 200, body: "Ok." },

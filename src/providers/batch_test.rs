@@ -7,17 +7,17 @@ use crate::{
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::Semaphore};
 
-pub(super) struct Exchange {
+pub(super) struct Exchange<'a> {
     pub request: &'static str,
     pub status: u16,
-    pub body: &'static str,
+    pub body: &'a str,
 }
 
 pub(super) async fn exercise(
     provider: &Provider,
     secrets: &[(&str, &str)],
     options: Values,
-    exchanges: &[Exchange],
+    exchanges: &[Exchange<'_>],
     inspect: impl Fn(usize, &str) -> &'static str,
     verify: impl AsyncFnOnce(&Conn<'_>),
 ) {
