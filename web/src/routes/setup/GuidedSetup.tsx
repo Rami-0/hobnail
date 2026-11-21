@@ -35,26 +35,6 @@ export default function SetupPage() {
   const [draft, setDraft] = useState<SetupDraft>();
   const [error, setError] = useState("");
   useEffect(() => {
-    if (!credentialPending) return;
-    const navigation = (event: Event) => {
-      if (leaving.current) return;
-      event.preventDefault();
-      setDeparture({ to: (event as CustomEvent<string>).detail });
-    };
-    const unload = (event: BeforeUnloadEvent) => {
-      if (leaving.current) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("rh:navigate", navigation);
-    window.addEventListener("beforeunload", unload);
-    return () => {
-      window.removeEventListener("rh:navigate", navigation);
-      window.removeEventListener("beforeunload", unload);
-    };
-  }, [credentialPending]);
-
-  useEffect(() => {
     const controller = new AbortController();
     void api.get<SetupDraft>(`${PATH}/draft`, { signal: controller.signal }).then((response) => {
       if (controller.signal.aborted) return;
@@ -112,6 +92,26 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   const credentialPending = Object.keys(credentials).length > 0;
   const stepIndex = stepOrder.indexOf(step);
   const chosenTheme = doc.theme ?? draft.theme_default;
+
+  useEffect(() => {
+    if (!credentialPending) return;
+    const navigation = (event: Event) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      setDeparture({ to: (event as CustomEvent<string>).detail });
+    };
+    const unload = (event: BeforeUnloadEvent) => {
+      if (leaving.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("rh:navigate", navigation);
+    window.addEventListener("beforeunload", unload);
+    return () => {
+      window.removeEventListener("rh:navigate", navigation);
+      window.removeEventListener("beforeunload", unload);
+    };
+  }, [credentialPending]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
