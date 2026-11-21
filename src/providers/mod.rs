@@ -21,6 +21,8 @@ mod connection;
 mod generic;
 mod pihole;
 
+#[allow(unused_imports)] // Available to providers that need CSRF headers.
+pub use connection::TargetHeader;
 pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
 pub(crate) use connection::{Connections, Credentials, Revision, Target};
 

@@ -220,6 +220,15 @@ pub enum Verb {
     Delete,
 }
 
+/// Standard headers derived exclusively from the bound target, never from
+/// credentials, query parameters or upstream responses.
+#[derive(Clone, Copy)]
+#[allow(dead_code)] // Available to providers that require CSRF headers.
+pub enum TargetHeader {
+    Origin,
+    Referer,
+}
+
 pub struct Step<'a> {
     pub verb: Verb,
     /// Empty uses the exact saved endpoint. Otherwise this is relative to
@@ -229,6 +238,7 @@ pub struct Step<'a> {
     pub query: &'a [(&'a str, Input<'a>)],
     pub body: Option<Body<'a>>,
     pub response_headers: &'a [&'a str],
+    pub target_headers: &'a [TargetHeader],
     pub status_only: bool,
 }
 
@@ -241,6 +251,7 @@ impl<'a> Step<'a> {
             query: &[],
             body: None,
             response_headers: &[],
+            target_headers: &[],
             status_only: false,
         }
     }
@@ -383,10 +394,20 @@ impl<'a> Conn<'a> {
             Verb::Put => Method::PUT,
             Verb::Delete => Method::DELETE,
         };
+        for header in step.target_headers {
+            let (name, value) = match header {
+                TargetHeader::Origin => ("origin", self.origin.as_str()),
+                TargetHeader::Referer => ("referer", self.target.url.as_str()),
+            };
+            request.headers.push((name.into(), value.into()));
+        }
         for auth in step.auth {
             let (name, value) = match auth {
                 Auth::Header(name, input) => {
-                    if name.eq_ignore_ascii_case("cookie") {
+                    if ["cookie", "origin", "referer"]
+                        .iter()
+                        .any(|header| name.eq_ignore_ascii_case(header))
+                    {
                         return Err(Class::Protocol.into());
                     }
                     (*name, self.auth_value(input)?.to_owned())

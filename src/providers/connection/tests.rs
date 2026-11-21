@@ -255,6 +255,9 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
         assert!(wire.contains("x-api-key: opaque-token\r\n"));
         assert!(wire.contains("authorization: PVEAPIToken=test@realm!id=opaque-token\r\n"));
         assert!(wire.contains("cookie: sid=fixture\r\n"));
+        let host = upstream.local_addr().unwrap();
+        assert!(wire.contains(&format!("origin: http://{host}\r\n")));
+        assert!(wire.contains(&format!("referer: http://{host}/prefix\r\n")));
         assert!(!wire.contains("ignored") && !wire.contains("HttpOnly"));
         respond(
             &mut socket,
@@ -306,6 +309,7 @@ async fn steps_encode_credentials_and_only_return_requested_headers() {
                     ("auth", Input::Credential("token")),
                     ("name&", Input::Text("value=")),
                 ],
+                target_headers: &[TargetHeader::Origin, TargetHeader::Referer],
                 ..Step::get("/stats")
             })
             .await?;
