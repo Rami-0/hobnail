@@ -253,7 +253,7 @@ try {
     await move("skip", 4);
     await require("pending credentials do not block Skip or save automatically", text(wizard, "Only saved credentials are included"));
     await require("Review identifies both unfinished items", `[...${el(wizard)}.querySelectorAll("li")].filter(li => li.textContent.includes("incomplete — will not be added")).length === 2`);
-    await click(".setup-fields li button");
+    await click(".setup-fields li button.btn-link");
     await step(3);
     await require("Skip and Back retain entered connection fields", `${el(link)}?.value === "https://example.test/home" && ${el(url)}?.value === ${q(endpoint)} && ${el(secret)}?.value.startsWith("unsaved")`);
     await fill(secret, "fixture-credential");
