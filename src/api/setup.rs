@@ -371,10 +371,10 @@ fn save(conn: &Connection, owner: i64, update: SetupUpdate, now: i64) -> Result<
     for change in update.credentials {
         let local = |error| item_error(&change.item_id, error);
         let Some(SetupTarget::Http { base_url, .. }) = items.get(change.item_id.as_str()) else {
-            return Err(ApiError::bad_request(
+            return Err(local(ApiError::bad_request(
                 "select an HTTP connection for this credential",
                 Some("secret"),
-            ));
+            )));
         };
         field_length(&change.base_url, "base_url", URL_BYTES).map_err(local)?;
         if let Some(secret) = change.secret {

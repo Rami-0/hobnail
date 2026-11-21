@@ -288,7 +288,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     return <section className="setup-item" key={id}>
       <h3>{item.name || "Unnamed service"}</h3>
       {content}
-      <Button data-testid="setup-test" disabled={controlsDisabled || !canTest} onClick={() => void test(item)}>Test connection</Button>
+      <Button data-testid="setup-test" disabled={controlsDisabled || !canTest} onClick={() => void test(item)}>{change ? "Save and test connection" : "Test connection"}</Button>
       {result && <Note kind={typeof result !== "string" && result.ok ? "ok" : "warn"} testId="setup-verdict">
         {typeof result === "string" ? result : result.message}
       </Note>}
