@@ -227,7 +227,10 @@ mod tests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
@@ -310,11 +313,21 @@ fn clip(s: &str, max: usize) -> &str {
 
 /// The history database handle.
 pub struct Db {
+    provider_scope: AtomicU64,
     inner: Option<Mutex<Inner>>,
     path: Option<PathBuf>,
 }
 
 impl Db {
+    pub(crate) fn provider_scope_generation(&self) -> u64 {
+        self.provider_scope.load(Ordering::SeqCst)
+    }
+
+    /// Rotate under the database lock before committing a visibility change.
+    pub(crate) fn invalidate_provider_scope(&self) {
+        self.provider_scope.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub(crate) fn dashboard<T, E>(
         &self,
         operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, E>,
@@ -439,6 +452,7 @@ impl Db {
     /// A handle that records nothing and returns empty results.
     pub fn disabled() -> Self {
         Self {
+            provider_scope: AtomicU64::new(0),
             inner: None,
             path: None,
         }
@@ -507,6 +521,7 @@ impl Db {
         };
         let (w60, w600) = (get("hist.w60"), get("hist.w600"));
         Ok(Self {
+            provider_scope: AtomicU64::new(0),
             inner: Some(Mutex::new(Inner {
                 conn,
                 names: HashMap::new(),

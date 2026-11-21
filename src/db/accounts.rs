@@ -539,6 +539,7 @@ impl Db {
                     tx.execute("DELETE FROM users WHERE id = ?1", [user])?;
                 }
             }
+            self.invalidate_provider_scope();
             tx.commit()?;
             Ok(Ok(()))
         })

@@ -697,6 +697,7 @@ pub(super) async fn route(
                     [id],
                 )?;
                 state.integration_checks.lock().unwrap().remove(id);
+                db.invalidate_provider_scope();
                 Ok(())
             })?;
             state.changed("reload");

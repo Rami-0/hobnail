@@ -1122,6 +1122,7 @@ pub(super) async fn route(
                 let board = get(c, id)?;
                 let mut doc = document(c, &board)?;
                 mask_provider_widgets(c, id, user, &mut doc)?;
+                db.invalidate_provider_scope();
                 Ok(Ok((doc, integrations::list(state, c, user)?, board)))
             })?;
             match result {
@@ -1169,6 +1170,7 @@ pub(super) async fn route(
                     [id],
                 )?;
                 c.execute("DELETE FROM drafts WHERE key=?1", [draft_key])?;
+                db.invalidate_provider_scope();
                 Ok(board.version.saturating_add(1))
             })?;
             publish(state, id, version);
