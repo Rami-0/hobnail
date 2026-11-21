@@ -92,20 +92,19 @@ pub fn host_allowed(host: &str, env: &crate::state::Env) -> bool {
 #[derive(Debug, Clone, Copy)]
 pub struct Peer(pub SocketAddr);
 
+fn negotiates_json(path: &str) -> bool {
+    path.starts_with("/api/")
+        && !matches!(
+            path,
+            "/api/v1/stream" | "/api/logs/stream" | "/api/logs/download"
+        )
+}
+
 async fn respond(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
-    // Keep stream and download responses out of content negotiation entirely.
-    if matches!(
-        req.uri().path(),
-        "/api/v1/stream" | "/api/logs/stream" | "/api/logs/download"
-    ) {
+    if !negotiates_json(req.uri().path()) {
         return route(state, req).await;
     }
-    let accepts_gzip = super::assets::accepts_gzip(
-        req.headers()
-            .get_all(hyper::header::ACCEPT_ENCODING)
-            .iter()
-            .filter_map(|value| value.to_str().ok()),
-    );
+    let accepts_gzip = super::assets::request_accepts_gzip(req.headers());
     super::compression::negotiate(route(state, req).await, accepts_gzip).await
 }
 
@@ -362,6 +361,24 @@ mod tests {
         assert!(host_allowed("homelab.tail1234.ts.net", &e));
         assert!(!host_allowed("evil.example.com", &e));
         assert!(!host_allowed("homelab.evil.com", &e));
+    }
+
+    #[test]
+    fn runtime_gzip_is_limited_to_buffered_api_routes() {
+        for path in ["/api/v1/boards/large", "/api/history/system"] {
+            assert!(negotiates_json(path), "{path}");
+        }
+        for path in [
+            "/assets/data.json",
+            "/assets/app.js.map",
+            "/app/api/v1/boards/large",
+            "/manifest.webmanifest",
+            "/api/v1/stream",
+            "/api/logs/stream",
+            "/api/logs/download",
+        ] {
+            assert!(!negotiates_json(path), "{path}");
+        }
     }
 
     #[test]

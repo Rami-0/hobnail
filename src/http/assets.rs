@@ -15,7 +15,7 @@ use hyper::header::{
     HeaderName, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH,
     CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY, VARY, X_CONTENT_TYPE_OPTIONS,
 };
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 
 use crate::http::server::{full, set, Body};
 
@@ -37,11 +37,12 @@ pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; 
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
 pub fn route(req: &Request<Incoming>) -> Response<Body> {
-    let ae = req
-        .headers()
-        .get(ACCEPT_ENCODING)
-        .and_then(|v| v.to_str().ok());
-    let r = resolve(ASSETS, req.uri().path(), ae, req.method() == Method::HEAD);
+    let r = resolve(
+        ASSETS,
+        req.uri().path(),
+        request_accepts_gzip(req.headers()),
+        req.method() == Method::HEAD,
+    );
     let mut resp = full(r.status, r.body);
     for (k, v) in r.headers {
         set(&mut resp, k, v);
@@ -101,9 +102,18 @@ pub fn lookup<'a>(table: &'a [Asset], path: &str) -> Option<&'a Asset> {
     (key == "index.html" || a.immutable).then_some(a)
 }
 
+pub(super) fn request_accepts_gzip(headers: &HeaderMap) -> bool {
+    accepts_gzip(
+        headers
+            .get_all(ACCEPT_ENCODING)
+            .iter()
+            .filter_map(|value| value.to_str().ok()),
+    )
+}
+
 /// Whether the request's `Accept-Encoding` allows gzip (RFC 9110 12.5.3):
 /// `gzip`/`x-gzip` with q > 0, or `*` with q > 0 when gzip is not listed.
-pub fn accepts_gzip<'a>(headers: impl IntoIterator<Item = &'a str>) -> bool {
+fn accepts_gzip<'a>(headers: impl IntoIterator<Item = &'a str>) -> bool {
     let mut gzip = None;
     let mut star = None;
     for item in headers.into_iter().flat_map(|value| value.split(',')) {
@@ -127,12 +137,7 @@ pub fn accepts_gzip<'a>(headers: impl IntoIterator<Item = &'a str>) -> bool {
 }
 
 /// The whole decision: entry, encoding, headers, body (empty for HEAD).
-pub fn resolve(
-    table: &'static [Asset],
-    path: &str,
-    accept_encoding: Option<&str>,
-    head: bool,
-) -> Reply {
+pub fn resolve(table: &'static [Asset], path: &str, gzip_allowed: bool, head: bool) -> Reply {
     let is_app = path == "/app" || path.starts_with("/app/");
     let Some(a) = lookup(table, path) else {
         return if is_app {
@@ -158,11 +163,9 @@ pub fn resolve(
     if a.gz.is_some() || !is_app {
         headers.push((VARY, "Accept-Encoding"));
     }
-    if let Some(gz) = a.gz {
-        if accepts_gzip(accept_encoding) {
-            headers.push((CONTENT_ENCODING, "gzip"));
-            body = gz;
-        }
+    if let Some(gz) = a.gz.filter(|_| gzip_allowed) {
+        headers.push((CONTENT_ENCODING, "gzip"));
+        body = gz;
     }
     let head_len = head.then_some(body.len());
     if head {
@@ -246,7 +249,7 @@ mod tests {
 
     #[test]
     fn hashed_asset_encoding_and_cache_headers() {
-        let r = resolve(T, "/assets/app-abc123.js", Some("gzip, deflate"), false);
+        let r = resolve(T, "/assets/app-abc123.js", true, false);
         assert_eq!(r.status, StatusCode::OK);
         assert_eq!(r.body, b"GZ-JS");
         assert_eq!(r.header(&CONTENT_ENCODING), Some("gzip"));
@@ -258,16 +261,12 @@ mod tests {
         assert_eq!(r.header(&VARY), Some("Accept-Encoding"));
         assert_eq!(r.header(&X_CONTENT_TYPE_OPTIONS), Some("nosniff"));
         assert_eq!(r.header(&CONTENT_SECURITY_POLICY), None);
-        for ae in [None, Some("identity"), Some("gzip;q=0"), Some("br")] {
-            let r = resolve(T, "/assets/app-abc123.js", ae, false);
-            assert_eq!(r.body, T[0].raw, "{ae:?}");
-            assert_eq!(r.header(&CONTENT_ENCODING), None, "{ae:?}");
-            assert_eq!(r.header(&VARY), Some("Accept-Encoding"));
-        }
-        let r = resolve(T, "/assets/app-abc123.js", Some("*"), false);
-        assert_eq!(r.body, b"GZ-JS");
+        let r = resolve(T, "/assets/app-abc123.js", false, false);
+        assert_eq!(r.body, T[0].raw);
+        assert_eq!(r.header(&CONTENT_ENCODING), None);
+        assert_eq!(r.header(&VARY), Some("Accept-Encoding"));
         // No gzip copy: raw, whatever the client accepts.
-        let r = resolve(T, "/assets/logo-def456.png", Some("gzip"), false);
+        let r = resolve(T, "/assets/logo-def456.png", true, false);
         assert_eq!(r.body, b"PNG");
         assert_eq!(r.header(&CONTENT_ENCODING), None);
         assert_eq!(r.header(&CONTENT_TYPE), Some("image/png"));
@@ -282,7 +281,7 @@ mod tests {
             "/app/containers/x",
             "/app/assets/app-abc123.js",
         ] {
-            let r = resolve(T, p, None, false);
+            let r = resolve(T, p, false, false);
             assert_eq!(r.status, StatusCode::OK, "{p}");
             assert_eq!(r.body, T[3].raw, "{p}");
             assert_eq!(r.header(&CONTENT_TYPE), Some("text/html; charset=utf-8"));
@@ -292,7 +291,7 @@ mod tests {
             assert_eq!(r.header(&CONTENT_SECURITY_POLICY), Some(CSP));
         }
         assert!(CSP.contains("script-src 'self';") && CSP.contains("frame-ancestors 'none'"));
-        let r = resolve(T, "/app/x", Some("gzip"), false);
+        let r = resolve(T, "/app/x", true, false);
         assert_eq!(r.body, b"GZ-HTML");
         assert_eq!(r.header(&CONTENT_ENCODING), Some("gzip"));
         assert_eq!(r.header(&VARY), Some("Accept-Encoding"));
@@ -313,7 +312,7 @@ mod tests {
             "/assets/../favicon.svg",
             "/assets/..%2findex.html",
         ] {
-            let r = resolve(T, p, Some("gzip"), false);
+            let r = resolve(T, p, true, false);
             assert_eq!(r.status, StatusCode::NOT_FOUND, "{p}");
             assert_eq!(r.body, b"not found\n", "{p}");
             assert_eq!(r.header(&CONTENT_TYPE), Some("text/plain; charset=utf-8"));
@@ -326,17 +325,17 @@ mod tests {
 
     #[test]
     fn head_has_length_and_no_body() {
-        let r = resolve(T, "/assets/app-abc123.js", Some("gzip"), true);
+        let r = resolve(T, "/assets/app-abc123.js", true, true);
         assert_eq!(r.status, StatusCode::OK);
         assert_eq!(r.body, b"");
         assert_eq!(r.head_len, Some(5));
         assert_eq!(r.header(&CONTENT_ENCODING), Some("gzip"));
-        let r = resolve(T, "/app/x", None, true);
+        let r = resolve(T, "/app/x", false, true);
         assert_eq!(r.body, b"");
         assert_eq!(r.head_len, Some(T[3].raw.len()));
         assert_eq!(r.header(&CONTENT_SECURITY_POLICY), Some(CSP));
         assert_eq!(
-            resolve(T, "/assets/nope.js", None, true).status,
+            resolve(T, "/assets/nope.js", false, true).status,
             StatusCode::NOT_FOUND
         );
     }
@@ -344,11 +343,11 @@ mod tests {
     #[test]
     fn not_built_is_503_for_the_document_and_404_for_assets() {
         static EMPTY: &[Asset] = &[];
-        let r = resolve(EMPTY, "/app/containers", None, false);
+        let r = resolve(EMPTY, "/app/containers", false, false);
         assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(r.body, b"client not built\n");
         assert_eq!(
-            resolve(EMPTY, "/assets/x.js", None, false).status,
+            resolve(EMPTY, "/assets/x.js", false, false).status,
             StatusCode::NOT_FOUND
         );
     }
@@ -362,11 +361,12 @@ mod tests {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = l.local_addr().unwrap();
         tokio::spawn(crate::http::server::serve_listener(st, l));
-        let req = |method: &str, path: &str| {
+        let request = |method: &str, path: &str, encoding: &str| {
             format!(
-                "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n"
+                "{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{encoding}Connection: close\r\n\r\n"
             )
         };
+        let req = |method: &str, path: &str| request(method, path, "Accept-Encoding: gzip\r\n");
         let send = |r: String| async move {
             let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
             s.write_all(r.as_bytes()).await.unwrap();
@@ -404,7 +404,11 @@ mod tests {
                 assert!(hb.is_empty(), "HEAD has no body");
                 let n = ix.gz.unwrap_or(ix.raw).len();
                 assert!(hh.contains(&format!("content-length: {n}")), "{hh}");
-                if let Some(a) = ASSETS.iter().find(|a| a.immutable) {
+                if let Some(a) = ASSETS
+                    .iter()
+                    .filter(|a| a.immutable)
+                    .max_by_key(|a| a.gz.is_some())
+                {
                     let (s, h, b) = send(req("GET", &format!("/{}", a.path))).await;
                     assert_eq!(s, 200);
                     assert!(
@@ -416,6 +420,35 @@ mod tests {
                         assert!(h.contains("content-encoding: gzip"), "{h}");
                     }
                     assert_eq!(b, a.gz.unwrap_or(a.raw));
+                    let path = format!("/{}", a.path);
+                    for (fields, gzip_allowed) in [
+                        ("Accept-Encoding: br\r\nAccept-Encoding: gzip\r\n", true),
+                        (
+                            "Accept-Encoding: gzip\r\nAccept-Encoding: gzip;q=0\r\n",
+                            false,
+                        ),
+                    ] {
+                        let encoded = a.gz.filter(|_| gzip_allowed);
+                        let expected = encoded.unwrap_or(a.raw);
+                        for method in ["GET", "HEAD"] {
+                            let (status, headers, body) =
+                                send(request(method, &path, fields)).await;
+                            assert_eq!(status, 200);
+                            assert_eq!(
+                                headers.contains("content-encoding: gzip"),
+                                encoded.is_some()
+                            );
+                            assert!(
+                                headers
+                                    .lines()
+                                    .any(|line| line
+                                        == format!("content-length: {}", expected.len())),
+                                "{headers}"
+                            );
+                            assert!(headers.contains("vary: accept-encoding"));
+                            assert_eq!(body, if method == "GET" { expected } else { b"" });
+                        }
+                    }
                 }
             }
             None => {
