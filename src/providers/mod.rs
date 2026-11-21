@@ -43,6 +43,7 @@ mod prowlarr;
 mod qbittorrent;
 mod radarr;
 mod sonarr;
+mod tailscale;
 mod technitium;
 mod uptime_kuma;
 
@@ -68,6 +69,7 @@ pub const REGISTRY: &[Provider] = &[
     jellyseerr::JELLYSEERR,
     adguard_home::ADGUARD_HOME,
     technitium::TECHNITIUM,
+    tailscale::TAILSCALE,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

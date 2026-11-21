@@ -243,6 +243,27 @@ Verified from:
 
 UNVERIFIED: Older pagination contracts, cluster aggregation and live reverse proxies.
 
+## Tailscale
+
+Enable Provider internet access in Settings → Integrations. Leave the API
+URL at https://api.tailscale.com and enter your tailnet (or `-` for the
+token’s tailnet) and an API access token. A device-read Bearer token with
+`devices:core:read` is sufficient. Replace the token when it expires.
+Hobnail sends it only to the origin it was saved for.
+
+**Tailnet devices** counts devices connected to Tailscale’s control service
+and shows last seen for up to ten devices. **Expiring device keys** lists
+up to ten device keys expiring in the next 30 days, earliest first. The
+widgets read the API v2 device list.
+
+Verified from:
+
+- [Upstream authentication reference](https://tailscale.com/docs/reference/tailscale-api)
+- [Upstream device-read scope](https://tailscale.com/docs/reference/trust-credentials)
+- [Upstream device list client](https://github.com/tailscale/tailscale-client-go-v2/blob/f9e92a86ee85097dbabd255384403cb32b94f7c0/devices.go)
+
+UNVERIFIED: OAuth token renewal, live responses and large tailnets. Use the default `-` for account aliases containing `@`.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
