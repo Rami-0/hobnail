@@ -38,6 +38,7 @@ mod connection;
 mod generic;
 mod jellyfin;
 mod jellyseerr;
+mod nginx_proxy_manager;
 mod pihole;
 mod prowlarr;
 mod qbittorrent;
@@ -72,6 +73,7 @@ pub const REGISTRY: &[Provider] = &[
     technitium::TECHNITIUM,
     tailscale::TAILSCALE,
     wg_easy::WG_EASY,
+    nginx_proxy_manager::NGINX_PROXY_MANAGER,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

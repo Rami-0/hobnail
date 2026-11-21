@@ -285,6 +285,26 @@ Verified from:
 
 UNVERIFIED: v14 without a password, v15 accounts with two-factor authentication, other releases and live instances.
 
+## Nginx Proxy Manager
+
+Enter the admin UI URL, account email and password. A regular user with
+View on Proxy Hosts and SSL Certificates is sufficient for the records
+visible to that account. Hobnail exchanges the credentials for a Bearer
+token and verifies it using the account endpoint.
+
+**Proxy hosts and certificates** counts visible proxy hosts and certificates
+and lists up to ten certificate expiration dates. The two lists have no
+documented page controls in v2.12.3. An oversized list shows Unavailable
+for its own data while the other list remains usable.
+
+Verified from:
+
+- [Upstream v2.12.3 endpoint schemas](https://github.com/NginxProxyManager/nginx-proxy-manager/tree/v2.12.3/backend/schema/paths)
+- [Upstream v2.12.3 token exchange](https://github.com/NginxProxyManager/nginx-proxy-manager/blob/v2.12.3/backend/internal/token.js)
+- [Upstream v2.12.3 list permissions](https://github.com/NginxProxyManager/nginx-proxy-manager/tree/v2.12.3/backend/lib/access)
+
+UNVERIFIED: Other releases, database-specific display formats and live reverse proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
