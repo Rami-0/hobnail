@@ -18,7 +18,7 @@ pub(super) async fn exercise(
     secrets: &[(&str, &str)],
     options: Values,
     exchanges: &[Exchange],
-    inspect: impl Fn(usize, &str),
+    inspect: impl Fn(usize, &str) -> &'static str,
     verify: impl AsyncFnOnce(&Conn<'_>),
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -48,8 +48,8 @@ pub(super) async fn exercise(
         for (index, exchange) in exchanges.iter().enumerate() {
             let (mut socket, wire) = receive(&listener).await;
             assert_eq!(wire.lines().next(), Some(exchange.request));
-            inspect(index, &wire);
-            respond(&mut socket, exchange.status, "", exchange.body).await;
+            let headers = inspect(index, &wire);
+            respond(&mut socket, exchange.status, headers, exchange.body).await;
         }
     };
     tokio::join!(server, verify(&conn));

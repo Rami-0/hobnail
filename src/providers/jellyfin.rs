@@ -224,6 +224,7 @@ mod tests {
             Exchange { request: PROBE, status: 200, body: r#"[{"Client":"Jellyfin Web"}]"# },
         ], |_, wire| {
             assert_header(wire, &format!("authorization: MediaBrowser Token={KEY}"), KEY);
+                ""
         }, async |conn| {
             conn.run((JELLYFIN.test)(conn)).await.unwrap();
             let fetch = async |index: usize| {

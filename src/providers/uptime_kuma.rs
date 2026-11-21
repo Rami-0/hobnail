@@ -182,6 +182,7 @@ mod tests {
             |_, wire| {
                 assert!(!wire.contains("authorization:"));
                 assert!(!wire.contains("cookie:"));
+                ""
             },
             async |conn| {
                 conn.run((UPTIME_KUMA.test)(conn)).await.unwrap();

@@ -117,6 +117,28 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected release and live proxies.
 
+## qBittorrent
+
+Enter the WebUI URL, username and password. qBittorrent exposes its WebUI
+account without separate read-only scopes. Hobnail only logs in and reads
+transfer data. Keep the session cookie name at `SID` for a default 5.0.5
+WebUI. If your WebUI uses a custom or port-qualified name, enter the exact
+configured name, such as `QBT_SID_8080`. Keep WebUI CSRF protection enabled.
+
+**Torrent activity** shows download and upload rates, the WebUI's active
+and seeding counts, queued uploads and downloads, and free space on the
+default save path. A torrent can appear in more than one count. Both
+WebUI API v2 torrent lists and the initial sync snapshot can hit Hobnail's
+128 KiB response limit on large torrent sets.
+
+Verified from:
+
+- [WebUI API v2 documentation for qBittorrent 5.0](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0))
+- [5.0.5 login result](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/authcontroller.cpp) and [session cookies, CSRF and expired sessions](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/webapplication.cpp)
+- [Sync snapshot and free space](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/synccontroller.cpp)
+
+UNVERIFIED: Compatibility outside the inspected version and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

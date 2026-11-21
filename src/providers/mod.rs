@@ -36,6 +36,7 @@ mod connection;
 mod generic;
 mod jellyfin;
 mod pihole;
+mod qbittorrent;
 mod uptime_kuma;
 
 #[cfg(test)]
@@ -53,6 +54,7 @@ pub const REGISTRY: &[Provider] = &[
     pihole::PI_HOLE,
     uptime_kuma::UPTIME_KUMA,
     jellyfin::JELLYFIN,
+    qbittorrent::QBITTORRENT,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
