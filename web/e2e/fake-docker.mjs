@@ -15,6 +15,7 @@
 //                    or start event, plus a health_status event (default 0: off)
 //   --hostile        add 4 containers with long / hostile names, titles, URLs
 //                    and images (HTML, quotes, RTL override, javascript: links)
+//   --m2-fixtures    serve a controllable HTTP reading on port 8081
 //   --quiet          no request log
 // Names: svc001..svcNNN, service = name, project stackMM (round robin).
 // About 1 in 7 is stopped (exit codes 0 / 1 / 137 / 143 / 2), a few are
@@ -351,12 +352,25 @@ function stop() {
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 
-// Reachable only inside the fake instance's shared network namespace.
+// Normally reachable only inside the fake instance's network namespace.
+const m2Fixtures = flag("m2-fixtures");
+let m2Result = "fail";
 http.createServer((req, res) => {
+  if (m2Fixtures && req.url === "/fixture/m2/reading") {
+    if (m2Result === "fail") return json(res, 503, { error: "upstream unavailable" });
+    return json(res, 200, { reading: m2Result === "recover" ? "73 units" : "42 units" });
+  }
+  if (m2Fixtures && req.method === "PUT") {
+    const state = req.url?.match(/^\/fixture\/m2\/(fail|good|recover)$/)?.[1];
+    if (state) {
+      m2Result = state;
+      return res.writeHead(204).end();
+    }
+  }
   if (req.url === "/fixture/health") return res.end("ok");
   if (req.url === "/fixture/session") {
     res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ owner_exists: true }));
   }
   res.writeHead(404).end();
-}).listen(8081, "127.0.0.1");
+}).listen(8081, m2Fixtures ? "0.0.0.0" : "127.0.0.1");
