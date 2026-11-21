@@ -12,32 +12,35 @@ const shortcuts = ['button[aria-label="Keyboard shortcuts"]', "Open Keyboard sho
 const more = ['[data-testid="drawer-open"]', "More opens navigation to the rest of Hobnail."];
 const mobileSettings = [more[0], "Tap More, then Settings, to manage boards and integrations."];
 
+async function saveDismissal() {
+  for (const delay of [0, 1000, 3000, 10000]) {
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+    const result = await api.post("/api/v1/account/board-tour");
+    if (result.kind === "ok") {
+      void refreshSession();
+      return;
+    }
+    if (result.kind === "sign_in" || result.kind === "forbidden") return;
+  }
+}
+
 export default function Tour({ admin, empty, onClose }: { admin: boolean; empty: boolean; onClose: () => void }) {
   const phone = window.matchMedia("(max-width:699px)").matches;
   const steps = admin ? [edit, ...(empty ? [add] : []), palette, phone ? mobileSettings : settings]
     : [palette, account, phone ? more : shortcuts];
   const [index, setIndex] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const panel = useRef<HTMLElement>(null);
   const next = useRef<HTMLButtonElement>(null);
   const anchor = useRef<HTMLElement | null>(null);
   const [selector, description] = steps[index] ?? palette;
   const last = index === steps.length - 1;
 
-  async function finish() {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    const result = await api.post("/api/v1/account/board-tour");
-    if (result.kind === "ok") {
+  function finish() {
+    if (panel.current?.contains(document.activeElement)) {
       anchor.current?.focus({ preventScroll: true });
-      onClose();
-      void refreshSession();
-    } else {
-      setError(result.message);
-      setBusy(false);
     }
+    onClose();
+    void saveDismissal();
   }
 
   useLayoutEffect(() => {
@@ -82,7 +85,7 @@ export default function Tour({ admin, empty, onClose }: { admin: boolean; empty:
           document.querySelector('[role="dialog"][data-open], [role="menu"][data-open]') ||
           document.documentElement.classList.contains("side-open")) return;
       event.preventDefault();
-      void finish();
+      finish();
     };
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
@@ -91,10 +94,9 @@ export default function Tour({ admin, empty, onClose }: { admin: boolean; empty:
   return <Card ref={panel} className="board-tour" aria-labelledby="board-tour-title" data-testid="board-tour">
     <h2 id="board-tour-title">Board tour · {index + 1} of {steps.length}</h2>
     <p id="board-tour-description" aria-live="polite">{description}</p>
-    {error && <p role="alert" className="bad-fg">{error}</p>}
     <div className="acts">
-      <Button ref={next} variant="default" busy={busy} data-testid="tour-next" onClick={() => last ? void finish() : setIndex(index + 1)}>{last ? "Finish" : "Next"}</Button>
-      <Button disabled={busy} data-testid="tour-skip" onClick={() => void finish()}>Skip tour</Button>
+      <Button ref={next} variant="default" data-testid="tour-next" onClick={() => last ? finish() : setIndex(index + 1)}>{last ? "Finish" : "Next"}</Button>
+      <Button data-testid="tour-skip" onClick={finish}>Skip tour</Button>
     </div>
   </Card>;
 }

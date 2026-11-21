@@ -241,6 +241,17 @@ try {
     await click(attr("tour-skip"));
     await require("Skip tour closes from the first step", `!${el(tour)}`);
     await sessionPending(false);
+    await navigate(route + "?tour=1");
+    await require("replayed tour opens with focus on Next", `document.activeElement === ${el(attr("tour-next"))}`);
+    await user.key("Tab");
+    await require("Tab reaches Skip tour", `document.activeElement === ${el(attr("tour-skip"))}`);
+    for (let index = 0; index < 4 && await tab.ev(`${el(tour)}.contains(document.activeElement) || document.activeElement === document.body`); index++) {
+      await user.key("Tab");
+    }
+    await require("Tab can move focus to a control outside the tour", `!${el(tour)}.contains(document.activeElement) && document.activeElement !== document.body`);
+    await tab.ev("window.__m2OutsideTour = document.activeElement");
+    await user.key("Escape");
+    await require("Escape from outside closes the tour without moving focus", `!${el(tour)} && document.activeElement === window.__m2OutsideTour`);
     await capture("first-board", board);
     await click(attr("board-empty-discover"));
     await require("the real Discover button opens the normal board picker", `!!${el(attr("board-picker") + "[data-open]")}`);
