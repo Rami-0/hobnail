@@ -248,6 +248,8 @@ pub struct Step<'a> {
     pub status_only: bool,
     /// Request only application/json instead of the HTTP client’s default media types.
     pub accept_json: bool,
+    /// Set the fixed OCS-APIRequest header for Open Collaboration Services.
+    pub ocs_api_request: bool,
 }
 
 impl<'a> Step<'a> {
@@ -262,6 +264,7 @@ impl<'a> Step<'a> {
             target_headers: &[],
             status_only: false,
             accept_json: false,
+            ocs_api_request: false,
         }
     }
 }
@@ -411,6 +414,11 @@ impl<'a> Conn<'a> {
             request
                 .headers
                 .push(("accept".into(), "application/json".into()));
+        }
+        if step.ocs_api_request {
+            request
+                .headers
+                .push(("ocs-apirequest".into(), "true".into()));
         }
         for header in step.target_headers {
             let (name, value) = match header {

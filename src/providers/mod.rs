@@ -41,6 +41,7 @@ mod home_assistant;
 mod immich;
 mod jellyfin;
 mod jellyseerr;
+mod nextcloud;
 mod nginx_proxy_manager;
 mod pihole;
 mod plex;
@@ -86,6 +87,7 @@ pub const REGISTRY: &[Provider] = &[
     transmission::TRANSMISSION,
     sabnzbd::SABNZBD,
     home_assistant::HOME_ASSISTANT,
+    nextcloud::NEXTCLOUD,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

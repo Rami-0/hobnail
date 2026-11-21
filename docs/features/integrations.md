@@ -413,6 +413,23 @@ and [Core 2025.11.0 API source](https://github.com/home-assistant/core/blob/2025
 
 UNVERIFIED: live installations and the permissions of custom authentication providers.
 
+## Nextcloud
+
+Enter the Nextcloud URL, an administrator’s username and an app password.
+Enable Nextcloud’s Monitoring app (`serverinfo`). Hobnail uses HTTP Basic
+auth and the OCS request header on the OCS v2 serverinfo endpoint.
+
+**Storage and activity** shows free space as reported by Nextcloud, total
+users, active users in the last 5 minutes, hour and day, and total shares.
+The serverinfo response has no equivalent aggregate used-space field and
+provides activity counts in place of an event feed.
+
+Verified from: [serverinfo API and example](https://github.com/nextcloud/serverinfo)
+and the [Nextcloud 32 controller](https://github.com/nextcloud/serverinfo/blob/672a40b96e9a502122e6217fcd326b72b559d651/lib/Controller/ApiController.php).
+
+UNVERIFIED: other Nextcloud generations and storage backends, quota-derived
+used space and the separate Activity app.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
@@ -503,7 +520,7 @@ for CSRF checks that require the saved origin or URL.
 | --- | --- |
 | API-key header | Pass `Auth::Header("x-api-key", Input::Credential("api_key"))` to the step. |
 | Bearer | Pass `Auth::Bearer(Input::Credential("token"))`. Use `Auth::Authorization` for a service-specific authorization prefix. |
-| Basic | Pass the username and password fields as separate `Input::Credential` values to `Auth::Basic`. |
+| Basic | Pass the username and password fields as separate `Input::Credential` values to `Auth::Basic`. For OCS APIs, set `Step::ocs_api_request` to request the fixed `OCS-APIRequest: true` header. |
 | Query key | Add the field to `Step::query` as `Input::Credential`. The upstream and its proxies may record the query in their access logs. |
 | Form login and cookie | POST a `Body::Form` containing the credential fields and select `set-cookie` in `response_headers`. After a successful login, pass the expected cookie name to `Conn::session_cookie`. Use `Auth::Cookie(&session)` on later steps and add typed CSRF headers when required. |
 | 409 session challenge | Call `retry_session(|| async { Ok(None) }, request)`. Send the real RPC with the optional cached session. Select the challenge header and return `Fault::session_conflict(conn.session_header(&response, header)?)` on 409. The helper stores the challenge and retries the RPC once. |
