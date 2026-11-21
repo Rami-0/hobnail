@@ -32,11 +32,13 @@ use crate::{
     widgets,
 };
 
+mod arr;
 mod connection;
 mod generic;
 mod jellyfin;
 mod pihole;
 mod qbittorrent;
+mod sonarr;
 mod uptime_kuma;
 
 #[cfg(test)]
@@ -55,6 +57,7 @@ pub const REGISTRY: &[Provider] = &[
     uptime_kuma::UPTIME_KUMA,
     jellyfin::JELLYFIN,
     qbittorrent::QBITTORRENT,
+    sonarr::SONARR,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

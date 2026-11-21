@@ -139,6 +139,23 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected version and live proxies.
 
+## Sonarr
+
+Enter the service URL and the API key from Settings → General. Sonarr's
+instance API key is required and has no read-only scope. Hobnail sends it
+in `X-Api-Key` and uses only Sonarr API v3 GET routes.
+
+**Sonarr overview** shows the download queue total, including pending and
+unknown items, the monitored missing-episode total and current health issues.
+**Upcoming episodes** lists up to ten monitored airings in the next 48 hours.
+
+Verified from:
+
+- [Sonarr 4.0.17.2952 API v3 OpenAPI](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/openapi.json)
+- [Queue status](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Queue/QueueStatusController.cs), [missing episodes](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Wanted/MissingController.cs) and [calendar](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Calendar/CalendarController.cs)
+
+UNVERIFIED: Compatibility outside the inspected release and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

@@ -47,7 +47,12 @@ pub(super) async fn exercise(
     let server = async {
         for (index, exchange) in exchanges.iter().enumerate() {
             let (mut socket, wire) = receive(&listener).await;
-            assert_eq!(wire.lines().next(), Some(exchange.request));
+            let request_line = wire.lines().next().unwrap();
+            if let Some(prefix) = exchange.request.strip_suffix('*') {
+                assert!(request_line.starts_with(prefix), "wrong request path");
+            } else {
+                assert!(request_line == exchange.request, "wrong request line");
+            }
             let headers = inspect(index, &wire);
             respond(&mut socket, exchange.status, headers, exchange.body).await;
         }
