@@ -38,6 +38,7 @@ mod generic;
 mod jellyfin;
 mod pihole;
 mod qbittorrent;
+mod radarr;
 mod sonarr;
 mod uptime_kuma;
 
@@ -58,6 +59,7 @@ pub const REGISTRY: &[Provider] = &[
     jellyfin::JELLYFIN,
     qbittorrent::QBITTORRENT,
     sonarr::SONARR,
+    radarr::RADARR,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;

@@ -156,6 +156,24 @@ Verified from:
 
 UNVERIFIED: Compatibility outside the inspected release and live proxies.
 
+## Radarr
+
+Enter the service URL and the API key from Settings → General. Radarr's
+instance API key is required and has no read-only scope. Hobnail sends it
+in `X-Api-Key` and uses only Radarr API v3 GET routes.
+
+**Radarr overview** shows the download queue total, including pending and
+unknown items, the monitored missing-movie total and current health issues.
+**Upcoming movies** lists up to ten monitored movies with a theatrical,
+digital or physical release in the next 48 hours, in Radarr's calendar order.
+
+Verified from:
+
+- [Radarr API v3 OpenAPI](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/openapi.json)
+- [Queue status](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Queue/QueueStatusController.cs), [missing movies](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Wanted/MissingController.cs), [calendar](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Calendar/CalendarController.cs) and [release-window query](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/NzbDrone.Core/Movies/MovieRepository.cs)
+
+UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
