@@ -1,11 +1,26 @@
 //! Add a provider in its own module and register its static descriptor below.
 //! Declare fields, destination policy, connection test and widgets together.
-//! Test and Fetch receive a Conn for their full operation. Declare write-only
-//! secret fields and refer to them by ID via Input::Credential. Use Step for
-//! provider-relative requests, opt in to individual response headers, and
-//! use the Conn session helpers for authentication handshakes. Return typed
-//! faults and structured display data. Exercise the workflow with a fake HTTP
-//! server. See docs/features/integrations.md for the complete contract.
+//! Test and Fetch receive a Conn with one deadline, permit and revision. Use
+//! Step for provider-relative requests and select any response headers needed.
+//!
+//! - API key: Auth::Header with Input::Credential.
+//! - Bearer: Auth::Bearer with Input::Credential.
+//! - Basic: Auth::Basic with separate username and password credential fields.
+//! - Query key: Step::query with Input::Credential.
+//! - Form login: POST a Body::Form, select Set-Cookie, parse a named cookie with
+//!   Conn::session_cookie and send it with Auth::Cookie. Use TargetHeader for
+//!   Origin or Referer when required.
+//! - 409 challenge: use retry_session with a login closure returning None.
+//!   Send the actual RPC and return Fault::session_conflict with session_header.
+//! - Token exchange: wrap the response token with Conn::session and use
+//!   retry_session with a login closure returning Some(session).
+//! - Credential-free probe: use dns_lookup for A/AAAA, tcp_probe for a timed
+//!   TCP connect, tls_leaf for handshake metadata and a verification verdict,
+//!   or http_status for a status without the response body. TCP connect
+//!   substitutes for ICMP ping.
+//!
+//! Return typed faults and structured display data. Exercise the workflow
+//! with a fake service. See docs/features/integrations.md for the contract.
 
 use std::{future::Future, pin::Pin, time::Duration};
 

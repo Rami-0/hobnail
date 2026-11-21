@@ -147,26 +147,50 @@ connection fields, test function and widget descriptors. Add it to `REGISTRY`
 in `src/providers/mod.rs`. Document the actual destinations in `contacts` and
 set `public_internet` if the provider intrinsically requires a public service.
 
-Declare any number of secret fields alongside the URL, enabled flag and
-provider options. Settings and Guided Setup render the same schema. Keep
-sensitive values out of ordinary options. The Test and Fetch functions receive
-a `Conn`; Fetch also receives the effective widget options, with the refresh
+Declare write-only secret fields alongside the URL, enabled flag and provider
+options. Settings and Guided Setup render the same schema. Keep sensitive
+values out of ordinary options. Test and Fetch receive a `Conn` for the whole
+operation. Fetch also receives the effective widget options, with the refresh
 interval handled by the scheduler.
 
-Use `Conn::request(Step)` for each HTTP step. Use the empty path for the exact
-configured endpoint, or append a provider-relative path to the configured
-prefix. Pass query parameters separately. Resolve stored credentials by
-schema field ID for Bearer, Basic, custom headers, a custom Authorization
-prefix, query parameters, or JSON and form bodies. Request only the response
-headers you need. Handle status codes and parse bounded response data locally.
-Use `Conn::session` or `Conn::session_header` to turn session material into an
-opaque value and `retry_session` for a single 401, 403 or 409 retry. A 409 can
-carry a replacement session in `Fault::session_conflict`.
+Use `Conn::request(Step)` for HTTP. An empty path uses the exact saved endpoint.
+A provider-relative path appends to the saved prefix. Supply query parameters
+separately and select only the response headers you need. Use
+`TargetHeader::Origin` and `TargetHeader::Referer` in `Step::target_headers`
+for CSRF checks that require the saved origin or URL.
+
+| Pattern | Recipe |
+| --- | --- |
+| API-key header | Pass `Auth::Header("x-api-key", Input::Credential("api_key"))` to the step. |
+| Bearer | Pass `Auth::Bearer(Input::Credential("token"))`. Use `Auth::Authorization` for a service-specific authorization prefix. |
+| Basic | Pass the username and password fields as separate `Input::Credential` values to `Auth::Basic`. |
+| Query key | Add the field to `Step::query` as `Input::Credential`. The upstream and its proxies may record the query in their access logs. |
+| Form login and cookie | POST a `Body::Form` containing the credential fields and select `set-cookie` in `response_headers`. After a successful login, pass the expected cookie name to `Conn::session_cookie`. Use `Auth::Cookie(&session)` on later steps and add typed CSRF headers when required. |
+| 409 session challenge | Call `retry_session(|| async { Ok(None) }, request)`. Send the real RPC with the optional cached session. Select the challenge header and return `Fault::session_conflict(conn.session_header(&response, header)?)` on 409. The helper stores the challenge and retries the RPC once. |
+| Token exchange | Send the login step using `Body::Json` or `Body::Form`, handle errors, and turn the response token into an opaque session with `Conn::session`. Return `Some(session)` from the login closure in `retry_session`, then use `Input::Session` with the service's auth header or Bearer scheme. |
+| Credential-free probe | Call `dns_lookup`, `tcp_probe`, `tls_leaf`, or `http_status` for the saved target. Each uses the same destination policy, request permit, deadline, and revision as HTTP steps. |
+
+The system resolver exposes up to 64 A/AAAA addresses, including results from
+the local hosts database. Other DNS record types require a dedicated resolver.
+TCP connect reports reachability and connect time. Use it in place of ICMP
+ping, which is outside this contract because it can require extra privileges.
+The HTTP status probe gets the status and latency without waiting for the
+response body or following redirects. The TLS probe performs only a TLS
+handshake. It verifies the handshake signatures and reports the leaf subject,
+issuer, validity in Unix seconds, SANs, SHA-256 fingerprint, and certificate
+verification verdict even when normal trust or pin verification rejects the
+leaf. A certificate inspection does not relax verification on HTTP requests.
 
 Return a typed `Fault`. Keep raw responses, credentials and sessions out of
 errors and logs. A widget returns a `StructuredBody` with display data. Choose
 among a stat, stat grid, status list, item list, meter, table or unavailable
 message. The React client renders these shapes from the schema and registry.
+The shared output boundary redacts credentials and known sessions, including
+textual escapes and standard or URL-safe Base64. Redact JSON before truncating
+or formatting it so an encoded credential cannot survive as a partial display
+value. The redactor checks up to 128 KiB per string, 32 distinct secret values
+up to 16 KiB apiece, and three layers of percent, JSON and common HTML escapes.
+It withholds a string or link that exceeds the applicable bounds.
 Exercise connection tests and fetches against a local fake service.
 
 See [Boards](boards.md), [Login and security](login.md) and [API](../api.md).
