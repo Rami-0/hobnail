@@ -124,6 +124,21 @@ async fn req(
     headers: &[(&str, &str)],
     body: &str,
 ) -> Resp {
+    let (status, head, body) = raw_req(addr, method, path, headers, body).await;
+    Resp {
+        status,
+        head,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    }
+}
+
+async fn raw_req(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (u16, String, Vec<u8>) {
     let mut s = TcpStream::connect(addr).await.unwrap();
     let mut r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nContent-Length: {}\r\n",
@@ -137,18 +152,10 @@ async fn req(
     s.write_all(r.as_bytes()).await.unwrap();
     let mut out = Vec::new();
     s.read_to_end(&mut out).await.unwrap();
-    let text = String::from_utf8_lossy(&out).into_owned();
-    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
-    let status = head
-        .split_whitespace()
-        .nth(1)
-        .and_then(|c| c.parse().ok())
-        .unwrap_or(0);
-    Resp {
-        status,
-        head: head.to_string(),
-        body: body.to_string(),
-    }
+    let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8(out[..split].to_vec()).unwrap();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head, out.split_off(split + 4))
 }
 
 fn state() -> Arc<AppState> {
@@ -2237,6 +2244,80 @@ async fn viewer_cannot_read_administrative_details() {
     let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
     assert_eq!(owner_history.status, 200);
     assert!(owner_history.body.contains("auth.login_failed"));
+}
+
+#[tokio::test]
+async fn large_api_json_negotiates_gzip_over_the_listener() {
+    let containers = (0..48)
+        .map(|n| crate::testutil::ctr(&format!("service-{n}"), Some("lab"), "running"))
+        .collect();
+    let st = crate::testutil::state_with(containers, "");
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let request = |encoding| {
+        let cookie = &cookie;
+        async move {
+            let (status, head, body) = raw_req(
+                addr,
+                "GET",
+                "/api/v1/containers",
+                &[("Cookie", cookie), ("Accept-Encoding", encoding)],
+                "",
+            )
+            .await;
+            assert_eq!(status, 200);
+            assert_eq!(header(&head, "vary").as_deref(), Some("Accept-Encoding"));
+            assert_eq!(
+                header(&head, "content-length")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+                body.len()
+            );
+            (header(&head, "content-encoding"), body)
+        }
+    };
+
+    let (encoding, identity) = request("identity").await;
+    assert_eq!(encoding, None);
+    assert!(identity.len() > 1024);
+    let (encoding, gzip) = request("gzip").await;
+    assert_eq!(encoding.as_deref(), Some("gzip"));
+    assert_eq!(&gzip[..3], &[0x1f, 0x8b, 8]);
+    assert_eq!(
+        miniz_oxide::inflate::decompress_to_vec(&gzip[10..gzip.len() - 8]).unwrap(),
+        identity
+    );
+    assert_eq!(request("gzip;q=0").await, (None, identity));
+}
+
+#[tokio::test]
+async fn small_api_json_stays_identity_over_the_listener() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let request = |encoding| {
+        let cookie = &cookie;
+        async move {
+            let response = req(
+                addr,
+                "GET",
+                "/api/v1/settings",
+                &[("Cookie", cookie), ("Accept-Encoding", encoding)],
+                "",
+            )
+            .await;
+            assert_eq!(response.status, 200);
+            assert_eq!(header(&response.head, "content-encoding"), None);
+            assert_eq!(header(&response.head, "vary"), None);
+            response.body
+        }
+    };
+    let body = request("gzip").await;
+    assert!(body.len() <= 1024);
+    assert_eq!(body, request("identity").await);
 }
 
 async fn queued_login(addr: std::net::SocketAddr) -> Resp {
