@@ -300,7 +300,7 @@ impl<'a> Conn<'a> {
     fn remember_auth(&self, value: &str) {
         if !value.is_empty() {
             let mut values = self.auth_output.lock().unwrap();
-            if !values.contains(value) {
+            if values.len() <= super::redaction::MAX_SECRETS && !values.contains(value) {
                 values.insert(value.to_owned());
             }
         }

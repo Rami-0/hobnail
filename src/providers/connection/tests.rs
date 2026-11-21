@@ -142,7 +142,7 @@ async fn shared_fetch_redacts_all_emitted_auth_representations() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let mut credentials = credentials(&origin);
-    credentials.get_mut("token").unwrap().token = r#"token+"with\quotes"#.into();
+    credentials.get_mut("token").unwrap().token = r#"token~*+"with\quotes"#.into();
     for (field, value) in [("header", "header-secret"), ("query", "query +/secret")] {
         credentials.insert(
             field.into(),
@@ -152,12 +152,17 @@ async fn shared_fetch_redacts_all_emitted_auth_representations() {
             },
         );
     }
+    let encoded = base64(r#"token~*+"with\quotes"#);
     let echoes = [
-        r#"token+"with\quotes"#,
-        r#"Bearer token+"with\quotes"#,
-        "dG9rZW4rIndpdGhccXVvdGVz",
-        r#"token+\"with\\quotes"#,
-        "token%2B%22with%5Cquotes",
+        r#"token~*+"with\quotes"#,
+        r#"Bearer token~*+"with\quotes"#,
+        encoded.as_str(),
+        r#"token~*+\"with\\quotes"#,
+        "token~%2A%2B%22with%5Cquotes",
+        "token%7e*%2B%22with%5cquotes",
+        r#"token\u007e\u002a\u002b\u0022with\u005cquotes"#,
+        "token&#126;&#x2a;+&quot;with&#92;quotes",
+        "c29tZS11c2VyOnArIHNzJi8",
         "Basic c29tZS11c2VyOnArIHNzJi8=",
         "c29tZS11c2VyOnArIHNzJi8=",
         "some-user:p+ ss&/",
@@ -170,14 +175,22 @@ async fn shared_fetch_redacts_all_emitted_auth_representations() {
         "fake-sid%2B%2F",
         "untouched",
     ];
+    let count = echoes.len();
+    let items: Vec<_> = echoes
+        .iter()
+        .map(|value| {
+            json!({
+                "title": value, "secondary": value, "link": format!("https://example.test/{value}")
+            })
+        })
+        .collect();
     let fake = tokio::spawn(async move {
         let (mut socket, _) = receive(&listener).await;
-        let rows: Vec<_> = echoes.iter().map(|value| json!([value, value])).collect();
         respond(
             &mut socket,
             200,
             "",
-            &json!({"kind":"stat_grid","rows":rows}).to_string(),
+            &json!({"kind":"item_list","items":items}).to_string(),
         )
         .await;
     });
@@ -197,24 +210,25 @@ async fn shared_fetch_redacts_all_emitted_auth_representations() {
         fetch: echo,
         validate: |_| Ok(()),
     };
-    let StructuredBody::StatGrid { rows } = providers::fetch(&conn, &widget, &Values::new())
+    let StructuredBody::ItemList { items } = providers::fetch(&conn, &widget, &Values::new())
         .await
         .unwrap()
     else {
         panic!("unexpected output shape")
     };
     fake.await.unwrap();
-    assert_eq!(rows.len(), echoes.len());
-    for (index, (label, value)) in rows.iter().enumerate() {
-        let expected = if index == echoes.len() - 1 {
+    assert_eq!(items.len(), count);
+    for (index, item) in items.iter().enumerate() {
+        let expected = if index == count - 1 {
             "untouched"
         } else {
             "<redacted>"
         };
         assert!(
-            label == expected && value == expected,
-            "redaction at row {index}"
+            item.title == expected && item.secondary.as_deref() == Some(expected),
+            "redaction at item {index}"
         );
+        assert_eq!(item.link.is_some(), index == count - 1);
     }
 }
 

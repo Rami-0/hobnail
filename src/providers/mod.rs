@@ -320,76 +320,12 @@ pub fn refresh(values: &Values) -> Duration {
     )
 }
 
-/// Redact authentication material at the provider output boundary, including
-/// credentials echoed as encoded strings inside JSON or as part of a URL.
-pub(super) struct OutputRedactor(Vec<String>);
+mod redaction;
+use redaction::OutputRedactor;
 
 impl OutputRedactor {
-    fn new(values: impl Iterator<Item = impl AsRef<str>>) -> Self {
-        let mut patterns = std::collections::HashSet::new();
-        for value in values {
-            let value = value.as_ref();
-            if value.is_empty() {
-                continue;
-            }
-            let encoded = connection::base64(value);
-            let url_base64 = encoded.replace('+', "-").replace('/', "_");
-            for text in [
-                value,
-                &encoded,
-                encoded.trim_end_matches('='),
-                &url_base64,
-                url_base64.trim_end_matches('='),
-            ] {
-                patterns.insert(text.to_owned());
-
-                let escaped = Value::from(text).to_string();
-                patterns.insert(escaped[1..escaped.len() - 1].to_owned());
-
-                let mut url = String::new();
-                connection::encode(&mut url, text);
-                // Encoders may write lowercase hex or use '+' for spaces.
-                let mut lower = url.clone().into_bytes();
-                let mut index = 0;
-                while index + 2 < lower.len() {
-                    if lower[index] == b'%' {
-                        lower[index + 1..index + 3].make_ascii_lowercase();
-                        index += 2;
-                    }
-                    index += 1;
-                }
-                let lower = String::from_utf8(lower).expect("percent-encoded ASCII");
-                for url in [url, lower] {
-                    patterns.insert(url.replace("%20", "+"));
-                    patterns.insert(url);
-                }
-            }
-        }
-        let mut patterns: Vec<_> = patterns.into_iter().collect();
-        patterns.sort_unstable_by_key(|text| std::cmp::Reverse(text.len()));
-        Self(patterns)
-    }
-
-    fn matches(&self, text: &str) -> bool {
-        self.0.iter().any(|pattern| text.contains(pattern))
-    }
-
-    fn redact(&self, text: &mut String) -> bool {
-        let mut changed = false;
-        for pattern in &self.0 {
-            if text.contains(pattern) {
-                *text = text.replace(pattern, "<redacted>");
-                changed = true;
-            }
-        }
-        if changed && self.matches(text) {
-            text.clear();
-        }
-        changed
-    }
-
     fn json(&self, value: &mut Value) {
-        if self.0.is_empty() {
+        if self.is_empty() {
             return;
         }
         match value {
