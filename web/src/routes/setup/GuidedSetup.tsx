@@ -77,13 +77,19 @@ function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft
 
 function Wizard({ initial }: { initial: SetupDraft }) {
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     void api.get<Provider[]>("/api/v1/providers", { signal: controller.signal }).then((result) => {
-      if (!controller.signal.aborted && result.kind === "ok") setProviders(result.data);
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") {
+        setProviders(result.data);
+        setCatalogError("");
+      } else setCatalogError(result.message);
     });
     return () => controller.abort();
-  }, []);
+  }, [catalogAttempt]);
   const [draft, setDraft] = useState(initial);
   const [doc, setDoc] = useState(initial.document);
   const [credentials, setCredentials] = useState<Record<string, SetupCredentialChange>>({});
@@ -281,7 +287,8 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     let content: ReactNode;
     let canTest = true;
     if (target.kind === "provider") {
-      const schema = providers.find((entry) => entry.id === target.provider)?.fields ?? [];
+      const schema = providers.find((entry) => entry.id === target.provider)?.fields;
+      if (!schema) return null;
       const bound = draft.credential_bindings[id];
       const values = { ...target.options, ...target, ...Object.fromEntries(changes.map((entry) => [entry.field ?? "", entry.secret])) };
       canTest = !!target.base_url && target.enabled;
@@ -360,6 +367,10 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             {discoveryError && <Note kind="warn">Discovery failed. You can continue with manual setup. {discoveryError}</Note>}
             <Button onClick={() => setScan((value) => value + 1)}>Refresh suggestions</Button>
           </>}
+          {(step === "select" || step === "connections") && catalogError && <Note kind="bad"
+            testId="setup-catalog-error" action={<Button onClick={() => setCatalogAttempt((attempt) => attempt + 1)}>Retry</Button>}>
+            The integration catalog could not load. {catalogError}
+          </Note>}
           {step === "select" && <>
             <p>Include the services you want, then give them names and place them in sections.</p>
             <div className="acts">
@@ -399,9 +410,9 @@ function Wizard({ initial }: { initial: SetupDraft }) {
           </>}
           {step === "connections" && <>
             <p>Set service URLs or test connections from Hobnail. You can finish setup even when a test fails.</p>
-            {connections.length
-              ? connections
-              : <p className="muted">There are no selected services with connection settings.</p>}
+            {connections}
+            {!connections.length && !catalogError && <p className="muted">{!providers.length && [...groups.values()].flat().some((item) => item.target.kind === "provider")
+              ? "Loading connection fields…" : "There are no selected services with connection settings."}</p>}
           </>}
           {step === "review" && <>
             <p>Hobnail will create a board named Home and make it your landing page.</p>

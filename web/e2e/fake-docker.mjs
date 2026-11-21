@@ -367,6 +367,10 @@ http.createServer(async (req, res) => {
       return res.writeHead(204).end();
     }
   }
+  if (m2Fixtures && req.url === "/fixture/http") {
+    if (req.headers.authorization !== "Bearer guided-fixture-bearer") return json(res, 401, {});
+    return json(res, 200, { reading: "42 units" });
+  }
   if (m2Fixtures && req.url?.startsWith("/fixture/pihole/api/")) {
     if (req.method === "POST" && req.url.endsWith("/api/auth")) {
       let body = "";
