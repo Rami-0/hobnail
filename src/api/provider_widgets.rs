@@ -138,6 +138,7 @@ pub(super) async fn route(
     if let Some((id, version)) = board {
         boards::publish(state, &id, version);
     }
+    placements_changed(state);
     state.changed("reload");
     Ok(super::json(StatusCode::CREATED, &integration))
 }
@@ -310,27 +311,56 @@ pub(super) fn placement_scope(
     .optional()
 }
 
-/// Copies a provider widget's options when an existing widget is used in a new
-/// board item. The board item ID makes the placement stable across reorders.
+pub(super) struct PlacementSource {
+    integration: String,
+    widget: String,
+    options: String,
+}
+
+pub(super) fn placement_source(
+    conn: &Connection,
+    board: &str,
+    widget_id: &str,
+) -> rusqlite::Result<Option<PlacementSource>> {
+    conn.query_row(
+        "SELECT integration_id,widget,options FROM provider_widgets WHERE board_id=?1 AND id=?2",
+        (board, widget_id),
+        |row| {
+            Ok(PlacementSource {
+                integration: row.get(0)?,
+                widget: row.get(1)?,
+                options: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// Copy from the pre-save snapshot. Another item may already have overwritten
+/// the original placement while saving this document.
 pub(super) fn place(
     conn: &Connection,
     board: &str,
     item: &str,
     widget_id: &mut String,
+    source: &PlacementSource,
 ) -> rusqlite::Result<()> {
-    if !widget_id.starts_with("provider:") {
-        return Ok(());
-    }
     let id = format!("provider:{item}");
-    if *widget_id != id && conn.execute(
-        "INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
-         SELECT ?1,integration_id,?2,widget,options FROM provider_widgets WHERE id=?3
-         ON CONFLICT(id) DO UPDATE SET integration_id=excluded.integration_id,widget=excluded.widget,options=excluded.options",
-        (&id, board, &*widget_id),
-    )? > 0 {
+    if *widget_id != id {
+        conn.execute(
+            "INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+             VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(id) DO UPDATE SET integration_id=excluded.integration_id,widget=excluded.widget,options=excluded.options",
+            (&id, &source.integration, board, &source.widget, &source.options),
+        )?;
         *widget_id = id;
     }
     Ok(())
+}
+
+pub(super) fn placements_changed(state: &AppState) {
+    state.provider_viewers.changed.send_replace(());
+    state.wake.notify_one();
 }
 
 fn cache_key(provider: &str, integration: &str, widget: &str, options: &Values) -> String {
@@ -584,8 +614,12 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
 }
 
 fn matching_placements(conn: &Connection, poll: &Poll) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn
-        .prepare("SELECT id,options FROM provider_widgets WHERE integration_id=?1 AND widget=?2")?;
+    let mut stmt = conn.prepare(
+        "SELECT id,options FROM provider_widgets pw WHERE integration_id=?1 AND widget=?2
+             AND EXISTS (SELECT 1 FROM board_items item
+                 WHERE item.board_id=pw.board_id AND item.kind='widget'
+                 AND json_extract(item.config,'$.widget_id')=pw.id)",
+    )?;
     let rows = stmt.query_map((&poll.integration, poll.widget.id), |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -662,6 +696,7 @@ pub(crate) fn poll(
                     providers::fetch(&conn, poll.widget, &poll.options).await
                 } => Some(result),
             };
+            let cancelled = result.is_none();
             if let Some(result) = result.filter(|_| poll.target.revision.check().is_ok()) {
                 let mut output = WidgetOutput {
                     fetched_at: crate::util::unix_now(),
@@ -676,10 +711,16 @@ pub(crate) fn poll(
                     if poll.target.revision.check().is_err() {
                         return Ok(());
                     }
-                    if state.record_widget(&config, &poll.key, attempt, Instant::now(), output) {
-                        let ids = matching_placements(conn, &poll)?;
-                        let active = state.provider_viewers.ids.lock().unwrap();
-                        for id in ids.into_iter().filter(|id| active.contains_key(id)) {
+                    let ids = matching_placements(conn, &poll)?;
+                    let active = state.provider_viewers.ids.lock().unwrap();
+                    let mut viewed = ids
+                        .into_iter()
+                        .filter(|id| active.contains_key(id))
+                        .peekable();
+                    if viewed.peek().is_some()
+                        && state.record_widget(&config, &poll.key, attempt, Instant::now(), output)
+                    {
+                        for id in viewed {
                             state.changed(&format!("w-{id}"));
                         }
                     }
@@ -687,6 +728,9 @@ pub(crate) fn poll(
                 });
             }
             running.lock().unwrap().remove(&poll.key);
+            if cancelled {
+                state.wake.notify_one();
+            }
         });
     }
 }

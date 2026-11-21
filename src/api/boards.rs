@@ -618,6 +618,18 @@ pub(super) fn store(
         .filter(|section| section.legacy_provider_title)
         .map(|section| (section.id, section.title))
         .collect();
+    let mut sources = HashMap::new();
+    for item in doc.sections.iter().flat_map(|section| &section.items) {
+        if let BoardPayload::Widget { widget_id, .. } = &item.payload {
+            if widget_id.starts_with("provider:") && !sources.contains_key(widget_id) {
+                if let Some(source) =
+                    super::provider_widgets::placement_source(conn, id, widget_id)?
+                {
+                    sources.insert(widget_id.clone(), source);
+                }
+            }
+        }
+    }
     conn.execute("DELETE FROM board_items WHERE board_id=?1", [id])?;
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
@@ -625,7 +637,9 @@ pub(super) fn store(
         for mut item in section.items {
             let item_id = next_id(conn, item.id)?;
             if let BoardPayload::Widget { widget_id, .. } = &mut item.payload {
-                super::provider_widgets::place(conn, id, &item_id, widget_id)?;
+                if let Some(source) = sources.get(widget_id) {
+                    super::provider_widgets::place(conn, id, &item_id, widget_id, source)?;
+                }
             }
             let (kind, target) = match &item.payload {
                 BoardPayload::Container { .. } => ("container", None),
@@ -1127,6 +1141,7 @@ pub(super) async fn route(
             })?;
             match result {
                 Ok((doc, visible, board)) => {
+                    super::provider_widgets::placements_changed(state);
                     publish(state, id, board.version);
                     state.changed("groups");
                     super::json(
@@ -1173,6 +1188,7 @@ pub(super) async fn route(
                 db.invalidate_provider_scope();
                 Ok(board.version.saturating_add(1))
             })?;
+            super::provider_widgets::placements_changed(state);
             publish(state, id, version);
             // The removed grants prevent scoped subscribers from receiving the
             // board ID. A generic invalidation lets them refresh navigation.

@@ -2501,3 +2501,109 @@ async fn guided_setup_saves_the_registry_provider_and_all_staged_fields() {
     );
     assert!(!integrations.to_string().contains("test-fixture"));
 }
+
+#[tokio::test]
+async fn swapping_provider_references_preserves_their_source_options() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Swap").await;
+    let mut integrations = Vec::new();
+    for name in ["first", "second"] {
+        let integration = owner.json("POST", "/api/v1/providers/install", json!({
+            "integration":{"name":name,"kind":"http","enabled":true,"base_url":"http://fixture.invalid"},
+            "board_id":board, "widgets":[{"id":"json","options":{"paths":[name]}}]
+        }), 201).await;
+        integrations.push(integration["id"].as_str().unwrap().to_owned());
+    }
+    let path = format!("/api/v1/boards/{board}");
+    let mut doc = owner.json("GET", &path, Value::Null, 200).await["document"].clone();
+    let mut widgets = Vec::new();
+    for section in doc["sections"].as_array().unwrap() {
+        widgets.push(section["items"][0]["payload"]["widget_id"].clone());
+    }
+    doc["sections"][0]["items"][0]["payload"]["widget_id"] = widgets[1].clone();
+    doc["sections"][1]["items"][0]["payload"]["widget_id"] = widgets[0].clone();
+    owner.json("PUT", &path, doc, 200).await;
+    for (index, name) in ["first", "second"].into_iter().enumerate() {
+        let id = &integrations[index];
+        let options = owner
+            .json(
+                "GET",
+                &format!("/api/v1/providers/widgets?integration={id}&board={board}"),
+                Value::Null,
+                200,
+            )
+            .await;
+        assert_eq!(options["json"][0]["id"], widgets[1 - index]);
+        assert_eq!(options["json"][0]["options"]["paths"], json!([name]));
+    }
+}
+
+#[tokio::test]
+async fn changing_provider_options_cancels_an_unneeded_in_flight_fetch() {
+    use std::time::Duration;
+
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st.clone()).await).await;
+    let board = owner.board("Change options").await;
+    let path = "/api/v1/providers/install";
+    let mut install = json!({
+        "integration":{"name":"Fixture","kind":"http","enabled":true,
+                       "base_url":format!("http://{}", upstream.local_addr().unwrap())},
+        "board_id":board, "widgets":[{"id":"json","options":{"paths":["first"]}}]
+    });
+    let connection = owner.json("POST", path, install.clone(), 201).await;
+    let (mut stream, _) = Stream::open(
+        owner.addr,
+        &format!("/api/v1/stream?topics=widget&board={board}"),
+        &owner.cookie,
+    )
+    .await;
+    assert_eq!(stream.next().await.0, "hello");
+    assert_eq!(stream.next().await.1["status"], "waiting");
+    let run = tokio::spawn(crate::live::run(st));
+    let (mut original, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    upstream_request(&mut original).await;
+
+    install["integration_id"] = connection["id"].clone();
+    install["widgets"][0]["options"]["paths"] = json!(["second"]);
+    owner.json("POST", path, install, 201).await;
+    let closed = tokio::time::timeout(Duration::from_secs(2), original.read(&mut [0]))
+        .await
+        .expect("old request cancelled after options changed");
+    match closed {
+        Ok(0) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+        other => panic!("upstream socket stayed open: {other:?}"),
+    }
+    let (mut replacement, _) = tokio::time::timeout(Duration::from_secs(3), upstream.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    upstream_request(&mut replacement).await;
+    let body = r#"{"first":"old","second":"new"}"#;
+    replacement
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    loop {
+        let (topic, frame) = stream.next().await;
+        if topic == "widget" {
+            assert_eq!(frame["structured"]["rows"], json!([["second", "new"]]));
+            break;
+        }
+    }
+    run.abort();
+}
