@@ -342,30 +342,62 @@ async fn workflow(conn: &Conn<'_>, limits: &RateLimits, repo: &str) -> Result<St
     })
 }
 
+/// Leave time to finish and record a partial result inside [`REQUEST_TIMEOUT`].
+/// The client opens a connection per request, so a distant API can take
+/// longer than the whole deadline for eight repositories.
+pub(super) const FETCH_BUDGET: Duration = Duration::from_millis(4_250);
+
+pub(super) fn budget() -> tokio::time::Instant {
+    tokio::time::Instant::now() + FETCH_BUDGET
+}
+
+async fn repository(conn: &Conn<'_>, limits: &RateLimits, name: &str) -> Result<String, Fault> {
+    let path = format!("repos/{name}");
+    let Some(response) = optional(conn, limits, &path, &[]).await? else {
+        return Ok("Repository unavailable".into());
+    };
+    let repo: Repo = parse_json(response)?;
+    let counts = match pulls(conn, limits, &path).await? {
+        Some(prs) if prs <= repo.open_issues_count => {
+            format!("{} issues · {prs} PRs", repo.open_issues_count - prs)
+        }
+        Some(prs) => format!("Issue count unavailable · {prs} PRs"),
+        None => format!("{} issues and PRs", repo.open_issues_count),
+    };
+    let workflow = workflow(conn, limits, &path).await?;
+    Ok(format!(
+        "{} stars · {counts} · {workflow}",
+        repo.stargazers_count
+    ))
+}
+
+/// Rows not reached before `deadline` say so instead of failing the widget.
+pub(super) const NOT_REACHED: &str = "Not checked this refresh (time limit)";
+
 async fn activity(
     conn: &Conn<'_>,
     limits: &RateLimits,
     options: &Values,
+    deadline: tokio::time::Instant,
 ) -> Result<StructuredBody, Fault> {
     let names = repositories::names(options).map_err(|_| Class::Protocol)?;
     let mut rows = Vec::with_capacity(names.len());
+    let mut expired = false;
     for name in names {
-        let path = format!("repos/{name}");
-        let value = if let Some(response) = optional(conn, limits, &path, &[]).await? {
-            let repo: Repo = parse_json(response)?;
-            let counts = match pulls(conn, limits, &path).await? {
-                Some(prs) if prs <= repo.open_issues_count => {
-                    format!("{} issues · {prs} PRs", repo.open_issues_count - prs)
-                }
-                Some(prs) => format!("Issue count unavailable · {prs} PRs"),
-                None => format!("{} issues and PRs", repo.open_issues_count),
-            };
-            let workflow = workflow(conn, limits, &path).await?;
-            format!("{} stars · {counts} · {workflow}", repo.stargazers_count)
+        let value = if expired {
+            NOT_REACHED.into()
+        } else if let Ok(value) =
+            tokio::time::timeout_at(deadline, repository(conn, limits, name)).await
+        {
+            value?
         } else {
-            "Repository unavailable".into()
+            expired = true;
+            NOT_REACHED.into()
         };
         rows.push((name.into(), value));
+    }
+    if rows.first().is_some_and(|(_, value)| value == NOT_REACHED) {
+        return Err(Class::Timeout.into());
     }
     Ok(StructuredBody::StatGrid { rows })
 }
@@ -375,7 +407,7 @@ fn overview<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBo
         if !conn.base_url_is_one_of(URLS) {
             return Err(Class::Blocked.into());
         }
-        activity(conn, &LIMITS, options).await
+        activity(conn, &LIMITS, options, budget()).await
     })
 }
 
@@ -424,7 +456,7 @@ mod tests {
             async |conn| {
                 conn.run(verify(conn, &limits)).await.unwrap();
                 let options = Values::from_iter([("repositories".into(), json!(["o/r"]))]);
-                let fetch = async || conn.run(activity(conn, &limits, &options)).await;
+                let fetch = async || conn.run(activity(conn, &limits, &options, budget())).await;
                 assert_eq!(serde_json::to_value(fetch().await.unwrap()).unwrap()["rows"], json!([
                     ["o/r","17 stars · 6 issues · 3 PRs · Workflow success"]
                 ]));
@@ -440,6 +472,98 @@ mod tests {
                 assert_test_fault(conn, &GITHUB, Class::Blocked).await;
             }
         ).await;
+    }
+
+    #[tokio::test]
+    async fn returns_rows_fetched_before_the_budget_and_marks_the_rest() {
+        let ok = |request, body| Exchange {
+            request,
+            status: 200,
+            body,
+        };
+        let limits = RateLimits::default();
+        let soon = || tokio::time::Instant::now() + Duration::from_millis(400);
+        // Each fake answers the first repository and leaves o/b's request unanswered.
+        let activity_exchanges = [
+            ok(
+                "GET /prefix/repos/o/a HTTP/1.1",
+                r#"{"stargazers_count":1,"open_issues_count":0}"#,
+            ),
+            ok(
+                "GET /prefix/repos/o/a/pulls?state=open&per_page=1 HTTP/1.1",
+                "[]",
+            ),
+            ok(
+                "GET /prefix/repos/o/a/actions/runs?per_page=1 HTTP/1.1",
+                r#"{"workflow_runs":[]}"#,
+            ),
+        ];
+        exercise(
+            &GITHUB,
+            &[],
+            Values::new(),
+            &activity_exchanges,
+            |_, _| "",
+            async |conn| {
+                let options =
+                    Values::from_iter([("repositories".into(), json!(["o/a", "o/b", "o/c"]))]);
+                let body = activity(conn, &limits, &options, soon()).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(body).unwrap()["rows"],
+                    json!([
+                        ["o/a", "1 stars · 0 issues · 0 PRs · No workflow runs"],
+                        ["o/b", NOT_REACHED],
+                        ["o/c", NOT_REACHED],
+                    ])
+                );
+                // Nothing within the budget is a timeout, not a widget of placeholders.
+                let past = tokio::time::Instant::now();
+                assert!(matches!(
+                    activity(conn, &limits, &options, past)
+                        .await
+                        .unwrap_err()
+                        .class,
+                    Class::Timeout
+                ));
+            },
+        )
+        .await;
+        let release_exchanges = [ok(
+            "GET /prefix/repos/o/a/releases/latest HTTP/1.1",
+            r#"{"tag_name":"v1"}"#,
+        )];
+        exercise(
+            &GITHUB,
+            &[],
+            Values::new(),
+            &release_exchanges,
+            |_, _| "",
+            async |conn| {
+                let options =
+                    Values::from_iter([("tracked".into(), json!(["o/a | 1", "o/b | 2"]))]);
+                let body = releases::latest(conn, &limits, &options, soon())
+                    .await
+                    .unwrap();
+                let body = serde_json::to_value(body).unwrap();
+                assert_eq!(
+                    body["items"][0]["secondary"],
+                    "Current 1 · Latest v1 · Up to date"
+                );
+                assert_eq!(
+                    body["items"][1]["secondary"],
+                    format!("Current 2 · {NOT_REACHED}")
+                );
+                let past = tokio::time::Instant::now();
+                assert!(matches!(
+                    releases::latest(conn, &limits, &options, past)
+                        .await
+                        .unwrap_err()
+                        .class,
+                    Class::Timeout
+                ));
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -502,8 +626,8 @@ mod tests {
                 body: r#"{"message":"You have exceeded a secondary rate limit.","documentation_url":"https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"}"#,
             },
         ], |_, _| "X-RateLimit-Remaining: 57\r\nX-RateLimit-Reset: 9999999999\r\nRetry-After: +900\r\n", async |conn| {
-            assert!(matches!(activity(conn, &limits, &activity_options).await.unwrap_err().class, Class::RateLimited));
-            assert!(matches!(releases::latest(conn, &limits, &release_options).await.unwrap_err().class, Class::RateLimited));
+            assert!(matches!(activity(conn, &limits, &activity_options, budget()).await.unwrap_err().class, Class::RateLimited));
+            assert!(matches!(releases::latest(conn, &limits, &release_options, budget()).await.unwrap_err().class, Class::RateLimited));
             let identity = conn.credential_revision_hash(TOKEN);
             let later = Instant::now() + Duration::from_secs(65);
             assert!(!limits.blocked(identity, later));
@@ -535,11 +659,11 @@ mod tests {
                 }
             },
             async |conn| {
-                releases::latest(conn, &limits, &release_options)
+                releases::latest(conn, &limits, &release_options, budget())
                     .await
                     .unwrap();
                 assert!(matches!(
-                    releases::latest(conn, &limits, &release_options)
+                    releases::latest(conn, &limits, &release_options, budget())
                         .await
                         .unwrap_err()
                         .class,

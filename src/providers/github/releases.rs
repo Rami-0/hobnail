@@ -105,41 +105,61 @@ struct Release {
     html_url: Option<String>,
 }
 
+async fn release(
+    conn: &Conn<'_>,
+    limits: &RateLimits,
+    repo: &str,
+    current: &str,
+) -> Result<(String, Option<String>), Fault> {
+    let response = within_response_limit(
+        limits
+            .get(conn, &format!("repos/{repo}/releases/latest"), &[])
+            .await,
+    )?;
+    let Some(response) = response.filter(|response| response.status != 404) else {
+        return Ok((
+            format!("Current {current} · Latest release unavailable"),
+            None,
+        ));
+    };
+    let release: Release = parse_json(response)?;
+    if release.tag_name.trim().is_empty() {
+        return Err(Class::Protocol.into());
+    }
+    let verdict = compare(current, &release.tag_name);
+    let tag = display_text(conn, release.tag_name);
+    Ok((
+        format!("Current {current} · Latest {tag} · {verdict}"),
+        release.html_url.filter(|url| {
+            url.len() <= 512 && url.starts_with("https://github.com/") && navigation_link(url)
+        }),
+    ))
+}
+
 pub(super) async fn latest(
     conn: &Conn<'_>,
     limits: &RateLimits,
     options: &Values,
+    deadline: tokio::time::Instant,
 ) -> Result<StructuredBody, Fault> {
     let repos = tracked(options).map_err(|_| Class::Protocol)?;
     let mut items = Vec::with_capacity(repos.len());
+    let mut expired = false;
     for (repo, current) in repos {
-        let response = within_response_limit(
-            limits
-                .get(conn, &format!("repos/{repo}/releases/latest"), &[])
-                .await,
-        )?;
-        let (secondary, link) =
-            if let Some(response) = response.filter(|response| response.status != 404) {
-                let release: Release = parse_json(response)?;
-                if release.tag_name.trim().is_empty() {
-                    return Err(Class::Protocol.into());
-                }
-                let verdict = compare(current, &release.tag_name);
-                let tag = display_text(conn, release.tag_name);
-                (
-                    format!("Current {current} · Latest {tag} · {verdict}"),
-                    release.html_url.filter(|url| {
-                        url.len() <= 512
-                            && url.starts_with("https://github.com/")
-                            && navigation_link(url)
-                    }),
-                )
-            } else {
-                (
-                    format!("Current {current} · Latest release unavailable"),
-                    None,
-                )
-            };
+        let not_reached = || (format!("Current {current} · {NOT_REACHED}"), None);
+        let (secondary, link) = if expired {
+            not_reached()
+        } else if let Ok(result) =
+            tokio::time::timeout_at(deadline, release(conn, limits, repo, current)).await
+        {
+            result?
+        } else {
+            expired = true;
+            if items.is_empty() {
+                return Err(Class::Timeout.into());
+            }
+            not_reached()
+        };
         items.push(BodyItem {
             title: repo.into(),
             secondary: Some(secondary),
@@ -156,7 +176,7 @@ fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody>
         if !conn.base_url_is_one_of(URLS) {
             return Err(Class::Blocked.into());
         }
-        latest(conn, &LIMITS, options).await
+        latest(conn, &LIMITS, options, budget()).await
     })
 }
 
@@ -195,12 +215,12 @@ mod tests {
             if i == 3 { "Retry-After: 600\r\n" } else { "" }
         }, async |conn| {
             let options = values(json!(["o/big | 1", "o/r | 1.9", "o/missing | custom"]));
-            let body = serde_json::to_value(latest(conn, &limits, &options).await.unwrap()).unwrap();
+            let body = serde_json::to_value(latest(conn, &limits, &options, budget()).await.unwrap()).unwrap();
             assert_eq!(body["items"][0]["secondary"], "Current 1 · Latest release unavailable");
             assert_eq!(body["items"][1]["secondary"], "Current 1.9 · Latest v1.10.0 · New version available");
             assert_eq!(body["items"][2]["secondary"], "Current custom · Latest release unavailable");
             for _ in 0..2 {
-                assert!(matches!(latest(conn, &limits, &options).await.unwrap_err().class, Class::RateLimited));
+                assert!(matches!(latest(conn, &limits, &options, budget()).await.unwrap_err().class, Class::RateLimited));
             }
         }).await;
     }

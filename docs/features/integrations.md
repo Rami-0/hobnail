@@ -563,6 +563,15 @@ widgets or shorter intervals can exhaust that budget. Rate-limited responses
 retain stale data and suppress further requests until the cooldown expires.
 Anonymous and authenticated cooldowns are tracked separately in memory.
 
+Each repository takes three sequential requests, each on a new connection,
+and the whole refresh must finish within the 5-second provider deadline.
+After about 4.25 seconds Hobnail stops starting requests and shows the rows
+fetched so far. The remaining rows read "Not checked this refresh (time
+limit)" until a later refresh reaches them. If not even the first repository
+completes, the widget reports a timeout. Rows are fetched in configured
+order, so on a slow link the last repositories can stay unchecked. List
+fewer repositories, or the most important ones first.
+
 Verified from GitHub's [repositories](https://docs.github.com/en/rest/repos/repos#get-a-repository),
 [pull requests](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests),
 [pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api),
@@ -704,7 +713,9 @@ Use Contents read access for private repositories.
 The comparison ignores a leading `v`, compares one to three numeric version
 components, and ignores valid build metadata. Unknown versions, including
 prerelease suffixes, are displayed beside the latest tag without a comparison.
-The refresh interval is one hour.
+The refresh interval is one hour. Like repository activity, the watcher
+returns the repositories checked within the provider deadline and marks the
+rest "Not checked this refresh (time limit)".
 
 Verified from: [latest GitHub release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
 [GitHub REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
