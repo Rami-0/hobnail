@@ -652,6 +652,142 @@ to **261.3 / 110.3 ms**. Phone table load was **301.4 / 160.5 ms** by tracing
 INP missed once at **240 ms** (chart phone, run 1); CLS stayed ≤0.1 in these
 runs. Route-change latency (≤200/500 ms) was not separately timed.
 
+### Finish-hobnail M5 browser budgets
+
+Measured the client at `8a7bd3c`, the startup and chart change at `6a7ae87`,
+the live and log trial, and the final client at `e20187e`. The Rust release profile and
+backend source were the same. Each browser sweep ran twice against a
+throwaway 150-container instance on loopback port 3396 with `--log-fixtures`.
+The CDP runner used cold browser caches, 1440×900 desktop at 1× CPU and
+390×844 touch phone at 4×. Each visit measured one navigation, three live
+update windows and the scripted interaction. Logs used a separate fresh
+instance and one `logs-check.mjs` sweep per measured state, with both themes
+at both widths and 4× CPU on phone. The runner verified delivery of the
+1,500-line burst and kept the original observation windows.
+
+The Overview interaction now clicks a visible health count. The old
+disclosure selector discarded both Overview rows in the first baseline sweep.
+Overview and Host readiness now use their visible content because a chart
+below the viewport can wait until scroll. The comparable baseline and
+startup rows use the replays with this probe. The replays include the Board
+target to keep its fixture setup. They visit fewer preceding routes, so the
+fixture history can be younger. Readiness selectors for the other routes,
+throttling, update counts and thresholds were preserved.
+
+Raw `perf.json`, `perf.md`, `logs/results.json`, host pressure samples, build
+sizes and test output are under
+`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5b/`.
+The directories `baseline`, `startup`, `batches` and `final` identify the
+builds. `ready-replay*` supplies the corrected Overview and Host runs.
+The later baseline timings and the baseline log sweep overlapped compilation.
+At the end of the second baseline browser sweep, host CPU pressure averaged
+13.48% over 60 seconds. Phone log-route LCP was 1,832 ms in the first
+baseline and 3,880 ms in the overlapping run. The candidate sweeps ran
+sequentially after compilation and tests. Improvements against the
+overlapping samples include host variance.
+
+Each table cell shows **baseline median/worst → final median/worst**.
+Times are milliseconds except CLS. Live values summarize the maximum of
+the three update windows in each run. Load tracing and the long-task
+observer measure different windows. An observer reading of zero means
+no observed task of at least 50 ms. The first plot value is the trace
+task containing the first Recharts mount. The Chart and Logs routes
+below are the `svc002` detail and log views. The board fixture has 40 tiles.
+
+| Route | Profile | LCP | Load trace | Load observer | Live | INP | CLS | First plot |
+|---|---|---|---|---|---|---|---|---|
+| `/app/containers` | phone | 1808/2392 → 2108/2636 | 243.6/319 → 237.85/311.8 | 254.5/318 → 287.5/370 | 31.8/32 → 35.05/37.4 | 120/120 → 116/120 | 0.0087/0.0087 → 0.0087/0.0087 | — → — |
+| `/app/containers` | desktop | 468/480 → 636/660 | 113.85/139.5 → 62/63.9 | 98/108 → 61.5/64 | 70.3/77 → 62.45/70.1 | 208/288 → 128/136 | 0.0429/0.0429 → 0.01775/0.0178 | — → — |
+| `/app/containers/svc002` | phone | 1714/1904 → 1388/1408 | 369.9/396.6 → 297.55/316.3 | 381/396 → 297/316 | 24.7/34.2 → 15.4/15.6 | 156/160 → 48/48 | 0.002/0.002 → 0.002/0.002 | 369.9/396.6 → 297.55/316.3 |
+| `/app/containers/svc002` | desktop | 550/568 → 660/684 | 103.45/104.1 → 67.5/70.6 | 103/104 → 67/70 | 14.9/16.1 → 11.15/15.1 | 32/40 → 16/16 | 0.01565/0.0294 → 0.00255/0.0026 | 103.45/104.1 → 67.5/70.6 |
+| `/app/overview` | phone | 1566/1604 → 1484/1508 | 140.4/161 → 124.2/128.6 | 180/180 → 188/192 | 46.45/53 → 26.35/30.6 | 136/136 → 144/152 | 0.0088/0.0088 → 0.0088/0.0088 | — → — |
+| `/app/overview` | desktop | 658/716 → 714/744 | 64.6/86.7 → 37.95/46.3 | 68.5/86 → 82.5/100 | 23.55/30.8 → 16.15/20.9 | 100/120 → 76/80 | 0.04655/0.0653 → 0.0028/0.0028 | 86.7/86.7 → — |
+| `/app/history` | phone | 1142/1352 → 1152/1224 | 433.25/525.5 → 289.05/304.4 | 433/526 → 288.5/304 | 154.2/192.4 → 107.7/118.2 | 316/376 → 204/240 | 0.0077/0.0077 → 0.0059/0.0059 | 433.25/525.5 → 289.05/304.4 |
+| `/app/history` | desktop | 462/528 → 594/608 | 89.75/101.5 → 56.65/57 | 89.5/101 → 56.5/57 | 66.35/66.9 → 51.35/54.5 | 36/40 → 28/32 | 0.0351/0.0351 → 0.0044/0.0044 | 89.75/101.5 → 56.65/57 |
+| `/app/host` | phone | 1294/1328 → 1322/1324 | 152.85/181.7 → 135.8/136.5 | 195.5/210 → 171.5/184 | 23/24.9 → 19.4/20.8 | 64/64 → 68/72 | 0.00205/0.0021 → 0.002/0.002 | — → — |
+| `/app/host` | desktop | 622/740 → 672/696 | 43.35/53.4 → 40.65/46.5 | 60/70 → 29.5/59 | 17.3/17.8 → 16.65/17.8 | 48/56 → 52/56 | 0.0001/0.0001 → 0.0132/0.0237 | — → — |
+| `/app/boards/<id>` | phone | 1920/2092 → 1570/1600 | 119/134.1 → 98.25/107.6 | 281.5/292 → 187/200 | 45.5/45.5 → 35.05/43.5 | 108/144 → 64/64 | 0.0565/0.0575 → 0.0575/0.0575 | — → — |
+| `/app/boards/<id>` | desktop | 778/944 → 734/784 | 46.6/58.7 → 52.95/63 | 79/93 → 76.5/79 | 24.65/32.6 → 14.9/15.9 | 124/160 → 76/80 | 0.028/0.028 → 0.0025/0.0025 | — → — |
+| `/app/containers/svc002/logs` | phone | 2856/3880 → 1750/1756 | 268.5/473.3 → 135/150.8 | 349.5/470 → 192.5/194 | 74.1/114.1 → 31.05/33.2 | 216/312 → 116/120 | 0.0075/0.0118 → 0.0323/0.0366 | — → — |
+| `/app/containers/svc002/logs` | desktop | 958/1232 → 754/760 | 65.85/72.1 → 41.9/48.8 | 83.5/113 → 0/0 | 31.6/37.7 → 34.8/36.4 | 112/136 → 92/96 | 0.0387/0.0387 → 0.0124/0.0124 | — → — |
+| `/app/settings/general` | phone | 1984/2600 → 1352/1360 | 127.9/139.5 → 95.1/100.7 | 346/462 → 218/228 | 39.55/41.8 → 32.95/33.3 | 76/80 → 64/64 | 0.0057/0.0057 → 0.002/0.002 | — → — |
+| `/app/settings/general` | desktop | 570/604 → 694/780 | 48.95/57.1 → 28.85/34.1 | 63/71 → 62/63 | 19.1/25.1 → 15.9/16.5 | 52/56 → 40/48 | 0.1032/0.1032 → 0.00255/0.0026 | — → — |
+
+The final LCP worst case exceeded its cap for every route/profile pair.
+Phone History met the cap in one run at 1,080 ms and missed in the other
+at 1,224 ms. Desktop and phone table LCP worsened in the final comparison.
+In the slowest phone table load, the session response finished at 195 ms,
+the bootstrap request started at 1,166 ms and FCP was 1,508 ms. The
+session and bootstrap transfers took 11 ms and 12 ms respectively. The
+timing gap leaves startup and rendering on the critical path even with
+early network reads.
+
+The phone table load cap still fails at 311.8 ms by tracing and 370 ms by
+the observer. The intermediate startup sweep passed at 172.5 ms and
+190 ms respectively. The final phone container and History first mounts
+reached 316.3 ms and 304.4 ms. The Settings phone observer peaked at
+228 ms. The desktop table and both History live profiles still exceed
+50 ms. The final peaks were 70.1 ms for the desktop table, 118.2 ms for
+phone History and 54.5 ms for desktop History. Overview now passes in
+both profiles. Both container chart profiles passed scripted INP. The
+phone History click reached 240 ms with 143.2 ms of input delay and
+42.1 ms of event processing. The final worst CLS was 0.0575.
+
+The retained startup change avoids suspending on an already resolved
+route and removes the font-warming render. The chart grid reserves space
+before importing Recharts, and plot mounting stays viewport-driven. The
+drag overlay updates independently of the chart and tooltips reuse
+formatters. The intermediate phone chart INP was 40/40 ms and its first
+mount was 320.4/327.2 ms. The intermediate desktop table LCP was
+650/664 ms against 468/480 ms at baseline.
+
+The retained live change reuses structurally shared container rows and
+snapshots and confines Overview stats renders to the resource panels.
+The desktop table live median/worst was 62.85/66.2 ms after the startup
+change, 57.65/59.4 ms in the batch trial and 62.45/70.1 ms in the final
+sweep. The generic transition on successful refetches was reversed.
+With it, phone History live work moved only from 110.65/116.2 ms to
+110.5/112.1 ms while INP rose from 136/192 ms to 192/208 ms.
+The final phone History INP still exceeds the cap.
+
+The retained log change skips a full-ring sort for ordered batches,
+combines filtering and counting and avoids fitting the pane on
+content-only resizes. The 128-line frame cap and the DOM window
+continue to bound the burst. The batch trial observed no task of
+50 ms or longer across the four profiles.
+
+| Bundle gate | Baseline B | Final B | Final headroom B |
+|---|---:|---:|---:|
+| Whole dist raw (1,350,000) | 1,349,132 | 1,346,772 | 3,228 |
+| Whole dist gzip (450,000) | 438,069 | 437,641 | 12,359 |
+| First route gzip (180,000) | 144,646 | 144,667 | 35,333 |
+| Largest capped lazy chunk gzip (60,000) | 54,813 | 54,814 | 5,186 |
+
+The final web check, 152 web tests, build, size check, Rust fmt, clippy
+and 500 Rust tests passed.
+
+Each log profile has one observation per build, so its median and worst
+are the same. The final log sweep completed all four profiles with zero
+console errors or CSP violations.
+
+| Log profile | Single pane max ms | Four panes max ms | ≤100 ms |
+|---|---:|---:|---|
+| 1440-dark | 0 → 0 | 0 → 0 | Pass |
+| 1440-light | 0 → 0 | 0 → 0 | Pass |
+| 390-dark | 54 → 0 | 60 → 0 | Pass |
+| 390-light | 0 → 0 | 117 → 53 | Pass |
+
+Browser regressions used fresh fixtures on port 3397. Boards passed 107
+checks, including 1440 light and 390 dark. The read-page sweep passed at
+1440 light and 390 dark, checking the History SVG and drag-to-zoom and
+revealing the container Metrics grid. The initial read-page replay
+stopped at an obsolete SVG-treemap selector in both profiles. The
+corrected check uses the linked treemap tiles and restores the hidden
+tab fixture before continuing. Guided setup passed 35 checks per
+requested profile. The final log sweep above also served as the Logs
+regression check. The Board and History captures were inspected at both
+requested profiles.
+
 ## Browser checks and logs
 
 **[exp]** Fresh fake instance at 3398 with `--log-fixtures`, same image;
@@ -756,9 +892,10 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 2. The **13.3 MB** M5 image exceeded the original 13 MB after-removal
    budget. The owner accepted it and set a 13.5 MB gate. Lifetime memory
    peaks including login exceed **20 MiB**.
-3. Browser LCP, load-task/live-task, one INP and log-burst budgets are missed,
-   as recorded above; they are not rounded into passes. Full chart first mount
-   remains a long task. CLS passes these two runs.
+3. The final M5 browser runs still miss LCP, phone load tasks, desktop table
+   and History live tasks, and phone History INP. Recharts loads near the
+   viewport, and the phone first plot is still a long task. Container chart
+   INP, log bursts and CLS pass. See the finish-hobnail browser results above.
 4. `/` returns **404 with a link to `/app`**, following the owner's no-redirect
    rule. No old-URL compatibility or RH_UI=classic exists; `rust-only` retains
    the old UI. This differs from the earlier plan's redirect/fallback wording.
@@ -807,18 +944,21 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 
 ## Budgets still missed
 
-- Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The M5 build
-  is 1,349,132 B raw and 438,069 B gzip. The configured size checks pass.
+- Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The final
+  build is 1,346,772 B raw and 437,641 B gzip. The configured size checks pass.
 - Preferred lifetime memory under 10 MiB. M5 peaked at 12.45 MiB with full history.
 - Uncapped cold SQLite database peak under 20 MiB. The cold probe reached
   187,559,936 B (178.87 MiB), primarily charged file cache.
 - First sign-in with a legacy hash exceeded 20 MiB in the migration probe.
   Fresh-hash workload results are in the M5 table above.
-- LCP ≤400/1,200 ms on the failing route/profile rows; phone table load ≤200 ms
-  in run 1; first chart/History mounts also exceed that diagnostic threshold.
-- Live-update ≤50 ms on table and several other routes; INP ≤200 ms on chart
-  phone run 1 (240 ms).
-- Log burst ≤100 ms on phone dark (107 ms).
+- LCP ≤400/1,200 ms. Each final route/profile pair missed in at least one run.
+  The worst desktop result was 784 ms and the worst phone result was 2,636 ms.
+- Phone table load ≤200 ms. The final maxima were 311.8 ms by tracing and
+  370 ms by observer. The first container and History plots reached 316.3 ms
+  and 304.4 ms, and the Settings phone observer reached 228 ms.
+- Live-update ≤50 ms. The desktop table peaked at 70.1 ms, phone History at
+  118.2 ms and desktop History at 54.5 ms.
+- Scripted INP ≤200 ms. The phone History click reached 240 ms.
 
 Passing checks at raised caps do not constitute the owner's acceptance of
 these deviations. [QA outcomes](../qa/QA.md#react-port-outcomes-of-the-deferred-findings)
