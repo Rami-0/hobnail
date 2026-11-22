@@ -516,8 +516,8 @@ beyond the latest SMART self-test result.
 
 ## Gitea / Forgejo
 
-Enter the forge URL and a personal access token with `read:repository`
-and access to the selected repos. Hobnail sends `Authorization: token …`.
+Enter the forge URL and a personal access token with `read:repository`,
+`read:user` and access to the selected repos. Hobnail sends `Authorization: token …`.
 The connection test checks `/api/v1/version`, then a one-item
 `/api/v1/user/repos` request to verify the token.
 

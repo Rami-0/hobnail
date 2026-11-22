@@ -18,7 +18,7 @@ pub const GITEA: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(TOKEN, "Access token", Kind::Secret, "Use a personal access token with read access to the selected repositories.")
+            ..Field::new(TOKEN, "Access token", Kind::Secret, "Use a personal access token with read:user and read:repository scopes and access to the selected repositories.")
         },
         ENABLED,
     ],
@@ -207,7 +207,7 @@ mod tests {
             ),
             ("GET /prefix/api/v1/repos/o/big HTTP/1.1", 200, &oversized),
             (VERSION, 200, r#"{"version":"1.26.0"}"#),
-            (USER_REPOS, 401, ""),
+            (USER_REPOS, 403, r#"{"message":"token does not have at least one of required scope(s), required=[read:user]"}"#),
             (VERSION, 200, "{}"),
         ]
         .map(|(request, status, body)| Exchange {
