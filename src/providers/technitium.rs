@@ -54,16 +54,17 @@ enum Envelope<T> {
     },
 }
 
-async fn get<T: serde::de::DeserializeOwned>(
+async fn post<T: serde::de::DeserializeOwned>(
     conn: &Conn<'_>,
     path: &str,
     params: &[(&str, &str)],
 ) -> Result<T, Fault> {
-    let mut query = vec![(TOKEN, Input::Credential(TOKEN))];
-    query.extend(params.iter().map(|&(key, value)| (key, Input::Text(value))));
+    let mut form = vec![(TOKEN, Input::Credential(TOKEN))];
+    form.extend(params.iter().map(|&(key, value)| (key, Input::Text(value))));
     match parse_json(
         conn.request(Step {
-            query: &query,
+            verb: Verb::Post,
+            body: Some(Body::Form(&form)),
             ..Step::get(path)
         })
         .await?,
@@ -96,7 +97,7 @@ struct Zones {
 }
 
 async fn zones(conn: &Conn<'_>) -> Result<Zones, Fault> {
-    get(conn, ZONES, &[("pageNumber", "1"), ("zonesPerPage", "1")]).await
+    post(conn, ZONES, &[("pageNumber", "1"), ("zonesPerPage", "1")]).await
 }
 
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
@@ -106,7 +107,7 @@ fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
 fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
         let zones = zones(conn).await?;
-        let dashboard: Dashboard = get(conn, STATS, &[]).await?;
+        let dashboard: Dashboard = post(conn, STATS, &[]).await?;
         Ok(StructuredBody::StatGrid {
             rows: vec![
                 (
@@ -132,17 +133,24 @@ mod tests {
     #[tokio::test]
     async fn reads_zone_total_and_maps_api_token_errors() {
         const LIST: &str =
-            "GET /prefix/api/zones/list?token=fake%2Btoken&pageNumber=1&zonesPerPage=1 HTTP/1.1";
+            "POST /prefix/api/zones/list HTTP/1.1";
         const ZONE_BODY: &str =
             r#"{"status":"ok","response":{"totalZones":12,"zones":[{"name":"example.invalid"}]}}"#;
         exercise(&TECHNITIUM, &[(TOKEN, "fake+token")], Values::new(), &[
             Exchange { request: LIST, status: 200, body: ZONE_BODY },
             Exchange { request: LIST, status: 200, body: ZONE_BODY },
-            Exchange { request: "GET /prefix/api/dashboard/stats/get?token=fake%2Btoken HTTP/1.1", status: 200, body: r#"{"status":"ok","response":{"stats":{"totalQueries":100,"totalBlocked":25}}}"# },
+            Exchange { request: "POST /prefix/api/dashboard/stats/get HTTP/1.1", status: 200, body: r#"{"status":"ok","response":{"stats":{"totalQueries":100,"totalBlocked":25}}}"# },
             Exchange { request: LIST, status: 200, body: r#"{"status":"invalid-token"}"# },
             Exchange { request: LIST, status: 200, body: r#"{"status":"ok","response":{"zones":[]}}"# },
-        ], |_, wire| {
-            assert!(!wire.split_once("\r\n").unwrap().1.contains("fake"));
+         ], |index, wire| {
+            let (headers, body) = wire.split_once("\r\n\r\n").unwrap();
+            assert!(!headers.contains("fake"));
+            assert!(headers.contains("content-type: application/x-www-form-urlencoded"));
+            assert!(body == if index == 2 {
+                "token=fake%2Btoken"
+            } else {
+                "token=fake%2Btoken&pageNumber=1&zonesPerPage=1"
+            });
             ""
         }, async |conn| {
             conn.run(test(conn)).await.unwrap();
