@@ -10,6 +10,8 @@
 
 /* ---- sidebar ---- */
 .side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;min-width:0;background:var(--bg-side);border-right:1px solid var(--line);z-index:var(--z-side);will-change:transform}
+/* short windows (200 % zoom): the sidebar scrolls so its foot stays reachable */
+@media (max-height:520px){.side{overflow-y:auto}}
 /* (will-change: the sidebar is its own layer, so a live number elsewhere does not repaint the 150-item tree) */
 .side-head{display:flex;align-items:center;gap:8px;height:var(--top-h);padding:0 var(--s-3) 0 var(--s-4);border-bottom:1px solid var(--line);flex:none}
 .brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1;color:var(--text);font-weight:650;font-size:calc(15rem/14)}
