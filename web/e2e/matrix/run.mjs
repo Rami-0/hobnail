@@ -43,6 +43,9 @@ async function run(name, fn) {
   const t0 = Date.now(), first = results.states.length;
   let error = null, note = null;
   try { note = (await fn(h, f)) || null; } catch (e) { error = String(e?.stack || e).split("\n").slice(0, 4).join(" | ").slice(0, 600); await h.shot(`${name}-FAIL`); }
+  // Console, page and CSP errors after the flow's last state belong to it.
+  const left = await h.flush();
+  if (left.length) results.states.push({ engine, profile: profileName, unit, flow: name, state: "(after the last state)", url: page.url().replace(/^https?:\/\/[^/]+/, ""), controls: 0, problems: left });
   const states = results.states.slice(first);
   const problems = states.reduce((n, s) => n + s.problems.length, 0);
   const ok = !error && problems === 0;

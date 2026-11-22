@@ -3,6 +3,7 @@
 // h.state(label) on every page state it reaches (all checks run there).
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { focusWalk, guardNetwork, harness } from "./lib.mjs";
 
 const tid = (id) => `[data-testid="${id}"]`;
 const dialog = '[role="dialog"][data-open]';
@@ -39,7 +40,7 @@ async function finishTour(h) {
   await tour.waitFor({ timeout: 10000 });
   let steps = 0;
   for (; steps < 10 && await tour.isVisible().catch(() => false); steps++) {
-    await h.state(`tour step ${steps + 1}`, { focus: false });
+    await h.state(`tour step ${steps + 1}`);
     await page.locator(tid("tour-next")).click();
     await page.waitForTimeout(150);
   }
@@ -182,7 +183,7 @@ export const flows = {
     await page.goto(new URL("/app/overview", f.base).href);
     await page.locator(tid("user")).click();
     await page.locator(tid("signout")).waitFor();
-    await h.state("account menu", { focus: false });
+    await h.state("account menu");
     await page.locator(tid("signout")).click();
     await page.locator('form[data-testid="login"]').waitFor();
     await h.state("signed out");
@@ -262,7 +263,7 @@ export const flows = {
     if (box) {
       if (h.profile.touch) await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
       else await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await h.state("chart read-out", { focus: false });
+      await h.state("chart read-out");
     }
     await go(h, f, "/app/containers/svc001?tab=metrics", tid("ctr-tabs"));
     // The history charts load when their section scrolls into view; on a
@@ -300,7 +301,7 @@ export const flows = {
     await page.locator(tid("board-add-section")).click();
     await page.locator(tid("board-cancel")).click();
     const confirm = page.locator(dialog);
-    if (await confirm.isVisible().catch(() => false)) { await h.state("discard prompt", { focus: false }); await confirm.getByRole("button", { name: /discard/i }).click(); }
+    if (await confirm.isVisible().catch(() => false)) { await h.state("discard prompt"); await confirm.getByRole("button", { name: /discard/i }).click(); }
     await page.locator(tid("board-editor")).waitFor({ state: "detached" });
     assert.equal(await page.locator(tid("board-tile")).count(), tiles + 1, "Cancel discards the unsaved section");
     await h.state("cancelled");
@@ -366,22 +367,28 @@ export const flows = {
     await go(h, f, "/app/settings/users", tid("invite-create"));
     await page.locator(tid("invite-create")).click();
     await page.locator(dialog).waitFor();
-    await h.state("invite dialog", { focus: false });
+    await h.state("invite dialog");
     await page.locator(dialog).getByRole("button", { name: "Create invitation" }).click();
     const link = page.locator(tid("invite-link"));
     await link.waitFor();
-    await h.state("invite link", { focus: false });
+    await h.state("invite link");
     const url = new URL(await link.inputValue());
     await page.locator(dialog).getByRole("button", { name: "Done" }).click();
     await page.locator(tid("invite-row")).first().waitFor();
     await h.state("invitation listed");
     // Accept in a separate browser context (a new person, no cookie).
     const other = await page.context().browser().newContext(h.contextOptions);
-    const p2 = await other.newPage();
+    other.setDefaultTimeout(15000);
     try {
-      const h2 = { ...h, page: p2 };
+      const p2 = await other.newPage();
+      // The invited person's page gets every check too (its own listeners;
+      // its states and events go into this flow).
+      const h2 = await harness(p2, { engine: h.engine, profileName: h.profileName, profile: h.profile, out: h.out, unit: h.unit, motion: h.motion, results: h.results });
+      h2.ctx.flow = h.ctx.flow;
+      await guardNetwork(other, (u) => h2.record({ kind: "network", text: `request to a non-local address blocked: ${u}` }));
       await p2.goto(new URL(url.pathname + url.search + url.hash, f.base).href);
       await p2.locator('form[data-testid="invite"]').waitFor();
+      await h2.state("invite accept form");
       const name = `matrix-${h.profileName.replace(/[^a-z0-9]/gi, "")}`;
       await p2.locator('form[data-testid="invite"] input[name="username"]').fill(name);
       await p2.locator('form[data-testid="invite"] input[name="password"]').fill(f.password);
@@ -389,7 +396,9 @@ export const flows = {
       await p2.locator('form[data-testid="invite"] button[type="submit"]').click();
       await p2.locator(tid("user")).waitFor();
       assert.ok((await p2.locator(tid("user")).getAttribute("aria-label")).includes(name), "invited user signs in");
-      void h2;
+      await h2.state("invited user signed in");
+      const left = await h2.flush();
+      if (left.length) h.results.states.push({ engine: h.engine, profile: h.profileName, unit: h.unit, flow: h.ctx.flow, state: "(invited page, after its last state)", url: "", controls: 0, problems: left });
     } finally { await other.close(); }
     await page.reload();
     await page.locator(tid("user-row")).nth(1).waitFor();
@@ -402,10 +411,10 @@ export const flows = {
     else await page.keyboard.press("Control+k");
     const palette = page.locator(tid("palette"));
     await palette.waitFor();
-    await h.state("open", { focus: false });
+    await h.state("open");
     await page.keyboard.type("containers");
     await page.waitForTimeout(200);
-    await h.state("results", { focus: false });
+    await h.state("results");
     await page.keyboard.press("Enter");
     await page.waitForURL((u) => u.pathname.startsWith("/app/containers"));
     await palette.waitFor({ state: "hidden" });
@@ -425,23 +434,13 @@ export const flows = {
     // The focused skip link is drawn over the brand by design: no target check here.
     await h.state("skip link", { focus: false, targets: false });
     await page.keyboard.press("Enter");
-    // Walk 30 stops: each one visibly focused and on screen.
-    const bad = [];
-    const seen = new Set();
-    for (let i = 0; i < 30; i++) {
-      await page.keyboard.press("Tab");
-      const r = await page.evaluate(() => {
-        const el = document.activeElement; if (!el || el === document.body) return { none: true };
-        const s = getComputedStyle(el), b = el.getBoundingClientRect();
-        const ring = (s.outlineStyle !== "none" && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== "none";
-        return { key: el.outerHTML.slice(0, 80), ring, fv: el.matches(":focus-visible"), on: b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth };
-      });
-      if (r.none) continue;
-      seen.add(r.key);
-      if (!r.ring || !r.fv || !r.on) bad.push(`${r.key} ring=${r.ring} focus-visible=${r.fv} on-screen=${r.on}`);
-    }
+    // Walk 30 stops: each one visibly focused (the same ring test as every
+    // state's focus check, lib.mjs) and on screen.
+    const stops = await focusWalk(page, 30);
+    const seen = new Set(stops.map((r) => r.key));
+    const bad = stops.filter((r) => !r.ring || !r.visible || !r.onScreen).map((r) => `${r.key} ring=${r.ring} focus-visible=${r.visible} on-screen=${r.onScreen}`);
     assert.ok(seen.size >= 8, `Tab reaches distinct controls (${seen.size})`);
-    assert.deepEqual(bad, [], "every Tab stop shows its focus");
+    assert.deepEqual(bad, [], `every Tab stop shows its focus: ${bad.join("; ").slice(0, 400)}`);
     await h.state("tab walk");
     await page.keyboard.press("Control+k");
     await page.locator(tid("palette")).waitFor();
@@ -459,7 +458,7 @@ export const flows = {
     await page.locator(tid("user")).focus();
     await page.keyboard.press("Enter");
     await page.locator(tid("signout")).waitFor();
-    await h.state("account menu by keyboard", { focus: false });
+    await h.state("account menu by keyboard");
     await page.keyboard.press("Escape");
     await page.locator(tid("signout")).waitFor({ state: "hidden" });
     const back = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
@@ -473,7 +472,7 @@ export const flows = {
     if (await drawer.count()) {
       await drawer.first().tap();
       await page.locator("html.side-open").waitFor({ timeout: 5000 });
-      await h.state("drawer open", { focus: false });
+      await h.state("drawer open");
       await page.locator('#side a[href="/app/containers"]').first().tap();
     } else await page.locator('nav a[href="/app/containers"]:visible').first().tap();
     await page.waitForURL((u) => u.pathname === "/app/containers");
@@ -492,7 +491,10 @@ export const flows = {
     await go(h, f, "/app/containers", tid("row"));
     const live = page.locator(tid("live-status"));
     await page.waitForFunction(() => document.querySelector('[data-testid="live-status"]')?.dataset.state === "live", null, { timeout: 15000 });
-    await h.expecting([/ERR_INTERNET_DISCONNECTED|NetworkError|network connection was lost|Failed to load resource|EventSource|ERR_NETWORK|interrupted|can.t establish a connection|connection.*(refused|reset)|Could not connect/i], async () => {
+    // Only failures of the event stream itself are expected (the message
+    // or its source URL names /api/v1/stream); any other failed request
+    // while the network is down still counts.
+    await h.expecting([/(ERR_INTERNET_DISCONNECTED|NetworkError|network connection was lost|Failed to load resource|EventSource|ERR_NETWORK|interrupted|can.t establish a connection|connection.*(refused|reset)|Could not connect).*\/api\/v1\/stream\b/is], async () => {
       await page.context().setOffline(true);
       // Offline emulation alone leaves an open EventSource connected in
       // Chromium; the runner restarts the throwaway server to cut it.
@@ -531,7 +533,7 @@ export const flows = {
       await page.waitForTimeout(400);
       const box = await page.locator(tid("palette")).boundingBox();
       assert.ok(box && box.x >= 0 && box.x + box.width <= height + 1, "open palette stays on screen after rotation");
-      await h.state("palette rotated", { focus: false });
+      await h.state("palette rotated");
       await page.keyboard.press("Escape");
     } finally { await page.setViewportSize({ width, height }); }
   },
