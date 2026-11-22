@@ -396,6 +396,8 @@ permissions are checked when the widget refreshes.
 **Immich overview** shows instance photo and video counts, used and available
 disk space, and active, waiting and failed jobs across the queues. If a
 response exceeds the cap, the other endpoints can still supply their data.
+A server that answers 404 for the deprecated `/api/jobs` route shows
+"Jobs: Unavailable" and keeps the storage and library rows.
 
 Verified from:
 
@@ -544,6 +546,8 @@ Hobnail uses it as a Bearer token and tests a one-entry disk query.
 up to ten pools, and the latest reported SMART self-test for up to ten
 disks. Missing results stay unknown. The provider reads the test log and
 does not start a test. Oversized lists leave independent metrics visible.
+If the SMART results route answers 404, each disk reads "SMART results
+unavailable" and the alert, pool and disk rows stay visible.
 
 Verified from [24.10.2 REST v2.0](https://www.truenas.com/docs/scale/24.10/api/scale_rest_api.html),
 [Bearer auth source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/restful.py),

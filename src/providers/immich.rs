@@ -78,14 +78,16 @@ impl Counts {
     }
 }
 
+async fn request(conn: &Conn<'_>, path: &str) -> Result<client::Response, Fault> {
+    conn.request(Step {
+        auth: &[Auth::Header("x-api-key", Input::Credential(KEY))],
+        ..Step::get(path)
+    })
+    .await
+}
+
 async fn get<T: serde::de::DeserializeOwned>(conn: &Conn<'_>, path: &str) -> Result<T, Fault> {
-    parse_json(
-        conn.request(Step {
-            auth: &[Auth::Header("x-api-key", Input::Credential(KEY))],
-            ..Step::get(path)
-        })
-        .await?,
-    )
+    parse_json(request(conn, path).await?)
 }
 
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
@@ -97,7 +99,13 @@ fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         let storage = within_response_limit(get::<Storage>(conn, STORAGE).await)?;
         let statistics =
             within_response_limit(get::<Statistics>(conn, "api/server/statistics").await)?;
-        let jobs = within_response_limit(get::<BTreeMap<String, Queue>>(conn, "api/jobs").await)?;
+        // A release without the jobs route leaves only the job rows unavailable.
+        let jobs = within_response_limit(
+            request(conn, "api/jobs")
+                .await
+                .and_then(parse_optional::<BTreeMap<String, Queue>>),
+        )?
+        .flatten();
         let mut rows = vec![];
         match storage {
             Some(storage) => {
@@ -204,6 +212,21 @@ mod tests {
                 },
                 Exchange {
                     request: SPACE,
+                    status: 200,
+                    body: SPACE_BODY,
+                },
+                Exchange {
+                    request: STATISTICS,
+                    status: 200,
+                    body: r#"{"photos":100,"videos":3,"usageByUser":[]}"#,
+                },
+                Exchange {
+                    request: JOBS,
+                    status: 404,
+                    body: r#"{"message":"Cannot GET /api/jobs","error":"Not Found","statusCode":404}"#,
+                },
+                Exchange {
+                    request: SPACE,
                     status: 403,
                     body: "",
                 },
@@ -238,6 +261,16 @@ mod tests {
                 rows[2][1] = json!("Unavailable");
                 rows[3][1] = json!("Unavailable");
                 assert_eq!(fetch().await["rows"], rows);
+                assert_eq!(
+                    fetch().await["rows"],
+                    json!([
+                        ["Disk usage", "1.0 MiB / 1.0 GiB"],
+                        ["Disk available", "1.0 MiB"],
+                        ["Photos", "100"],
+                        ["Videos", "3"],
+                        ["Jobs", "Unavailable"],
+                    ])
+                );
                 assert_test_fault(conn, &IMMICH, Class::Auth).await;
                 assert_test_fault(conn, &IMMICH, Class::Protocol).await;
             },

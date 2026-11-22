@@ -77,19 +77,25 @@ struct SmartTest {
     status: String,
 }
 
+async fn request(
+    conn: &Conn<'_>,
+    path: &str,
+    query: &[(&str, Input<'_>)],
+) -> Result<client::Response, Fault> {
+    conn.request(Step {
+        auth: &[Auth::Bearer(Input::Credential(KEY))],
+        query,
+        ..Step::get(path)
+    })
+    .await
+}
+
 async fn get<T: serde::de::DeserializeOwned>(
     conn: &Conn<'_>,
     path: &str,
     query: &[(&str, Input<'_>)],
 ) -> Result<Vec<T>, Fault> {
-    parse_json(
-        conn.request(Step {
-            auth: &[Auth::Bearer(Input::Credential(KEY))],
-            query,
-            ..Step::get(path)
-        })
-        .await?,
-    )
+    parse_json(request(conn, path, query).await?)
 }
 
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
@@ -145,16 +151,24 @@ async fn disk_rows(conn: &Conn<'_>) -> Result<Vec<(String, String)>, Fault> {
         return Ok(rows);
     }
     let tests = within_response_limit(
-        get::<SmartResults>(
+        request(
             conn,
             SMART,
             &[("limit", Input::Text("10")), ("sort", Input::Text("disk"))],
         )
-        .await,
+        .await
+        .and_then(parse_optional::<Vec<SmartResults>>),
     )?;
     rows.extend(disks.into_iter().take(DISPLAY_LIMIT).map(|disk| {
-        let status = tests.as_ref().map_or("SMART results too large", |tests| {
-            match tests
+        let status = match &tests {
+            None => Err("SMART results too large"),
+            // A release without the SMART test route keeps the disk rows.
+            Some(None) => Err("SMART results unavailable"),
+            Some(Some(tests)) => Ok(tests),
+        };
+        let status = status.map_or_else(
+            |message| message,
+            |tests| match tests
                 .iter()
                 .find(|test| test.disk == disk.name)
                 .and_then(|result| result.tests.first())
@@ -165,8 +179,8 @@ async fn disk_rows(conn: &Conn<'_>) -> Result<Vec<(String, String)>, Fault> {
                 Some("RUNNING") => "SMART test running",
                 Some("ABORTED") => "Last SMART test aborted",
                 _ => "No reported SMART result",
-            }
-        });
+            },
+        );
         (display_text(conn, disk.name), status.into())
     }));
     Ok(rows)
@@ -235,6 +249,10 @@ mod tests {
             (ALERT_LIST, 200, &oversized),
             (POOL_LIST, 200, POOL),
             (DISK_LIST, 200, "[]"),
+            (ALERT_LIST, 200, "[]"),
+            (POOL_LIST, 200, POOL),
+            (DISK_LIST, 200, DISK),
+            (TESTS, 404, r#"{"message":"Not Found"}"#),
             (CHECK, 403, ""),
             (CHECK, 200, "{}"),
         ]
@@ -280,6 +298,16 @@ mod tests {
                 assert_eq!(
                     degraded["rows"][2],
                     json!(["tank", "ONLINE · 1.0 MiB free"])
+                );
+                assert_eq!(
+                    fetch().await["rows"],
+                    json!([
+                        ["Active alerts", "0"],
+                        ["Pools", "1"],
+                        ["tank", "ONLINE · 1.0 MiB free"],
+                        ["Disks", "1"],
+                        ["sda", "SMART results unavailable"]
+                    ])
                 );
                 assert_test_fault(conn, &TRUENAS, Class::Auth).await;
                 assert_test_fault(conn, &TRUENAS, Class::Protocol).await;

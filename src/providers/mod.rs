@@ -356,6 +356,17 @@ fn parse_json<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(&success(response)?.body).map_err(|_| Class::Protocol.into())
 }
 
+/// Parse an optional endpoint's JSON, reading 404 (an endpoint a release
+/// removed or never had) as an absent metric instead of a failed widget.
+fn parse_optional<T: serde::de::DeserializeOwned>(
+    response: crate::http::client::Response,
+) -> Result<Option<T>, Fault> {
+    if response.status == 404 {
+        return Ok(None);
+    }
+    parse_json(response).map(Some)
+}
+
 /// Keep independent metrics when one upstream response exceeds the step budget.
 fn within_response_limit<T>(result: Result<T, Fault>) -> Result<Option<T>, Fault> {
     match result {
