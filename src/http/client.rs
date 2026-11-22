@@ -287,9 +287,17 @@ pub(crate) async fn send_step(
         })
 }
 
+/// Whether `ip` is a LAN-side address for the provider internet switch:
+/// RFC 1918, loopback, link-local, unique-local and the 100.64.0.0/10
+/// shared space (CGNAT, where Tailscale addresses its nodes). 100.100.100.200
+/// sits in that range but is a cloud metadata endpoint, so it is not local.
 fn local_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(ip) => ip.is_private() || ip.is_loopback() || ip.is_link_local(),
+        IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            let shared = a == 100 && b & 0xc0 == 64 && ip != Ipv4Addr::new(100, 100, 100, 200);
+            ip.is_private() || ip.is_loopback() || ip.is_link_local() || shared
+        }
         IpAddr::V6(ip) => match ip.to_ipv4_mapped() {
             Some(ip) => local_ip(ip.into()),
             None => ip.is_unique_local() || ip.is_loopback() || ip.is_unicast_link_local(),
@@ -590,7 +598,33 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
 
 #[cfg(test)]
 mod integration_policy_tests {
-    use super::restricted_integration_ip;
+    use super::{local_ip, restricted_integration_ip};
+
+    #[test]
+    fn shared_address_space_counts_as_local_except_the_metadata_address() {
+        for ip in [
+            "10.0.0.2",
+            "192.168.1.1",
+            "127.0.0.1",
+            "100.64.0.1",
+            "100.101.102.103",
+            "100.127.255.254",
+            "::ffff:100.80.0.1",
+            "fd7a:115c:a1e0::1",
+        ] {
+            assert!(local_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "100.63.255.255",
+            "100.128.0.0",
+            "100.100.100.200",
+            "::ffff:100.100.100.200",
+            "8.8.8.8",
+            "2001:db8::1",
+        ] {
+            assert!(!local_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
 
     #[test]
     fn restrict_special_destinations_but_allow_private_services() {

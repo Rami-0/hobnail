@@ -745,8 +745,11 @@ address-policy exemption. See [Outgoing HTTP](../configuration.md#outgoing-http)
 **Settings → Integrations → Provider internet access** starts off. The section
 states what each provider contacts. A provider declared as public is disabled
 while the switch is off. Generic HTTP accepts LAN destinations by default and
-checks every resolved address before an HTTP connection. Public destinations
-require the switch even if the hostname is in `allow_hosts`. Hostname
+checks every resolved address before an HTTP connection. Private, loopback,
+link-local and unique-local addresses count as LAN destinations, as does the
+100.64.0.0/10 shared range that Tailscale uses for its nodes (except the
+100.100.100.200 metadata address). Public destinations require the switch even
+if the hostname is in `allow_hosts`. Hostname
 resolution still uses the server's DNS. The switch is for catalog providers,
 independent of file-configured widgets or dashboard-icons.
 
