@@ -82,7 +82,7 @@ if (TARGETS.includes("board")) {
   if (!saved.ok) throw new Error(`Board fixture: ${saved.status} ${await saved.text()}`);
 }
 const T = {
-  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-strips summary' },
+  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong') && !document.querySelector('[data-testid="overview"] [aria-busy="true"]')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-counts a' },
   history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: ["config"], interaction: '.history-controls button' },
   host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]') && !document.querySelector('.ch-wait')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary' },
   board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]' },
