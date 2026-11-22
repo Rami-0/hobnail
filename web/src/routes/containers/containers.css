@@ -26,7 +26,6 @@
 /* ---- table ---- */
 .ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
 .ctbl{table-layout:fixed}
-.ctbl .c-name{width:auto}
 .ctbl .c-stack{width:90px}
 .ctbl .c-image{width:160px}
 .ctbl .c-state{width:116px}
@@ -35,7 +34,7 @@
 .ctbl .c-hist .hstrip{width:100%}
 .ctbl .c-num:not(.c-up){width:110px}
 .ctbl .c-ports{width:168px}
-.ctbl .c-act{width:64px}
+.ctbl .c-act{width:calc(100px + var(--hit))}
 .ctbl .c-num .cell-spark{width:30px;margin-left:4px}
 .ctbl caption{caption-side:top;text-align:left;padding:8px 12px;font-size:var(--fs-xs);color:var(--text-3);border-bottom:1px solid var(--line)}
 .ctbl caption b{color:var(--text);font-weight:600}
@@ -49,7 +48,7 @@
 .ctbl th.c-num{text-align:right}
 .ctbl th.c-num .sort-b{justify-content:flex-end}
 .ctbl .row td:first-child{padding-left:14px}
-.c-name{width:32%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
 .c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
 .c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
@@ -90,8 +89,8 @@ tbody.grp+tbody.grp .grp-h th{border-top:1px solid var(--line)}
 tbody.none td{padding:0}
 /* rows still to come (index.tsx Waiting): their height, so nothing moves when they arrive */
 .ctbl tr.row-wait td{height:calc(var(--n) * var(--row));padding:0;border:0}
-@media (max-width:1250px){.ctbl .c-image{display:none}.c-name{width:40%}}
-@media (max-width:900px){.c-num .cell-spark{display:none}.c-num{width:80px}.ctbl .c-ports,.ctbl .c-hist{display:none}}
+@container (width<1150px){.ctbl .c-image{display:none}}@container (width<1030px){.ctbl .c-ports{display:none}}
+@container (width<862px){.c-num .cell-spark{display:none}.ctbl .c-num:not(.c-up){width:80px}.ctbl .c-hist{display:none}}
 
 /* ---- phones: stacked rows, a sort control in the toolbar ---- */
 @media (max-width:640px){
