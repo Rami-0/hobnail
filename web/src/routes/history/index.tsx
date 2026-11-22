@@ -12,6 +12,7 @@ import { Button } from "../../ui/Button.tsx";
 import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { historyWindow, RANGES, windowSteps } from "./window.ts";
+import { MAX_DEFER_MS, QUIET_MS, quietDelay } from "./quiet.ts";
 import "./history.css";
 
 /** Apply background History reads once the current gesture has settled. */
@@ -23,27 +24,28 @@ function useQuietCommit() {
       const id = "pointerId" in event ? event.pointerId : event.code;
       if (event.type.endsWith("down")) current.pressed.add(id);
       else current.pressed.delete(id);
-      current.until = performance.now() + 100;
+      current.until = performance.now() + QUIET_MS;
     };
-    const blur = () => current.pressed.clear();
+    const clear = () => { current.pressed.clear(); current.until = 0; };
     const lifetime = new AbortController();
-    for (const event of ["pointerdown", "pointerup", "pointercancel", "keydown", "keyup"] as const) {
+    for (const event of ["pointerdown", "pointerup", "pointercancel", "lostpointercapture", "keydown", "keyup"] as const) {
       window.addEventListener(event, track, { capture: true, signal: lifetime.signal });
     }
-    window.addEventListener("blur", blur, { signal: lifetime.signal });
-    return () => { blur(); lifetime.abort(); };
+    window.addEventListener("blur", clear, { signal: lifetime.signal });
+    document.addEventListener("visibilitychange", clear, { signal: lifetime.signal });
+    return () => lifetime.abort();
   }, []);
 
   return useCallback((commit: () => void) => {
     const current = input.current;
-    let timer = 0;
+    const deadline = performance.now() + MAX_DEFER_MS;
     const apply = () => {
-      const delay = current.pressed.size ? 100 : current.until - performance.now();
+      const delay = quietDelay(current.pressed.size > 0, current.until, deadline, performance.now());
       if (delay > 0) timer = window.setTimeout(apply, delay);
       else commit();
     };
     // Give already queued input a chance to arrive before applying the reply.
-    timer = window.setTimeout(apply, 0);
+    let timer = window.setTimeout(apply, 0);
     return () => window.clearTimeout(timer);
   }, []);
 }
