@@ -4,8 +4,8 @@ import type { StructuredBody } from "../api/gen/StructuredBody.ts";
 const captionDate = new Intl.DateTimeFormat(undefined, { timeZone: "UTC", calendar: "gregory", month: "long", year: "numeric" });
 
 function month(date: string) {
-  const [number, today, year] = date.split("/").map(Number);
-  const index = number - 1;
+  const parts = date.split("/");
+  const year = Number(parts[2]), index = Number(parts[0]) - 1, today = Number(parts[1]);
   const first = new Date(Date.UTC(year, index, 1)).getUTCDay();
   const days = new Date(Date.UTC(year, index + 1, 0)).getUTCDate();
   const caption = captionDate.format(Date.UTC(year, index, 1));
