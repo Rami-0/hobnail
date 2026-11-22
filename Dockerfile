@@ -44,7 +44,7 @@ RUN --mount=type=cache,id=rh-cargo-registry,target=/usr/local/cargo/registry \
  && cargo fmt --check \
  && cargo clippy --locked --all-targets -- -D warnings \
  && cargo test --locked \
- && cargo build --locked --release \
+ && cargo rustc --locked --release -- -Clink-arg=-Wl,-z,pack-relative-relocs \
  && v="$(/target/release/hobnail version)" && echo "$v" \
  && case "$v" in *"($RH_GIT_SHA "*"content $RH_CONTENT_HASH") ;; \
       *) echo "stale binary: expected sha $RH_GIT_SHA and content $RH_CONTENT_HASH" >&2; exit 1 ;; esac \
