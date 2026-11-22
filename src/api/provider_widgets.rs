@@ -105,8 +105,17 @@ pub(super) async fn route(
             for row in rows {
                 let (widget, id, value, kind) = row?;
                 if let Ok(mut value) = serde_json::from_str::<Values>(&value) {
-                    if providers::get(&kind).is_some_and(|provider| provider.public_internet) {
-                        let seconds = providers::refresh(&value, true).as_secs();
+                    if let Some((provider, spec)) = providers::get(&kind)
+                        .and_then(|provider| {
+                            provider
+                                .widgets
+                                .iter()
+                                .find(|spec| spec.id == widget)
+                                .map(|spec| (provider, spec))
+                        })
+                        .filter(|(provider, _)| provider.public_internet)
+                    {
+                        let seconds = spec.refresh(&value, provider.public_internet).as_secs();
                         value.insert("refresh".into(), seconds.into());
                     }
                     options
@@ -600,7 +609,7 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
                 .widgets
                 .lock()
                 .unwrap()
-                .deadline(&key, providers::refresh(&options, provider.public_internet))
+                .deadline(&key, widget.refresh(&options, provider.public_internet))
                 .is_some_and(|at| now < at)
             {
                 return Ok(None);

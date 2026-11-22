@@ -65,6 +65,7 @@ mod technitium;
 mod transmission;
 mod truenas;
 mod uptime_kuma;
+mod weather;
 mod wg_easy;
 
 #[cfg(test)]
@@ -109,6 +110,7 @@ pub const REGISTRY: &[Provider] = &[
     ssl_expiry::SSL_EXPIRY,
     reachability::REACHABILITY,
     feed::FEED,
+    weather::WEATHER,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
@@ -157,6 +159,18 @@ pub struct Widget {
     #[serde(skip)]
     #[cfg_attr(test, ts(skip))]
     pub validate: fn(&Values) -> Result<(), &'static str>,
+}
+
+impl Widget {
+    pub(crate) fn refresh(&self, options: &Values, public_internet: bool) -> Duration {
+        let floor = self
+            .fields
+            .iter()
+            .find(|field| field.id == "refresh")
+            .and_then(|field| field.min)
+            .unwrap_or(MIN_REFRESH as u32);
+        refresh(options, public_internet).max(Duration::from_secs(u64::from(floor)))
+    }
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -208,6 +222,11 @@ impl Field {
             }),
             Kind::Secret => text().is_some_and(|s| !s.chars().any(char::is_control)),
             Kind::Text => text().is_some(),
+            Kind::Decimal => text()
+                .and_then(|s| s.trim().parse::<f64>().ok())
+                .is_some_and(|n| {
+                    n.is_finite() && self.max.is_none_or(|max| n.abs() <= f64::from(max))
+                }),
             Kind::Bool => value.is_boolean(),
             Kind::Number => value.as_u64().is_some_and(|n| {
                 self.min.is_none_or(|min| n >= u64::from(min))
@@ -236,6 +255,7 @@ pub enum Kind {
     Text,
     Secret,
     Number,
+    Decimal,
     Bool,
     Select,
     List,

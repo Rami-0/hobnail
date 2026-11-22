@@ -623,6 +623,18 @@ Verified from: [RSS 2.0](https://www.rssboard.org/rss-specification),
 
 UNVERIFIED: Live feeds. Non-UTF-8 encodings and relative article links are unsupported.
 
+## Weather (Open-Meteo)
+
+With provider internet access enabled, enter latitude and longitude in decimal
+degrees. Hobnail contacts only `api.open-meteo.com` and uses the free API for
+current temperature and conditions and today's high and low in the location's
+time zone. Choose Celsius or Fahrenheit and optionally show an outlook for
+three days, including today. Refresh is at least 15 minutes.
+
+Verified from: [Open-Meteo Forecast API and WMO code table](https://open-meteo.com/en/docs).
+
+UNVERIFIED: Live API responses, quota behavior and location coverage.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
