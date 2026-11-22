@@ -94,6 +94,10 @@ tab.on("Fetch.requestPaused", ({ requestId, request }) => {
   inject = undefined;
   void tab.send("Fetch.disable");
 });
+async function clickNoteButton(label) {
+  assert.ok(await tab.ev(`(() => { const b = [...document.querySelectorAll(".note button")].find((b) => b.textContent === ${q(label)}); if (b) b.id = "hb-note-action"; return !!b; })()`), `note button ${label}`);
+  await click("#hb-note-action");
+}
 async function addProvider(id) {
   await click('button[aria-label="Add an integration"]');
   await click(`[role="option"][data-value="${id}"]`);
@@ -117,6 +121,12 @@ try {
   await require("theme applied", `document.documentElement.dataset.theme === ${q(theme)}`);
   await shot("appearance");
   if (failures) {
+    // A failed draft load offers Retry, which loads it again.
+    await failOnce("/api/v1/onboarding/draft", "GET", 503, { code: "unavailable", message: "Fixture load failure." });
+    await tab.send("Page.reload");
+    await require("a failed draft load offers Retry", `[...document.querySelectorAll(".note")].some((n) => n.textContent.includes("Fixture load failure.") && [...n.querySelectorAll("button")].some((b) => b.textContent === "Retry"))`);
+    await clickNoteButton("Retry");
+    await step("Appearance");
     // A step change whose save fails on an item this step does not show:
     // the general note names it and "Retry save" makes the step change.
     await require("theme autosaved", 'document.querySelector(".setup-actions [role=status]")?.textContent === "Draft saved"');
@@ -124,7 +134,7 @@ try {
     await nav("continue");
     await require("an item failure off this step shows the general note with Retry save", `[...document.querySelectorAll(".note")].some((n) => n.textContent.includes("Fixture item failure.") && [...n.querySelectorAll("button")].some((b) => b.textContent === "Retry save"))`);
     await step("Appearance");
-    await click(".note button");
+    await clickNoteButton("Retry save");
     await step("Discover services");
     await require("the retried step change cleared the note", `!document.body.textContent.includes("Fixture item failure.")`);
     await nav("back");
@@ -221,7 +231,14 @@ try {
   await step("Review dashboard");
   if (!empty) await require("review names the selected service and its section", 'document.querySelector(".setup-fields").textContent.includes("Selected service") && document.querySelector(".setup-fields").textContent.includes("Home tools")');
   await shot("review");
-  await nav("create");
+  if (failures) {
+    // Storage failing during the commit: a plain message and Retry.
+    await failOnce("/api/v1/onboarding/commit", "POST", 500, { code: "internal", message: "dashboard storage unavailable" });
+    await nav("create");
+    await require("a failed commit explains itself and offers Retry", `[...document.querySelectorAll(".note")].some((n) => n.textContent.includes("Hobnail could not create the board. Your setup is saved; try again.") && [...n.querySelectorAll("button")].some((b) => b.textContent === "Retry"))`);
+    await clickNoteButton("Retry");
+    await require("Retry creates the board", `location.pathname.startsWith("/app/boards/") && !!${el(attr("board"))}`);
+  } else await nav("create");
   await require("created board opens", `location.pathname.startsWith("/app/boards/") && !!${el(attr("board"))}`);
   await require("board uses the chosen theme", `document.documentElement.dataset.theme === ${q(theme)}`);
   if (empty) {

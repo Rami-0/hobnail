@@ -35,9 +35,13 @@ function openBoard(id: string) {
   window.location.replace(`/app/boards/${id}`);
 }
 
+// The draft load runs once per page: Retry loads the page again, and with
+// an expired session the reload goes to sign-in and back here.
+const retry = () => window.location.reload();
+
 export default function SetupPage() {
   const [draft, setDraft] = useState<SetupDraft>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Failed>();
   useEffect(() => {
     const controller = new AbortController();
     void api.get<SetupDraft>(`${PATH}/draft`, { signal: controller.signal }).then((response) => {
@@ -45,14 +49,16 @@ export default function SetupPage() {
       if (response.kind === "ok") {
         if (response.data.board_id) openBoard(response.data.board_id);
         else setDraft(response.data);
-      } else setError(response.kind === "error" && response.status === 404 ? "There is no guided setup draft for this account." : response.message);
+      } else setError(response);
     });
     return () => controller.abort();
   }, []);
   if (draft) return <Wizard initial={draft} />;
   return <main id="main" className="page narrow">
     <PageHeader title="Set up Hobnail" />
-    {error ? <Note kind="bad" action={<a className="btn btn-link" href="/app">Go to Home</a>}>{error}</Note> : <p role="status">Loading setup draft…</p>}
+    {error ? <Note kind="bad" action={<><Button onClick={retry}>{error.kind === "sign_in" ? "Sign in" : "Retry"}</Button>
+      <a className="btn btn-link" href="/app">Go to Home</a></>}>
+      {error.kind === "error" && error.status === 404 ? "There is no guided setup draft for this account." : error.message}</Note> : <p role="status">Loading setup draft…</p>}
   </main>;
 }
 
@@ -71,8 +77,9 @@ function newItem(target: SetupTarget, name: string, group = ""): SetupItem {
 // `draft`: a failed draft save, holding the step it was saving, which
 // "Retry save" saves again.
 type Failure = { message: string; stale?: boolean; draft?: SetupDocument["step"]; item?: string; field?: string };
+type Failed = Exclude<ApiResult<unknown>, { kind: "ok" }>;
 
-function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft?: SetupDocument["step"]): Failure {
+function setupFailure(result: Failed, draft?: SetupDocument["step"]): Failure {
   const [, item, field] = result.kind === "invalid" ? result.field?.split(".") ?? [] : [];
   return { message: result.message, stale: result.kind === "stale", draft, item, field };
 }
@@ -274,6 +281,9 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       openBoard(result.data.board_id);
     } else {
       const problem = setupFailure(result);
+      if (result.kind === "error" && result.status >= 500) {
+        problem.message = "Hobnail could not create the board. Your setup is saved; try again.";
+      }
       if (problem.field === "integration_choice") {
         const latest = await api.get<SetupDraft>(`${PATH}/draft`);
         if (latest.kind === "ok" && latest.data.revision === draft.revision) {
@@ -464,7 +474,9 @@ function Wizard({ initial }: { initial: SetupDraft }) {
           </>}
         </fieldset>
         {failure && (!failure.item || !shown) && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
-          : retryStep ? <Button disabled={controlsDisabled} onClick={() => void goTo({ ...doc, step: retryStep })}>Retry save</Button> : undefined}>{failure.message}</Note>}
+          : retryStep ? <Button disabled={controlsDisabled} onClick={() => void goTo({ ...doc, step: retryStep })}>Retry save</Button>
+          // Otherwise board creation failed (the commit is safe to repeat).
+          : <Button disabled={controlsDisabled || dirty} onClick={() => void create()}>Retry</Button>}>{failure.message}</Note>}
         <div className="acts setup-actions">
           <Button data-testid="setup-back" disabled={controlsDisabled || stepIndex === 0} onClick={() => void go("back")}>Back</Button>
           {step !== "review" && <Button data-testid="setup-skip" disabled={controlsDisabled} onClick={() => void go("skip")}>Skip</Button>}
