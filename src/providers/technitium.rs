@@ -132,8 +132,7 @@ mod tests {
 
     #[tokio::test]
     async fn reads_zone_total_and_maps_api_token_errors() {
-        const LIST: &str =
-            "POST /prefix/api/zones/list HTTP/1.1";
+        const LIST: &str = "POST /prefix/api/zones/list HTTP/1.1";
         const ZONE_BODY: &str =
             r#"{"status":"ok","response":{"totalZones":12,"zones":[{"name":"example.invalid"}]}}"#;
         exercise(&TECHNITIUM, &[(TOKEN, "fake+token")], Values::new(), &[

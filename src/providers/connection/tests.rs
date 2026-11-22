@@ -839,14 +839,19 @@ fn secure_session_cookie_requires_https() {
     let policy = policy();
     let response = Response {
         status: 200,
-        headers: [(hyper::header::SET_COOKIE, "sid=fixture; Path=/; sEcUrE; HttpOnly".parse().unwrap())]
-            .into_iter()
-            .collect(),
+        headers: [(
+            hyper::header::SET_COOKIE,
+            "sid=fixture; Path=/; sEcUrE; HttpOnly".parse().unwrap(),
+        )]
+        .into_iter()
+        .collect(),
         body: Default::default(),
     };
     for (scheme, accepted) in [("http", false), ("https", true)] {
         let target = Target::new(format!("{scheme}://127.0.0.1"), Default::default(), false);
-        let permit = std::sync::Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let permit = std::sync::Arc::new(Semaphore::new(1))
+            .try_acquire_owned()
+            .unwrap();
         let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
         let session = conn.session_cookie(&response, "sid");
         assert_eq!(session.is_ok(), accepted);

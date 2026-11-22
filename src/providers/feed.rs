@@ -84,7 +84,8 @@ impl Entry {
             } else {
                 title
             },
-            link: (!self.link_overflow && link.len() <= LINK && navigation_link(link)).then(|| link.into()),
+            link: (!self.link_overflow && link.len() <= LINK && navigation_link(link))
+                .then(|| link.into()),
             secondary: (!secondary.is_empty()).then_some(secondary),
             time: None,
         }

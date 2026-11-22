@@ -59,7 +59,11 @@ async fn get<T: serde::de::DeserializeOwned>(
     plugin: &str,
 ) -> Result<Option<T>, Fault> {
     let optional = matches!(plugin, "fs" | "sensors");
-    let suffix = if version == 4 && optional { "/top/5" } else { "" };
+    let suffix = if version == 4 && optional {
+        "/top/5"
+    } else {
+        ""
+    };
     let path = format!("api/{version}/{plugin}{suffix}");
     let basic = optional_basic(conn)?;
     let response = conn
@@ -77,7 +81,9 @@ async fn get<T: serde::de::DeserializeOwned>(
             detail: String,
         }
         if serde_json::from_slice::<Error>(&response.body).is_ok_and(|error| {
-            error.detail.starts_with(&format!("Unknown plugin {plugin} (available plugins:"))
+            error
+                .detail
+                .starts_with(&format!("Unknown plugin {plugin} (available plugins:"))
         }) {
             return Ok(None);
         }

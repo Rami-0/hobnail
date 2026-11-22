@@ -167,7 +167,10 @@ mod tests {
     async fn public_page_and_heartbeat_map_status_and_incident() {
         const PAGE: &str = "GET /prefix/api/status-page/home HTTP/1.1";
         const PAGE_BODY: &str = r#"{"config":{"slug":"home"},"incident":{"title":"Service outage","content":"Investigating"},"publicGroupList":[{"monitorList":[{"id":1,"name":"Web"},{"id":2,"name":"DNS"},{"id":3,"name":"Mail"},{"id":4,"name":"Storage"},{"id":5,"name":"New monitor"}]}]}"#;
-        let oversized = format!(r#"{{"heartbeatList":{{}},"uptimeList":{{{}}}}}"#, " ".repeat(128 * 1024));
+        let oversized = format!(
+            r#"{{"heartbeatList":{{}},"uptimeList":{{{}}}}}"#,
+            " ".repeat(128 * 1024)
+        );
         exercise(
             &UPTIME_KUMA,
             &[],

@@ -61,24 +61,36 @@ fn indexers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         let now = unix_now();
         let start = fmt_utc(now.saturating_sub(7 * 86_400));
         let end = fmt_utc(now);
-        let stats = within_response_limit(arr::get::<Stats>(
-            conn,
-            "api/v1/indexerstats",
-            &[
-                ("startDate", Input::Text(&start)),
-                ("endDate", Input::Text(&end)),
-            ],
-        )
-        .await)?;
+        let stats = within_response_limit(
+            arr::get::<Stats>(
+                conn,
+                "api/v1/indexerstats",
+                &[
+                    ("startDate", Input::Text(&start)),
+                    ("endDate", Input::Text(&end)),
+                ],
+            )
+            .await,
+        )?;
         let mut rows = vec![("Temporarily blocked".into(), blocked.len().to_string())];
         let count = |metric: fn(&Indexer) -> u32| {
             stats.as_ref().map_or_else(
                 || "Unavailable".into(),
-                |stats| stats.indexers.iter().map(|indexer| u64::from(metric(indexer))).sum::<u64>().to_string(),
+                |stats| {
+                    stats
+                        .indexers
+                        .iter()
+                        .map(|indexer| u64::from(metric(indexer)))
+                        .sum::<u64>()
+                        .to_string()
+                },
             )
         };
         rows.push(("Grabs (7 days)".into(), count(|i| i.number_of_grabs)));
-        rows.push(("Failed grabs (7 days)".into(), count(|i| i.number_of_failed_grabs)));
+        rows.push((
+            "Failed grabs (7 days)".into(),
+            count(|i| i.number_of_failed_grabs),
+        ));
         for status in blocked.into_iter().take(5) {
             let name = stats
                 .iter()
@@ -110,7 +122,10 @@ mod tests {
         const STATUS: &str = "GET /prefix/api/v1/indexerstatus HTTP/1.1";
         const KEY: &str = "fake-prowlarr-api-key";
         const BLOCKED: &str = r#"[{"id":2,"indexerId":9,"disabledTill":"2026-11-22T01:00:00Z"},{"id":3,"indexerId":11,"disabledTill":"2026-11-22T02:00:00Z"}]"#;
-        let oversized = format!(r#"{{"indexers":[],"userAgents":[],"hosts":[]{} }}"#, " ".repeat(128 * 1024));
+        let oversized = format!(
+            r#"{{"indexers":[],"userAgents":[],"hosts":[]{} }}"#,
+            " ".repeat(128 * 1024)
+        );
         exercise(&PROWLARR, &[("api_key", KEY)], Values::new(), &[
             Exchange { request: STATUS, status: 200, body: BLOCKED },
             Exchange { request: STATUS, status: 200, body: BLOCKED },

@@ -149,9 +149,15 @@ fn expirations<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody>
         let now = unix_now();
         let mut expiring = Vec::new();
         let mut incomplete = 0;
-        for device in devices(conn).await?.into_iter().filter(|device| !device.key_expiry_disabled) {
+        for device in devices(conn)
+            .await?
+            .into_iter()
+            .filter(|device| !device.key_expiry_disabled)
+        {
             match timestamp(device.expires.as_deref()) {
-                Some(at) if (now..=now + EXPIRY_WINDOW).contains(&at) => expiring.push((at, device.hostname)),
+                Some(at) if (now..=now + EXPIRY_WINDOW).contains(&at) => {
+                    expiring.push((at, device.hostname))
+                }
                 None => incomplete += 1,
                 _ => {}
             }
@@ -163,16 +169,16 @@ fn expirations<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody>
             });
         }
         let mut items: Vec<_> = expiring
-                .into_iter()
-                .take(10)
-                .map(|(at, name)| BodyItem {
-                    icon: None,
-                    title: display_text(conn, name),
-                    secondary: Some(format!("Expires {}", fmt_utc(at))),
-                    link: None,
-                    time: None,
-                })
-                .collect();
+            .into_iter()
+            .take(10)
+            .map(|(at, name)| BodyItem {
+                icon: None,
+                title: display_text(conn, name),
+                secondary: Some(format!("Expires {}", fmt_utc(at))),
+                link: None,
+                time: None,
+            })
+            .collect();
         if incomplete > 0 {
             items.push(BodyItem {
                 title: format!("Expiry data unavailable for {incomplete} device(s)"),
@@ -256,7 +262,10 @@ mod tests {
                 let keys = fetch(1).await;
                 assert_eq!(keys["items"].as_array().unwrap().len(), 2);
                 assert_eq!(keys["items"][0]["title"], "a");
-                assert_eq!(keys["items"][1]["title"], "Expiry data unavailable for 1 device(s)");
+                assert_eq!(
+                    keys["items"][1]["title"],
+                    "Expiry data unavailable for 1 device(s)"
+                );
                 assert_test_fault(conn, &TAILSCALE, Class::Auth).await;
                 assert_test_fault(conn, &TAILSCALE, Class::Protocol).await;
             },

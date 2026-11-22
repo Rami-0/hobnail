@@ -122,7 +122,8 @@ fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
 
 fn streams<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let Some(sessions) = within_response_limit(get::<Vec<Playback>>(conn, "Sessions", &[]).await)?
+        let Some(sessions) =
+            within_response_limit(get::<Vec<Playback>>(conn, "Sessions", &[]).await)?
         else {
             return Ok(StructuredBody::Unavailable {
                 message: "Session list too large to show active streams.".into(),

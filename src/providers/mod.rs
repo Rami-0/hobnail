@@ -775,27 +775,38 @@ mod tests {
 #[cfg(test)]
 #[tokio::test]
 async fn compact_display_text_fits_widget_cache() {
-    batch_test::exercise(&jellyfin::JELLYFIN, &[], Values::new(), &[], |_, _| "", async |conn| {
-        let oversized = "é".repeat(30_000);
-        let title = display_text(conn, oversized);
-        assert_eq!(title.chars().count(), 161);
-        let short = display_text(conn, {
-            let mut text = String::with_capacity(48_000);
-            text.push_str("short");
-            text
-        });
-        let mut cache = widgets::WidgetCache::default();
-        let id = "provider-fetch:fixture";
-        let attempt = cache.begin(id);
-        let output = widgets::WidgetOutput {
-            structured: Some(widgets::StructuredBody::StatGrid {
-                rows: vec![(short, title)],
-            }.into()),
-            ..Default::default()
-        };
-        assert!(cache.record(id, attempt, std::time::Instant::now(), output));
-        let output = cache.get(id).unwrap();
-        assert!(output.error.is_none());
-        assert!(output.structured.is_some());
-    }).await;
+    batch_test::exercise(
+        &jellyfin::JELLYFIN,
+        &[],
+        Values::new(),
+        &[],
+        |_, _| "",
+        async |conn| {
+            let oversized = "é".repeat(30_000);
+            let title = display_text(conn, oversized);
+            assert_eq!(title.chars().count(), 161);
+            let short = display_text(conn, {
+                let mut text = String::with_capacity(48_000);
+                text.push_str("short");
+                text
+            });
+            let mut cache = widgets::WidgetCache::default();
+            let id = "provider-fetch:fixture";
+            let attempt = cache.begin(id);
+            let output = widgets::WidgetOutput {
+                structured: Some(
+                    widgets::StructuredBody::StatGrid {
+                        rows: vec![(short, title)],
+                    }
+                    .into(),
+                ),
+                ..Default::default()
+            };
+            assert!(cache.record(id, attempt, std::time::Instant::now(), output));
+            let output = cache.get(id).unwrap();
+            assert!(output.error.is_none());
+            assert!(output.structured.is_some());
+        },
+    )
+    .await;
 }

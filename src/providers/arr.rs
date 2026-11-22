@@ -72,11 +72,17 @@ pub(super) fn overview_v3<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, Stru
             ],
         )
         .await?;
-        let issues = within_response_limit(get::<Vec<HealthIssue>>(conn, "api/v3/health", &[]).await)?;
+        let issues =
+            within_response_limit(get::<Vec<HealthIssue>>(conn, "api/v3/health", &[]).await)?;
         let mut rows = vec![
             ("Queue".into(), queue.total_count.to_string()),
             ("Missing".into(), missing.total_records.to_string()),
-            ("Health issues".into(), issues.as_ref().map_or_else(|| "Unavailable".into(), |issues| issues.len().to_string())),
+            (
+                "Health issues".into(),
+                issues
+                    .as_ref()
+                    .map_or_else(|| "Unavailable".into(), |issues| issues.len().to_string()),
+            ),
         ];
         rows.extend(issues.into_iter().flatten().take(5).map(|issue| {
             (

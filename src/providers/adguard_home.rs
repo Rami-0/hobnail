@@ -86,9 +86,17 @@ fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                     stats.num_blocked_filtering as f64 / stats.num_dns_queries as f64 * 100.0
                 )
             };
-            (stats.num_dns_queries.to_string(), stats.num_blocked_filtering.to_string(), percent)
+            (
+                stats.num_dns_queries.to_string(),
+                stats.num_blocked_filtering.to_string(),
+                percent,
+            )
         } else {
-            ("Unavailable".into(), "Unavailable".into(), "Unavailable".into())
+            (
+                "Unavailable".into(),
+                "Unavailable".into(),
+                "Unavailable".into(),
+            )
         };
         Ok(StructuredBody::StatGrid {
             rows: vec![
@@ -144,8 +152,16 @@ mod tests {
                     status: 200,
                     body: r#"{"num_dns_queries":40,"num_blocked_filtering":5}"#,
                 },
-                Exchange { request: STATUS, status: 200, body: ACTIVE },
-                Exchange { request: "GET /prefix/control/stats/config HTTP/1.1", status: 200, body: r#"{"enabled":false,"interval":86400000,"ignored":[]}"# },
+                Exchange {
+                    request: STATUS,
+                    status: 200,
+                    body: ACTIVE,
+                },
+                Exchange {
+                    request: "GET /prefix/control/stats/config HTTP/1.1",
+                    status: 200,
+                    body: r#"{"enabled":false,"interval":86400000,"ignored":[]}"#,
+                },
                 Exchange {
                     request: STATUS,
                     status: 401,
@@ -177,11 +193,18 @@ mod tests {
                         ["Protection", "On"],
                     ])
                 );
-                let disabled = super::super::fetch(conn, &ADGUARD_HOME.widgets[0], &Values::new()).await.unwrap();
-                assert_eq!(serde_json::to_value(disabled).unwrap()["rows"], json!([
-                    ["Queries", "Unavailable"], ["Blocked by filters", "Unavailable"],
-                    ["Blocked %", "Unavailable"], ["Protection", "On"]
-                ]));
+                let disabled = super::super::fetch(conn, &ADGUARD_HOME.widgets[0], &Values::new())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    serde_json::to_value(disabled).unwrap()["rows"],
+                    json!([
+                        ["Queries", "Unavailable"],
+                        ["Blocked by filters", "Unavailable"],
+                        ["Blocked %", "Unavailable"],
+                        ["Protection", "On"]
+                    ])
+                );
                 assert_test_fault(conn, &ADGUARD_HOME, Class::Auth).await;
                 assert_test_fault(conn, &ADGUARD_HOME, Class::Protocol).await;
             },

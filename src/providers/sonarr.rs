@@ -49,7 +49,8 @@ struct Series {
 
 fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let episodes: Option<Vec<Episode>> = arr::calendar(conn, &[("includeSeries", "true")]).await?;
+        let episodes: Option<Vec<Episode>> =
+            arr::calendar(conn, &[("includeSeries", "true")]).await?;
         Ok(arr::upcoming(episodes, |episode| {
             let title = display_text(
                 conn,
