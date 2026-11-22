@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -35,10 +36,17 @@ const MAX_BODY: usize = 4096;
 /// Eight waiting requests retain only parsed credentials and request state.
 pub(crate) const CREDENTIAL_WAITERS: usize = 8;
 const CREDENTIAL_WAIT: Duration = Duration::from_secs(5);
+/// Sign-in responses while legacy hashes remain take at least this long
+/// after the request obtains the credential permit.
+pub(crate) const MIN_CREDENTIAL_FLOOR: Duration = Duration::from_millis(150);
+/// Upper bound of the adaptive floor: one sign-in per second at worst.
+const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_secs(1);
 
 pub(crate) struct CredentialQueue {
     active: Arc<Semaphore>,
     waiters: Semaphore,
+    /// The slowest credential operation seen so far, in microseconds.
+    slowest_us: AtomicU64,
 }
 
 impl Default for CredentialQueue {
@@ -46,8 +54,15 @@ impl Default for CredentialQueue {
         Self {
             active: Arc::new(Semaphore::new(1)),
             waiters: Semaphore::new(CREDENTIAL_WAITERS),
+            slowest_us: AtomicU64::new(0),
         }
     }
+}
+
+/// Twice the slowest observed operation, so a legacy hash (measured at about
+/// 1.5 times a current one) stays under the floor on slower hardware too.
+fn credential_floor(slowest: Duration) -> Duration {
+    (slowest * 2).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
 }
 
 impl CredentialQueue {
@@ -60,6 +75,18 @@ impl CredentialQueue {
             .await
             .ok()?
             .ok()
+    }
+
+    /// The current padding for sign-in responses (see [`credential_floor`]).
+    pub(crate) fn floor(&self) -> Duration {
+        credential_floor(Duration::from_micros(
+            self.slowest_us.load(Ordering::Relaxed),
+        ))
+    }
+
+    fn observe(&self, work: Duration) {
+        let us = u64::try_from(work.as_micros()).unwrap_or(u64::MAX);
+        self.slowest_us.fetch_max(us, Ordering::Relaxed);
     }
 
     #[cfg(test)]
@@ -812,25 +839,38 @@ pub(crate) async fn credential_route(
     let Some(permit) = state.credential_queue.acquire().await else {
         return credential_busy(legacy);
     };
+    // The deadline starts when this request holds the only permit, and the
+    // permit is kept until then. A queued request therefore waits for the
+    // previous holder's deadline, never for its hash, so neither its own
+    // response time nor a later one reveals which hash profile was checked.
+    let deadline = tokio::time::Instant::now() + state.credential_queue.floor();
     let st = state.clone();
-    let (outcome, failure_deadline) = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        let started = tokio::time::Instant::now();
-        let legacy_hashes = action == CredentialAction::Login
-            && st
+    let joined = tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        // Fail closed: a scan error pads like a remaining legacy hash.
+        let padded = action == CredentialAction::Login
+            && !st
                 .db
                 .legacy_hash_users()
-                .is_ok_and(|users| !users.is_empty());
+                .is_ok_and(|users| users.is_empty());
         let outcome = authenticate(&st, ip, action, credentials);
-        let deadline = (legacy_hashes && matches!(outcome, Err(Attempt::Wrong)))
-            .then(|| started + Duration::from_millis(150));
-        (outcome, deadline)
+        st.credential_queue.observe(started.elapsed());
+        (outcome, padded, permit)
     })
-    .await
-    .unwrap_or((Err(Attempt::Failed), None));
-    if let Some(deadline) = failure_deadline {
-        tokio::time::sleep_until(deadline).await;
-    }
+    .await;
+    let outcome = match joined {
+        Ok((outcome, padded, permit)) => {
+            if padded {
+                tokio::time::sleep_until(deadline).await;
+            }
+            drop(permit);
+            outcome
+        }
+        Err(_) => {
+            tokio::time::sleep_until(deadline).await;
+            Err(Attempt::Failed)
+        }
+    };
     let token = match outcome {
         Ok(token) => token,
         Err(Attempt::Limited(secs)) => return limited(secs),
@@ -1078,6 +1118,27 @@ pub(crate) fn set_password_for_tests(db: &Db, password: &str) {
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn credential_floor_follows_the_slowest_operation_within_bounds() {
+        assert_eq!(credential_floor(Duration::ZERO), MIN_CREDENTIAL_FLOOR);
+        assert_eq!(
+            credential_floor(Duration::from_millis(69)),
+            MIN_CREDENTIAL_FLOOR
+        );
+        assert_eq!(
+            credential_floor(Duration::from_millis(300)),
+            Duration::from_millis(600)
+        );
+        assert_eq!(
+            credential_floor(Duration::from_secs(9)),
+            MAX_CREDENTIAL_FLOOR
+        );
+        let queue = CredentialQueue::default();
+        queue.observe(Duration::from_millis(200));
+        queue.observe(Duration::from_millis(100));
+        assert_eq!(queue.floor(), Duration::from_millis(400));
+    }
 
     #[test]
     fn argon2id_hashes_are_salted_and_verifiable() {

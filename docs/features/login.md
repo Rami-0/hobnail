@@ -94,12 +94,18 @@ migration is complete. The Owner-only `GET /api/v1/users` response also marks
 each account with `legacy_hash`. The shipped Compose and deploy
 configurations set no memory limit.
 
-While legacy hashes remain, failed sign-ins that reach verification have a
-150 ms response floor. The server waits after releasing the hashing permit.
-In a loopback test of the pre-fix release, 30 failed attempts per profile
+While legacy hashes remain, or when the server cannot tell whether any
+remain, every sign-in that reaches the credential queue (wrong password,
+unknown or disabled account, back-off refusal after queueing, and success)
+is answered no earlier than a floor after it obtained the single credential
+permit, and the permit is held until then. A queued request therefore waits
+for the previous holder's deadline rather than its hash. The floor is twice
+the slowest credential operation seen since start, at least 150 ms and at
+most one second, so it grows on slower hardware. In a loopback test of the pre-fix release, 30 failed attempts per profile
 had medians of 68.85 ms for legacy hashes, 44.52 ms for current hashes and
 51.44 ms for unknown accounts. Their maxima were 82.52, 67.69 and 106.20 ms,
-respectively. Normal variation under load can still exceed the floor.
+respectively. Normal variation under load, or a first legacy hash slower
+than 150 ms before the floor has adapted, can still exceed it.
 
 Cold SQLite reads can also raise the container's reported memory usage. The
 kernel charges file-cache pages to the container that brings them into cache

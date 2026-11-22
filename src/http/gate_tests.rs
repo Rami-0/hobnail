@@ -2677,3 +2677,100 @@ sample_interval = "45s"
         }
     }
 }
+
+/// A legacy-profile PHC string: listed by the legacy scan, never verified here.
+const LEGACY_PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+fn add_user(st: &AppState, name: &str, hash: rusqlite::types::Value, disabled: bool) {
+    st.db.with((), |i| {
+        i.conn.execute(
+            "INSERT INTO users(name,password_hash,role,created,updated,disabled)
+             VALUES (?1,?2,'viewer',0,0,?3)",
+            rusqlite::params![name, hash, disabled],
+        )?;
+        Ok(())
+    });
+}
+
+async fn login_as(addr: std::net::SocketAddr, username: &str, password: &str) -> Resp {
+    req(
+        addr,
+        "POST",
+        "/api/login",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &format!("http://{addr}")),
+        ],
+        &serde_json::json!({"username": username, "password": password}).to_string(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn every_sign_in_outcome_waits_for_the_floor_while_legacy_hashes_remain() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let fast = st.db.credential("admin").unwrap().1;
+    add_user(&st, "old", LEGACY_PHC.to_string().into(), false);
+    add_user(&st, "gone", fast.into(), true);
+    let addr = start(st.clone()).await;
+    for (username, password, status) in [
+        ("admin", "wrong horse", 401),
+        ("nobody", PW, 401),
+        ("gone", PW, 401),
+        ("admin", PW, 200),
+    ] {
+        *st.login_limiter.lock().unwrap() = Default::default();
+        let sent = std::time::Instant::now();
+        let response = login_as(addr, username, password).await;
+        assert_eq!(response.status, status, "{username}");
+        assert!(
+            sent.elapsed() >= crate::auth::MIN_CREDENTIAL_FLOOR,
+            "{username} answered after {:?}",
+            sent.elapsed()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_login_limited_after_queueing_waits_for_its_own_floor() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    add_user(&st, "old", LEGACY_PHC.to_string().into(), false);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    // A fails against the target; B, from the same client, queues behind it
+    // and is then refused by the back-off A's failure started.
+    let a = tokio::spawn(login_as(addr, "admin", "wrong horse"));
+    wait_for_queued_logins(&st, 1).await;
+    let b = tokio::spawn(queued_login(addr));
+    wait_for_queued_logins(&st, 2).await;
+    let released = std::time::Instant::now();
+    drop(permit);
+    let floor = crate::auth::MIN_CREDENTIAL_FLOOR;
+    let a = a.await.unwrap();
+    assert_eq!(a.status, 401);
+    assert!(released.elapsed() >= floor);
+    let b = b.await.unwrap();
+    assert_eq!(b.status, 429);
+    // B obtained the permit only at A's deadline, not when A's hash ended,
+    // and then waited its own floor.
+    assert!(
+        released.elapsed() >= floor * 2,
+        "B answered {:?} after release",
+        released.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_legacy_scan_still_pads_failed_logins() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    // A non-text hash makes the legacy scan fail.
+    add_user(&st, "broken", rusqlite::types::Value::Blob(vec![0]), false);
+    assert!(st.db.legacy_hash_users().is_err());
+    let addr = start(st.clone()).await;
+    let sent = std::time::Instant::now();
+    assert_eq!(login_as(addr, "admin", "wrong horse").await.status, 401);
+    assert!(sent.elapsed() >= crate::auth::MIN_CREDENTIAL_FLOOR);
+}
