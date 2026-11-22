@@ -26,6 +26,7 @@
 /* ---- table ---- */
 .ct .tablewrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
 .ctbl{table-layout:fixed}
+.ctbl .c-name{width:100%}
 .ctbl .c-stack{width:90px}
 .ctbl .c-image{width:160px}
 .ctbl .c-state{width:116px}

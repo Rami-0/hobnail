@@ -76,7 +76,7 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
     page, engine, profile, profileName, unit, ctx, events,
     coarse: () => page.evaluate(() => matchMedia("(pointer:coarse)").matches),
     async shot(name) {
-      if (shots >= 25) return;
+      if (shots >= 25 && !name.endsWith("FAIL")) return;
       shots++;
       const file = path.join(out, "shots", `${engine}-${profileName}-${unit}-${name}`.replace(/[^a-z0-9.-]+/gi, "_") + ".jpg");
       fs.mkdirSync(path.dirname(file), { recursive: true });

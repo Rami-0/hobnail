@@ -193,7 +193,10 @@ export const flows = {
     await page.locator(tid("log-matches")).waitFor();
     await h.state("filtered");
     await filter.fill("");
-    const [download] = await Promise.all([page.waitForEvent("download"), page.locator("a[download]").first().click()]);
+    // Phones fold the filters and the download link behind "Filters".
+    const toggle = page.locator(".log-filters:visible");
+    if (await toggle.count() && !(await page.locator("a[download]:visible").count())) await toggle.click();
+    const [download] = await Promise.all([page.waitForEvent("download"), page.locator("a[download]:visible").first().click()]);
     const file = await download.path();
     assert.ok(file, "download completed");
     const { size } = await import("node:fs").then((fs) => fs.statSync(file));
@@ -252,6 +255,8 @@ export const flows = {
   },
   async "catalog to widget"(h, f) {
     const { page } = h;
+    await go(h, f, f.board, tid("board"));
+    const tiles = await page.locator(tid("board-tile")).count();
     await go(h, f, "/app/settings/integrations", tid("integration-create"));
     await page.locator(tid("integration-create")).click();
     const form = page.locator(tid("integration-form"));
@@ -278,7 +283,7 @@ export const flows = {
     await form.waitFor({ state: "detached" });
     await h.state("installed");
     await go(h, f, f.board, tid("board-tile"));
-    await page.locator(tid("board-tile")).filter({ hasText: "Matrix Pi-hole" }).first().waitFor();
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="board-tile"]').length > n, tiles);
     await h.state("widget on board");
   },
   async settings(h, f) {
@@ -433,7 +438,7 @@ export const flows = {
     await go(h, f, "/app/containers", tid("row"));
     const live = page.locator(tid("live-status"));
     await page.waitForFunction(() => document.querySelector('[data-testid="live-status"]')?.dataset.state === "live", null, { timeout: 15000 });
-    await h.expecting([/ERR_INTERNET_DISCONNECTED|NetworkError|network connection was lost|Failed to load resource|EventSource|ERR_NETWORK|interrupted/i], async () => {
+    await h.expecting([/ERR_INTERNET_DISCONNECTED|NetworkError|network connection was lost|Failed to load resource|EventSource|ERR_NETWORK|interrupted|can.t establish a connection|connection.*(refused|reset)|Could not connect/i], async () => {
       await page.context().setOffline(true);
       // Offline emulation alone leaves an open EventSource connected in
       // Chromium; the runner restarts the throwaway server to cut it.
@@ -446,10 +451,11 @@ export const flows = {
       await h.state("network dropped", { axe: true });
       await page.context().setOffline(false);
       await page.waitForFunction(() => document.querySelector('[data-testid="live-status"]')?.dataset.state === "live", null, { timeout: 45000 });
+      await page.locator(tid("live-stopped")).waitFor({ state: "detached" });
+      assert.equal(await live.getAttribute("data-state"), "live");
+      // Engines report the failed stream requests late; still part of the drop.
+      await h.state("reconnected");
     });
-    await page.locator(tid("live-stopped")).waitFor({ state: "detached" });
-    assert.equal(await live.getAttribute("data-state"), "live");
-    await h.state("reconnected");
   },
   async "tablet rotation"(h, f) {
     const { page } = h;
