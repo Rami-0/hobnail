@@ -183,8 +183,10 @@ landing page.
   `options` as Settings. Each credential change supplies `item_id`, schema
   `field`, `base_url` and a write-only `secret`. Omit the change to keep that
   field, or send null to clear it. Draft responses return saved field origins
-  under `credential_bindings`.
-  Setup writes accept up to 2 MiB and 512 items. Item names and sections
+  under `credential_bindings`. Staged credentials expire after seven days
+  without a draft save; the draft itself is kept, and an expired field must
+  be entered again.
+  Setup writes accept up to 512 KiB and 512 items. Item names and sections
   accept up to 256 UTF-8 bytes, URLs up to 2,048 bytes, and icon names up to
   96 bytes. The legacy discovery source field accepts up to 4,096 bytes.
 - GET `/onboarding/discovery` for Docker availability, config status and the

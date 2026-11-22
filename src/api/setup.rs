@@ -80,6 +80,13 @@ const LABEL_BYTES: usize = 256;
 const URL_BYTES: usize = 2048;
 const ICON_BYTES: usize = 96;
 const SOURCE_BYTES: usize = 4096;
+/// Setup draft PUT body cap. Discovery offers at most 256 suggestions and a
+/// draft holds at most 512 items; a suggestion-derived item with long
+/// Docker names, a 256-byte link and an icon encodes to under 1 KiB, so 512
+/// such items fit with room for manual items with longer URLs. The body,
+/// the parsed document, its stored copy and the response view are alive
+/// together.
+const DRAFT_BYTES: usize = 512 * 1024;
 
 fn field_length(value: &str, field: &str, max: usize) -> Result<(), ApiError> {
     if value.len() > max {
@@ -822,7 +829,7 @@ pub(super) async fn route(
             &db.dashboard(|conn| view(conn, user.id, read(conn, user.id)?, &config))?,
         ),
         Handler::SetupSave => {
-            let update = super::read_json(req, 2 * 1024 * 1024).await?;
+            let update = super::read_json(req, DRAFT_BYTES).await?;
             let draft = db.dashboard(|conn| {
                 let draft = view(conn, user.id, save(conn, user.id, update, now)?, &config)?;
                 state.provider_connections.invalidate_draft(user.id);

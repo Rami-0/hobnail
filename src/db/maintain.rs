@@ -13,6 +13,9 @@ use super::{
 
 pub(crate) const HOUR: i64 = 3600;
 const WEEK: i64 = 7 * 86_400;
+/// How long credentials staged in the owner-setup draft outlive the draft's
+/// last save (docs/api.md, onboarding).
+const SETUP_CREDENTIALS_KEEP: i64 = WEEK;
 
 /// Background task: runs `maintain` a minute after start, then checks every
 /// ten minutes (`maintain` itself does the work at most hourly). The work
@@ -218,6 +221,18 @@ pub(super) fn prune(i: &mut Inner, now: i64) -> rusqlite::Result<()> {
             "DELETE FROM drafts WHERE updated < ?1 AND key != ?2",
             params![now - WEEK, super::accounts::SETUP_DRAFT_KEY],
         )?;
+        // The setup draft itself is kept (it is the owner's progress), but
+        // credentials staged for it expire after SETUP_CREDENTIALS_KEEP of
+        // inactivity, so an abandoned setup does not hold secrets forever.
+        tx.execute(
+            "DELETE FROM setup_credentials WHERE NOT EXISTS (
+               SELECT 1 FROM drafts d WHERE d.user_id = setup_credentials.user_id
+                 AND d.key = ?2 AND d.updated >= ?1)",
+            params![
+                now - SETUP_CREDENTIALS_KEEP,
+                super::accounts::SETUP_DRAFT_KEY
+            ],
+        )?;
         prune_provider_placements(&tx, None, now)?;
         tx.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
         tx.commit()?;
@@ -310,5 +325,37 @@ mod tests {
         assert_eq!(count(), 2);
         run_once(&db, WEEK + HOUR);
         assert_eq!(count(), 1);
+    }
+
+    #[test]
+    fn maintenance_expires_staged_setup_credentials_after_a_week_idle() {
+        let db = Db::open_in_memory().unwrap();
+        let key = crate::db::accounts::SETUP_DRAFT_KEY;
+        db.dashboard(|conn| {
+            conn.execute_batch(
+                "INSERT INTO users(id,name,password_hash,role,created,updated) VALUES
+                    (1,'active','fixture','owner',0,0),
+                    (2,'abandoned','fixture','admin',0,0),
+                    (3,'draftless','fixture','admin',0,0);
+                 INSERT INTO setup_credentials(user_id,item_id,field,origin,secret) VALUES
+                    (1,'item','secret','http://a.test','one'),
+                    (2,'item','secret','http://a.test','two'),
+                    (3,'item','secret','http://a.test','three');",
+            )?;
+            conn.execute(
+                "INSERT INTO drafts(user_id,key,value,updated) VALUES (1,?1,'{}',?2),(2,?1,'{}',?3)",
+                params![key, 2 * WEEK, WEEK - 1],
+            )
+        })
+        .unwrap();
+        run_once(&db, 2 * WEEK);
+        let kept = db
+            .dashboard(|conn| {
+                let mut st = conn.prepare("SELECT user_id FROM setup_credentials ORDER BY 1")?;
+                let rows = st.query_map([], |row| row.get::<_, i64>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap();
+        assert_eq!(kept, vec![1]);
     }
 }

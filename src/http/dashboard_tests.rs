@@ -1185,6 +1185,39 @@ const SETUP_DRAFT: &str = "/api/v1/onboarding/draft";
 const SETUP_DISCOVERY: &str = "/api/v1/onboarding/discovery";
 const SETUP_TEST: &str = "/api/v1/onboarding/test";
 const SETUP_COMMIT: &str = "/api/v1/onboarding/commit";
+/// The documented setup draft PUT cap (src/api/setup.rs DRAFT_BYTES).
+const DRAFT_BYTES: usize = 512 * 1024;
+
+#[tokio::test]
+async fn setup_draft_cap_fits_a_maximal_suggestion_draft_and_refuses_more() {
+    let st = state();
+    let addr = start(st.clone()).await;
+    let owner = browser_owner(addr).await;
+    owner.json("GET", SETUP_DRAFT, Value::Null, 200).await;
+    // 512 items (the item limit), each as long as a Docker-derived suggestion
+    // realistically gets: 64-byte names, a 256-byte link and a 96-byte icon.
+    let long = |c: char, n: usize| c.to_string().repeat(n);
+    let items: Vec<Value> = (0..512)
+        .map(|n| {
+            json!({
+                "id":format!("{n:032x}"),"included":true,"name":long('n', 64),"group":long('g', 64),
+                "target":{"kind":"board","payload":{
+                    "kind":"container","target":{"by":"compose","project":long('p', 64),"service":long('s', 64)},
+                    "title":long('t', 64),"icon":long('i', 96),
+                    "link":format!("https://{}.test/", long('l', 240))
+                }}
+            })
+        })
+        .collect();
+    let mut update =
+        json!({"revision":0,"document":{"step":"select","items":items},"credentials":[]});
+    let size = update.to_string().len();
+    assert!(size < DRAFT_BYTES, "{size}");
+    owner.json("PUT", SETUP_DRAFT, update.clone(), 200).await;
+    update["revision"] = json!(1);
+    update["document"]["items"][0]["source"] = json!(long('x', DRAFT_BYTES));
+    owner.json("PUT", SETUP_DRAFT, update, 413).await;
+}
 
 #[tokio::test]
 async fn setup_resumes_and_commits_once_with_a_failing_connection() {
