@@ -85,9 +85,13 @@ try {
       await inp.key("Escape");
       assert.ok(await tab.until(`!document.querySelector('[data-testid="palette"]')`), "palette closes");
 
-      // A missing tour chunk leaves the board as it is.
+      // A missing tour chunk leaves the board as it is. Finish the pending
+      // tour first, so its chunk is not loaded with the board.
+      await fixture.api("/api/v1/account/board-tour", "POST");
       await tab.send("Page.navigate", { url: new URL(`/app/boards/${fixture.board.id}`, base).href });
       assert.ok(await tab.until(`!!document.querySelector('[data-testid="board"] [data-testid="board-tile"]')`), "board renders");
+      await sleep(500);
+      assert.equal(await tab.ev(`!!document.querySelector('[data-testid="board-tour"]')`), false, "no tour before the replay");
       await block("*.js");
       await tab.ev(`history.pushState(null, "", location.pathname + "?tour=1"), dispatchEvent(new PopStateEvent("popstate"))`);
       assert.ok(await blocked(), "tour asset returned 404");
