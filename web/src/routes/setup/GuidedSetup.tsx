@@ -68,9 +68,11 @@ function newItem(target: SetupTarget, name: string, group = ""): SetupItem {
   return { id, name, group, target, included: true };
 }
 
-type Failure = { message: string; stale?: boolean; draft?: boolean; item?: string; field?: string };
+// `draft`: a failed draft save, holding the step it was saving, which
+// "Retry save" saves again.
+type Failure = { message: string; stale?: boolean; draft?: SetupDocument["step"]; item?: string; field?: string };
 
-function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft = false): Failure {
+function setupFailure(result: Exclude<ApiResult<unknown>, { kind: "ok" }>, draft?: SetupDocument["step"]): Failure {
   const [, item, field] = result.kind === "invalid" ? result.field?.split(".") ?? [] : [];
   return { message: result.message, stale: result.kind === "stale", draft, item, field };
 }
@@ -175,7 +177,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     savingRef.current = false;
     setSaving(false);
     if (response.kind !== "ok") {
-      setFailure(setupFailure(response, true));
+      setFailure(setupFailure(response, next.step));
       return null;
     }
     setDraft(response.data);
@@ -200,8 +202,16 @@ function Wizard({ initial }: { initial: SetupDraft }) {
     setFailure((current) => current?.item === id ? undefined : current);
   }
 
+  // Whether this render shows the item failure next to its item; when it
+  // does not (another step, a field not on screen), the general note does.
+  let shown = false;
+  function shownError(message?: string) {
+    shown ||= !!message;
+    return message;
+  }
+
   function fieldError(id: string, field: string) {
-    return failure?.item === id && failure.field === field ? failure.message : undefined;
+    return shownError(failure?.item === id && failure.field === field ? failure.message : undefined);
   }
 
   function update(id: string, replacement: Partial<SetupItem>) {
@@ -279,6 +289,8 @@ function Wizard({ initial }: { initial: SetupDraft }) {
   const itemLimit = doc.items.length >= 512;
   const known = new Set(doc.items.flatMap(({ target }) => target.kind === "board" ? [payloadIdentity(target.payload)] : []));
   const groups = selectedGroups(doc);
+  const connectionFields = ["url", "base_url", "fingerprint", ...providers.flatMap((p) => p.fields.map((f) => f.id))];
+  const retryStep = failure?.draft;
 
   function connection(item: SetupItem) {
     const { target, id } = item;
@@ -389,7 +401,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             </div>
             {doc.items.map((item) => <section className="setup-item" key={item.id} data-testid="setup-selection">
               <Field id={`${item.id}-include`} label={null}
-                error={failure?.item === item.id && !["name", "group", "url", "base_url", "fingerprint", ...providers.flatMap((p) => p.fields.map((f) => f.id))].includes(failure.field ?? "") ? failure.message : undefined}>
+                error={shownError(failure?.item === item.id && !["name", "group", ...connectionFields].includes(failure.field ?? "") ? failure.message : undefined)}>
                 <Checkbox checked={item.included} onChange={(included) => update(item.id, { included })}
                   label={`Include ${item.name || "unnamed service"}`} />
               </Field>
@@ -427,6 +439,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                   const fields = providers.find((entry) => entry.id === provider)?.fields;
                   const incomplete = incompleteField(item, !fields || hasEndpoint(fields));
                   const error = failure?.item === item.id ? failure : undefined;
+                  shown ||= !!error;
                   const matchId = draft.integration_matches[item.id];
                   const matches = matchId ? draft.matching_integrations[matchId] : undefined;
                   const matchError = error?.field === "integration_choice";
@@ -443,15 +456,15 @@ function Wizard({ initial }: { initial: SetupDraft }) {
                     </Field>}
                     {error && (!matchError || !matches) && <p className="bad-fg" role="alert">{error.message}</p>}
                     {fix && <Button variant="link" disabled={controlsDisabled} onClick={() => void goTo({
-                      ...doc, step: ["url", "base_url", "fingerprint", ...providers.flatMap((p) => p.fields.map((f) => f.id))].includes(fix) ? "connections" : "select",
+                      ...doc, step: connectionFields.includes(fix) ? "connections" : "select",
                     })}>Fix {item.name || "unnamed service"}</Button>}
                   </li>;
                 })}</ul>
               </section>)}
           </>}
         </fieldset>
-        {failure && !failure.item && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
-          : failure.draft ? <Button disabled={controlsDisabled} onClick={() => void persist(doc)}>Retry save</Button> : undefined}>{failure.message}</Note>}
+        {failure && (!failure.item || !shown) && <Note kind="bad" action={failure.stale ? <Button onClick={() => window.location.reload()}>Reload saved draft</Button>
+          : retryStep ? <Button disabled={controlsDisabled} onClick={() => void goTo({ ...doc, step: retryStep })}>Retry save</Button> : undefined}>{failure.message}</Note>}
         <div className="acts setup-actions">
           <Button data-testid="setup-back" disabled={controlsDisabled || stepIndex === 0} onClick={() => void go("back")}>Back</Button>
           {step !== "review" && <Button data-testid="setup-skip" disabled={controlsDisabled} onClick={() => void go("skip")}>Skip</Button>}

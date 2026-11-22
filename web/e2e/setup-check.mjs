@@ -77,6 +77,23 @@ async function fill(selector, value) {
   assert.ok(!response.error, `Could not enter value in ${selector}`);
   assert.ok(await tab.ev(`${el(selector)}?.value === ${q(value)}`), `Value reached ${selector}`);
 }
+// SETUP_FAILURES=1: answer the next matching request with an error once
+// (Fetch interception), the way a failing server would.
+const failures = process.env.SETUP_FAILURES === "1";
+let inject;
+async function failOnce(path, method, status, error) {
+  events.allow(({ url, status: got }) => new URL(url).pathname === path && got === status && `injected ${status}`);
+  inject = { path, method, status, error };
+  await tab.send("Fetch.enable", { patterns: [{ urlPattern: `${base.origin}${path}*` }] });
+}
+tab.on("Fetch.requestPaused", ({ requestId, request }) => {
+  const hit = inject && new URL(request.url).pathname === inject.path && request.method === inject.method;
+  if (!hit) return void tab.send("Fetch.continueRequest", { requestId });
+  const body = Buffer.from(JSON.stringify({ error: inject.error })).toString("base64");
+  void tab.send("Fetch.fulfillRequest", { requestId, responseCode: inject.status, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body });
+  inject = undefined;
+  void tab.send("Fetch.disable");
+});
 async function addProvider(id) {
   await click('button[aria-label="Add an integration"]');
   await click(`[role="option"][data-value="${id}"]`);
@@ -99,6 +116,20 @@ try {
   await click(`[role="option"][data-value="${theme}"]`);
   await require("theme applied", `document.documentElement.dataset.theme === ${q(theme)}`);
   await shot("appearance");
+  if (failures) {
+    // A step change whose save fails on an item this step does not show:
+    // the general note names it and "Retry save" makes the step change.
+    await require("theme autosaved", 'document.querySelector(".setup-actions [role=status]")?.textContent === "Draft saved"');
+    await failOnce("/api/v1/onboarding/draft", "PUT", 400, { code: "invalid", message: "Fixture item failure.", field: "items.fixture-item.name" });
+    await nav("continue");
+    await require("an item failure off this step shows the general note with Retry save", `[...document.querySelectorAll(".note")].some((n) => n.textContent.includes("Fixture item failure.") && [...n.querySelectorAll("button")].some((b) => b.textContent === "Retry save"))`);
+    await step("Appearance");
+    await click(".note button");
+    await step("Discover services");
+    await require("the retried step change cleared the note", `!document.body.textContent.includes("Fixture item failure.")`);
+    await nav("back");
+    await step("Appearance");
+  }
   await nav("continue");
   await step("Discover services");
   if (!empty) await require("Docker suggestions loaded", 'document.body.textContent.includes("Docker is reachable")');
