@@ -93,11 +93,28 @@ are always checked against a current-profile dummy record, so a disabled
 legacy account never migrates by itself: run `hobnail reset-password
 <username>` for it too.
 
-Before enforcing a hard 20 MiB container limit, allow more memory and have
-every account sign in once, or reset the remaining passwords from the host
-with `hobnail reset-password <username>`. The reset preserves the existing
-account and revokes its sessions. It reads the new password from the TTY
-without echo or from stdin, just like owner recovery.
+Finish the migration before enforcing a hard 20 MiB container limit. Either
+have every account sign in once while the container has no limit, or reset
+the remaining passwords with `hobnail reset-password <username>`. The reset
+preserves the existing account and revokes its sessions. It reads the new
+password from the TTY without echo or from stdin, just like owner recovery.
+
+`reset-password` and `set-password` hash the new password and open the
+database themselves. `docker exec` runs them inside the server's own cgroup,
+so they share its memory limit and can be OOM-killed with it. Run them with
+`docker exec` only while the container has no hard limit. Once a limit is in
+place, stop the server and run the command in a one-off container on the same
+data volume, without a memory limit, then start the server again:
+
+```sh
+docker stop hobnail
+docker run --rm -it --user 1000:1000 -v /opt/stacks/hobnail/data:/data \
+  hobnail:latest reset-password <username>
+docker start hobnail
+```
+
+Use your stack folder's `data` directory for the volume. Do not use
+`docker compose run`: it applies the service's own memory limit.
 
 Run `hobnail list-legacy-hashes` against the same data directory or volume.
 It prints one username per line and exits successfully with no output when
