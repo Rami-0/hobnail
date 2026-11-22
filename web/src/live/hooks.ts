@@ -79,13 +79,16 @@ export function useStat(name: string): Stat {
   return useSyncExternalStore(sub, get, get);
 }
 
+const EMPTY_STATS = new Map<string, Stat>();
+const noStats = () => EMPTY_STATS;
+
 /**
  * Every container's live numbers (a new map per change), for a sort by CPU
  * or memory. Disabled, it does not follow the changes (no re-render).
  */
 export function useStatsMap(enabled: boolean): ReadonlyMap<string, Stat> {
   const sub = useCallback((fn: () => void) => (enabled ? stats.subscribeAll(fn) : () => {}), [enabled]);
-  return useDeferredValue(useSyncExternalStore(sub, stats.snapshot, stats.snapshot));
+  return useDeferredValue(useSyncExternalStore(sub, enabled ? stats.snapshot : noStats));
 }
 
 /** The latest host sample from the `system` topic; null until the first one. */

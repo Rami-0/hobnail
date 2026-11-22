@@ -41,7 +41,7 @@ import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { GroupRow } from "../../api/gen/GroupRow.ts";
 import { setSearch, useRoute } from "../../app/router.ts";
 import { bytes, imageLabel, pct, portLinks, rowLink, statusText, viewerHost, duration } from "../../format/index.ts";
-import { NO_STAT, stats, useBootstrap, useContainers, useNow, useStatsMap, useStrips } from "../../live/index.ts";
+import { stats, useBootstrap, useContainers, useNow, useStatsMap, useStrips } from "../../live/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/Note.tsx";
 import { HealthStrip, Sparkline } from "../../ui/Sparkline.tsx";
@@ -105,6 +105,7 @@ function statReadings() {
 /** Rows rendered on the first frame; the rest follow in slices of this size, one per task. */
 const FIRST = 10;
 const SLICE = 10;
+const NO_ROWS: ContainerRow[] = [];
 
 function useProgressive(total: number): number {
   const [limit, setLimit] = useState(FIRST);
@@ -187,8 +188,8 @@ export default function ContainersPage() {
   const byNumber = view.sort === "cpu" || view.sort === "mem";
   const live = useStatsMap(byNumber && !frozen);
   const fresh = useMemo(
-    () => select(groups, view, now, byNumber ? (n: string) => live.get(n) ?? NO_STAT : undefined),
-    [groups, view, now, byNumber, live],
+    () => select(groups, view, now, byNumber ? (n: string) => (frozen ? stats.get(n) : live.get(n) ?? stats.get(n)) : undefined),
+    [groups, view, now, byNumber, frozen, live],
   );
   // The order on screen when the reader came in; a change of the view
   // itself (a sort click) is the reader's own and starts a new one.
@@ -231,7 +232,7 @@ export default function ContainersPage() {
     const closed = !!sec.group && grouped && isClosed(sec.group, view, folded);
     const take = closed ? 0 : Math.max(0, Math.min(sec.rows.length, budget));
     budget -= take;
-    slices.push({ section: sec, closed, rows: take === sec.rows.length ? sec.rows : sec.rows.slice(0, take) });
+    slices.push({ section: sec, closed, rows: take === 0 ? NO_ROWS : take === sec.rows.length ? sec.rows : sec.rows.slice(0, take) });
   }
 
   // ---- keyboard: the shell's map does j/k, l and / (it finds the rows by
@@ -551,7 +552,7 @@ function Waiting({ n, grouped = false }: { n: number; grouped?: boolean }) {
   </tr>;
 }
 
-function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
+const SectionBody = memo(function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
   const g = section.group;
   const waiting = closed ? 0 : section.rows.length - rows.length;
   if (!g) {
@@ -598,7 +599,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
       <Waiting n={waiting} grouped />
     </tbody>
   );
-}
+});
 
 interface RowProps {
   row: ContainerRow;
@@ -659,8 +660,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
       <td className="c-hist" data-l="24 h">
         {near ? <HealthStrip codes={strip ?? []} label={r.title} step={stripStep} /> : null}
       </td>
-      <LiveCell name={r.name} kind="cpu" running={running} near={near} visible={visible} cells={cells} />
-      <LiveCell name={r.name} kind="mem" running={running} near={near} visible={visible} cells={cells} />
+      <ResourceCells name={r.name} running={running} near={near} visible={visible} cells={cells} />
       <td className="c-ports" data-l="Ports">
         {ports.slice(0, 3).map((p) =>
           p.url ? (
@@ -702,40 +702,34 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
   );
 }, sameRow);
 
-function LiveCell({
-  name,
-  kind,
-  running,
-  near,
-  visible,
-  cells,
-}: {
+function ResourceCells({ name, running, near, visible, cells }: {
   name: string;
-  kind: "cpu" | "mem";
   running: boolean;
   near: boolean;
-  /** On or near the screen now: only then does the cell follow its numbers. */
   visible: boolean;
   cells: LiveCells;
 }) {
-  const sub = useCallback((fn: () => void) => (visible ? cells.subscribe(name, fn) : () => {}), [cells, name, visible]);
+  const sub = useCallback((fn: () => void) => (visible && running ? cells.subscribe(name, fn) : unsubscribeNothing), [cells, name, visible, running]);
   const cell = useSyncExternalStore(sub, () => cells.get(name));
-  const scale = useSyncExternalStore(near && visible ? cells.subscribeScale : noSub, () => cells.getScale()[kind]);
-  const v = kind === "cpu" ? cell.cpu : cell.mem;
-  return (
-    <td className={`c-num c-${kind}`} data-l={kind === "cpu" ? "CPU" : "Memory"}>
-      <span className={running && v !== null ? "num" : "num muted"}>{!running || v === null ? "—" : kind === "cpu" ? pct(v) : bytes(v)}</span>
-      {running && near && (
-        <Sparkline
-          values={kind === "cpu" ? cell.cpuHist : cell.memHist}
-          max={scale}
-          label=""
-          color={kind === "cpu" ? "--ch-cpu" : "--ch-mem"}
-          className="cell-spark"
-        />
-      )}
-    </td>
-  );
+  const scale = useSyncExternalStore(near && visible && running ? cells.subscribeScale : noSub, cells.getScale);
+  return <>
+    <ResourceCell kind="cpu" value={running ? cell.cpu : null} history={running && near ? cell.cpuHist : null} max={scale.cpu} />
+    <ResourceCell kind="mem" value={running ? cell.mem : null} history={running && near ? cell.memHist : null} max={scale.mem} />
+  </>;
 }
 
-const noSub = () => () => {};
+const ResourceCell = memo(function ResourceCell({ kind, value, history, max }: {
+  kind: "cpu" | "mem";
+  value: number | null;
+  history: (number | null)[] | null;
+  max: number;
+}) {
+  const cpu = kind === "cpu";
+  return <td className={`c-num c-${kind}`} data-l={cpu ? "CPU" : "Memory"}>
+    <span className={value === null ? "num muted" : "num"}>{value === null ? "—" : cpu ? pct(value) : bytes(value)}</span>
+    {history && <Sparkline values={history} max={max} label="" color={cpu ? "--ch-cpu" : "--ch-mem"} className="cell-spark" />}
+  </td>;
+});
+
+const unsubscribeNothing = () => {};
+const noSub = () => unsubscribeNothing;
