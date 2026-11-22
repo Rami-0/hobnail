@@ -412,7 +412,11 @@ impl<'a> Conn<'a> {
         self.resolve(input)
     }
 
-    pub async fn request(&self, step: Step<'_>) -> Result<Response, Fault> {
+    pub fn request<'b>(&'b self, step: Step<'b>) -> super::Job<'b, Response> {
+        Box::pin(self.request_inner(step))
+    }
+
+    async fn request_inner(&self, step: Step<'_>) -> Result<Response, Fault> {
         let mut url = join(&self.target.url, step.path)?;
         if client::origin(&url).as_deref() != Some(self.origin.as_str()) {
             return Err(Class::Blocked.into());
