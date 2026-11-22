@@ -87,13 +87,14 @@ const screenshotProbe = (engine, e) => engine === "webkit" && e.kind === "csp" &
 // chunk's CSS, the favicon fetch). WebKit then reports "EventSource / Fetch
 // API cannot load <url> due to access control checks." as page errors, and
 // Vite's preload helper (WebKit, Firefox) throws "Unable to preload CSS for
-// <url>", and Firefox fails a lazy chunk with "error loading dynamically
-// imported module: <url>"; React logs both. Exactly these messages are set aside when they
+// <url>", and a lazy chunk fails with "error loading dynamically imported
+// module: <url>" (Firefox) or "TypeError: Importing a module script
+// failed." (WebKit); React logs them. Exactly these messages are set aside when they
 // arrive while a main-frame navigation is under way (its request sent, the
 // new document not yet committed, at most 1.5 s): only the document being
 // left exists then, so they cannot come from the page the user lands on.
 // Counted in the unit's JSON as `excluded`.
-const CANCEL_SIGNATURE = /^(EventSource cannot load|Fetch API cannot load) (.+?) due to access control checks\.|Unable to preload CSS for (\S+)|error loading dynamically imported module: (\S+)/;
+const CANCEL_SIGNATURE = /^(EventSource cannot load|Fetch API cannot load) (.+?) due to access control checks\.|Unable to preload CSS for (\S+)|error loading dynamically imported module: (\S+)|^TypeError: Importing a module script failed\.( @ |$)/;
 
 // Chromium on Linux aborts the requests it has in flight with
 // net::ERR_NETWORK_CHANGED whenever a network interface of its namespace
@@ -192,7 +193,7 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
       if (screenshotProbe(engine, e)) results.excluded.push({ reason: "screenshot style probe (WebKit)", flow: e.flow, text: e.text.slice(0, 200) });
       else if (leftPage(e)) results.excluded.push({ reason: "load cancelled by leaving the page", flow: e.flow, text: e.text.slice(0, 200) });
       else if ((why = netChange(engine, e))) results.excluded.push({ reason: "host network change (Chromium)", flow: e.flow, text: `${e.text.slice(0, 160)} [${why}]` });
-      else problems.push({ kind: e.kind, detail: e.text, sinceNav: e.sinceNav });
+      else problems.push({ kind: e.kind, detail: e.text, sinceNav: e.sinceNav, leaving: e.leaving });
     }
     return problems;
   };
