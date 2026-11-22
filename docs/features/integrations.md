@@ -513,6 +513,25 @@ contract does not support.
 UNVERIFIED: live appliances, 25.x REST compatibility and disk health
 beyond the latest SMART self-test result.
 
+## Gitea / Forgejo
+
+Enter the forge URL and a personal access token with `read:repository`
+and access to the selected repos. Hobnail sends `Authorization: token …`.
+The connection test checks `/api/v1/version`, then a one-item
+`/api/v1/user/repos` request to verify the token.
+
+**Repository activity** counts repositories visible to the token and shows
+separate issue and PR counts for up to eight configured `owner/repository`
+names. It reads the most recent Actions run on Gitea 1.26 and Forgejo 15.
+If the run endpoint is absent, it reads the latest Actions task when
+available (including on Gitea 1.24), and labels it as a task.
+
+Verified from the [Gitea 1.26 API](https://github.com/go-gitea/gitea/blob/v1.26.0/templates/swagger/v1_json.tmpl),
+[Gitea 1.24 Actions API](https://docs.gitea.com/api/1.24/operations/list-action-tasks/)
+and [Forgejo 15 API](https://codeberg.org/forgejo/forgejo/src/tag/v15.0.0/templates/swagger/v1_json.tmpl).
+
+UNVERIFIED: older API releases, private installations and custom token middleware.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

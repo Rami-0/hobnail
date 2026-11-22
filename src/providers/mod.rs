@@ -37,6 +37,7 @@ mod arr;
 mod connection;
 mod duplicati;
 mod generic;
+mod gitea;
 mod glances;
 mod home_assistant;
 mod immich;
@@ -50,6 +51,7 @@ mod prowlarr;
 mod proxmox;
 mod qbittorrent;
 mod radarr;
+mod repositories;
 mod sabnzbd;
 mod sonarr;
 mod syncthing;
@@ -96,6 +98,7 @@ pub const REGISTRY: &[Provider] = &[
     duplicati::DUPLICATI,
     proxmox::PROXMOX,
     truenas::TRUENAS,
+    gitea::GITEA,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const DEFAULT_REFRESH: u64 = 60;
@@ -198,7 +201,7 @@ impl Field {
             }),
             Kind::Select => text().is_some_and(|s| self.choices.contains(&s)),
             Kind::List => value.as_array().is_some_and(|items| {
-                items.len() <= 16
+                items.len() <= self.max.unwrap_or(16).min(16) as usize
                     && (!self.required || !items.is_empty())
                     && items.iter().all(|item| {
                         item.as_str().is_some_and(|s| {
