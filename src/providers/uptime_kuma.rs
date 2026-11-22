@@ -99,9 +99,10 @@ fn monitors<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
         let slug = slug(conn)?;
         let page = page(conn, slug).await?;
-        let data: Heartbeats = parse_json(
+        let data = within_response_limit(
             conn.request(Step::get(&format!("api/status-page/heartbeat/{slug}")))
-                .await?,
+                .await
+                .and_then(parse_json::<Heartbeats>),
         )?;
         let mut rows = Vec::new();
         if let Some(incident) = page.incident {
@@ -114,28 +115,30 @@ fn monitors<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
             .into_iter()
             .flat_map(|group| group.monitor_list);
         for monitor in monitors.by_ref().take(24) {
-            let (label, health) = match data
-                .heartbeat_list
-                .get(&monitor.id.to_string())
-                .and_then(|beats| beats.last())
-                .map(|beat| beat.status)
-            {
+            let id = monitor.id.to_string();
+            let latest = data
+                .as_ref()
+                .and_then(|data| data.heartbeat_list.get(&id))
+                .and_then(|beats| beats.last());
+            let (label, health) = match latest.map(|beat| beat.status) {
                 Some(0) => ("Down", Health::Down),
                 Some(1) => ("Up", Health::Up),
                 Some(2) => ("Pending", Health::Warn),
                 Some(3) => ("Maintenance", Health::Warn),
+                _ if data.is_none() => ("Heartbeat unavailable", Health::Warn),
                 _ => ("Unknown", Health::Warn),
             };
             let uptime = data
-                .uptime_list
-                .get(&format!("{}_24", monitor.id))
+                .as_ref()
+                .and_then(|data| data.uptime_list.get(&format!("{id}_24")))
                 .copied()
                 .flatten()
-                .filter(|uptime| (0.0..=1.0).contains(uptime))
-                .map_or_else(
-                    || "24h uptime unavailable".into(),
-                    |uptime| format!("{:.1}% over 24h", uptime * 100.0),
-                );
+                .filter(|uptime| (0.0..=1.0).contains(uptime));
+            let uptime = match uptime {
+                Some(0.0) if latest.is_none() => "No 24h uptime data".into(),
+                Some(uptime) => format!("{:.1}% over 24h", uptime * 100.0),
+                None => "24h uptime unavailable".into(),
+            };
             let name = display_text(conn, monitor.name);
             rows.push((format!("{name} — {label}, {uptime}"), health));
         }
@@ -163,7 +166,8 @@ mod tests {
     #[tokio::test]
     async fn public_page_and_heartbeat_map_status_and_incident() {
         const PAGE: &str = "GET /prefix/api/status-page/home HTTP/1.1";
-        const PAGE_BODY: &str = r#"{"config":{"slug":"home"},"incident":{"title":"Service outage","content":"Investigating"},"publicGroupList":[{"monitorList":[{"id":1,"name":"Web"},{"id":2,"name":"DNS"},{"id":3,"name":"Mail"},{"id":4,"name":"Storage"}]}]}"#;
+        const PAGE_BODY: &str = r#"{"config":{"slug":"home"},"incident":{"title":"Service outage","content":"Investigating"},"publicGroupList":[{"monitorList":[{"id":1,"name":"Web"},{"id":2,"name":"DNS"},{"id":3,"name":"Mail"},{"id":4,"name":"Storage"},{"id":5,"name":"New monitor"}]}]}"#;
+        let oversized = format!(r#"{{"heartbeatList":{{}},"uptimeList":{{{}}}}}"#, " ".repeat(128 * 1024));
         exercise(
             &UPTIME_KUMA,
             &[],
@@ -174,8 +178,10 @@ mod tests {
                 Exchange {
                     request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1",
                     status: 200,
-                    body: r#"{"heartbeatList":{"1":[{"status":0},{"status":1}],"2":[{"status":0}],"3":[{"status":2}],"4":[{"status":3}]},"uptimeList":{"1_24":0.995,"2_24":0,"3_24":null,"4_24":1}}"#,
+                    body: r#"{"heartbeatList":{"1":[{"status":0},{"status":1}],"2":[{"status":0}],"3":[{"status":2}],"4":[{"status":3}],"5":[]},"uptimeList":{"1_24":0.995,"2_24":0,"3_24":null,"4_24":1,"5_24":0}}"#,
                 },
+                Exchange { request: PAGE, status: 200, body: PAGE_BODY },
+                Exchange { request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1", status: 200, body: &oversized },
                 Exchange { request: PAGE, status: 403, body: "" },
                 Exchange { request: PAGE, status: 200, body: "{}" },
             ],
@@ -192,8 +198,14 @@ mod tests {
                     ["Web — Up, 99.5% over 24h", "up"],
                     ["DNS — Down, 0.0% over 24h", "down"],
                     ["Mail — Pending, 24h uptime unavailable", "warn"],
-                    ["Storage — Maintenance, 100.0% over 24h", "warn"]
+                    ["Storage — Maintenance, 100.0% over 24h", "warn"],
+                    ["New monitor — Unknown, No 24h uptime data", "warn"]
                 ]));
+                let partial = super::super::fetch(conn, &UPTIME_KUMA.widgets[0], &Values::new()).await.unwrap();
+                let partial = serde_json::to_value(partial).unwrap();
+                assert_eq!(partial["rows"].as_array().unwrap().len(), 6);
+                assert_eq!(partial["rows"][0][0], "Incident: Service outage — Investigating");
+                assert_eq!(partial["rows"][1][0], "Web — Heartbeat unavailable, 24h uptime unavailable");
                 for class in [Class::Auth, Class::Protocol] {
                     let fault = conn.run((UPTIME_KUMA.test)(conn)).await.unwrap_err();
                     assert_eq!(fault.class.message(), class.message());
