@@ -392,10 +392,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 </nav>
               ) : <span className="title">{title}</span>}
             </div>
-            <Button variant="outline" className="cmd" data-testid="palette-open" aria-label="Search and commands" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+            <Button variant="outline" className="cmd" data-testid="palette-open" aria-label="Search or jump to…" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
               <span className="cmd-t">Search or jump to…</span>
-              <kbd className="cmd-k">⌘ K</kbd>
+              <kbd className="cmd-k" />
             </Button>
             {b && !b.scoped && !phone && <Vitals />}
             <ThemeButton />

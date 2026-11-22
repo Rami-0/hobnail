@@ -5,7 +5,7 @@ import { Card } from "../../ui/Card.tsx";
 
 const edit = ['[data-testid="board-edit"]', "Edit board lets you add services, move and resize tiles, and save your layout."];
 const add = ['[data-testid="board-empty-add"]', "Add opens the board editor and picker. Use Discover to browse available services."];
-const palette = ['[data-testid="palette-open"]', "Search and commands opens the command palette. Press Ctrl+K or Command+K to open it from anywhere."];
+const palette = ['[data-testid="palette-open"]', "Search opens the command palette. Press Ctrl+K or Command+K to open it from anywhere."];
 const account = ['button[data-testid="user"]', "Open your account menu to manage your password or sign out."];
 const settings = ['nav [data-rtip="Settings"]', "Open Settings to manage boards and integrations."];
 const shortcuts = ['button[aria-label="Keyboard shortcuts"]', "Open Keyboard shortcuts to see what you can do from the keyboard."];

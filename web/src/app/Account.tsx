@@ -27,7 +27,7 @@ export function Account() {
         triggerClassName="icon-btn"
         trigger={
           <>
-            <span className="account-avatar" aria-hidden="true">{user.name.slice(0, 2).toUpperCase()}</span>
+            <span className="account-avatar" data-i={user.name.slice(0, 2).toUpperCase()} aria-hidden="true" />
             <span className="sr">{user.name}</span>
           </>
         }
