@@ -728,6 +728,7 @@ pub(super) async fn route(
                 db.invalidate_provider_scope();
                 Ok(())
             })?;
+            super::provider_widgets::placements_changed(state);
             state.changed("reload");
             return Ok(super::no_content());
         }

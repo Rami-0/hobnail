@@ -825,3 +825,41 @@ fn widget_cache_evicts_output_within_the_aggregate_budget_but_keeps_its_deadline
     cache.clear();
     assert_eq!(cache.retained_bytes, 0);
 }
+
+#[test]
+fn provider_refresh_floors_survive_eviction_at_128_slots() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let fixtures = [
+        ("weather", "forecast", 900),
+        ("github", "repositories", 600),
+        ("github", "releases", 3600),
+    ];
+    for (provider, widget, _) in fixtures {
+        let id = format!("provider-fetch:{provider}:{widget}");
+        let attempt = cache.begin_provider(&id, now);
+        assert!(cache.record(&id, attempt, now, WidgetOutput::default()));
+    }
+    for n in 1..=128 {
+        let id = format!("provider-fetch:fixture:{n}");
+        let completed = now + Duration::from_secs(n);
+        let attempt = cache.begin_provider(&id, completed);
+        assert!(cache.record(&id, attempt, completed, WidgetOutput::default()));
+    }
+    for (provider, widget, seconds) in fixtures {
+        let id = format!("provider-fetch:{provider}:{widget}");
+        let provider = crate::providers::get(provider).unwrap();
+        let spec = provider
+            .widgets
+            .iter()
+            .find(|spec| spec.id == widget)
+            .unwrap();
+        let refresh = spec.refresh(
+            &serde_json::from_str(r#"{"refresh":1}"#).unwrap(),
+            provider.public_internet,
+        );
+        assert_eq!(refresh.as_secs(), seconds);
+        assert!(cache.get(&id).is_none());
+        assert_eq!(cache.deadline(&id, refresh), Some(now + refresh));
+    }
+}

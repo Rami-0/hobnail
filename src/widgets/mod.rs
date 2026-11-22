@@ -418,6 +418,8 @@ pub(crate) struct WidgetCache {
     slots: std::collections::HashMap<String, WidgetSlot>,
     retained_bytes: usize,
     next_attempt: u64,
+    // Live provider fetch keys outlast evictable body slots and config reloads.
+    provider_attempts: std::collections::HashMap<String, Instant>,
 }
 
 #[derive(Default)]
@@ -439,8 +441,21 @@ impl WidgetCache {
     }
 
     pub(crate) fn deadline(&self, id: &str, refresh: Duration) -> Option<Instant> {
-        let (_, completed) = self.slots.get(id)?.completed?;
-        Some(refresh_deadline(completed, refresh))
+        let at = self
+            .provider_attempts
+            .get(id)
+            .copied()
+            .or_else(|| self.slots.get(id)?.completed.map(|(_, at)| at))?;
+        Some(refresh_deadline(at, refresh))
+    }
+
+    pub(crate) fn begin_provider(&mut self, id: &str, started: Instant) -> u64 {
+        self.provider_attempts.insert(id.into(), started);
+        self.begin(id)
+    }
+
+    pub(crate) fn provider_attempts(&mut self) -> &mut std::collections::HashMap<String, Instant> {
+        &mut self.provider_attempts
     }
 
     pub(crate) fn begin(&mut self, id: &str) -> u64 {
@@ -454,7 +469,9 @@ impl WidgetCache {
             if providers.clone().count() >= MAX_PROVIDER_SLOTS {
                 if let Some(oldest) = providers
                     .by_ref()
-                    .min_by_key(|(_, slot)| slot.completed.map(|(_, at)| at))
+                    .min_by_key(|(_, slot)| {
+                        (slot.completed.is_none(), slot.completed.map(|(_, at)| at))
+                    })
                     .map(|(id, _)| id.clone())
                 {
                     self.retained_bytes -= self.slots.remove(&oldest).expect("cache slot").bytes;
@@ -497,6 +514,9 @@ impl WidgetCache {
             return false;
         }
         slot.completed = Some((attempt, completed));
+        if let Some(at) = self.provider_attempts.get_mut(id) {
+            *at = completed;
+        }
         out.bound();
         self.retained_bytes -= slot.bytes;
         match &mut slot.output {

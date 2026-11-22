@@ -374,6 +374,38 @@ pub(super) fn place(
 }
 
 pub(super) fn placements_changed(state: &AppState) {
+    let _ = state.db.dashboard(|conn| -> rusqlite::Result<()> {
+        let mut cache = state.widgets.lock().unwrap();
+        let attempts = cache.provider_attempts();
+        if attempts.is_empty() {
+            return Ok(());
+        }
+        let mut stmt = conn.prepare(
+            "SELECT i.kind, pw.integration_id, pw.widget, pw.options
+             FROM board_items item JOIN provider_widgets pw
+               ON item.board_id=pw.board_id AND json_extract(item.config,'$.widget_id')=pw.id
+             JOIN integrations i ON pw.integration_id=i.id WHERE item.kind='widget'",
+        )?;
+        let mut rows = stmt.query([])?;
+        let mut live = HashSet::new();
+        while let Some(row) = rows.next()? {
+            let raw: String = row.get(3)?;
+            if let Ok(options) = serde_json::from_str::<Values>(&raw) {
+                let key = cache_key(
+                    &row.get::<_, String>(0)?,
+                    &row.get::<_, String>(1)?,
+                    &row.get::<_, String>(2)?,
+                    &options,
+                );
+                if attempts.contains_key(&key) {
+                    live.insert(key);
+                }
+            }
+        }
+        attempts.retain(|key, _| live.contains(key));
+        attempts.shrink_to_fit();
+        Ok(())
+    });
     state.provider_viewers.changed.send_replace(());
     state.wake.notify_one();
 }
@@ -698,7 +730,16 @@ pub(crate) fn poll(
         if running_ids.contains(&poll.key) {
             continue;
         }
-        let Some(attempt) = state.begin_widget(config, &poll.key) else {
+        let attempt = state.db.dashboard(|conn| -> rusqlite::Result<_> {
+            if poll.target.revision.check().is_err() || matching_placements(conn, &poll)?.is_empty()
+            {
+                return Ok(None);
+            }
+            let mut cache = state.widgets.lock().unwrap();
+            Ok(Arc::ptr_eq(config, &state.config.current())
+                .then(|| cache.begin_provider(&poll.key, now)))
+        });
+        let Ok(Some(attempt)) = attempt else {
             continue;
         };
         running_ids.insert(poll.key.clone());
