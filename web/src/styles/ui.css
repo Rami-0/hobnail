@@ -261,8 +261,9 @@ li.kfocus{box-shadow:inset 2px 0 0 var(--ring)}
 
 /* Keep pending notifications out of the active modal's focus and reading order. */
 body:has(.dlg[data-open]) .toasts{visibility:hidden}
-/* Text actions outside prose use the same real hit box as icon actions. */
-.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row,.overview-counts,.sec-h,.foot-line)>a,.page>a,.panel>a,.log-pane-head>a,.log-pane-tools a,.crumb a,.dlg p>a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+/* Text actions outside prose use the same real hit box as icon actions
+   (.p-link: a paragraph that holds only a link). */
+.page :is(li,header,strong,h2,h3,nav,span,td,.panel-h,.settings-row,.overview-counts,.sec-h,.foot-line)>a,.page>a,.panel>a,.log-pane-head>a,.log-pane-tools a,.crumb a,.p-link>a{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 .page summary{min-height:var(--hit);line-height:var(--hit)}
 
 /* Reserve chart grid layout before its lazy implementation arrives. */
