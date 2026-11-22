@@ -86,6 +86,13 @@ public JSON routes supply these together. Its documented Prometheus metrics
 expose monitor state and response time, but do not include the status page's
 uptime or pinned incident.
 
+The heartbeat route has no size option and returns the last 50 (1.23) or
+100 (2.x) beats of every public monitor, which passes 128 KiB at about 20
+monitors. Hobnail streams it and keeps only the latest status and 24-hour
+uptime of the monitors it displays. A monitor missing from the response
+shows Unknown while the other rows stay current. Only a response over
+16 MiB leaves every row at "Heartbeat unavailable".
+
 Verified from:
 
 - [Kuma 1.23.16 status-page router](https://github.com/louislam/uptime-kuma/blob/1.23.16/server/routers/status-page-router.js)
