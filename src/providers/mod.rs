@@ -14,6 +14,8 @@
 //!   Send the actual RPC and return Fault::session_conflict with session_header.
 //! - Token exchange: wrap the response token with Conn::session and use
 //!   retry_session with a login closure returning Some(session).
+//! - Large JSON: Conn::scan streams a body through json_scan::Scanner with a
+//!   visitor holding bounded state, never the document.
 //! - Credential-free probe: use dns_lookup for A/AAAA, tcp_probe for a timed
 //!   TCP connect, tls_leaf for handshake metadata and a verification verdict,
 //!   or http_status for a status without the response body. TCP connect
@@ -47,6 +49,7 @@ mod home_assistant;
 mod immich;
 mod jellyfin;
 mod jellyseerr;
+mod json_scan;
 mod markdown_note;
 mod nextcloud;
 mod nginx_proxy_manager;

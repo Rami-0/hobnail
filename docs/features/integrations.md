@@ -130,16 +130,26 @@ configured name, such as `QBT_SID_8080`. Keep WebUI CSRF protection enabled.
 **Torrent activity** shows download and upload rates, the WebUI's active
 and seeding counts, queued uploads and downloads, and free space on the
 default save path. A torrent can appear in more than one count.
-Active and seeding counts use separate filtered first pages and show
-Unavailable when the page fills (32 entries) or reaches the response cap.
-Queued and free-space figures come from the initial sync snapshot and show
-Unavailable if it exceeds 128 KiB. Transfer speeds remain visible.
+Active and seeding counts stream the WebUI's filtered `torrents/info`
+lists and count their entries without keeping them. Queued and free-space
+figures stream the initial `sync/maindata` snapshot, keeping only a queued
+counter and the `server_state.free_space_on_disk` number. qBittorrent has
+no queued filter and reports free space only in that snapshot, which lists
+every torrent in full (over 128 KiB at about 100 torrents). Each streamed
+response may carry up to 16 MiB, enough for roughly 10,000 torrents. A
+larger list shows Unavailable for that count, and transfer speeds remain
+visible. All four requests share the 5-second provider deadline, so a slow
+WebUI with a very large library can time out.
 
 Verified from:
 
 - [WebUI API v2 documentation for qBittorrent 5.0](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0))
 - [5.0.5 login result](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/authcontroller.cpp) and [session cookies, CSRF and expired sessions](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/webapplication.cpp)
 - [Sync snapshot and free space](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/synccontroller.cpp)
+- [`torrents/info` filters, `limit` and `offset`](https://github.com/qbittorrent/qBittorrent/blob/master/src/webui/api/torrentscontroller.cpp)
+  ([5.0.x](https://github.com/qbittorrent/qBittorrent/blob/v5_0_x/src/webui/api/torrentscontroller.cpp)).
+  Released branches reset an `offset` past the end to 0, so paging cannot
+  find the end of a list. Hobnail streams the unpaged list instead.
 
 UNVERIFIED: Compatibility outside the inspected version and live proxies.
 
@@ -837,6 +847,7 @@ for CSRF checks that require the saved origin or URL.
 | Form login and cookie | POST a `Body::Form` containing the credential fields and select `set-cookie` in `response_headers`. After a successful login, pass the expected cookie name to `Conn::session_cookie`. Use `Auth::Cookie(&session)` on later steps and add typed CSRF headers when required. |
 | 409 session challenge | Call `retry_session(|| async { Ok(None) }, request)`. Send the real RPC with the optional cached session. Select the challenge header and return `Fault::session_conflict(conn.session_header(&response, header)?)` on 409. The helper stores the challenge and retries the RPC once. |
 | Token exchange | Send the login step using `Body::Json` or `Body::Form`, handle errors, and turn the response token into an opaque session with `Conn::session`. Return `Some(session)` from the login closure in `retry_session`, then use `Input::Session` with the service's auth header or Bearer scheme. |
+| Streamed JSON | For a response that can exceed the 128 KiB step cap (a full torrent list, every heartbeat), call `Conn::scan(step, sink)` and feed the sink to `json_scan::Scanner` with a visitor that keeps only bounded state, such as a counter. Chunks are dropped after the visitor sees them, so memory stays at one chunk (under 64 KiB, measured) plus the fixed-size scanner. A streamed body may carry up to 16 MiB before it fails as too large, and the operation deadline still applies. Non-2xx responses are collected as usual so their status can be mapped. |
 | Credential-free probe | Call `dns_lookup`, `tcp_probe`, `tls_leaf`, or `http_status` for the saved target. Each uses the same destination policy, request permit, deadline, and revision as HTTP steps. |
 
 The system resolver exposes up to 64 A/AAAA addresses, including results from

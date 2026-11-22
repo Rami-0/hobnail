@@ -14,12 +14,14 @@ use super::{Class, Fault, Values, MAX_RESPONSE, REQUEST_TIMEOUT};
 use crate::{
     config::HttpPolicy,
     http::{
-        client::{self, BoundCredential, BoundPolicy, Response},
+        client::{self, BodyMode, BoundCredential, BoundPolicy, Response},
         probe::{HttpProbe, ProbeTarget, TcpProbe, TlsLeaf},
     },
 };
 
 const MAX_REQUEST: usize = 16 * 1024;
+/// Most bytes a streamed body may carry. The deadline bounds it as well.
+pub(super) const MAX_STREAM: usize = 16 * 1024 * 1024;
 const MAX_SESSION: usize = 1024;
 const MAX_SESSIONS: usize = 16;
 
@@ -413,10 +415,29 @@ impl<'a> Conn<'a> {
     }
 
     pub fn request<'b>(&'b self, step: Step<'b>) -> super::Job<'b, Response> {
-        Box::pin(self.request_inner(step))
+        Box::pin(self.request_inner(step, BodyMode::Collect))
     }
 
-    async fn request_inner(&self, step: Step<'_>) -> Result<Response, Fault> {
+    /// Send `step` and pass a successful body to `sink` chunk by chunk, up to
+    /// [`MAX_STREAM`] bytes, without retaining it. Use this to count or pick
+    /// values from responses larger than [`MAX_RESPONSE`]; the sink must keep
+    /// its own state bounded. The returned response has an empty body when
+    /// the status is 2xx, and the usual capped body otherwise.
+    pub fn scan<'b>(
+        &'b self,
+        step: Step<'b>,
+        sink: client::BodySink<'b>,
+    ) -> super::Job<'b, Response> {
+        Box::pin(self.request_inner(
+            step,
+            BodyMode::Scan {
+                sink,
+                limit: MAX_STREAM,
+            },
+        ))
+    }
+
+    async fn request_inner(&self, step: Step<'_>, mode: BodyMode<'_>) -> Result<Response, Fault> {
         let mut url = join(&self.target.url, step.path)?;
         if client::origin(&url).as_deref() != Some(self.origin.as_str()) {
             return Err(Class::Blocked.into());
@@ -545,6 +566,7 @@ impl<'a> Conn<'a> {
                 status_only: step.status_only,
                 headers,
                 revision: self.revision.clone(),
+                body: mode,
             },
         )
         .await

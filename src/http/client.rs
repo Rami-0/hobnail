@@ -109,7 +109,7 @@ pub async fn send(req: Request, policy: &HttpPolicy) -> Result<Response, String>
 async fn send_with_policy(
     req: Request,
     policy: &HttpPolicy,
-    integration: Option<IntegrationPolicy>,
+    integration: Option<IntegrationPolicy<'_>>,
 ) -> Result<Response, String> {
     let timeout = req.timeout;
     match tokio::time::timeout(timeout, send_inner(req, policy, integration)).await {
@@ -191,23 +191,42 @@ impl fmt::Debug for BoundCredential {
     }
 }
 
+/// Receives a streamed response body one chunk at a time. Return `Err` to
+/// stop reading; the request then fails as an unexpected response.
+pub(crate) type BodySink<'a> = &'a mut (dyn FnMut(&[u8]) -> Result<(), ()> + Send);
+
+/// How a bound request reads a successful response body.
 #[derive(Default)]
-pub(crate) struct BoundPolicy {
+pub(crate) enum BodyMode<'a> {
+    /// Collect up to `max_body` bytes; a larger body is an error.
+    #[default]
+    Collect,
+    /// Pass each chunk to the sink and drop it, so memory stays at one
+    /// chunk (bounded by the connection's read buffer) however long the
+    /// body is. `limit` caps the total bytes read. A non-2xx response is
+    /// collected as usual instead, so its status and body can be inspected.
+    Scan { sink: BodySink<'a>, limit: usize },
+}
+
+#[derive(Default)]
+pub(crate) struct BoundPolicy<'a> {
     pub headers: Vec<hyper::header::HeaderName>,
     pub revision: crate::providers::Revision,
     pub pin: Option<Fingerprint>,
     pub local_only: bool,
     pub max_body: Option<usize>,
     pub status_only: bool,
+    pub body: BodyMode<'a>,
 }
 
-struct IntegrationPolicy {
+struct IntegrationPolicy<'a> {
     headers: Vec<hyper::header::HeaderName>,
     revision: crate::providers::Revision,
     tls: Option<Arc<rustls::ClientConfig>>,
     local_only: bool,
     max_body: usize,
     status_only: bool,
+    body: BodyMode<'a>,
 }
 
 #[derive(Debug)]
@@ -223,7 +242,7 @@ pub(crate) async fn send_bound(
     url: String,
     credential: Option<BoundCredential>,
     policy: &HttpPolicy,
-    options: BoundPolicy,
+    options: BoundPolicy<'_>,
 ) -> Result<Response, BoundError> {
     let blocked = |message: &str| BoundError {
         message: message.into(),
@@ -248,7 +267,7 @@ pub(crate) async fn send_step(
     req: Request,
     bound_origin: &str,
     policy: &HttpPolicy,
-    options: BoundPolicy,
+    options: BoundPolicy<'_>,
 ) -> Result<Response, BoundError> {
     let blocked = |message: &str| BoundError {
         message: message.into(),
@@ -272,6 +291,7 @@ pub(crate) async fn send_step(
         local_only: options.local_only,
         max_body: options.max_body.unwrap_or(MAX_BODY).min(MAX_BODY),
         status_only: options.status_only,
+        body: options.body,
     };
     send_with_policy(req, policy, Some(integration))
         .await
@@ -401,7 +421,7 @@ impl<'a> Destination<'a> {
 async fn send_inner(
     req: Request,
     policy: &HttpPolicy,
-    integration: Option<IntegrationPolicy>,
+    integration: Option<IntegrationPolicy<'_>>,
 ) -> Result<Response, String> {
     let uri: hyper::Uri = req.url.parse().map_err(|_| "invalid URL".to_string())?;
     let destination = Destination::parse(&uri)?;
@@ -452,7 +472,7 @@ async fn send_inner(
 async fn exchange(
     io: impl AsyncRead + AsyncWrite + Unpin,
     request: HRequest<Full<Bytes>>,
-    policy: Option<IntegrationPolicy>,
+    policy: Option<IntegrationPolicy<'_>>,
 ) -> Result<Response, String> {
     let mut builder = hyper::client::conn::http1::Builder::new();
     if policy.is_some() {
@@ -479,14 +499,24 @@ async fn exchange(
                 }
             }
         }
-        let body = if policy.as_ref().is_some_and(|p| p.status_only) {
-            Bytes::new()
-        } else {
-            read_body(
-                response.into_body(),
-                policy.map_or(MAX_BODY, |p| p.max_body),
-            )
-            .await?
+        let body = match policy {
+            Some(IntegrationPolicy {
+                status_only: true, ..
+            }) => Bytes::new(),
+            Some(IntegrationPolicy {
+                body: BodyMode::Scan { sink, limit },
+                ..
+            }) if response.status().is_success() => {
+                scan_body(response.into_body(), limit, sink).await?;
+                Bytes::new()
+            }
+            policy => {
+                read_body(
+                    response.into_body(),
+                    policy.map_or(MAX_BODY, |p| p.max_body),
+                )
+                .await?
+            }
         };
         Ok(Response {
             status,
@@ -568,6 +598,23 @@ pub async fn read_body(body: Incoming, limit: usize) -> Result<Bytes, String> {
                 format!("reading body: {e}")
             }
         })
+}
+
+/// Feed a body to `sink` chunk by chunk without retaining it.
+async fn scan_body(mut body: Incoming, limit: usize, sink: BodySink<'_>) -> Result<(), String> {
+    let mut total = 0usize;
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(|e| format!("reading body: {e}"))?;
+        let Ok(data) = frame.into_data() else {
+            continue; // Trailers carry no body bytes.
+        };
+        total = total.saturating_add(data.len());
+        if total > limit {
+            return Err("response too large".into());
+        }
+        sink(&data).map_err(|()| "unexpected streamed body".to_string())?;
+    }
+    Ok(())
 }
 
 pub(super) fn roots() -> Arc<rustls::RootCertStore> {

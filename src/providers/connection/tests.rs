@@ -858,3 +858,55 @@ fn secure_session_cookie_requires_https() {
         assert_eq!(conn.output_redactor().matches("fixture"), accepted);
     }
 }
+
+/// Streamed bodies are handed over one bounded chunk at a time and never
+/// collected: a 6 MiB body reaches the sink in chunks of at most 64 KiB,
+/// and a body over MAX_STREAM fails as too large once the cap is passed.
+#[tokio::test]
+async fn scan_streams_bodies_in_bounded_chunks_and_caps_the_total() {
+    const CHUNK: usize = 256 * 1024;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let target = Target::new(origin, Credentials::new(), false);
+    let connections = Connections::default();
+    let policy = policy();
+    let permit = std::sync::Arc::new(Semaphore::new(1))
+        .try_acquire_owned()
+        .unwrap();
+    let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+    let server = async {
+        for length in [6 * 1024 * 1024, MAX_STREAM + CHUNK] {
+            let (mut socket, _) = receive(&listener).await;
+            let head = format!("HTTP/1.1 200 Fixture\r\nContent-Length: {length}\r\n\r\n");
+            socket.write_all(head.as_bytes()).await.unwrap();
+            let chunk = vec![b'x'; CHUNK];
+            for _ in 0..length / CHUNK {
+                // The client hangs up once the cap is passed.
+                if socket.write_all(&chunk).await.is_err() {
+                    break;
+                }
+            }
+        }
+    };
+    let client = async {
+        let (mut total, mut largest) = (0, 0);
+        let mut sink = |chunk: &[u8]| {
+            total += chunk.len();
+            largest = largest.max(chunk.len());
+            Ok(())
+        };
+        let response = conn.scan(Step::get(""), &mut sink).await.unwrap();
+        assert!(response.body.is_empty());
+        assert_eq!(total, 6 * 1024 * 1024);
+        assert!(largest <= 64 * 1024, "largest chunk {largest}");
+        let mut seen = 0;
+        let mut sink = |chunk: &[u8]| {
+            seen += chunk.len();
+            Ok(())
+        };
+        let fault = conn.scan(Step::get(""), &mut sink).await.unwrap_err();
+        assert!(matches!(fault.class, Class::TooLarge));
+        assert!(seen <= MAX_STREAM);
+    };
+    tokio::join!(server, client);
+}
