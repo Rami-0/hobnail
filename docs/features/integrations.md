@@ -677,6 +677,26 @@ Verified from: [CommonMark 0.31.2 syntax](https://spec.commonmark.org/0.31.2/).
 
 UNVERIFIED: Other Markdown dialects and their extensions.
 
+## GitHub releases watcher
+
+Select the releases widget on a GitHub integration after enabling provider
+internet access. Enter up to ten lines in the form `owner/repo | v1.2.3`.
+Current versions are manual. The widget queries GitHub's latest published
+full release for each repository, with the shared GitHub cooldown and stale
+data behavior. A fine-grained token is optional for public repositories.
+Use Contents read access for private repositories.
+
+The comparison ignores a leading `v`, compares one to three numeric version
+components, and ignores valid build metadata. Unknown versions, including
+prerelease suffixes, are displayed beside the latest tag without a comparison.
+The refresh interval is one hour.
+
+Verified from: [latest GitHub release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
+[GitHub REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+and [SemVer precedence](https://semver.org/).
+
+UNVERIFIED: Live repositories, private repository permissions and GitHub quota behavior.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

@@ -13,6 +13,18 @@ pub(super) const REPOSITORIES: Field = Field {
     )
 };
 
+pub(super) fn valid_name(value: &str) -> bool {
+    value.split_once('/').is_some_and(|(owner, repo)| {
+        [owner, repo].iter().all(|part| {
+            !part.is_empty()
+                && !matches!(*part, "." | "..")
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        })
+    })
+}
+
 pub(super) fn names(options: &Values) -> Result<Vec<&str>, &'static str> {
     let value = options.get(REPOS).ok_or(REPOS)?;
     if !REPOSITORIES.accepts(value) {
@@ -21,16 +33,10 @@ pub(super) fn names(options: &Values) -> Result<Vec<&str>, &'static str> {
     let mut names: Vec<&str> = Vec::new();
     for name in value.as_array().ok_or(REPOS)? {
         let name = name.as_str().ok_or(REPOS)?;
-        let (owner, repo) = name.split_once('/').ok_or(REPOS)?;
-        if [owner, repo].iter().any(|part| {
-            part.is_empty()
-                || matches!(*part, "." | "..")
-                || !part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-        }) || names
-            .iter()
-            .any(|previous| previous.eq_ignore_ascii_case(name))
+        if !valid_name(name)
+            || names
+                .iter()
+                .any(|previous| previous.eq_ignore_ascii_case(name))
         {
             return Err(REPOS);
         }

@@ -4,6 +4,8 @@ use repositories::REPOSITORIES;
 use std::sync::atomic::{AtomicU64, Ordering};
 use widgets::StructuredBody;
 
+mod releases;
+
 const URL: &str = "https://api.github.com";
 const URLS: &[&str] = &[URL, "https://api.github.com/"];
 const TOKEN: &str = "token";
@@ -13,8 +15,7 @@ pub const GITHUB: Provider = Provider {
     name: "GitHub",
     category: "Development",
     icon: "github",
-    description:
-        "Show stars, open issues and pull requests, and workflow status for selected repositories.",
+    description: "Show repository activity and watch releases for apps you run.",
     docs: "https://docs.github.com/en/rest",
     public_internet: true,
     contacts: "GitHub’s public REST API at https://api.github.com.",
@@ -38,21 +39,24 @@ pub const GITHUB: Provider = Provider {
         ENABLED,
     ],
     test,
-    widgets: &[Widget {
-        id: "repositories",
-        name: "Repository activity",
-        description: "Stars, issue and PR counts, and the latest repository workflow run.",
-        recommended: true,
-        fields: &[
-            REPOSITORIES,
-            Field {
-                default: Some("1800"),
-                ..PUBLIC_REFRESH
-            },
-        ],
-        fetch: overview,
-        validate: repositories::validate_options,
-    }],
+    widgets: &[
+        Widget {
+            id: "repositories",
+            name: "Repository activity",
+            description: "Stars, issue and PR counts, and the latest repository workflow run.",
+            recommended: true,
+            fields: &[
+                REPOSITORIES,
+                Field {
+                    default: Some("1800"),
+                    ..PUBLIC_REFRESH
+                },
+            ],
+            fetch: overview,
+            validate: repositories::validate_options,
+        },
+        releases::WATCHER,
+    ],
 };
 
 #[derive(Default)]

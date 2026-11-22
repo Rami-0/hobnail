@@ -1,0 +1,201 @@
+use super::*;
+use std::cmp::Ordering as VersionOrder;
+use widgets::BodyItem;
+
+const TRACKED: Field = Field {
+    required: true,
+    max: Some(10),
+    max_length: Some(208),
+    ..Field::new(
+        "tracked",
+        "Repositories and current versions",
+        Kind::List,
+        "Up to ten lines, each with owner/repository | current version, e.g. owner/app | v1.2.3.",
+    )
+};
+
+pub(super) const WATCHER: Widget = Widget {
+    id: "releases",
+    name: "GitHub releases watcher",
+    description: "See whether GitHub has a newer release for the apps you run.",
+    recommended: false,
+    fields: &[
+        TRACKED,
+        Field {
+            min: Some(3600),
+            default: Some("3600"),
+            ..PUBLIC_REFRESH
+        },
+    ],
+    fetch,
+    validate,
+};
+
+fn tracked(options: &Values) -> Result<Vec<(&str, &str)>, &'static str> {
+    let key = TRACKED.id;
+    let value = options
+        .get(key)
+        .filter(|value| TRACKED.accepts(value))
+        .ok_or(key)?;
+    let mut tracked: Vec<(&str, &str)> = Vec::new();
+    for line in value.as_array().ok_or(key)? {
+        let (name, version) = line
+            .as_str()
+            .and_then(|line| line.split_once('|'))
+            .ok_or(key)?;
+        let (name, version) = (name.trim(), version.trim());
+        if name.len() > 140
+            || !repositories::valid_name(name)
+            || version.is_empty()
+            || version.len() > 64
+            || version.contains('|')
+            || version.chars().any(char::is_control)
+            || tracked
+                .iter()
+                .any(|(previous, _)| previous.eq_ignore_ascii_case(name))
+        {
+            return Err(key);
+        }
+        tracked.push((name, version));
+    }
+    Ok(tracked)
+}
+
+fn validate(options: &Values) -> Result<(), &'static str> {
+    tracked(options).map(|_| ())
+}
+
+fn version(text: &str) -> Option<[u64; 3]> {
+    let text = text.strip_prefix(['v', 'V']).unwrap_or(text);
+    let core = if let Some((core, build)) = text.split_once('+') {
+        if !build.split('.').all(|part| {
+            !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        }) {
+            return None;
+        }
+        core
+    } else {
+        text
+    };
+    let mut parts = [0; 3];
+    for (index, piece) in core.split('.').enumerate() {
+        if !piece.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        *parts.get_mut(index)? = piece.parse().ok()?;
+    }
+    Some(parts)
+}
+
+fn compare(current: &str, latest: &str) -> &'static str {
+    match version(current)
+        .zip(version(latest))
+        .map(|(current, latest)| current.cmp(&latest))
+    {
+        Some(VersionOrder::Less) => "New version available",
+        Some(VersionOrder::Equal) => "Up to date",
+        Some(VersionOrder::Greater) => "Current version is ahead",
+        None => "Versions not comparable",
+    }
+}
+
+#[derive(Deserialize)]
+struct Release {
+    tag_name: String,
+    html_url: Option<String>,
+}
+
+async fn latest(
+    conn: &Conn<'_>,
+    limits: &RateLimits,
+    options: &Values,
+) -> Result<StructuredBody, Fault> {
+    let repos = tracked(options).map_err(|_| Class::Protocol)?;
+    let mut items = Vec::with_capacity(repos.len());
+    for (repo, current) in repos {
+        let response = limits
+            .get(conn, &format!("repos/{repo}/releases/latest"), &[])
+            .await?;
+        let (secondary, link) = if response.status == 404 {
+            (
+                format!("Current {current} · Latest release unavailable"),
+                None,
+            )
+        } else {
+            let release: Release = parse_json(response)?;
+            if release.tag_name.trim().is_empty() {
+                return Err(Class::Protocol.into());
+            }
+            let verdict = compare(current, &release.tag_name);
+            let tag = display_text(conn, release.tag_name);
+            (
+                format!("Current {current} · Latest {tag} · {verdict}"),
+                release.html_url.filter(|url| {
+                    url.len() <= 512
+                        && url.starts_with("https://github.com/")
+                        && navigation_link(url)
+                }),
+            )
+        };
+        items.push(BodyItem {
+            title: repo.into(),
+            secondary: Some(secondary),
+            link,
+            icon: None,
+            time: None,
+        });
+    }
+    Ok(StructuredBody::ItemList { items })
+}
+
+fn fetch<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
+    Box::pin(async move {
+        if !conn.base_url_is_one_of(URLS) {
+            return Err(Class::Blocked.into());
+        }
+        latest(conn, &LIMITS, options).await
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::batch_test::{exercise, Exchange};
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compares_numeric_tags_conservatively() {
+        assert_eq!(compare("v1.9", "1.10.0"), "New version available");
+        assert_eq!(compare("1.10+abc", "V1.10.0"), "Up to date");
+        assert_eq!(compare("2", "1.9"), "Current version is ahead");
+        for tag in ["nightly", "1.2.3-rc.1", "1..0", "1.2.3.4", "1.2+A..B"] {
+            assert_eq!(compare(tag, "1.2.3"), "Versions not comparable");
+        }
+        let invalid = Values::from_iter([("tracked".into(), json!(["O/r | 1", "o/R | 2"]))]);
+        assert!(validate(&invalid).is_err());
+        assert_eq!(WATCHER.refresh(&Values::new(), true).as_secs(), 3600);
+    }
+
+    #[tokio::test]
+    async fn fetches_latest_releases_and_honors_the_shared_cooldown() {
+        let limits = RateLimits::default();
+        let values = |repos| Values::from_iter([("tracked".into(), repos)]);
+        let path = "GET /prefix/repos/o/r/releases/latest HTTP/1.1";
+        exercise(&GITHUB, &[], Values::new(), &[
+            Exchange { request: path, status: 200, body: r#"{"tag_name":"v1.10.0","html_url":"https://github.com/o/r/releases/tag/v1.10.0"}"# },
+            Exchange { request: "GET /prefix/repos/o/missing/releases/latest HTTP/1.1", status: 404, body: "{}" },
+            Exchange { request: path, status: 429, body: "{}" },
+        ], |i, wire| {
+            assert!(!wire.contains("authorization:"));
+            if i == 2 { "Retry-After: 600\r\n" } else { "" }
+        }, async |conn| {
+            let options = values(json!(["o/r | 1.9", "o/missing | custom"]));
+            let body = serde_json::to_value(latest(conn, &limits, &options).await.unwrap()).unwrap();
+            assert_eq!(body["items"][0]["secondary"], "Current 1.9 · Latest v1.10.0 · New version available");
+            assert_eq!(body["items"][1]["secondary"], "Current custom · Latest release unavailable");
+            for _ in 0..2 {
+                assert!(matches!(latest(conn, &limits, &options).await.unwrap_err().class, Class::RateLimited));
+            }
+        }).await;
+    }
+}
