@@ -184,7 +184,7 @@ main>.banner{max-width:var(--page-max);margin:0 auto 16px}
 /* ---- 44 px targets on touch and phones (A11Y-18) ---- */
 @media (pointer:coarse),(max-width:699px){
  .tree .ia.logs,.sh .ia.logs{width:44px;height:44px;margin:0}
- .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px}
+ .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
  .nav-item,.chip,.tree-filter input{height:44px}
  .tree-filter input{font-size:var(--fs-input)}
  .ctr>a:first-child,.sh{height:44px}
