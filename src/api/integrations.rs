@@ -609,6 +609,9 @@ pub(super) async fn test_connection(
         (VerdictClass::Success, Some("nginx_proxy_manager")) => {
             "Signed in and read the account profile. Widget list permissions are unchecked."
         }
+        (VerdictClass::Success, Some("immich")) => {
+            "Read storage statistics. Library statistics and job permissions are unchecked."
+        }
         _ => class.message(),
     };
     IntegrationVerdict {

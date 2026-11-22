@@ -356,6 +356,9 @@ Enter your Immich server URL and an API key from an administrator account.
 Grant only `server.statistics`, `server.storage` and `job.read`. Hobnail sends
 the key in the `x-api-key` header.
 
+The connection test verifies storage access. Library statistics and job
+permissions are checked when the widget refreshes.
+
 **Immich overview** shows instance photo and video counts, used and available
 disk space, and active, waiting and failed jobs across the queues. If a
 response exceeds the cap, the other endpoints can still supply their data.
