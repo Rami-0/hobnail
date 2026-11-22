@@ -264,7 +264,7 @@ async fn dispatch(
         // The React client (docs/plans/react-port.md): its JSON API, the
         // embedded build under /assets/ and the app document under /app.
         p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
-            crate::http::assets::route(&req)
+            crate::http::assets::route(state, &req)
         }
         p => super::pwa::route(state, p).unwrap_or_else(|| not_found(p)),
     }
