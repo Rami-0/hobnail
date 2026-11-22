@@ -16,18 +16,21 @@ ENGINES=webkit PLAN=plan.txt FLOWS="logs,boards" scripts/e2e-matrix.sh hobnail-m
 in the script). Output goes to `$OUT` (default: a new directory under
 `$TMPDIR`): one JSON file per unit, `<engine>.log`, `summary.txt` (the
 engine × profile × flow table, problem counts by kind, and the distinct
-problems), and JPEG screenshots of failing states in `shots/`. Exit status
-is 0 only when every flow passed with no problem on any state.
+problems, the engine messages set aside and why), and JPEG screenshots of
+failing states in `shots/`. Exit status is 0 only when every flow passed
+with no problem on any state and every unit of the plan (listed in
+`expected.txt`: plan lines times engines) wrote a result; an instance or
+browser that fails to start writes a fatal result.
 
 A full run (3 engines in parallel, 26 units each: 78 units, 330 flow runs
-and about 2 800 checked page states) takes about 70-95 minutes on this host
+and about 2 850 checked page states) takes about 70-95 minutes on this host
 and writes 1-6 MB (screenshots only of failing states). Each flows unit
 takes 5-7 minutes, each sweep 2-3.
 
 ## How it works
 
-- **Browsers:** `mcr.microsoft.com/playwright:v1.64.1-noble` (Chromium 156,
-  Firefox 157, WebKit 27.2). `playwright-core` 1.64.1 and `axe-core` 4.14.0
+- **Browsers:** `mcr.microsoft.com/playwright:v1.64.1-noble`, pinned by
+  digest `sha256:2f05f8a7…8768f` (Chromium 156, Firefox 157, WebKit 27.2). `playwright-core` 1.64.1 and `axe-core` 4.14.0
   come from `package-lock.json` in this folder, installed with
   `npm ci --ignore-scripts` into the Docker volume `hobnail-m6-pw` (rebuilt
   when the lock file changes, or with `PW_REBUILD=1`). Both were published
@@ -38,7 +41,8 @@ takes 5-7 minutes, each sweep 2-3.
   container stopping and starting every 30 s). Engines get ports 3395, 3396
   and 3397. Port 3200 and the container `hobnail` are refused everywhere
   (`lib.mjs` `assertTarget`, `fake-instance.sh`). No third-party service
-  is contacted.
+  is contacted: every browser context aborts any request to a host other
+  than 127.0.0.1 or localhost and reports it as a `network` problem.
 - **Units:** `flows` (fresh instance; onboarding through every step with a
   tested Pi-hole connection, then every flow below), `skip` (fresh
   instance; onboarding skipping every step, then "tour stays closed" and
@@ -54,16 +58,18 @@ onboarding (every step / skip, including the board tour, which must
 appear on the first board visit and be saved as seen) · tour stays closed
 (straight after onboarding: revisit the board, save an edit, leave and come
 back in the app, reload; the tour must not open again) · login and logout
-(wrong password, the rate-limit pause, sign in again) · overview, host,
-alerts · containers (filter, open a container, all five detail tabs) · logs
+(the account button names its visible initials, wrong password, the
+rate-limit pause, sign in again) · overview, host, alerts (each stack's
+fold toggle says "Fold" or "Show" and its stack; the process table is a
+named region) · containers (filter, open a container, all five detail tabs) · logs
 (live tail, search filter, download — opening "Filters" on phones — picker,
 multi-pane) · history charts (hover or tap read-out, container metrics) ·
 boards (edit, add a link, save; edit, cancel) · catalog → add Pi-hole →
 test → choose widgets → save to board → tile on the board · settings (all
 12 tabs, save and restore a setting, account) · users and invites (create,
-accept in a second browser context, listed) · command palette (open, type,
+accept in a second browser context with its own checks, listed) · command palette (open, type,
 Enter, Escape) · keyboard only (skip link, 30 Tab stops all visibly
-focused, palette to settings, filter, account menu with Escape returning
+focused and never back on `<main>`, palette to settings, filter, account menu with Escape returning
 focus) · touch (drawer, tap navigation, tap a row, palette; touch profiles)
 · SSE reconnect after a network drop · tablet rotation (portrait ↔
 landscape on three pages and with the palette open; tablet profiles).
@@ -80,15 +86,17 @@ Chromium (measured: the status stayed "live" for 20 s), hence the restart.
 
 | Check | Rule |
 |---|---|
-| console | no `console.error` and no uncaught page error (a flow may allow named, expected ones: the 401 of a wrong password, the 429 pause, failed stream requests while the network is down) |
-| CSP | no `securitypolicyviolation` event and no CSP console report |
+| console | no `console.error` and no uncaught page error, counting everything since the previous state (navigation, clicks, saves) and what is left after a flow's last state; `console.error(object)` is reported with its arguments. A flow may allow named, expected ones, matched against the message and its URL: the 401 of a wrong password, the 429 pause, and, while the network is down, failures of the event stream (`/api/v1/stream`) only |
+| CSP | no `securitypolicyviolation` event and no CSP console report (same accounting as console) |
+| network | no request to anything but the throwaway instance |
 | sideways scroll | `scrollWidth` of the document and body ≤ viewport + 1 px |
-| clipped controls | no visible control cut by a non-scrolling ancestor, outside the viewport, or with its own text cut without an ellipsis |
-| targets | `../hit-targets.mjs` (the whole target must be the control's own): 44 px where the design promises it (`pointer:coarse` or under 700 px, `shell.css` A11Y-18), 24 px (WCAG 2.5.8) for a fine pointer; with a dialog, menu or listbox open, its own controls |
-| focus | two Tab presses: each focused control matches `:focus-visible`, shows an outline or box shadow, and is on screen |
+| clipped controls | no visible control cut by a non-scrolling ancestor, outside the viewport, or with its own text cut without an ellipsis (designed truncation: an ellipsis, with the control still at the page's target size wide) |
+| targets | `../hit-targets.mjs` (the whole target must be the control's own): 44 px where the design promises it (`pointer:coarse` or under 700 px, `shell.css` A11Y-18), 24 px (WCAG 2.5.8) for a fine pointer; with a dialog, menu, listbox or the tour open, its own controls; toasts as a scope of their own. A measurement that throws, or none on a page with visible controls, is a `harness` problem |
+| focus | two key presses (Tab; arrows in a menu or listbox), on the page or inside the open layer (focus goes back where it was): each focused control matches `:focus-visible`, is on screen, stays inside a modal dialog, and shows a ring: its outline (visible, not transparent) or box shadow, or a near ancestor's, differs from its blurred look |
 | reduced motion | under `prefers-reduced-motion: reduce`, no running transition or animation |
 | axe | `axe.run(document)` with axe-core's default rules (WCAG 2.0-2.2 A/AA and best practice): zero violations |
 | tour | once onboarding has finished the board tour, it is not open on any later state (a `?tour=1` replay excepted) |
+| heading | an empty state's title is deeper than its section's own heading |
 
 ### Profiles and modes
 
@@ -149,14 +157,60 @@ media queries and container queries see exactly what they would at 200 %.
   (runs 2-4). A standalone probe loads all 12 charts in WebKit once the
   placeholder is in view; the flow keeps it in view, as a user scrolling
   would (run 4b: pass).
-- **WebKit screenshots and CSP.** `page.screenshot()` in WebKit injects a
-  style element (to hide the caret), which the page's `style-src 'self'`
-  refuses with a console error. The harness takes screenshots only after a
-  state's checks, and none of these reached a result (they would show as
-  `csp` problems).
-- **Transient overlays.** Toasts are hidden while targets are measured; the
-  board tour, an open dialog, menu or listbox limits the target check to
-  its own controls; the focused skip link covers the brand by design.
+- **Engine messages set aside.** Each is matched exactly, only in its
+  window, and counted per unit (`excluded` in the JSON, by reason in
+  `summary.txt`); everything else counts.
+  - *WebKit screenshots and CSP.* `page.screenshot()` in WebKit always
+    appends `<style>body {}</style>` to sync animations
+    (playwright-core 1.64.1, `lib/coreBundle.js`:
+    `inPagePrepareForScreenshots(…, syncAnimations)`, with
+    `WKPage.shouldToggleStyleSheetToSyncAnimations()` returning true;
+    Chromium and Firefox return false), whatever the `caret` and
+    `animations` options. The page's `style-src 'self'` refuses it
+    ("Refused to apply a stylesheet …", `style-src-elem` `inline`). Set
+    aside: that refusal, in WebKit, while a screenshot is being taken
+    (and 150 ms after). Screenshots are taken only of failing states.
+  - *Loads cancelled by leaving a page.* A navigation cancels the old
+    page's loads in flight: WebKit then reports "EventSource cannot load
+    … / Fetch API cannot load … due to access control checks." as page
+    errors (seen for the event stream, `/api/v1/strips`, `/icon.svg`,
+    `/api/settings/general`), and Vite's preload helper (WebKit, Firefox)
+    throws "Unable to preload CSS for …", and a lazy chunk fails with
+    "error loading dynamically imported module: …" (Firefox) or
+    "TypeError: Importing a module script failed." (WebKit); React logs
+    them. Set aside: those
+    messages while a main-frame navigation is under way (its request
+    sent, the new document not yet committed, at most 1.5 s), when only
+    the document being left exists. Measured: every one arrived 1-60 ms
+    after the navigation request; the failed-request log
+    (`requestsFailed` in the JSON) shows the same URLs "Load request
+    cancelled" (WebKit) or `NS_BINDING_ABORTED` (Firefox). A standalone
+    probe (a plain page with an open `EventSource` and a pending fetch,
+    then `goto`) logs nothing in any engine, so these need the app's
+    timing (lazy chunks and the stream still connecting), but they never
+    reach the page the user lands on.
+  - *Chromium and host network changes.* Chromium on Linux aborts its
+    requests in flight with `net::ERR_NETWORK_CHANGED` whenever an
+    interface of its network namespace changes. The browsers run with
+    `--network host`, and the matrix's own throwaway containers (every
+    unit's instance and fixtures, the network-drop restart, on three
+    engines at once) add and remove veth interfaces on the host. First
+    seen in the run of image 59a3fc7 (Chromium 390 overview: two assets;
+    the 1920 sweep: four history requests and `/icon.svg`). The runner
+    records the host's container start/die and network connect/
+    disconnect events (`docker-events.log`); set aside: exactly "Failed
+    to load resource: net::ERR_NETWORK_CHANGED", in Chromium, when one of
+    those events falls from 3 s before to 1 s after it (the matching
+    events are kept in the record).
+- **Transient overlays.** Toasts are measured as a scope of their own; the
+  board tour, an open dialog, menu or listbox limits the target check and
+  the focus check to its own controls; the focused skip link covers the
+  brand by design.
+- **Firefox and `console.error(object)`.** Firefox prints an Error
+  argument as "Error" or "JSHandle@object", and its handle is gone once
+  the page has navigated away. The harness writes the arguments out in the
+  page as `console.error` is called (an init script and a binding, like
+  the CSP listener) and reports that text.
 - **The board tour loads lazily.** In run 2 Chromium showed "Board tour ·
   1 of 3" again after a board save. Its onboarding had recorded no tour
   step: the flow had looked for the tour before its chunk rendered, so the
@@ -175,13 +229,23 @@ media queries and container queries see exactly what they would at 200 %.
 
 ## Results
 
-**Final full matrix**, 2026-11-22, image built from 0c1d0f9 (the branch
-head for the app; later commits touch only this folder's docs): 78 units,
-330 flow runs (321 run, 9 n/a), 2 835 page states checked: **every flow
-passes and every check is zero**: 0 console errors, 0 CSP violations,
-0 sideways scroll, 0 clipped controls, 0 target findings, 0 visible-focus
-failures, 0 reduced-motion failures, 0 axe violations, 0 tour
-reappearances. 70 minutes, 0.9 MB of output.
+**Final full matrix**, 2026-11-22, image built from 0727d26 (the branch
+head for the app; later commits touch only this folder's docs), with the
+un-blinded checks of the M6 gate fixes: 78 of 78 units, 330 flow runs
+(321 run, 9 n/a), 2 859 page states checked: **every flow passes and
+every check is zero**: 0 console errors, 0 page errors, 0 CSP
+violations, 0 blocked outside requests, 0 sideways scroll, 0 clipped
+controls, 0 target findings, 0 visible-focus failures (264 of the states
+with a dialog, menu, listbox or the tour open, checked inside it),
+0 reduced-motion failures, 0 axe violations, 0 tour reappearances,
+0 heading findings, 0 harness problems. Engine messages set aside
+(see "Engine messages set aside"): 28 loads cancelled by leaving a page
+(27 WebKit, 1 Firefox, 5 units) and 5 Chromium `ERR_NETWORK_CHANGED`
+(1 unit, each 1.6-2.9 s after a container stop and network
+disconnect/connect on the host); no screenshot was taken, so none from
+WebKit's screenshot style. No toast was on screen at a checked state, so
+the toast target scope measured nothing in this run. 75 minutes, 1.9 MB
+of output.
 
 | flow | C 390 | C tablet-p | C tablet-l | C 1440 | F 390 | F tablet-p | F tablet-l | F 1440 | W 390 | W tablet-p | W tablet-l | W 1440 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -235,5 +299,23 @@ RM: under reduced motion.
   notes).
 - Run 5 (image 7137de6, flows, skip and sweeps at 1440 and 200 % zoom on
   all three engines: 12 units, 63 flow runs, 421 states): all pass.
-- Final run above (image 0c1d0f9): the whole plan, all pass, after the
-  tour check was added.
+- Run 6 (image 0c1d0f9): the whole plan, all pass, after the tour check
+  was added. That run's checks had blind spots (M6 gate review): errors
+  outside a state's own checks were dropped, dialog and menu states
+  skipped the focus check, a failed target measurement passed, and a
+  unit that wrote no result counted as a pass.
+- Run 7 (image 59a3fc7, the review's harness fixes, app unchanged since
+  0c1d0f9): 78 units, 330 flow runs, 323 pass, 7 fail, 2 843 states.
+  Found: WebKit's keyboard-only walk landing back on `<main>` after the
+  skip link (all four flows profiles; fixed in "Skip link: focus main
+  directly"), Chromium `ERR_NETWORK_CHANGED` (two units) and a Firefox
+  lazy import cancelled by a reload (engine messages, set aside with
+  evidence); 43 left-page and 8 WebKit screenshot messages set aside.
+  Before it, smaller runs of the work-in-progress app found that the
+  account initials named "(AD)" still failed axe 2.5.3 (parentheticals
+  are dropped), fixed in the same commit as the initials.
+- Re-run (image 7cc876a, WebKit, keyboard-only, login and overview on
+  the four flows profiles): 19 of 20 pass; one "Importing a module
+  script failed." during a navigation, then added to the left-page
+  signatures.
+- Final run above (image 0727d26): the whole plan, all pass.
