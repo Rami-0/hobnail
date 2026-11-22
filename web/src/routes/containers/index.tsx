@@ -334,10 +334,11 @@ export default function ContainersPage() {
         onPointerLeave={() => setInTable((s) => (s.pointer ? { ...s, pointer: false } : s))}
       >
         <table ref={tableRef} className={grouped ? "tbl ctbl grouped" : "tbl ctbl"} data-testid="containers">
-          <caption className="count" role="status" aria-live="polite" data-testid="showing">
+          {/* A caption may not take role=status: the live region sits inside it. */}
+          <caption className="count"><output data-testid="showing">
             Showing <b className="num">{shown}</b> of <span className="num">{total}</span> containers
             {hiddenInFolded > 0 ? ` · ${hiddenInFolded} in collapsed stacks` : ""}
-          </caption>
+          </output></caption>
           <thead>
             <tr>
               <SortTh view={view} k="name" label="Name" cls="c-name" setView={setView} />
