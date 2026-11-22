@@ -181,6 +181,10 @@ export const flows = {
   async "login and logout"(h, f) {
     const { page } = h;
     await page.goto(new URL("/app/overview", f.base).href);
+    // The avatar's initials are in the DOM and in the button's name, so a
+    // speech user can say what they see ("click AD").
+    const [label, initials] = await page.locator(`button${tid("user")}`).evaluate((b) => [b.getAttribute("aria-label"), b.querySelector(".account-avatar")?.textContent ?? ""]);
+    assert.ok(initials.length === 2 && label.endsWith(`, ${initials}`), `account button "${label}" names its initials "${initials}"`);
     await page.locator(tid("user")).click();
     await page.locator(tid("signout")).waitFor();
     await h.state("account menu");

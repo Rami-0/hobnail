@@ -14,7 +14,7 @@ export interface MenuItem {
 }
 
 export interface MenuProps {
-  /** The button's accessible name ("Account: admin"). */
+  /** The button's accessible name ("Account: admin, AD"). */
   label: string;
   /** What the button shows. */
   trigger: ReactNode;
