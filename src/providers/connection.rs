@@ -630,10 +630,18 @@ impl<'a> Conn<'a> {
             .get_all(hyper::header::SET_COOKIE)
             .iter()
             .filter_map(|header| header.to_str().ok())
-            .filter_map(|value| value.split(';').next().map(str::trim))
-            .filter(|pair| pair.split_once('=').is_some_and(|(key, _)| key == name));
-        let pair = selected.next().ok_or(Class::Protocol)?;
-        if pair.len() > MAX_SESSION || selected.next().is_some() {
+            .filter_map(|value| {
+                let mut parts = value.split(';').map(str::trim);
+                let pair = parts.next()?;
+                let (key, _) = pair.split_once('=')?;
+                (key == name).then_some((pair, parts))
+            });
+        let (pair, mut attributes) = selected.next().ok_or(Class::Protocol)?;
+        if pair.len() > MAX_SESSION
+            || selected.next().is_some()
+            || (self.origin.starts_with("http://")
+                && attributes.any(|attr| attr.eq_ignore_ascii_case("secure")))
+        {
             return Err(Class::Protocol.into());
         }
         let start = name.len() + 1;

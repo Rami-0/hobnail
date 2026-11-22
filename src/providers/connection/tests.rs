@@ -832,3 +832,24 @@ async fn changing_a_target_cancels_a_stalled_tls_probe() {
     let (result, ()) = tokio::join!(conn.run(conn.tls_leaf()), invalidate);
     assert!(matches!(result.unwrap_err().class, Class::Changed));
 }
+
+#[test]
+fn secure_session_cookie_requires_https() {
+    let connections = Connections::default();
+    let policy = policy();
+    let response = Response {
+        status: 200,
+        headers: [(hyper::header::SET_COOKIE, "sid=fixture; Path=/; sEcUrE; HttpOnly".parse().unwrap())]
+            .into_iter()
+            .collect(),
+        body: Default::default(),
+    };
+    for (scheme, accepted) in [("http", false), ("https", true)] {
+        let target = Target::new(format!("{scheme}://127.0.0.1"), Default::default(), false);
+        let permit = std::sync::Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
+        let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+        let session = conn.session_cookie(&response, "sid");
+        assert_eq!(session.is_ok(), accepted);
+        assert_eq!(conn.output_redactor().matches("fixture"), accepted);
+    }
+}
