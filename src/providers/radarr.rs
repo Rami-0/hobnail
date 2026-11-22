@@ -42,8 +42,8 @@ struct Movie {
 
 fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let movies: Vec<Movie> = arr::calendar(conn, &[]).await?;
-        Ok(arr::upcoming(movies.into_iter().map(|movie| {
+        let movies: Option<Vec<Movie>> = arr::calendar(conn, &[]).await?;
+        Ok(arr::upcoming(movies, |movie| {
             BodyItem {
                 icon: None,
                 title: display_text(conn, movie.title),
@@ -54,7 +54,7 @@ fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 link: None,
                 time: None,
             }
-        })))
+        }))
     })
 }
 

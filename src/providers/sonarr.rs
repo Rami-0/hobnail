@@ -49,8 +49,8 @@ struct Series {
 
 fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let episodes: Vec<Episode> = arr::calendar(conn, &[("includeSeries", "true")]).await?;
-        Ok(arr::upcoming(episodes.into_iter().map(|episode| {
+        let episodes: Option<Vec<Episode>> = arr::calendar(conn, &[("includeSeries", "true")]).await?;
+        Ok(arr::upcoming(episodes, |episode| {
             let title = display_text(
                 conn,
                 episode.title.unwrap_or_else(|| "Untitled episode".into()),
@@ -68,7 +68,7 @@ fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 link: None,
                 time: None,
             }
-        })))
+        }))
     })
 }
 
@@ -83,12 +83,18 @@ mod tests {
         const HEALTH: &str = "GET /prefix/api/v3/health HTTP/1.1";
         const ISSUE: &str = r#"[{"id":1,"source":"IndexerStatusCheck","type":"warning","message":"Indexer unavailable"}]"#;
         const KEY: &str = "fake-sonarr-api-key";
+        let oversized = format!("[{}]", " ".repeat(128 * 1024));
         exercise(&SONARR, &[("api_key", KEY)], Values::new(), &[
             Exchange { request: HEALTH, status: 200, body: "[]" },
             Exchange { request: "GET /prefix/api/v3/queue/status HTTP/1.1", status: 200, body: r#"{"totalCount":5,"count":4,"unknownCount":1,"errors":false}"# },
             Exchange { request: "GET /prefix/api/v3/wanted/missing?page=1&pageSize=1&monitored=true HTTP/1.1", status: 200, body: r#"{"page":1,"pageSize":1,"totalRecords":42,"records":[{"id":12,"title":"Pilot"}]}"# },
             Exchange { request: HEALTH, status: 200, body: ISSUE },
             Exchange { request: "GET /prefix/api/v3/calendar?start=*", status: 200, body: r#"[{"id":1,"title":"The first episode","airDateUtc":"2026-11-22T02:00:00Z","series":{"title":"Sample series"}}]"# },
+            Exchange { request: "GET /prefix/api/v3/queue/status HTTP/1.1", status: 200, body: r#"{"totalCount":5}"# },
+            Exchange { request: "GET /prefix/api/v3/wanted/missing?page=1&pageSize=1&monitored=true HTTP/1.1", status: 200, body: r#"{"totalRecords":42,"records":[]}"# },
+            Exchange { request: HEALTH, status: 200, body: &oversized },
+            Exchange { request: "GET /prefix/api/v3/calendar?start=*", status: 200, body: &oversized },
+            Exchange { request: "GET /prefix/api/v3/calendar?start=*", status: 200, body: "[]" },
             Exchange { request: HEALTH, status: 401, body: "" },
             Exchange { request: HEALTH, status: 200, body: r#"[{"id":7}]"# },
         ], |index, wire| {
@@ -106,6 +112,14 @@ mod tests {
             ]));
             let upcoming = super::super::fetch(conn, &SONARR.widgets[1], &Values::new()).await.unwrap();
             assert_eq!(serde_json::to_value(upcoming).unwrap()["items"][0]["secondary"], "Sample series · 2026-11-22T02:00:00Z");
+            let overview = super::super::fetch(conn, &SONARR.widgets[0], &Values::new()).await.unwrap();
+            assert_eq!(serde_json::to_value(overview).unwrap()["rows"], json!([
+                ["Queue", "5"], ["Missing", "42"], ["Health issues", "Unavailable"]
+            ]));
+            for message in ["Calendar response too large for the next 48 hours.", "Nothing upcoming in the next 48 hours."] {
+                let upcoming = super::super::fetch(conn, &SONARR.widgets[1], &Values::new()).await.unwrap();
+                assert_eq!(serde_json::to_value(upcoming).unwrap()["message"], message);
+            }
             assert_test_fault(conn, &SONARR, Class::Auth).await;
             assert_test_fault(conn, &SONARR, Class::Protocol).await;
         }).await;

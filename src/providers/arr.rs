@@ -72,13 +72,13 @@ pub(super) fn overview_v3<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, Stru
             ],
         )
         .await?;
-        let issues: Vec<HealthIssue> = get(conn, "api/v3/health", &[]).await?;
+        let issues = within_response_limit(get::<Vec<HealthIssue>>(conn, "api/v3/health", &[]).await)?;
         let mut rows = vec![
             ("Queue".into(), queue.total_count.to_string()),
             ("Missing".into(), missing.total_records.to_string()),
-            ("Health issues".into(), issues.len().to_string()),
+            ("Health issues".into(), issues.as_ref().map_or_else(|| "Unavailable".into(), |issues| issues.len().to_string())),
         ];
-        rows.extend(issues.into_iter().take(5).map(|issue| {
+        rows.extend(issues.into_iter().flatten().take(5).map(|issue| {
             (
                 display_text(conn, issue.severity),
                 display_text(conn, issue.message),
@@ -91,17 +91,25 @@ pub(super) fn overview_v3<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, Stru
 pub(super) async fn calendar<T: serde::de::DeserializeOwned>(
     conn: &Conn<'_>,
     extra: &[(&str, &str)],
-) -> Result<Vec<T>, Fault> {
+) -> Result<Option<Vec<T>>, Fault> {
     let now = unix_now();
     let start = fmt_utc(now);
     let end = fmt_utc(now + 2 * 86_400);
     let mut query = vec![("start", Input::Text(&start)), ("end", Input::Text(&end))];
     query.extend(extra.iter().map(|&(key, text)| (key, Input::Text(text))));
-    get(conn, "api/v3/calendar", &query).await
+    within_response_limit(get(conn, "api/v3/calendar", &query).await)
 }
 
-pub(super) fn upcoming(items: impl Iterator<Item = BodyItem>) -> StructuredBody {
-    let items = items.take(10).collect::<Vec<_>>();
+pub(super) fn upcoming<T>(
+    entries: Option<Vec<T>>,
+    item: impl FnMut(T) -> BodyItem,
+) -> StructuredBody {
+    let Some(entries) = entries else {
+        return StructuredBody::Unavailable {
+            message: "Calendar response too large for the next 48 hours.".into(),
+        };
+    };
+    let items = entries.into_iter().take(10).map(item).collect::<Vec<_>>();
     if items.is_empty() {
         StructuredBody::Unavailable {
             message: "Nothing upcoming in the next 48 hours.".into(),
