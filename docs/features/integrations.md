@@ -561,6 +561,23 @@ REST API documentation.
 UNVERIFIED: live tokens, enterprise policy behavior and concurrent changes
 to issue and PR counts between the two requests.
 
+## Paperless-ngx
+
+Enter the Paperless-ngx URL and an API token from your Paperless account.
+Grant the account view permission for the documents and inbox tags you
+want counted. Hobnail sends the token in `Authorization: Token …` and
+checks `GET /api/`.
+
+**Documents and inbox** reads `GET /api/statistics/` for the visible document
+total and inbox count. It reports when the account has no visible inbox tag.
+The provider reads counts without listing or downloading documents.
+
+Verified from the [Paperless-ngx REST API](https://paperless-ngx-docs.readthedocs.io/en/latest/api.html),
+[v2.20.15 routes](https://github.com/paperless-ngx/paperless-ngx/blob/v2.20.15/src/paperless/urls.py)
+and [statistics source](https://github.com/paperless-ngx/paperless-ngx/blob/v2.20.15/src/documents/views.py).
+
+UNVERIFIED: other API versions, reverse-proxy auth and live permission setups.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

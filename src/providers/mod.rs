@@ -46,6 +46,7 @@ mod jellyfin;
 mod jellyseerr;
 mod nextcloud;
 mod nginx_proxy_manager;
+mod paperless;
 mod pihole;
 mod plex;
 mod prowlarr;
@@ -101,6 +102,7 @@ pub const REGISTRY: &[Provider] = &[
     truenas::TRUENAS,
     gitea::GITEA,
     github::GITHUB,
+    paperless::PAPERLESS,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
