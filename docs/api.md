@@ -129,12 +129,15 @@ Provider catalog and installation:
   includes upstream data. The test does not write the draft or record saved
   health evidence.
 - `POST /api/v1/providers/install` accepts
-  `{integration, integration_id?, board_id?, widgets?}`. Each selected
+  `{integration, integration_id?, board_id?, widgets?, remove?}`. Each selected
   widget is `{id, placement?, options}`. Use the widget descriptor ID for
   `id` and the widget's saved placement ID when editing it. A nonempty
   selection requires a board. Connection and board updates commit together.
   The selected board's placement gets the options and refresh interval. An
-  empty selection saves the connection alone.
+  empty selection saves the connection alone. `remove` lists saved placement
+  IDs of this integration on the board to take off it; removals and the
+  selection land in the same board revision, and an ID that is not this
+  integration's placement on that board is refused.
 - `GET /api/v1/providers/widgets?integration=<id>&board=<id>` returns a map
   of widget descriptor IDs to arrays of placements `{id, options}`. Scoped
   admins can test or update a granted integration by supplying its ID. Reading

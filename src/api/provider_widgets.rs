@@ -43,6 +43,10 @@ struct Install {
     board_id: Option<String>,
     #[serde(default)]
     widgets: Vec<Selection>,
+    /// Saved placement IDs of this integration on `board_id` to take off the
+    /// board, in the same board revision as the selection.
+    #[serde(default)]
+    remove: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -168,13 +172,15 @@ fn install(
     user: &Principal,
 ) -> Result<(IntegrationView, Option<(String, u32)>), ApiError> {
     let provider = integrations::provider(&input.integration.kind)?;
-    if input.widgets.len() > 512 || !input.widgets.is_empty() && input.board_id.is_none() {
+    let placing = !input.widgets.is_empty() || !input.remove.is_empty();
+    if input.widgets.len() > 512 || input.remove.len() > 512 || placing && input.board_id.is_none()
+    {
         return Err(ApiError::bad_request(
             "Choose a board and supported widgets.",
             Some("widgets"),
         ));
     }
-    if !input.widgets.is_empty()
+    if placing
         && input
             .board_id
             .as_ref()
@@ -213,10 +219,43 @@ fn install(
             Some(&format!("widgets.{index}.paths")),
         ));
     }
-    let board = if let Some(id) = input.board_id.filter(|_| !options.is_empty()) {
+    let remove: HashSet<String> = input.remove.into_iter().collect();
+    if options
+        .iter()
+        .any(|(_, placement, _)| placement.as_ref().is_some_and(|id| remove.contains(id)))
+    {
+        return Err(ApiError::bad_request(
+            "Choose a widget placement once.",
+            Some("widgets"),
+        ));
+    }
+    let board = if let Some(id) = input.board_id.filter(|_| placing) {
         let board = boards::get(conn, &id)?;
         let previous = boards::document(conn, &board)?;
         let mut doc = previous.clone();
+        for widget_id in &remove {
+            let owned = conn
+                .query_row(
+                    "SELECT 1 FROM provider_widgets WHERE id=?1 AND integration_id=?2 AND board_id=?3",
+                    (widget_id, &integration.id, &id),
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if owned.is_none() {
+                return Err(ApiError::bad_request(
+                    "The widget placement has changed. Reload the board and try again.",
+                    Some("widgets"),
+                ));
+            }
+        }
+        let mut removed = false;
+        for section in &mut doc.sections {
+            section.items.retain(|item| {
+                let gone = matches!(&item.payload, boards::BoardPayload::Widget { widget_id, .. } if remove.contains(widget_id));
+                removed |= gone;
+                !gone
+            });
+        }
         let mut section = boards::BoardSection {
             id: None,
             title: "Widgets".into(),
@@ -274,20 +313,25 @@ fn install(
                 },
             });
         }
-        if section.items.is_empty() {
+        if section.items.is_empty() && !removed {
             None
         } else {
-            doc.sections.push(section);
+            let added = !section.items.is_empty();
+            if added {
+                doc.sections.push(section);
+            }
             boards::validate(&doc, &previous, user, conn, &state.config.current())?;
-            for (item, placement) in doc
-                .sections
-                .last_mut()
-                .expect("new widget section")
-                .items
-                .iter_mut()
-                .zip(placements)
-            {
-                item.id = Some(placement);
+            if added {
+                for (item, placement) in doc
+                    .sections
+                    .last_mut()
+                    .expect("new widget section")
+                    .items
+                    .iter_mut()
+                    .zip(placements)
+                {
+                    item.id = Some(placement);
+                }
             }
             boards::store(conn, &id, doc, crate::auth::now_s())?;
             Some((id, board.version.saturating_add(1)))

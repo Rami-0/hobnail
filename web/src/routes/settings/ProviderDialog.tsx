@@ -126,8 +126,13 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
     }
 
     const widgetFields: Record<string, Record<string, string>> = {};
+    // Saved placements switched off: the server takes them off the board.
+    const remove: string[] = [];
     const widgets = choosing && board ? rows.flatMap(({ widget, id }) => {
-      if (!selected[id]) return [];
+      if (!selected[id]) {
+        if (id !== widget.id) remove.push(id);
+        return [];
+      }
       const fields = schemaValues(widget.fields, selected[id] ?? {});
       if (Object.keys(fields.errors).length) widgetFields[id] = fields.errors;
       return [{ id: widget.id, placement: id === widget.id ? undefined : id, options: fields.values }];
@@ -149,7 +154,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
     } else {
       const result = item && !choosing
         ? await api.request("PUT", `/api/v1/integrations/${item.id}`, { body: integration })
-        : await api.post("/api/v1/providers/install", { integration, integration_id: item?.id, board_id: board || null, widgets });
+        : await api.post("/api/v1/providers/install", { integration, integration_id: item?.id, board_id: board || null, widgets, remove });
       if (result.kind === "ok") onSaved();
       else {
         const field = result.kind === "invalid" ? result.field : undefined;

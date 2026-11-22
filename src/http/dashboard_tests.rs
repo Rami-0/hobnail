@@ -2137,6 +2137,35 @@ async fn scoped_admins_can_test_and_configure_granted_provider_integrations() {
         saved_options["json"][0]["options"]["paths"],
         json!(["new_reading"])
     );
+
+    // Switching a saved placement off removes it in one board revision.
+    let placed = saved_options["json"][0]["id"].clone();
+    let board_path = format!("/api/v1/boards/{board}");
+    let before = admin.json("GET", &board_path, Value::Null, 200).await;
+    let mut foreign = placement(&board, json!({}));
+    foreign["widgets"] = json!([]);
+    foreign["remove"] = json!(["provider:not-this-integration"]);
+    admin.json("POST", install, foreign, 400).await;
+    let mut both = placement(&board, json!({"paths":["value"]}));
+    both["widgets"][0]["placement"] = placed.clone();
+    both["remove"] = json!([placed]);
+    admin.json("POST", install, both, 400).await;
+    let mut off = placement(&board, json!({}));
+    off["widgets"] = json!([]);
+    off["remove"] = json!([placed]);
+    admin.json("POST", install, off, 201).await;
+    let saved_options = admin
+        .json("GET", &options(id, &board), Value::Null, 200)
+        .await;
+    assert_eq!(saved_options, json!({}));
+    let after = admin.json("GET", &board_path, Value::Null, 200).await;
+    assert_eq!(
+        after["document"]["version"].as_u64().unwrap(),
+        before["document"]["version"].as_u64().unwrap() + 1
+    );
+    assert!(!after["document"]
+        .to_string()
+        .contains(placed.as_str().unwrap()));
 }
 
 #[tokio::test]

@@ -353,6 +353,23 @@ export const flows = {
     await go(h, f, f.board, tid("board-tile"));
     await page.waitForFunction((n) => document.querySelectorAll('[data-testid="board-tile"]').length > n, tiles);
     await h.state("widget on board");
+    // Switching a placed widget off takes it off the board.
+    const placed = await page.locator(tid("board-tile")).count();
+    await go(h, f, "/app/settings/integrations", tid("integration-row"));
+    await page.locator(tid("integration-row")).filter({ hasText: "Matrix Pi-hole" }).getByRole("button", { name: "Edit" }).click();
+    await form.waitFor();
+    await page.getByRole("button", { name: "Choose widgets" }).click();
+    await form.locator('[aria-label="Board"]').click();
+    await page.locator('[role="option"]').nth(1).click();
+    await sw.waitFor();
+    assert.equal(await sw.getAttribute("aria-checked"), "true", "the placed widget shows switched on");
+    await sw.click();
+    await h.state("widget switched off");
+    await page.getByRole("button", { name: "Save widgets to board" }).click();
+    await form.waitFor({ state: "detached" });
+    await go(h, f, f.board, tid("board-tile"));
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid="board-tile"]').length === n, placed - 1);
+    await h.state("widget removed");
   },
   async settings(h, f) {
     const { page } = h;
