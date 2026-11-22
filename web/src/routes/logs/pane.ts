@@ -1,5 +1,5 @@
 import { api } from "../../api/session.ts";
-import { chipName, filterRows, matcher, matchRanges, nextMatch, Ring, streamParams, type LogLine, type MatchPosition, type Row } from "./model.ts";
+import { chipName, fgProperty, filterRows, matcher, matchRanges, nextMatch, Ring, streamParams, type LogLine, type MatchPosition, type Row } from "./model.ts";
 
 const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
@@ -586,9 +586,10 @@ export class LogPane {
       for (const segment of row.segments) {
         const span = segment.classes || segment.fg || segment.bg ? document.createElement("span") : text;
         if (segment.classes) span.className = segment.classes;
-        // The ANSI colour's lightness is clamped per theme (logs.css), so
-        // dark red stays readable on a light pane and black on a dark one.
-        if (segment.fg) span.style.setProperty("--fg", segment.fg); if (segment.bg) span.style.backgroundColor = segment.bg;
+        // On the pane's background the ANSI colour's lightness is clamped per
+        // theme (logs.css), so dark red stays readable on a light pane and
+        // black on a dark one; on its own ANSI background it is left as is.
+        if (segment.fg) span.style.setProperty(fgProperty(segment), segment.fg); if (segment.bg) span.style.backgroundColor = segment.bg;
         // Link only explicit http(s) URLs, with no interpretation of other text.
         const urls = /https?:\/\/[^\s<>"']+/g; let end = 0;
         for (const url of segment.text.matchAll(urls)) {

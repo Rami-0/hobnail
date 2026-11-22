@@ -26,6 +26,10 @@ export class Ring {
   }
 }
 export interface Segment { text: string; classes: string; fg?: string; bg?: string }
+/** Where a segment's ANSI foreground goes: "--fg", whose lightness logs.css
+ * clamps per theme so it reads on the pane, or, when the segment sets its own
+ * background, the plain colour, which pairs with that background instead. */
+export const fgProperty = (s: Segment) => s.bg ? "color" : "--fg";
 const palette = ["#121212", "#d65c5c", "#6bb576", "#c9ad58", "#729fe0", "#ba83d0", "#64b7bb", "#d0d0d0", "#777777", "#ff8585", "#93dc9b", "#f0d57f", "#9cc3ff", "#e3acfa", "#94e1e5", "#ffffff"];
 const cube = (k: number) => k ? 55 + k * 40 : 0;
 function color(n: number): string {
