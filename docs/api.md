@@ -108,8 +108,8 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 
 Board reads and successful board updates return at most 4 MiB of JSON.
 Resolved widget data has a 512 KiB budget within that limit. Later widgets
-that exceed the budget show an unavailable message. Individual widget
-reads and live updates can still provide their data. If the remaining
+that exceed the budget show an unavailable message. Live updates can
+still provide their data. If the remaining
 board metadata exceeds 4 MiB, the API returns a 413 response.
 
 Provider catalog and installation:

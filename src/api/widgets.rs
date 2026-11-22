@@ -37,12 +37,19 @@ impl WidgetView {
         if serde_json::to_writer(&mut size, &self).is_ok() && size.0 <= *remaining {
             *remaining -= size.0;
         } else {
-            self.body = None;
-            self.structured = None;
-            self.values.clear();
-            self.status = "error";
-            self.error = Some("Widget data unavailable within the board response limit.".into());
+            self.omit_board_body();
         }
+    }
+
+    pub(super) fn omit_board_body(&mut self) {
+        if self.body.is_none() && self.structured.is_none() && self.values.is_empty() {
+            return;
+        }
+        self.body = None;
+        self.structured = None;
+        self.values.clear();
+        self.status = "error";
+        self.error = Some("Widget data unavailable within the board response limit.".into());
     }
 }
 

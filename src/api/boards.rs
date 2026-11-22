@@ -40,17 +40,25 @@ impl std::io::Write for JsonSize {
     }
 }
 
-fn board_response(view: &BoardView) -> Result<Response<Body>, ApiError> {
+fn board_response(mut view: BoardView) -> Result<Response<Body>, ApiError> {
     let mut size = JsonSize::default();
-    serde_json::to_writer(&mut size, view).map_err(|_| {
-        ApiError::new(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "board_too_large",
-            "Board metadata exceeds the 4 MiB response limit.",
-        )
-    })?;
+    if serde_json::to_writer(&mut size, &view).is_err() {
+        for item in &mut view.resolved {
+            if let Some(widget) = &mut item.widget {
+                widget.omit_board_body();
+            }
+        }
+        size = JsonSize::default();
+        serde_json::to_writer(&mut size, &view).map_err(|_| {
+            ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "board_too_large",
+                "Board metadata exceeds the 4 MiB response limit.",
+            )
+        })?;
+    }
     let mut bytes = Vec::with_capacity(size.0);
-    serde_json::to_writer(&mut bytes, view).expect("board view serialized during sizing");
+    serde_json::to_writer(&mut bytes, &view).expect("board view serialized during sizing");
     Ok(super::json_bytes(StatusCode::OK, bytes))
 }
 
@@ -1132,7 +1140,7 @@ pub(super) async fn route(
                 mask_provider_widgets(c, id, user, &mut doc)?;
                 Ok((board, doc, integrations::list(state, c, user)?))
             })?;
-            board_response(&resolve(state, now, board, doc, visible, user))?
+            board_response(resolve(state, now, board, doc, visible, user))?
         }
         Handler::BoardSuggestions => {
             let (doc, integrations, targets) = db.dashboard(|c| -> Result<_, ApiError> {
@@ -1184,7 +1192,7 @@ pub(super) async fn route(
                     super::provider_widgets::placements_changed(state);
                     publish(state, id, board.version);
                     state.changed("groups");
-                    board_response(&resolve(state, now, board, doc, visible, user))?
+                    board_response(resolve(state, now, board, doc, visible, user))?
                 }
                 Err(version) => conflict(version),
             }
@@ -1359,7 +1367,7 @@ mod tests {
         let ((response, shown), peak) = measure_allocations(|| {
             let view = resolve(&state, 1, board, document, vec![], &owner);
             let shown = std::sync::Arc::strong_count(&body) - 2;
-            (board_response(&view).unwrap(), shown)
+            (board_response(view).unwrap(), shown)
         });
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         println!(
