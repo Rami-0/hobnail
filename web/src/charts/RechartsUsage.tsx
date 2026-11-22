@@ -15,7 +15,7 @@
 // plot, so they are focusable and named), local-time
 // ticks (series.ts `ticks`), lone points as dots, and the legend toggles
 // (buttons, remembered in localStorage ).
-import { memo, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   ComposedChart,
   Line,
@@ -98,25 +98,24 @@ function format(unit: Unit, v: number): string {
   }
 }
 
-// Intl's date formatting is slow the first time (locale data): warm it in a
-// task of its own, before the first chart asks for tick labels.
-window.setTimeout(() => tickLabel(Math.floor(Date.now() / 1000), 3600), 0);
+const Y_AXIS_WIDTH = 56;
+const MARGIN = { top: 10, right: 10, bottom: 0, left: 0 };
 
-// Multiple plots can intersect in the same layout. Give each one its own
-// frame and task so synchronous Recharts mounting never batches plots.
-const plotMounts = new Set<() => void>();
+// Mount and refresh one plot per frame. Recharts registers its axes and
+// lines synchronously, so batching plots can block the browser.
+const plotWork = new Set<() => void>();
 let mountFrame = 0;
-function schedulePlotMount() {
-  if (mountFrame || plotMounts.size === 0) return;
+function schedulePlotWork() {
+  if (mountFrame || plotWork.size === 0) return;
   mountFrame = requestAnimationFrame(() => {
     window.setTimeout(() => {
       mountFrame = 0;
-      const next = plotMounts.values().next().value;
+      const next = plotWork.values().next().value;
       if (next) {
-        plotMounts.delete(next);
+        plotWork.delete(next);
         next();
       }
-      schedulePlotMount();
+      schedulePlotWork();
     }, 0);
   });
 }
@@ -124,7 +123,13 @@ function schedulePlotMount() {
 export default function UsageCharts({ series, onZoom, onMarker, recording = true, metrics }: UsageChartsProps) {
   const rows = useMemo(() => chartRows(series), [series]);
   const markers = useMemo(() => chartMarkers(series.markers, series.from, series.to), [series]);
-  const xt = useMemo(() => ticks(series.from, series.to), [series.from, series.to]);
+  const { from, to } = series;
+  const axis = useMemo(() => {
+    const domain: [number, number] = [from, to];
+    const marks = ticks(from, to);
+    const labels = new Map(marks.map((t) => [t, tickLabel(t, to - from)]));
+    return { domain, marks, label: (t: number) => labels.get(t) ?? tickLabel(t, to - from) };
+  }, [from, to]);
   const [off, setOff] = useState<string[]>(loadOff);
   const toggle = useCallback((l: Layer) => {
     startTransition(() => setOff((o) => {
@@ -145,7 +150,7 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
     window.addEventListener("storage", on);
     return () => window.removeEventListener("storage", on);
   }, []);
-  const common = { rows, series, markers, xt, off, toggle, onZoom, onMarker, recording };
+  const common = { rows, series, markers, axis, off, toggle, onZoom, onMarker, recording };
   return <div className="charts two">
     {metrics ? metrics.map((metric) => {
       const [title, unit] = metricLabel(metric.key);
@@ -157,11 +162,22 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   </div>;
 }
 
-function HistoryChart({ metric, ...props }: Omit<OneProps, "kind"> & { metric: HistoryMetric }) {
+function HistoryChart({ metric, series, axis, markers, ...props }: Omit<OneProps, "kind"> & { metric: HistoryMetric }) {
+  const [current, setCurrent] = useState({ metric, series, axis, markers });
+  useEffect(() => {
+    if (current.metric === metric && current.series === series) return;
+    const update = () => startTransition(() => setCurrent({ metric, series, axis, markers }));
+    plotWork.add(update);
+    schedulePlotWork();
+    return () => { plotWork.delete(update); };
+  }, [metric, series, axis, markers, current]);
+
   const rows = useMemo(() => chartRows({
-    step: metric.step, cpu: metric.points, cpu_max: metric.max, mem: metric.yesterday ?? [], mem_max: null,
-  }), [metric]);
-  return <OneChart {...props} kind="cpu" rows={rows} testKey={metric.key} compare={metric.yesterday !== null} sync="history" />;
+    step: current.metric.step, cpu: current.metric.points, cpu_max: current.metric.max,
+    mem: current.metric.yesterday ?? [], mem_max: null,
+  }), [current.metric]);
+  return <OneChart {...props} kind="cpu" rows={rows} series={current.series} axis={current.axis}
+    markers={current.markers} testKey={current.metric.key} compare={current.metric.yesterday !== null} sync="history" />;
 }
 
 interface OneProps {
@@ -174,7 +190,7 @@ interface OneProps {
   rows: ChartRow[];
   series: Omit<SeriesSet, "range"> & Partial<Pick<SeriesSet, "range">>;
   markers: Marker[];
-  xt: number[];
+  axis: { domain: [number, number]; marks: number[]; label: (t: number) => string };
   off: string[];
   toggle: (l: Layer) => void;
   onZoom: (from: number, to: number) => void;
@@ -182,37 +198,38 @@ interface OneProps {
   recording: boolean;
 }
 
-interface Plot {
-  x: number;
-  width: number;
-}
-
-const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt, off, toggle, onZoom, onMarker, recording, unit = kind === "cpu" ? "pct" : "bytes", testKey = kind, compare = false, sync = "ctr-usage" }: OneProps) {
+const OneChart = memo(function OneChart({ kind, title, rows, series, markers, axis, off, toggle, onZoom, onMarker, recording, unit = kind === "cpu" ? "pct" : "bytes", testKey = kind, compare = false, sync = "ctr-usage" }: OneProps) {
   const bandKey = kind === "cpu" ? "cpuBand" : "memBand";
-  const hasBand = rows.some((r) => r[bandKey] !== null);
+  const values = useMemo(() => rows.flatMap((row) => row[kind] ?? []), [rows, kind]);
+  const last = values.at(-1) ?? null;
+  const hasBand = rows.some((row) => row[bandKey] !== null);
   const showAvg = !off.includes("avg");
   const showMax = hasBand && !off.includes("max");
   const showCompare = compare && !off.includes("cmp");
   const top = useMemo(() => Math.max(yTop(rows, kind, showMax), showCompare ? yTop(rows, "mem", false) : 0), [rows, kind, showMax, showCompare]);
-  const bottom = unit === "temp" ? Math.min(0, ...rows.map((row) => row[kind] ?? 0), ...rows.map((row) => showCompare ? row.mem ?? 0 : 0)) : 0;
-  const values = rows.flatMap((r) => (r[kind] === null ? [] : [r[kind] as number]));
-  const last = values.length ? (values[values.length - 1] as number) : null;
+  const bottom = unit === "temp" ? Math.min(0, ...values, ...rows.map((row) => showCompare ? row.mem ?? 0 : 0)) : 0;
+  const yAxis = useMemo(() => [bottom, (top + bottom) / 2, top], [bottom, top]);
+  const yDomain = useMemo(() => [bottom, top], [bottom, top]);
   const span = series.to - series.from;
-  const plot = useRef<Plot | null>(null);
-  // The plot's place, for the marker buttons above it (and the drag, via the ref).
-  const [layout, setLayout] = useState<Plot | null>(null);
-  const onPlot = useCallback((p: Plot) => {
-    plot.current = p;
-    startTransition(() => setLayout((l) => (l && l.x === p.x && l.width === p.width ? l : p)));
-  }, []);
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
+  const [decorated, setDecorated] = useState(false);
+  const plotWidth = width - Y_AXIS_WIDTH - MARGIN.right;
   const plotRows = useMemo(
-    () => rowsForWidth(rows, series.from, series.to, width - 66),
-    [rows, series.from, series.to, width],
+    () => plotWidth > 0 ? rowsForWidth(rows, series.from, series.to, plotWidth) : [],
+    [rows, series.from, series.to, plotWidth],
   );
   const lone = useMemo(() => lonePoints(plotRows, kind), [plotRows, kind]);
-  const hasValues = values.length > 0 || rows.some((r) => showCompare && r.mem !== null);
+  const hasValues = last !== null || (showCompare && rows.some((row) => row.mem !== null));
+  const plotted = width > 0 && hasValues;
+  useEffect(() => {
+    if (!plotted || decorated) return;
+    let timer = 0;
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(() => startTransition(() => setDecorated(true)), 0);
+    });
+    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [plotted, decorated]);
   useEffect(() => {
     const canvas = wrap.current;
     if (!hasValues || !canvas) return;
@@ -227,16 +244,18 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
       if (!entry) return;
       measured = Math.floor(entry.contentRect.width);
       if (mounted) startTransition(() => setWidth(measured));
-      else { plotMounts.add(mount); schedulePlotMount(); }
+      else { plotWork.add(mount); schedulePlotWork(); }
     });
     // Mount just before the canvas enters view, including below a wrapped phone header.
     const near = new IntersectionObserver(([entry]) => {
-      if (!entry?.isIntersecting) return;
-      near.disconnect();
-      size.observe(canvas);
+      if (entry?.isIntersecting) size.observe(canvas);
+      else {
+        size.unobserve(canvas);
+        plotWork.delete(mount);
+      }
     }, { rootMargin: "160px 0px" });
     near.observe(canvas);
-    return () => { near.disconnect(); size.disconnect(); plotMounts.delete(mount); };
+    return () => { near.disconnect(); size.disconnect(); plotWork.delete(mount); };
   }, [hasValues]);
   const selection = useRef<HTMLDivElement>(null);
   const drag = useRef<(() => void) | null>(null);
@@ -247,12 +266,11 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (e.target instanceof Element && e.target.closest(".mk")) return;
     const box = wrap.current;
-    const p = plot.current;
     const sel = selection.current;
-    if (!box || !p || !sel || drag.current) return;
+    if (!box || plotWidth <= 0 || !sel || drag.current) return;
     if (e.pointerType === "mouse") e.preventDefault();
     const r0 = box.getBoundingClientRect();
-    const left = r0.left + p.x;
+    const left = r0.left + Y_AXIS_WIDTH;
     const x0 = e.clientX - left;
     const end = (commitX: number | null) => {
       const d = drag.current;
@@ -261,17 +279,17 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
       drag.current = null;
       sel.hidden = true;
       if (commitX === null) return;
-      const z = zoomTo(x0, commitX, p.width, series.from, series.to);
+      const z = zoomTo(x0, commitX, plotWidth, series.from, series.to);
       if (z) onZoom(z.from, z.to);
     };
     const move = (ev: PointerEvent) => {
       if (ev.pointerId !== e.pointerId) return;
       const x1 = ev.clientX - left;
       const a = Math.max(0, Math.min(x0, x1));
-      const b = Math.min(p.width, Math.max(x0, x1));
+      const b = Math.min(plotWidth, Math.max(x0, x1));
       sel.hidden = b - a < 3;
       if (!sel.hidden) {
-        sel.style.left = `${p.x + a}px`;
+        sel.style.left = `${Y_AXIS_WIDTH + a}px`;
         sel.style.width = `${b - a}px`;
       }
     };
@@ -301,9 +319,9 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   };
 
   const summary =
-    values.length === 0
+    last === null
       ? `${title}: no data in this window`
-      : `${title}: last ${format(unit, last ?? 0)}, highest ${format(unit, Math.max(...values))}, lowest ${format(unit, Math.min(...values))}`;
+      : `${title}: last ${format(unit, last)}, highest ${format(unit, Math.max(...values))}, lowest ${format(unit, Math.min(...values))}`;
 
   return (
     <figure className={`chart ch-${kind}`} data-testid={`chart-${testKey}`} aria-label={summary}>
@@ -336,16 +354,16 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
             throttleDelay={48}
             width={width}
             height={180}
-            margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
+            margin={MARGIN}
           >
-            <PlotGrid values={[bottom, (top + bottom) / 2, top]} />
+            <PlotGrid values={yAxis} />
             <XAxis
               dataKey="t"
               type="number"
-              domain={[series.from, series.to]}
+              domain={axis.domain}
               allowDataOverflow
-              ticks={xt}
-              tickFormatter={(t: number) => tickLabel(t, span)}
+              ticks={axis.marks}
+              tickFormatter={axis.label}
               tickLine={false}
               // Our ticks are spaced already: no collision check (it measures
               // every label in the DOM), and no "nice" tick search.
@@ -353,21 +371,21 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
               niceTicks="none"
             />
             <YAxis
-              domain={[bottom, top]}
+              domain={yDomain}
               allowDataOverflow
-              ticks={[bottom, (top + bottom) / 2, top]}
+              ticks={yAxis}
               tickFormatter={(v: number) => v === 0 ? "0" : format(unit, v)}
               interval={0}
               niceTicks="none"
-              width={56}
+              width={Y_AXIS_WIDTH}
               tickLine={false}
               axisLine={false}
             />
-            <Tooltip
+            {decorated && <Tooltip
               isAnimationActive={false}
               cursor={{ className: "ch-cursor" }}
               content={<Tip kind={kind} unit={unit} compare={showCompare} span={span} markers={markers} />}
-            />
+            />}
             {showMax && <Band rows={plotRows} bandKey={bandKey} />}
             {showAvg && (
               <Line
@@ -384,12 +402,11 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
             )}
             {showCompare && <Line dataKey="mem" stroke="currentColor" strokeOpacity={0.55} strokeDasharray="4 3" name="Yesterday" dot={false} isAnimationActive={false} />}
             {showAvg && <LoneDots rows={plotRows} kind={kind} indices={lone} />}
-            <MarkerLines markers={markers} />
-            <PlotProbe onPlot={onPlot} />
+            {decorated && <MarkerLines markers={markers} />}
           </ComposedChart>}
           <div className="ch-sel" ref={selection} hidden aria-hidden="true" />
-          {layout && (
-            <div className="ch-marks" style={{ left: layout.x, width: layout.width }}>
+          {decorated && plotted && markers.length > 0 && (
+            <div className="ch-marks" style={{ left: Y_AXIS_WIDTH, width: plotWidth }}>
               {markers.map((m) => {
                 const left = ((m.at - series.from) / Math.max(1, span)) * 100;
                 if (!(left >= 0 && left <= 100)) return null;
@@ -455,17 +472,6 @@ function LoneDots({ rows, kind, indices }: { rows: ChartRow[]; kind: Kind; indic
     const row = rows[index];
     return row && <circle key={row.t} cx={x(row.t)} cy={y(row[kind])} r={2.5} fill="currentColor" />;
   })}</g>;
-}
-
-/** Tells the chart where its plot is (for the drag), from Recharts' layout. */
-function PlotProbe({ onPlot }: { onPlot: (p: Plot) => void }) {
-  const a = usePlotArea();
-  const x = a?.x;
-  const w = a?.width;
-  useLayoutEffect(() => {
-    if (x !== undefined && w !== undefined) onPlot({ x, width: w });
-  }, [x, w, onPlot]);
-  return null;
 }
 
 /** The tooltip body; Recharts passes the hover state (active, label, payload) into the element. */

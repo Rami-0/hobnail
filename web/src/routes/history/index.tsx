@@ -1,7 +1,7 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { Checkbox } from "../../ui/Checkbox.tsx";
 import { eventLabel } from "../container/events.ts";
-import { memo, useEffect } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { NearCharts } from "../container/NearCharts.tsx";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
 import { useRead } from "../../live/read.ts";
@@ -14,13 +14,48 @@ import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { historyWindow, RANGES, windowSteps } from "./window.ts";
 import "./history.css";
 
+/** Apply background History reads once the current gesture has settled. */
+function useQuietCommit() {
+  const input = useRef({ pressed: new Set<number | string>(), until: 0 });
+  useEffect(() => {
+    const current = input.current;
+    const track = (event: PointerEvent | KeyboardEvent) => {
+      const id = "pointerId" in event ? event.pointerId : event.code;
+      if (event.type.endsWith("down")) current.pressed.add(id);
+      else current.pressed.delete(id);
+      current.until = performance.now() + 100;
+    };
+    const blur = () => current.pressed.clear();
+    const lifetime = new AbortController();
+    for (const event of ["pointerdown", "pointerup", "pointercancel", "keydown", "keyup"] as const) {
+      window.addEventListener(event, track, { capture: true, signal: lifetime.signal });
+    }
+    window.addEventListener("blur", blur, { signal: lifetime.signal });
+    return () => { blur(); lifetime.abort(); };
+  }, []);
+
+  return useCallback((commit: () => void) => {
+    const current = input.current;
+    let timer = 0;
+    const apply = () => {
+      const delay = current.pressed.size ? 100 : current.until - performance.now();
+      if (delay > 0) timer = window.setTimeout(apply, delay);
+      else commit();
+    };
+    // Give already queued input a chance to arrive before applying the reply.
+    timer = window.setTimeout(apply, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+}
+
 export default function History() {
   const { search, hash } = useRoute();
   const { query, level, zoomed, range } = historyWindow(search);
   const bootstrap = useBootstrap();
   const sessionScoped = bootstrap?.scoped;
   const { data: containers } = useContainers();
-  const { data, error } = useRead<HistoryView>(sessionScoped === false ? `/api/v1/history?${query}` : null);
+  const quietCommit = useQuietCommit();
+  const { data, error } = useRead<HistoryView>(sessionScoped === false ? `/api/v1/history?${query}` : null, undefined, undefined, quietCommit);
 
   const selected = hash.startsWith("#ev-") ? Number(hash.slice(4)) : null;
   const extra = data?.markers.find((e) => e.id === selected && !data.events.some((row) => row.id === e.id));
@@ -29,9 +64,9 @@ export default function History() {
     const target = selected === null ? (hash === "#events" ? "events" : "") : `ev-${selected}`;
     if (target) document.getElementById(target)?.scrollIntoView({ block: "nearest" });
   }, [selected, hash, data]);
+  const names = useMemo(() => new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name))), [containers]);
   if (sessionScoped) return <p className="page">History is unavailable with board-scoped access.</p>;
 
-  const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   const steps = data ? windowSteps(data.from, data.to, data.now) : null;
   return <div className="page" data-testid="history">
     <PageHeader title="History" description="Host metrics and incidents from the local history database." />
@@ -67,7 +102,7 @@ export default function History() {
       <section className="panel history-block" id="events" aria-label="Incident timeline">
         <div className="panel-h"><h2>Incident timeline</h2></div>
         <div className="history-controls seg" role="group" aria-label="Incident severity">
-          {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
+          {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => { if (item !== level || search.has("before")) setSearch({ level: item, before: null }); }}>{item === "all" ? "All events" : item}</Button>)}
         </div>
         {data.events.length === 0 && !extra && <p>No matching events in this window.</p>}
         <ul className="history-events rows">
