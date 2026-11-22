@@ -34,10 +34,14 @@ disabled or deleted. Invitations are single-use, expire, and can be revoked.
   unsaved input without reloading the document.
 - Unknown Host names return 421. IP literals, localhost, `RH_HOSTNAME` and
   `RH_ALLOWED_HOSTS` globs are accepted; `/healthz` is exempt.
-- Passwords are salted argon2id hashes in SQLite: 19,456 KiB memory, two passes,
-  one lane. Each hash temporarily allocates about 19 MiB. The server does
-  one credential operation at a time on a blocking worker. Eight requests
-  can queue asynchronously for up to five seconds, retaining only parsed
+- New passwords are stored as salted Argon2id hashes in SQLite, using
+  7,168 KiB, five passes and one lane. This is one of the
+  [equivalent OWASP profiles](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id).
+  A successful login verifies a legacy 19,456 KiB/two-pass hash with its
+  original settings and then replaces it atomically. A failed upgrade write
+  leaves the original hash and the new session valid. The server runs one
+  credential operation at a time on a blocking worker. Eight requests can
+  queue asynchronously for up to five seconds, retaining only parsed
   credentials and request state. A full queue or an expired wait returns
   429 with `Retry-After: 1`.
 - Sessions use 32 random bytes; only their SHA-256 is stored. The cookie is

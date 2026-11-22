@@ -388,6 +388,19 @@ impl Db {
         })
     }
 
+    /// The verified login already has a session. A failed upgrade can be
+    /// retried on the next login and must not replace a concurrent reset.
+    pub(crate) fn upgrade_password_hash(&self, user: i64, previous: &str, replacement: &str) {
+        self.with((), |i| {
+            i.conn.execute(
+                "UPDATE users SET password_hash = ?3
+                 WHERE id = ?1 AND password_hash = ?2 AND disabled = 0",
+                params![user, previous, replacement],
+            )?;
+            Ok(())
+        });
+    }
+
     #[cfg(test)]
     pub fn session_is_valid(&self, hash: &str, now: i64) -> bool {
         self.with(false, |i| {

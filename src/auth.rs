@@ -266,7 +266,7 @@ pub(crate) fn change_password_for(
         .db
         .credential(&session.account.name)
         .ok_or("sign in required")?;
-    if current.len() > MAX_PASSWORD_BYTES || !verify_password(&stored, current) {
+    if current.len() > MAX_PASSWORD_BYTES || verify_password(&stored, current).is_none() {
         lock().failure(key, now_ms());
         state.db.record_event(
             now_s(),
@@ -357,7 +357,7 @@ fn argon2(memory: u32, passes: u32) -> Argon2<'static> {
 }
 
 fn hash_password(password: &str) -> Result<String, String> {
-    hash_with(&argon2(19_456, 2), password)
+    hash_with(&argon2(7_168, 5), password)
 }
 
 fn hash_with(algorithm: &Argon2<'_>, password: &str) -> Result<String, String> {
@@ -368,30 +368,38 @@ fn hash_with(algorithm: &Argon2<'_>, password: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-fn verify_password(stored: &str, password: &str) -> bool {
-    let Ok(hash) = PasswordHash::new(stored) else {
-        return false;
-    };
-    let production =
-        hash.params.get_decimal("m") == Some(19_456) && hash.params.get_decimal("t") == Some(2);
-    let test = cfg!(test)
-        && hash.params.get_decimal("m") == Some(32)
-        && hash.params.get_decimal("t") == Some(1);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PasswordProfile {
+    Current,
+    Legacy,
+    #[cfg(test)]
+    Test,
+}
+
+fn verify_password(stored: &str, password: &str) -> Option<PasswordProfile> {
+    let hash = PasswordHash::new(stored).ok()?;
     if hash.algorithm.as_str() != "argon2id"
         || hash.version != Some(19)
         || hash.params.get_decimal("p") != Some(1)
-        || !(production || test)
     {
-        return false;
+        return None;
     }
+    let profile = match (hash.params.get_decimal("m")?, hash.params.get_decimal("t")?) {
+        (7_168, 5) => PasswordProfile::Current,
+        (19_456, 2) => PasswordProfile::Legacy,
+        #[cfg(test)]
+        (32, 1) => PasswordProfile::Test,
+        _ => return None,
+    };
     Argon2::default()
         .verify_password(password.as_bytes(), &hash)
-        .is_ok()
+        .ok()?;
+    Some(profile)
 }
 
 // Public dummy record with the same work factors as a real password.
 const DUMMY_HASH: &str =
-    "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    "$argon2id$v=19$m=7168,t=5,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 fn valid_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
@@ -842,9 +850,19 @@ fn authenticate(
     let result = if action == CredentialAction::Login {
         let credential = db.credential(&username);
         let stored = credential.as_ref().map_or(DUMMY_HASH, |(_, hash, _)| hash);
-        let verified = password.len() <= MAX_PASSWORD_BYTES && verify_password(stored, &password);
-        match credential {
-            Some((id, stored, false)) if verified => db.sign_in(id, &stored, &hash, now, expires),
+        let verified = (password.len() <= MAX_PASSWORD_BYTES)
+            .then(|| verify_password(stored, &password))
+            .flatten();
+        match (credential, verified) {
+            (Some((id, stored, false)), Some(profile)) => {
+                db.sign_in(id, &stored, &hash, now, expires).map(|()| {
+                    if profile == PasswordProfile::Legacy {
+                        if let Ok(replacement) = hash_password(&password) {
+                            db.upgrade_password_hash(id, &stored, &replacement);
+                        }
+                    }
+                })
+            }
             _ => Err(AccountError::Invalid),
         }
     } else {
@@ -992,11 +1010,61 @@ mod tests {
     #[test]
     fn argon2id_hashes_are_salted_and_verifiable() {
         let hash = hash_password("correct horse").unwrap();
-        assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"));
-        assert!(verify_password(&hash, "correct horse"));
-        assert!(!verify_password(&hash, "wrong horse"));
-        assert!(!verify_password("invalid", "correct horse"));
+        assert!(hash.starts_with("$argon2id$v=19$m=7168,t=5,p=1$"));
+        assert_eq!(
+            verify_password(&hash, "correct horse"),
+            Some(PasswordProfile::Current)
+        );
+        assert_eq!(verify_password(&hash, "wrong horse"), None);
+        assert_eq!(verify_password("invalid", "correct horse"), None);
         assert_ne!(hash, hash_password("correct horse").unwrap());
+    }
+
+    #[test]
+    fn legacy_hash_upgrades_only_after_successful_login() {
+        let state = crate::testutil::state_with(vec![], "");
+        let previous = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &previous, 0).unwrap();
+        let login = |host, password: &str| {
+            authenticate(
+                &state,
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, host)),
+                CredentialAction::Login,
+                Credentials {
+                    username: "admin".into(),
+                    password: password.into(),
+                    token: None,
+                },
+            )
+        };
+        let read_hash = || state.db.credential("admin").unwrap().1;
+        assert!(matches!(login(1, "wrong horse"), Err(Attempt::Wrong)));
+        assert_eq!(read_hash(), previous);
+
+        state.db.with((), |i| {
+            i.conn.execute_batch(
+                "CREATE TRIGGER fail_upgrade BEFORE UPDATE OF password_hash ON users
+                 BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;",
+            )
+        });
+        let token = login(2, "correct horse").unwrap();
+        assert!(state
+            .db
+            .account_session(&sha256_hex(token.as_bytes()), now_s())
+            .is_some());
+        assert_eq!(read_hash(), previous);
+        state
+            .db
+            .with((), |i| i.conn.execute_batch("DROP TRIGGER fail_upgrade"));
+
+        login(2, "correct horse").unwrap();
+        let upgraded = read_hash();
+        assert_eq!(
+            verify_password(&upgraded, "correct horse"),
+            Some(PasswordProfile::Current)
+        );
+        login(2, "correct horse").unwrap();
+        assert_eq!(read_hash(), upgraded);
     }
 
     #[test]
