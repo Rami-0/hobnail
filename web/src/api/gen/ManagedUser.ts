@@ -3,4 +3,4 @@ import type { Role } from "./Role.ts";
 import type { ScopeTargets } from "./ScopeTargets.ts";
 import type { Scopes } from "./Scopes.ts";
 
-export type ManagedUser = { scope_targets: ScopeTargets | null, id: number, name: string, role: Role, disabled: boolean, created: number, updated: number, scopes: Scopes | null, };
+export type ManagedUser = { legacy_hash: boolean, scope_targets: ScopeTargets | null, id: number, name: string, role: Role, disabled: boolean, created: number, updated: number, scopes: Scopes | null, };

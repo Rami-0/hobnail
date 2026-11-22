@@ -110,11 +110,22 @@ If the database had a legacy password, browser ownership claims are locked.
 Run `hobnail set-password [username]` on the host to recover the owner. Old
 sessions are discarded. Fresh databases use browser setup instead.
 
-Existing account passwords hashed with the old 19 MiB Argon2id profile keep
-that work factor until the next successful sign-in for each account rehashes
-its password. That first sign-in peaked at about 20.5 MiB in M5. Temporarily
-raise a hard 20 MiB container memory limit for the first sign-in after
-upgrading. The shipped Compose and deploy configurations set no memory limit.
+Existing 19 MiB Argon2id hashes keep their original work factor until a
+successful sign-in rehashes each password at 7 MiB. Even an unsuccessful
+attempt against an old hash uses the original work factor. In M5 the first
+successful sign-in peaked at about 20.5 MiB.
+
+Before enforcing a hard 20 MiB container limit, allow more memory and have
+every account sign in once, or reset the remaining passwords from the host
+with `hobnail reset-password <username>`. The reset preserves the existing
+account and revokes its sessions. It reads the new password from the TTY
+without echo or from stdin, just like owner recovery.
+
+Run `hobnail list-legacy-hashes` against the same data directory or volume.
+It prints one username per line and exits successfully with no output when
+migration is complete. The Owner-only `GET /api/v1/users` response also marks
+each account with `legacy_hash`. The shipped Compose and deploy
+configurations set no memory limit.
 
 Reads from a cold SQLite database can increase reported container memory
 because the kernel charges file-cache pages to the container that reads
@@ -137,6 +148,8 @@ CLI (inside the container: `docker exec hobnail /hobnail <cmd>`):
 | `check-config [path]` | validate a config file, print errors with line/column |
 | `notify-test <channel>` | send a test message to a configured channel |
 | `set-password [username]` | optional owner recovery (TTY without echo, or stdin); revoke sessions |
+| `reset-password <username>` | reset an existing account in place (TTY without echo, or stdin); revoke its sessions |
+| `list-legacy-hashes` | print usernames still using the 19 MiB profile |
 | `mock-receiver [addr]` | local fake webhook/Slack/Telegram endpoint for testing |
 | `healthcheck` | used by the Docker healthcheck |
 | `version` | print version, git SHA and build time |

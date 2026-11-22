@@ -201,6 +201,18 @@ pub(crate) fn read_accounts(conn: &Connection) -> rusqlite::Result<Vec<Account>>
     rows.collect()
 }
 
+pub(crate) fn legacy_hash_users(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT name,password_hash FROM users ORDER BY name")?;
+    let mut rows = stmt.query([])?;
+    let mut names = Vec::new();
+    while let Some(row) = rows.next()? {
+        if crate::auth::is_legacy_hash(&row.get::<_, String>(1)?) {
+            names.push(row.get(0)?);
+        }
+    }
+    Ok(names)
+}
+
 /// Revoke outstanding invitations whose promised access can no longer be granted.
 pub(crate) fn revoke_target_invites(
     conn: &Connection,
@@ -348,6 +360,30 @@ impl Db {
                 insert_user(&tx, name.unwrap_or("admin"), hash, Role::Owner, now)?;
             }
             tx.execute("DELETE FROM kv WHERE key = 'auth.onboarding_locked'", [])?;
+            tx.commit()?;
+            Ok(Ok(()))
+        })
+    }
+
+    pub(crate) fn legacy_hash_users(&self) -> Result<Vec<String>> {
+        self.with(Err(AccountError::Storage), |i| {
+            Ok(Ok(legacy_hash_users(&i.conn)?))
+        })
+    }
+
+    pub(crate) fn reset_account_password(&self, name: &str, hash: &str, now: i64) -> Result<()> {
+        self.with(Err(AccountError::Storage), |i| {
+            let tx = i
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some(id) = tx.query_row(
+                "UPDATE users SET password_hash = ?2, updated = ?3 WHERE name = ?1 RETURNING id",
+                params![name, hash, now],
+                |r| r.get::<_, i64>(0),
+            ).optional()? else {
+                return Ok(Err(AccountError::Missing));
+            };
+            tx.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
             tx.commit()?;
             Ok(Ok(()))
         })

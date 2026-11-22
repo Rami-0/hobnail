@@ -9,7 +9,7 @@ use super::access::{Handler, Matched};
 use super::error::ApiError;
 use crate::auth::{self, now_s, sha256_hex, Session};
 use crate::db::accounts::{
-    read_accounts, Account, AccountChange, AccountError, Invite, Role, Scopes,
+    legacy_hash_users, read_accounts, Account, AccountChange, AccountError, Invite, Role, Scopes,
 };
 use crate::http::server::Body;
 use crate::state::AppState;
@@ -71,6 +71,7 @@ pub struct ManagedUser {
     #[serde(flatten)]
     #[cfg_attr(test, ts(flatten))]
     account: Account,
+    legacy_hash: bool,
     scope_targets: Option<ScopeTargets>,
 }
 
@@ -103,6 +104,7 @@ fn managed_users(conn: &rusqlite::Connection) -> Result<Vec<ManagedUser>, ApiErr
             name: row.get(1)?,
         })
     };
+    let legacy = legacy_hash_users(conn)?;
     read_accounts(conn)?
         .into_iter()
         .map(|account| {
@@ -119,6 +121,7 @@ fn managed_users(conn: &rusqlite::Connection) -> Result<Vec<ManagedUser>, ApiErr
                 None
             };
             Ok(ManagedUser {
+                legacy_hash: legacy.contains(&account.name),
                 account,
                 scope_targets,
             })

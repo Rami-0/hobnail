@@ -77,11 +77,22 @@ A database migrated from the legacy shared-password model is locked against
 browser ownership claims: the old password is discarded and host recovery is
 required. Keep a pre-upgrade database copy; migrations only move forward.
 
-Existing 19 MiB Argon2id hashes keep their original work factor until each
-account's next successful sign-in rehashes its password. The first sign-in with
-an old hash peaked at about 20.5 MiB in M5. If you run Hobnail with a hard
-20 MiB container memory limit, raise it temporarily for that first sign-in.
-The shipped Compose and deploy configurations set no memory limit.
+Existing 19 MiB Argon2id hashes keep their original work factor until a
+successful sign-in rehashes each password at 7 MiB. Even an unsuccessful
+attempt against an old hash uses the original work factor. In M5 the first
+successful sign-in peaked at about 20.5 MiB.
+
+Before enforcing a hard 20 MiB container limit, allow more memory and have
+every account sign in once, or reset the remaining passwords from the host
+with `hobnail reset-password <username>`. The reset preserves the existing
+account and revokes its sessions. It reads the new password from the TTY
+without echo or from stdin, just like owner recovery.
+
+Run `hobnail list-legacy-hashes` against the same data directory or volume.
+It prints one username per line and exits successfully with no output when
+migration is complete. The Owner-only `GET /api/v1/users` response also marks
+each account with `legacy_hash`. The shipped Compose and deploy
+configurations set no memory limit.
 
 Cold SQLite reads can also raise the container's reported memory usage. The
 kernel charges file-cache pages to the container that brings them into cache

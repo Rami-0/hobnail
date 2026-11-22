@@ -161,19 +161,66 @@ pub(crate) async fn route(
     credential_route(state, req, CredentialAction::Login).await
 }
 
+pub fn cli_list_legacy_hashes(args: &[String]) -> i32 {
+    if !args.is_empty() {
+        eprintln!("usage: hobnail list-legacy-hashes");
+        return 1;
+    }
+    let result = Db::open(&crate::db::path_from_env())
+        .map_err(|e| e.to_string())
+        .and_then(|db| db.legacy_hash_users().map_err(|e| format!("{e:?}")));
+    match result {
+        Ok(users) => {
+            for name in users {
+                println!("{name}");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("list-legacy-hashes: {e}");
+            1
+        }
+    }
+}
+
+fn store_console_password(
+    db: &Db,
+    name: Option<&str>,
+    password: &str,
+    reset: bool,
+) -> Result<(), String> {
+    check_password_policy(password)?;
+    let hash = hash_password(password)?;
+    let now = now_s();
+    if reset {
+        db.reset_account_password(name.expect("reset requires a name"), &hash, now)
+    } else {
+        db.recover_owner(name, &hash, now)
+    }
+    .map_err(|e| format!("{e:?}"))
+}
+
 /// `hobnail set-password`: reads the new password from the TTY without
 /// echo (twice), or one line from stdin when piped; stores the hash in the
-/// database and signs every session out.
-pub fn cli_set_password(args: &[String]) -> i32 {
-    if args.len() > 1 || args.first().is_some_and(|name| !valid_name(name)) {
-        eprintln!("usage: hobnail set-password [username] (1–64 letters, digits, dots, hyphens or underscores)");
+/// database and signs out the affected account.
+pub fn cli_set_password(args: &[String], reset: bool) -> i32 {
+    let (command, operand) = if reset {
+        ("reset-password", "<username>")
+    } else {
+        ("set-password", "[username]")
+    };
+    if args.len() > 1
+        || (reset && args.is_empty())
+        || args.first().is_some_and(|name| !valid_name(name))
+    {
+        eprintln!("usage: hobnail {command} {operand} (1–64 letters, digits, dots, hyphens or underscores)");
         return 1;
     }
     let path = crate::db::path_from_env();
     let db = match Db::open(&path) {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("set-password: cannot open the database: {e}");
+            eprintln!("{command}: cannot open the database: {e}");
             return 1;
         }
     };
@@ -182,23 +229,23 @@ pub fn cli_set_password(args: &[String]) -> i32 {
         let a = match tty::read_secret("New password: ") {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("set-password: {e}; nothing changed");
+                eprintln!("{command}: {e}; nothing changed");
                 return 1;
             }
         };
         if let Err(e) = check_password_policy(&a) {
-            eprintln!("set-password: {e}; nothing changed");
+            eprintln!("{command}: {e}; nothing changed");
             return 1;
         }
         let b = match tty::read_secret("Repeat password: ") {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("set-password: {e}; nothing changed");
+                eprintln!("{command}: {e}; nothing changed");
                 return 1;
             }
         };
         if a != b {
-            eprintln!("set-password: the passwords do not match; nothing changed");
+            eprintln!("{command}: the passwords do not match; nothing changed");
             return 1;
         }
         a
@@ -206,40 +253,39 @@ pub fn cli_set_password(args: &[String]) -> i32 {
         let mut line = String::new();
         match std::io::stdin().read_line(&mut line) {
             Ok(0) => {
-                eprintln!("set-password: no password on stdin; nothing changed");
+                eprintln!("{command}: no password on stdin; nothing changed");
                 return 1;
             }
             Ok(_) => line.trim_end_matches(['\n', '\r']).to_string(),
             Err(_) => {
-                eprintln!("set-password: could not read stdin; nothing changed");
+                eprintln!("{command}: could not read stdin; nothing changed");
                 return 1;
             }
         }
     };
-    let result = check_password_policy(&password)
-        .and_then(|()| hash_password(&password))
-        .and_then(|hash| {
-            db.recover_owner(args.first().map(String::as_str), &hash, now_s())
-                .map_err(|e| format!("{e:?}"))
-        });
-    match result {
+    let name = args.first().map(String::as_str);
+    match store_console_password(&db, name, &password, reset) {
         Ok(()) => {
             db.record_event(
                 now_s(),
                 "auth.password_changed",
                 "info",
-                "owner",
+                if reset {
+                    name.expect("reset requires a name")
+                } else {
+                    "owner"
+                },
                 "set from the console",
             );
             println!(
-                "Password {} in {}. The owner's sessions were signed out.",
-                if had { "changed" } else { "set" },
+                "Password {} in {}. The account's sessions were signed out.",
+                if reset || had { "changed" } else { "set" },
                 path.display()
             );
             0
         }
         Err(e) => {
-            eprintln!("set-password: {e}; nothing changed");
+            eprintln!("{command}: {e}; nothing changed");
             1
         }
     }
@@ -376,21 +422,35 @@ enum PasswordProfile {
     Test,
 }
 
-fn verify_password(stored: &str, password: &str) -> Option<PasswordProfile> {
-    let hash = PasswordHash::new(stored).ok()?;
+fn password_profile(hash: &PasswordHash<'_>) -> Option<PasswordProfile> {
     if hash.algorithm.as_str() != "argon2id"
         || hash.version != Some(19)
         || hash.params.get_decimal("p") != Some(1)
     {
         return None;
     }
-    let profile = match (hash.params.get_decimal("m")?, hash.params.get_decimal("t")?) {
-        (7_168, 5) => PasswordProfile::Current,
-        (19_456, 2) => PasswordProfile::Legacy,
-        #[cfg(test)]
-        (32, 1) => PasswordProfile::Test,
-        _ => return None,
-    };
+    Some(
+        match (hash.params.get_decimal("m")?, hash.params.get_decimal("t")?) {
+            (7_168, 5) => PasswordProfile::Current,
+            (19_456, 2) => PasswordProfile::Legacy,
+            #[cfg(test)]
+            (32, 1) => PasswordProfile::Test,
+            _ => return None,
+        },
+    )
+}
+
+pub(crate) fn is_legacy_hash(stored: &str) -> bool {
+    PasswordHash::new(stored)
+        .ok()
+        .as_ref()
+        .and_then(password_profile)
+        == Some(PasswordProfile::Legacy)
+}
+
+fn verify_password(stored: &str, password: &str) -> Option<PasswordProfile> {
+    let hash = PasswordHash::new(stored).ok()?;
+    let profile = password_profile(&hash)?;
     Argon2::default()
         .verify_password(password.as_bytes(), &hash)
         .ok()?;
@@ -1021,6 +1081,38 @@ mod tests {
     }
 
     #[test]
+    fn console_reset_migrates_a_named_account_and_revokes_its_sessions() {
+        let state = crate::testutil::state_with(vec![], "");
+        let db = &state.db;
+        let old = hash_with(&argon2(19_456, 2), "old password").unwrap();
+        store_console_password(db, None, "owner password", false).unwrap();
+        db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated) VALUES ('guest',?1,'viewer',0,0)",
+                [&old],
+            )?;
+            Ok(())
+        });
+        let (id, _, _) = db.credential("guest").unwrap();
+        let now = now_s();
+        db.sign_in(id, &old, "old-session", now, now + 100).unwrap();
+        assert_eq!(db.legacy_hash_users().unwrap(), ["guest"]);
+
+        store_console_password(db, Some("guest"), "new password", true).unwrap();
+
+        let (same_id, hash, _) = db.credential("guest").unwrap();
+        assert_eq!(same_id, id);
+        assert_eq!(
+            verify_password(&hash, "new password"),
+            Some(PasswordProfile::Current)
+        );
+        assert!(!db.session_is_valid("old-session", now));
+        assert!(db.legacy_hash_users().unwrap().is_empty());
+        assert_eq!(db.accounts().unwrap().len(), 2);
+        assert!(store_console_password(db, Some("absent"), "new password", true).is_err());
+    }
+
+    #[test]
     fn legacy_hash_upgrades_only_after_successful_login() {
         let state = crate::testutil::state_with(vec![], "");
         let previous = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
@@ -1040,6 +1132,7 @@ mod tests {
         let read_hash = || state.db.credential("admin").unwrap().1;
         assert!(matches!(login(1, "wrong horse"), Err(Attempt::Wrong)));
         assert_eq!(read_hash(), previous);
+        assert_eq!(state.db.legacy_hash_users().unwrap(), ["admin"]);
 
         state.db.with((), |i| {
             i.conn.execute_batch(
@@ -1059,6 +1152,7 @@ mod tests {
 
         login(2, "correct horse").unwrap();
         let upgraded = read_hash();
+        assert!(state.db.legacy_hash_users().unwrap().is_empty());
         assert_eq!(
             verify_password(&upgraded, "correct horse"),
             Some(PasswordProfile::Current)

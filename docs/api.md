@@ -92,7 +92,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/invites` | Owner | Invites. |
 | POST | `/api/v1/invites` | Owner | Invite create. |
 | DELETE | `/api/v1/invites/<id>` | Owner | Invite revoke. |
-| GET | `/api/v1/users` | Owner | Users. |
+| GET | `/api/v1/users` | Owner | Users, including the `legacy_hash` boolean for each account. |
 | PATCH | `/api/v1/users/<id>/role` | Owner | User role. |
 | PATCH | `/api/v1/users/<id>/disabled` | Owner | User disabled. |
 | PUT | `/api/v1/users/<id>/scopes` | Owner | User scopes. |
