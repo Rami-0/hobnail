@@ -369,7 +369,7 @@ Enter the Web UI origin, including any reverse-proxy prefix before
 uses HTTP Basic authentication. The RPC credential has no read-only scope.
 
 **Torrent activity** shows global transfer speeds and the exact active
-torrent count reported by `session-stats`. It lists up to ten downloading,
+torrent count reported by `session-stats`. When transfers are running, it lists up to ten downloading,
 seeding or verifying torrents from the `recently-active` RPC subset.
 If that subset exceeds the cap, speeds and the total remain available.
 Hobnail sends the real RPC on a cold connection and retries once with
