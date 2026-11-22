@@ -241,6 +241,41 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn malformed_forecasts_are_protocol_faults() {
+        let options = Values::from_iter([
+            ("latitude".into(), json!("52.52")),
+            ("longitude".into(), json!("13.41")),
+        ]);
+        let bodies = [
+            // A daily series shorter than forecast_days.
+            r#"{"current":{"temperature_2m":5,"weather_code":3},"daily":{"time":["2026-11-22"],"temperature_2m_max":[],"temperature_2m_min":[1],"weather_code":[3]}}"#,
+            r#"{"current":{"temperature_2m":"warm","weather_code":3},"daily":{"time":["2026-11-22"],"temperature_2m_max":[6],"temperature_2m_min":[1],"weather_code":[3]}}"#,
+            r#"{"daily":{"time":["2026-11-22"],"temperature_2m_max":[6],"temperature_2m_min":[1],"weather_code":[3]}}"#,
+            r#"{"error":true,"reason":"Cannot initialize WeatherVariable from invalid String value"}"#,
+            "<html>Bad gateway</html>",
+        ];
+        let exchanges = bodies.map(|body| Exchange {
+            request: "GET /prefix/v1/forecast?*",
+            status: 200,
+            body,
+        });
+        exercise(
+            &WEATHER,
+            &[],
+            options,
+            &exchanges,
+            |_, _| "",
+            async |conn| {
+                for _ in bodies {
+                    let fault = forecast(conn, false, false).await.unwrap_err();
+                    assert!(matches!(fault.class, Class::Protocol));
+                }
+            },
+        )
+        .await;
+    }
+
     #[test]
     fn checks_coordinates_fixed_origin_and_refresh_floor() {
         assert!(LATITUDE.accepts(&json!("-90")));

@@ -435,9 +435,15 @@ sends the key in the form body.
 and free space on the incomplete-download drive. It requests only one
 queue entry and reads the summary.
 
+A wrong or missing key is reported as an authentication failure, whether
+SABnzbd answers 403 with a plain message (4.5.x) or a JSON
+`{"status":false,"error":"API Key Incorrect"}` report. Any other JSON
+error report is an unexpected response.
+
 Verified from:
 
 - [Upstream queue API reference](https://sabnzbd.org/wiki/advanced/api)
+- [JSON error reports (`report`)](https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py)
 - [Upstream v4.5.5 queue response and units](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/api.py)
 - [Upstream v4.5.5 API key validation](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/interface.py)
 

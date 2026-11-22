@@ -352,6 +352,18 @@ mod tests {
         report: Report,
         fake: impl Future<Output = ()> + Send + 'static,
     ) -> widgets::StructuredBody {
+        try_activity(addr, version, credential, report, fake)
+            .await
+            .unwrap()
+    }
+
+    async fn try_activity(
+        addr: std::net::SocketAddr,
+        version: &'static str,
+        credential: (&'static str, &'static str),
+        report: Report,
+        fake: impl Future<Output = ()> + Send + 'static,
+    ) -> Result<widgets::StructuredBody, Fault> {
         let origin = format!("http://{addr}");
         let mut target = Target::new(
             format!("{origin}/dns"),
@@ -375,9 +387,62 @@ mod tests {
         let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
         let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
         let task = tokio::spawn(fake);
-        let body = conn.run(activity(&conn, report)).await.unwrap();
+        let body = conn.run(activity(&conn, report)).await;
         task.await.unwrap();
         body
+    }
+
+    #[tokio::test]
+    async fn v6_wrong_password_is_an_auth_fault_without_a_stats_request() {
+        // FTL answers a wrong password with 401 and an invalid session; a
+        // 200 with valid:false is treated the same.
+        for (status, body) in [
+            (
+                401,
+                r#"{"session":{"valid":false,"totp":false,"sid":null,"validity":-1,"message":"password incorrect"},"took":0.003}"#,
+            ),
+            (
+                200,
+                r#"{"session":{"valid":false,"totp":false,"sid":null,"validity":-1},"took":0.003}"#,
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let fault = try_activity(
+                addr,
+                "v6",
+                (PASSWORD, "wrong password"),
+                Report::Summary,
+                async move {
+                    let (mut socket, wire) = receive(&listener).await;
+                    assert!(wire.starts_with("POST /dns/api/auth HTTP/1.1"));
+                    respond(&mut socket, status, "", body).await;
+                    // No stats request follows a refused login.
+                    assert!(tokio::time::timeout(
+                        std::time::Duration::from_millis(200),
+                        listener.accept()
+                    )
+                    .await
+                    .is_err());
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(fault.class, Class::Auth));
+        }
+    }
+
+    #[tokio::test]
+    async fn v5_unauthorized_empty_array_is_an_auth_fault() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let fault = try_activity(addr, "v5", (TOKEN, "wrong"), Report::Summary, async move {
+            let (mut socket, _) = receive(&listener).await;
+            respond(&mut socket, 200, "", "[]").await;
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(fault.class, Class::Auth));
     }
 
     #[tokio::test]

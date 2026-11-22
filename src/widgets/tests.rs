@@ -945,10 +945,16 @@ fn a_fetch_that_reached_a_public_host_gets_the_public_floor() {
     let attempt = cache.begin_provider(key, now, feed.public_internet);
     assert!(cache.record(key, attempt, now, WidgetOutput::default()));
     assert!(!cache.attempt_public(key));
-    assert_eq!(spec.refresh(&options, cache.attempt_public(key)).as_secs(), 15);
+    assert_eq!(
+        spec.refresh(&options, cache.attempt_public(key)).as_secs(),
+        15
+    );
     cache.mark_public(key);
     let refresh = spec.refresh(&options, cache.attempt_public(key));
-    assert_eq!(refresh.as_secs(), u64::from(crate::providers::MIN_PUBLIC_REFRESH));
+    assert_eq!(
+        refresh.as_secs(),
+        u64::from(crate::providers::MIN_PUBLIC_REFRESH)
+    );
     assert_eq!(cache.deadline(key, refresh), Some(now + refresh));
     // Invalidation keeps a public key's deadline, as for public providers.
     cache.invalidate_providers("provider-fetch:feed:one:");

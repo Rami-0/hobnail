@@ -151,6 +151,22 @@ mod tests {
                     status: 200,
                     body: r#"{"queue":{}}"#,
                 },
+                // api.py report(error=...) answers 200 with a JSON status.
+                Exchange {
+                    request: PATH,
+                    status: 200,
+                    body: r#"{"status":false,"error":"API Key Incorrect"}"#,
+                },
+                Exchange {
+                    request: PATH,
+                    status: 200,
+                    body: r#"{"status":false,"error":"API Key Required"}"#,
+                },
+                Exchange {
+                    request: PATH,
+                    status: 200,
+                    body: r#"{"status":false,"error":"not implemented"}"#,
+                },
             ],
             |_, wire| {
                 let (headers, body) = wire.split_once("\r\n\r\n").unwrap();
@@ -172,6 +188,9 @@ mod tests {
                         ["Free space", "12.5 GiB"],
                     ])
                 );
+                assert_test_fault(conn, &SABNZBD, Class::Auth).await;
+                assert_test_fault(conn, &SABNZBD, Class::Protocol).await;
+                assert_test_fault(conn, &SABNZBD, Class::Auth).await;
                 assert_test_fault(conn, &SABNZBD, Class::Auth).await;
                 assert_test_fault(conn, &SABNZBD, Class::Protocol).await;
             },

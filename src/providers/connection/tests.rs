@@ -923,7 +923,11 @@ async fn reports_whether_a_destination_resolved_publicly() {
     ] {
         let target = Target::new(url.into(), Credentials::new(), true);
         let host = client::origin(url).unwrap();
-        let host = host.trim_start_matches("http://").rsplit_once(':').unwrap().0;
+        let host = host
+            .trim_start_matches("http://")
+            .rsplit_once(':')
+            .unwrap()
+            .0;
         let policy = HttpPolicy {
             allow_hosts: vec![host.trim_matches(['[', ']']).into()],
         };
