@@ -16,7 +16,7 @@
 
 .editor-fields>.btn,.editor-fields .board-section>.btn{justify-self:start}
 
-.board-tour{position:fixed;z-index:24;inset:auto;width:min(320px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;display:grid;gap:var(--s-2);box-shadow:var(--shadow-2);background:var(--raised)}
+.board-tour{position:fixed;z-index:var(--z-pop);inset:auto;width:min(320px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;display:grid;gap:var(--s-2);box-shadow:var(--shadow-2);background:var(--raised)}
 .board-tour h2{font-size:var(--fs-body)}
 .board-tour .acts{display:flex;flex-wrap:wrap;gap:var(--s-2)}
 [data-board-tour-anchor]{outline:2px solid var(--ring);outline-offset:3px}
