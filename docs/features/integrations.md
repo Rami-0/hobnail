@@ -344,7 +344,8 @@ Verified from:
 - [Upstream Media Server API 1.2.3 reference](https://developer.plex.tv/pms/)
 - [Upstream Media Server diagnostic trace for the global recently-added route](https://forums.plex.tv/t/library-scan-not-recognizing-video-files-after-update/898898)
 
-UNVERIFIED: Live token privilege combinations and pagination support on older recently-added routes.
+UNVERIFIED: Live token privilege combinations, and the JSON response shape and
+pagination of the global recently-added route.
 
 ## Immich
 
