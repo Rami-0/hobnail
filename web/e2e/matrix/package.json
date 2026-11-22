@@ -1,0 +1,9 @@
+{
+  "name": "hobnail-e2e-matrix",
+  "private": true,
+  "description": "Test-only tools for scripts/e2e-matrix.sh; installed into a Docker volume, never into web/node_modules.",
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "playwright-core": "1.64.1"
+  }
+}
