@@ -5,7 +5,25 @@ The older tables below are historical and refer to deleted UI paths and tools.
 Do not use `scripts/measure.sh` against a running production instance for this
 method; use a throwaway instance on ports 3395–3399.
 
-## React measurement method
+## Finish-hobnail M5 server memory
+
+The uncapped, warm-cache release workload peaked at **13,049,856 B (12.45 MiB)**,
+including fresh owner creation and login. The 25-dashboard phase was 7.16 MiB
+median and 7.75 MiB sampled maximum. Its anonymous and file maxima were 3.69 and
+2.52 MiB. Full history set the lifetime peak, with a 12.24 MiB sampled maximum and
+8.46 MiB anonymous, 2.52 MiB file, 0.56 MiB kernel, and less than 0.01 MiB socket
+maxima. The duplicate 20 MiB/no-swap run completed 10,938 requests and 4,637 SSE
+events with zero errors or OOM kills. Its lifetime peak was 12,836,864 B (12.24
+MiB). An uncapped diagnostic with the large database file evicted from cache
+reached 187,559,936 B (178.87 MiB), mainly file cache.
+
+The release workload includes 13 fake providers, 18 working provider widgets, 150
+fake Docker entries, full fixture history, logs and configuration writes. The
+phase table includes working set, cgroup breakdown, CPU, latency, raw paths,
+legacy authentication and the storage failure reproduction. [Finish-hobnail M5
+results](plans/react-port-phase-2-5.md#finish-hobnail-m5-server-memory)
+
+## Earlier React measurement method
 
 One application container, no memory limit, fresh data/config and warm image
 cache. `scripts/bench-mem.sh` records cgroup v2 memory.current, working set

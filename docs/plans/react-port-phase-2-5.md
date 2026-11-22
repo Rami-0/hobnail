@@ -107,6 +107,196 @@ chunk's name alone. [Full file inventory](react-port-raw/m5/web-size.log).
 
 ## Memory and CPU
 
+### Finish-hobnail M5 server memory
+
+2026-11-22, x86-64 Core i5-7200U, four logical CPUs, 7.15 GiB host RAM, Linux
+7.0.0-38-generic, Docker 29.5.2, cgroup v2. The release image was built from
+runtime commit `e2cd77b` using the repository Dockerfile. Image
+`hobnail-m5:history`, content hash
+`eb31290f2ad731569cf3fef4343fa0399a12371b2021705c86419dd5f8ae5149`. One
+application container on a throwaway loopback port, with Docker's healthcheck,
+read-only root, no capabilities and separate data. The fake Docker daemon, fake
+upstreams, HTTP drivers, Chromium, build tools and host services were outside the
+application cgroup.
+
+The unlimited run starts with an owner-free database. A separate process preloaded
+the full 6 h raw, 7 d one-minute and 90 d ten-minute history windows before the
+run, plus 100,000 events. The fixture has 150 live Docker entries, with
+long-retention series for 40 containers and the host. It includes host, container,
+container-extras and log-count tables. The database was 175.30 MB on disk. Startup
+was observed for 10 seconds, idle and cleanup for 60 seconds each. The run
+includes fresh owner creation, sign-in, guided board setup and installs, followed
+by 60 seconds each of 1, 10 and 25 live clients. Each client keeps a board-scoped
+SSE stream open, reads its board and the 150-container collection every two
+seconds, reads system chart data every five seconds, bootstraps every 30 seconds
+and fetches the shell and production asset set initially and every 20 seconds. All
+18 installed widgets reached `ready` and refresh against fakes for Pi-hole, Uptime
+Kuma, Jellyfin, qBittorrent, Sonarr, Radarr, Transmission, Home Assistant, Proxmox
+VE, Generic HTTP, RSS, TLS certificate expiry and reachability.
+
+After the clients disconnected, the workload read 24-hour comparisons and 30-day
+history, 24-hour host history, and 30-day container history ten times each. It
+then issued four concurrent 5,000-line log reads in each of three rounds, and ten
+rounds of board saves, settings writes, integration edits and connection tests.
+The populated system charts returned 360 buckets per metric at 24 h and 392 at 30
+d. Startup sampling begins after Docker makes the cgroup accessible. Nominal
+sample intervals were 500 ms and 20 ms for owner creation/sign-in. Bytes in the
+tables are converted using MiB = 1,048,576 B. Memory columns report median /
+maximum, except kernel `memory.peak`, which is cumulative through each phase.
+`Kernel` and `sock` come from `memory.stat`. The working set subtracts
+`inactive_file` from `memory.current`. Stream headers count as HTTP requests.
+Named events, including log completion, count separately as SSE events. Latencies
+include response reads.
+
+| Phase | n | Current | Working set | Kernel peak | Anon | File | Kernel | Sock | One-core CPU % | Requests / errors / SSE events | p50 / p99 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| startup | 20 | 1.82 / 4.37 | 1.52 / 4.34 | 4.61 | 1.20 / 3.26 | 0.30 / 0.30 | 0.31 / 0.32 | 0.00 / 0.00 | 0.93 | 0 / 0 / 0 | – / – |
+| owner+login | 9 | 5.01 / 9.26 | 4.71 / 8.96 | 9.26 | 3.67 / 8.33 | 0.34 / 0.37 | 0.31 / 0.31 | 0.00 / 0.00 | 53.10 | 2 / 0 / 0 | 57.1 / 75.4 |
+| guided-setup | 2 | 2.53 / 2.55 | 2.13 / 2.14 | 9.26 | 1.33 / 1.35 | 0.40 / 0.43 | 0.30 / 0.30 | 0.00 / 0.00 | 15.29 | 10 / 0 / 0 | 1.2 / 3.2 |
+| providers | 1 | 3.31 / 3.31 | 2.23 / 2.23 | 9.26 | 1.36 / 1.36 | 1.08 / 1.08 | 0.32 / 0.32 | 0.00 / 0.00 | – | 14 / 0 / 0 | 1.9 / 2.7 |
+| poll-warmup | 7 | 5.13 / 5.49 | 4.05 / 4.41 | 9.26 | 3.48 / 3.49 | 1.08 / 1.08 | 0.36 / 0.37 | 0.00 / 0.00 | 1.93 | 6 / 0 / 41 | 4.6 / 15.5 |
+| idle | 119 | 3.95 / 5.82 | 1.97 / 4.68 | 9.26 | 1.49 / 3.48 | 2.01 / 2.47 | 0.47 / 0.60 | 0.00 / 0.00 | 0.79 | 0 / 0 / 0 | – / – |
+| clients-1 | 118 | 5.20 / 5.86 | 2.72 / 3.38 | 9.26 | 1.81 / 2.02 | 2.48 / 2.48 | 0.54 / 0.55 | 0.00 / 0.02 | 2.39 | 301 / 0 / 125 | 0.7 / 21.9 |
+| clients-10 | 120 | 6.10 / 6.55 | 3.60 / 4.06 | 9.26 | 2.41 / 2.70 | 2.50 / 2.50 | 0.62 / 0.63 | 0.00 / 0.07 | 14.20 | 3001 / 0 / 1250 | 1.1 / 24.2 |
+| clients-25 | 115 | 7.16 / 7.75 | 4.66 / 5.23 | 9.50 | 3.41 / 3.69 | 2.52 / 2.52 | 0.73 / 0.74 | 0.00 / 0.08 | 27.73 | 7502 / 0 / 3125 | 1.6 / 59.2 |
+| full-history | 28 | 7.92 / 12.24 | 5.40 / 9.72 | 12.45 | 4.37 / 8.46 | 2.52 / 2.52 | 0.55 / 0.56 | 0.00 / 0.00 | 55.87 | 40 / 0 / 0 | 218.5 / 562.5 |
+| log-buffers | 5 | 7.25 / 8.62 | 4.73 / 6.11 | 12.45 | 4.18 / 5.11 | 2.52 / 2.52 | 0.55 / 0.57 | 0.00 / 0.00 | 18.70 | 12 / 0 / 96 | 118.7 / 222.9 |
+| config-writes | 69 | 5.21 / 5.88 | 2.68 / 3.35 | 12.45 | 2.14 / 2.19 | 2.52 / 2.53 | 0.49 / 0.55 | 0.00 / 0.00 | 0.97 | 50 / 0 / 0 | 3.8 / 21.0 |
+| cleanup | 117 | 5.12 / 5.70 | 2.58 / 3.16 | 12.45 | 2.08 / 2.20 | 2.54 / 2.54 | 0.48 / 0.56 | 0.00 / 0.00 | 0.31 | 0 / 0 / 0 | – / – |
+
+The uncapped lifetime peak was **13,049,856 B (12.45 MiB)**. Every phase median
+was under 10 MiB. Full history crossed the preferred 10 MiB ceiling, and the
+lifetime peak stayed below 20 MiB including owner creation and login. The run
+recorded 10,938 successful HTTP requests and 4,637 SSE events, with zero errors.
+
+The same workload at `--memory 20m --memory-swap 20m` recorded **12,836,864 B
+(12.24 MiB)** lifetime peak, 10,938 successful HTTP requests, 4,637 SSE events,
+zero errors and zero OOM kills. Cgroup `memory.events` recorded `max=0`, `oom=0`
+and `oom_kill=0`. Sampled anon/file/kernel/sock maxima were 8.02 / 2.54 / 0.84 /
+0.22 MiB. Three additional capped runs initialized SQLite from empty data and
+completed owner creation, login and guided setup. The hard limit was active before
+app startup in these runs and in the full validation. The sub-500 ms owner/login
+phase fell between sampler wakeups in the hard-limit run. Its two requests are
+present and its memory is included in the kernel lifetime peak. The per-phase
+hard-limit summary is stored with its raw samples.
+
+**Cache attribution and other peaks.** File pages are charged to the cgroup that
+first brings them into cache. A warm image shared across containers and a database
+seeded from the host can therefore produce lower charges than the same workload
+reading cold pages. The uncapped baseline with the same large fixture recorded
+**75,165,696 B (71.68 MiB)** at minute-one maintenance. The largest sample was
+71.20 MiB, including 3.66 MiB anonymous, 66.89 MiB file, 0.52 MiB kernel and less
+than 0.01 MiB socket memory. Another warm run of the baseline stayed at 6.15 MiB
+sampled through idle, with maxima of 2.96 MiB anonymous and 2.34 MiB file. Its
+SQLite trace recorded roughly 174 MiB of reads from the database around the first
+maintenance, while the WAL stayed small. These runs show the effect of cache
+attribution during history reads and maintenance. The warm results depend on cache
+residency.
+
+The same release was also probed after evicting the 175.30 MB SQLite file from the
+host page cache with `POSIX_FADV_DONTNEED`. The uncapped probe had already peaked
+at **42.56 MiB** by guided setup. The lifetime peak was **187,559,936 B (178.87
+MiB)** after minute-one maintenance and history reads. Its highest sample had
+178.46 MiB current, 8.87 MiB working set and 7.70 / 169.59 / 0.88 / 0.00 MiB
+anon/file/kernel/sock. The uncapped 20 MiB target therefore remains unmet for a
+cold, populated database. The capped cold probe reached 20,971,520 B (20.00 MiB),
+with 7.84 / 11.24 / 0.45 / 0.00 MiB anon/file/kernel/sock at its highest sample.
+Startup, authentication and 40 full-history reads completed. The capped cgroup
+recorded `max=1458`, `oom=0` and `oom_kill=0`. Both short probes omitted the live
+dashboard phases. Each returned twelve HTTP 400 responses for standalone log
+requests, which require visible containers. The full warm runs exercised the log
+streams successfully.
+
+The interval may miss short-lived maxima in the sampled breakdown. The lifetime
+peak records those maxima without identifying the underlying memory class. The
+current image uses musl and SQLite releases its page cache after sampler ticks.
+The History API now retains only the requested page and 200 markers while scanning
+up to 10,000 borrowed rows from SQLite. In an event-scan comparison with 100,000
+health events and 20 ms sampling, 40 history requests per build passed. Sampled
+anonymous maximum fell from 5.07 to 4.18 MiB and total sampled maximum from 7.03
+to 6.33 MiB. File maximum was 1.04 / 1.20 MiB, kernel 0.36 / 0.37 MiB and socket
+0.00 / 0.38 MiB. History p50/p99 was 74.2/108.8 ms before and 63.8/125.2 ms after.
+The main workload uses restart events and retained a higher History peak. After
+disconnect, anonymous median was 2.08 MiB, down from 3.41 MiB with 25 viewers and
+above the initial 1.49 MiB idle median.
+
+**Authentication.** Three fresh release-container trials per profile, each with
+one owner creation and seven logins. Samples targeted 5 ms during credentials.
+Argon2id v19 and one lane in all cases. The host also ran builds during some
+trials. [Equivalent OWASP
+profiles](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id)
+
+| Memory / passes | Kernel peak | Anon / file / kernel / sock maxima (MiB) | Login median / max (ms) |
+|---|---:|---:|---:|
+| 19,456 KiB / 2, baseline | 22,487,040 B (21.45 MiB) | 19.80 / 0.53 / 0.37 / <0.01 | 56.2 / 120.3 |
+| 9,216 KiB / 4 | 17,268,736 B (16.47 MiB) | 9.81 / 5.66 / 0.34 / <0.01 | 105.4 / 147.7 |
+| 7,168 KiB / 5, selected | 9,551,872 B (9.11 MiB) | 7.80 / 0.53 / 0.34 / <0.01 | 73.6 / 183.4 |
+
+The 9 MiB trial with the highest charge had 5.66 MiB of file cache. The anonymous
+measurements show the effect of each work factor. A first 7 MiB series peaked at
+9.30 MiB (7.81 MiB anon, 0.54 MiB file) before a scratch quota interruption. Login
+verifies a legacy hash with its original parameters and writes the new salted hash
+after creating the session. An uncapped first legacy login peaked at 21,524,480 B
+(20.53 MiB), with maxima of 19.70 MiB anon, 0.25 MiB file, 0.35 MiB kernel and
+less than 0.01 MiB socket. An existing legacy account's first sign-in under the
+hard limit reached 20,971,520 B and was OOM-killed. That remains a migration risk.
+
+**Guided setup storage investigation.** The old 19 MiB build disconnected during
+fresh owner creation in all three capped attempts. Docker reported OOM kills after
+those failures. One surviving cgroup sample recorded 1 `oom_kill` and a peak of
+20,971,520 B. The old phone screenshot showed `dashboard storage unavailable` at
+board commit. Three uncapped replays on the baseline and three replays with the
+new hash profile under the hard cap completed the same 39 phone checks. The capped
+phone peaks were 9,965,568 B, 9,973,760 B and 9,445,376 B. The highest sample
+components across those replays were 8.39 MiB anon, 0.54 MiB file, 0.49 MiB kernel
+and 0.01 MiB socket.
+
+Filling a disposable SQLite data mount reproduced the exact HTTP 500 text. The
+application's `pwrite64` returned `ENOSPC` (`SQLITE_FULL` in the bundled VFS). The
+cgroup lifetime peak was 9,711,616 B (9.26 MiB), and at injection it held 0.80 MiB
+anon, 0.41 MiB file, 0.30 MiB kernel and less than 0.01 MiB socket. Cgroup memory
+events remained zero. The regression check verified that no board was published,
+the draft survived, and retry created a complete 128-item board after space was
+freed. The original M4 run used the host's quota-limited tmpfs for app data. That
+tmpfs returned `EDQUOT` for scratch writes during M5, making storage exhaustion
+plausible. The original phone incident has no recorded SQLite code, so its exact
+cause remains unverified.
+
+**Artifact sizes.** Production web assets are 1,349,132 B raw / 438,069 B gzip
+(decimal bundle units). The three chart-named files total 104,762 B gzip. The
+executable is 8,964,656 B, embedded assets included. Docker's unpacked size is
+15,147,903 B (15.15 decimal MB) and its content size is 5,127,236 B (5.13 decimal
+MB). The unpacked image also missed the 13.5 MB gate on the baseline, at
+15,135,612 B. These are artifact bytes and are reported separately from cgroup
+RAM.
+
+**Checks.** The web check, 152 web tests, production build and bundle size check
+passed. Rust formatting, all-target Clippy with warnings denied, and 500 Rust
+tests passed. The repository Dockerfile also completed the release build. The
+separate unpacked image size gate reported the miss above.
+
+**Raw evidence.** All directories are below
+`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5-mem/`.
+`disk/` points to disk-backed scratch after the tmpfs quota interruption. The
+release runs are `disk/final-unlimited/` and `disk/final-hard/`, with
+`samples.jsonl`, `meta.jsonl`, `requests.jsonl`, `sse.jsonl` and `fixture.jsonl`.
+The same directory holds the workload driver `bench.py`, `summarize.py`, the
+`disk-fault.py` regression and its JSONL output, capped phone checks
+(`browser-hard-replay/`), and the legacy-login runs. The alternative hashes and
+the production profile are in `auth-baseline/`, `auth-9m/` and
+`disk/auth-7m-repeat/`. Baseline large-history runs and maintenance tracing are in
+`baseline-complete/`, `maintenance-raw/` and `maintenance-io.jsonl`. The isolated
+event scans are in `disk/history-before/` and `disk/history-after/`. The fresh
+hard-limit setup runs are in `disk/final-hard-fresh/` and the old failure replays
+are in `disk/baseline-hard-confirm/`. The cold database probes are in
+`disk/final-cold-db/` and `disk/final-cold-db-hard/`.
+
+From the repository root, use `python3 "$scratch/disk/bench.py" hobnail-m5:history
+<new-output-name> --mode full --port 3396`, where `scratch` is the directory
+above. Add `--hard` to apply the cap.
+
+### Earlier React port measurements
+
 **[exp]** `PORT=3395 scripts/bench-mem.sh hobnail-rp:m5 <fresh-output-dir>`;
 no config argument, a new empty data directory/database, real Docker socket
 read-only and host proc/sys read-only. No production configuration was used.
@@ -507,10 +697,15 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 
 ## Budgets still missed
 
-- Original whole-dist ≤1.3 MB raw /400 KB gzip: 1,344,189 /449,533 B.
-- Combined chart payload interpreted as ≤110 KB: 115,235 B; per-chunk gates pass.
-- Container lifetime peak ≤20 MiB, including sign-in; see exact final run bytes
-  above. Separate sign-in burst also exceeds 20 MiB.
+- Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The M5 build
+  is 1,349,132 B raw and 438,069 B gzip. The configured size checks pass.
+- Preferred lifetime memory under 10 MiB. M5 peaked at 12.45 MiB with full history.
+- Uncapped cold SQLite database peak under 20 MiB. The cold probe reached
+  187,559,936 B (178.87 MiB), primarily charged file cache.
+- First sign-in with a legacy hash exceeded 20 MiB in the migration probe.
+  Fresh-hash workload results are in the M5 table above.
+- Unpacked release image ceiling of 13.5 MB. M5 is 15,147,903 B, compared
+  with 15,135,612 B at the pre-M5 baseline.
 - LCP ≤400/1,200 ms on the failing route/profile rows; phone table load ≤200 ms
   in run 1; first chart/History mounts also exceed that diagnostic threshold.
 - Live-update ≤50 ms on table and several other routes; INP ≤200 ms on chart
