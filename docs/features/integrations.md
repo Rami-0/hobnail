@@ -383,8 +383,8 @@ UNVERIFIED: Nonstandard RPC path suffixes, releases that remove legacy RPC and l
 ## SABnzbd
 
 Enter the SABnzbd Web UI URL and the full API Key from Config → General.
-The NZB Key lacks queue access. Hobnail uses only the queue read call.
-Query parameters may be recorded by the service and its reverse proxies.
+The NZB Key lacks queue access. Hobnail uses only the queue read call and
+sends the key in the form body.
 
 **Download queue** shows the total number of queued jobs, download speed
 and free space on the incomplete-download drive. It requests only one

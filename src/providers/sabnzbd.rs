@@ -70,12 +70,13 @@ fn bytes(value: &str, scale: f64) -> Result<u64, Fault> {
 async fn metrics(conn: &Conn<'_>) -> Result<Metrics, Fault> {
     let response: Envelope = parse_json(
         conn.request(Step {
-            query: &[
+            verb: Verb::Post,
+            body: Some(Body::Form(&[
                 ("mode", Input::Text("queue")),
                 ("output", Input::Text("json")),
                 ("limit", Input::Text("1")),
                 ("apikey", Input::Credential(KEY)),
-            ],
+            ])),
             ..Step::get("api")
         })
         .await?,
@@ -122,9 +123,8 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn reads_limited_queue_with_key_only_in_query_and_maps_application_errors() {
-        const PATH: &str =
-            "GET /prefix/api?mode=queue&output=json&limit=1&apikey=fake%26sab HTTP/1.1";
+    async fn reads_limited_queue_with_key_only_in_body_and_maps_http_errors() {
+        const PATH: &str = "POST /prefix/api HTTP/1.1";
         const BODY: &str = r#"{"queue":{"noofslots":9,"noofslots_total":9,"kbpersec":"1024.00","diskspace1":"12.50","slots":[{"filename":"first item"}]}}"#;
         exercise(
             &SABNZBD,
@@ -143,8 +143,8 @@ mod tests {
                 },
                 Exchange {
                     request: PATH,
-                    status: 200,
-                    body: r#"{"status":false,"error":"API Key Incorrect"}"#,
+                    status: 403,
+                    body: "API Key Incorrect",
                 },
                 Exchange {
                     request: PATH,
@@ -153,7 +153,10 @@ mod tests {
                 },
             ],
             |_, wire| {
-                assert!(!wire.split_once("\r\n").unwrap().1.contains("fake"));
+                let (headers, body) = wire.split_once("\r\n\r\n").unwrap();
+                assert!(!headers.contains("fake"));
+                assert!(headers.contains("content-type: application/x-www-form-urlencoded"));
+                assert!(body == "mode=queue&output=json&limit=1&apikey=fake%26sab");
                 ""
             },
             async |conn| {
