@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { PROFILES, assertTarget, contextOptions, harness, launch } from "./lib.mjs";
-import { ensureSignedIn, flows, onboarding, sweep } from "./flows.mjs";
+import { ensureSignedIn, flows, onboarding, sweep, tourStaysClosed } from "./flows.mjs";
 import { sweepFixture } from "../sweep-fixture.mjs";
 
 const base = process.argv[2];
@@ -38,7 +38,7 @@ const h = await harness(page, { engine, profileName, profile, out, unit, motion,
 h.contextOptions = options;
 
 async function run(name, fn) {
-  if (only.length && !only.includes(name) && !name.startsWith("onboarding")) return;
+  if (only.length && !only.includes(name) && !name.startsWith("onboarding") && name !== "tour stays closed") return;
   h.ctx.flow = name;
   const t0 = Date.now(), first = results.states.length;
   let error = null, note = null;
@@ -55,12 +55,17 @@ try {
   if (unit === "flows") {
     await run("onboarding: every step", onboarding.full);
     if (!f.board) throw new Error("onboarding failed; the flows need its board");
+    // Straight after onboarding, while the page still holds its session.
+    await run("tour stays closed", tourStaysClosed);
     for (const [name, fn] of Object.entries(flows)) {
       await ensureSignedIn(h, f).catch(() => {});
       await run(name, fn);
     }
   } else if (unit === "skip") {
-    if (await run("onboarding: skip", onboarding.skip)) await run("login and logout", flows["login and logout"]);
+    if (await run("onboarding: skip", onboarding.skip)) {
+      await run("tour stays closed", tourStaysClosed);
+      await run("login and logout", flows["login and logout"]);
+    }
   } else if (unit === "sweep") {
     process.env.OUT ||= out;
     const fx = await sweepFixture(new URL(base));

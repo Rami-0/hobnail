@@ -95,6 +95,12 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
         for (const c of layout.clipped) problems.push({ kind: "clipped", detail: c });
         if (motion === "reduce" && layout.motion) problems.push({ kind: "motion", detail: layout.motion });
       }
+      // Once onboarding has finished the board tour, it must not open again
+      // (except as the replay a user asks for with ?tour=1).
+      if (ctx.tourDone && !/[?&]tour=1/.test(page.url())) {
+        const tour = await page.evaluate(() => { const t = document.querySelector('[data-testid="board-tour"]'); return t?.getClientRects().length ? t.querySelector("h2")?.textContent ?? "shown" : null; }).catch(() => null);
+        if (tour) problems.push({ kind: "tour", detail: `board tour open again after onboarding finished it: ${tour}` });
+      }
       const coarse = await h.coarse();
       const narrow = profile.width < 700;
       // With a dialog or menu open, the page behind it is inert or covered:

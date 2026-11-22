@@ -10,8 +10,10 @@ const dialog = '[role="dialog"][data-open]';
 async function go(h, f, route, ready) {
   await h.page.goto(new URL(route, f.base).href);
   await h.page.locator(ready).first().waitFor();
-  // A board's first visit opens its tour over the tiles; flows other than
-  // onboarding (which walks it) dismiss it.
+  // A board's first visit opens its tour over the tiles. The sweep (whose
+  // owner never saw it) dismisses it here; once onboarding has finished the
+  // tour (ctx.tourDone) it must not come back, and every state checks that.
+  if (h.ctx.tourDone) return;
   const tour = h.page.locator(tid("tour-skip"));
   if (await tour.isVisible().catch(() => false)) { await tour.click(); await tour.waitFor({ state: "hidden" }); }
 }
@@ -29,16 +31,55 @@ async function navigate(h, href) {
   } else await link.click();
   await h.page.waitForURL((u) => u.pathname === href);
 }
+/** Walk the board tour that a new owner's first board visit opens, then
+ * require the server to have recorded it as seen. */
 async function finishTour(h) {
-  const tour = h.page.locator(tid("board-tour"));
-  if (!(await tour.isVisible().catch(() => false))) return 0;
+  const { page } = h;
+  const tour = page.locator(tid("board-tour"));
+  await tour.waitFor({ timeout: 10000 });
   let steps = 0;
   for (; steps < 10 && await tour.isVisible().catch(() => false); steps++) {
     await h.state(`tour step ${steps + 1}`, { focus: false });
-    await h.page.locator(tid("tour-next")).click();
-    await h.page.waitForTimeout(150);
+    await page.locator(tid("tour-next")).click();
+    await page.waitForTimeout(150);
   }
-  return steps;
+  assert.ok(steps >= 3, `the tour has its steps (${steps})`);
+  let pending = true;
+  for (let i = 0; i < 20 && pending; i++) {
+    pending = await page.evaluate(async () => (await (await fetch("/api/v1/session")).json()).board_tour_pending);
+    if (pending) await page.waitForTimeout(500);
+  }
+  assert.equal(pending, false, "the finished tour is saved for the account");
+  h.ctx.tourDone = true;
+}
+/** Give a lazily loaded tour time to appear before judging that it did not. */
+async function noTour(h, label) {
+  await h.page.waitForTimeout(1500);
+  await h.state(label);
+  assert.equal(await h.page.locator(tid("board-tour")).count(), 0, `no board tour: ${label}`);
+}
+
+/** After onboarding finished the tour: visit the board again, save an edit,
+ * leave and come back in the app, and reload; the tour stays closed. */
+export async function tourStaysClosed(h, f) {
+  const { page } = h;
+  await page.goto(new URL(f.board, f.base).href);
+  await page.locator(tid("board")).waitFor();
+  await noTour(h, "board revisited");
+  await page.locator(tid("board-edit")).click();
+  await page.locator(tid("board-editor")).waitFor();
+  await page.locator(tid("board-add-section")).click();
+  await page.locator(tid("board-save")).click();
+  await page.locator(tid("board-editor")).waitFor({ state: "detached" });
+  await noTour(h, "board saved");
+  await navigate(h, "/app/overview");
+  await page.locator(tid("overview")).waitFor();
+  await navigate(h, f.board);
+  await page.locator(tid("board")).waitFor();
+  await noTour(h, "board via navigation");
+  await page.reload();
+  await page.locator(tid("board")).waitFor();
+  await noTour(h, "board reloaded");
 }
 
 /** Submit the filled login form, waiting out a rate-limit pause. */

@@ -48,7 +48,10 @@ writes about 6 MB. Each flows unit takes 5-7 minutes, each sweep 2-3.
 
 ### Flows (`flows.mjs`)
 
-onboarding (every step / skip, including the board tour) · login and logout
+onboarding (every step / skip, including the board tour, which must
+appear on the first board visit and be saved as seen) · tour stays closed
+(straight after onboarding: revisit the board, save an edit, leave and come
+back in the app, reload; the tour must not open again) · login and logout
 (wrong password, the rate-limit pause, sign in again) · overview, host,
 alerts · containers (filter, open a container, all five detail tabs) · logs
 (live tail, search filter, download — opening "Filters" on phones — picker,
@@ -83,6 +86,7 @@ Chromium (measured: the status stayed "live" for 20 s), hence the restart.
 | focus | two Tab presses: each focused control matches `:focus-visible`, shows an outline or box shadow, and is on screen |
 | reduced motion | under `prefers-reduced-motion: reduce`, no running transition or animation |
 | axe | `axe.run(document)` with axe-core's default rules (WCAG 2.0-2.2 A/AA and best practice): zero violations |
+| tour | once onboarding has finished the board tour, it is not open on any later state (a `?tour=1` replay excepted) |
 
 ### Profiles and modes
 
@@ -151,6 +155,17 @@ media queries and container queries see exactly what they would at 200 %.
 - **Transient overlays.** Toasts are hidden while targets are measured; the
   board tour, an open dialog, menu or listbox limits the target check to
   its own controls; the focused skip link covers the brand by design.
+- **The board tour loads lazily.** In run 2 Chromium showed "Board tour ·
+  1 of 3" again after a board save. Its onboarding had recorded no tour
+  step: the flow had looked for the tour before its chunk rendered, so the
+  tour was never finished and was still pending for the account (the tour
+  closes while the editor is open and starts again at step 1 after Save).
+  Not an app bug: finishing the tour saves it (`POST
+  /api/v1/account/board-tour`) and it stays closed after a save, in-app
+  navigation and a reload in all three engines. The flow now waits for the
+  tour, requires `board_tour_pending: false` from the server afterwards,
+  and the `tour` check fails any later state that shows it; with the tour
+  left unfinished on purpose, that check reports exactly the run 2 symptom.
 - **Table layout.** All three engines leave the width of `display:none`
   columns unallocated in a `table-layout: fixed` table whose flexible
   column is `width: auto`; give that column a percentage (see the
