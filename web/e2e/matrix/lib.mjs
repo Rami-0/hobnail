@@ -147,8 +147,17 @@ async function runAxe(page) {
 async function focusCheck(page) {
   const bad = [];
   for (let i = 0; i < 2; i++) {
+    // Tab from the last control leaves the document (Firefox keeps the old
+    // activeElement then): start again from the top in that case.
+    const mark = () => page.evaluate(() => { document.querySelectorAll("[data-hb-was]").forEach((e) => e.removeAttribute("data-hb-was")); document.activeElement?.setAttribute("data-hb-was", ""); }).catch(() => {});
+    await mark();
     await page.keyboard.press("Tab");
     await page.waitForTimeout(60);
+    if (await page.evaluate(() => !document.hasFocus() || document.activeElement?.hasAttribute("data-hb-was")).catch(() => false)) {
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.keyboard.press("Tab");
+      await page.waitForTimeout(60);
+    }
     const r = await page.evaluate(() => {
       let el = document.activeElement;
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement;

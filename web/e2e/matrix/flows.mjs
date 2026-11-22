@@ -10,6 +10,10 @@ const dialog = '[role="dialog"][data-open]';
 async function go(h, f, route, ready) {
   await h.page.goto(new URL(route, f.base).href);
   await h.page.locator(ready).first().waitFor();
+  // A board's first visit opens its tour over the tiles; flows other than
+  // onboarding (which walks it) dismiss it.
+  const tour = h.page.locator(tid("tour-skip"));
+  if (await tour.isVisible().catch(() => false)) { await tour.click(); await tour.waitFor({ state: "hidden" }); }
 }
 async function fill(h, selector, value) {
   const el = h.page.locator(selector).first();
