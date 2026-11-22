@@ -115,6 +115,13 @@ async fn visible_repos(conn: &Conn<'_>) -> Result<String, Fault> {
     Ok(count.map_or_else(|| "Count unavailable".into(), |count| count.to_string()))
 }
 
+/// One repository the token cannot see (403), that is missing (404), removed
+/// (410) or legally withheld (451) must not fail the other rows. A token
+/// rejected outright already fails the repository search first.
+fn unavailable(status: u16) -> bool {
+    matches!(status, 403 | 404 | 410 | 451)
+}
+
 async fn actions(conn: &Conn<'_>, path: &str) -> Result<String, Fault> {
     let response = get(conn, &format!("{path}/actions/runs"), LIMIT_ONE).await;
     let (response, label) = match response {
@@ -127,7 +134,7 @@ async fn actions(conn: &Conn<'_>, path: &str) -> Result<String, Fault> {
     let Some(response) = within_response_limit(response)? else {
         return Ok("Actions response too large".into());
     };
-    if matches!(response.status, 403 | 404) {
+    if unavailable(response.status) {
         return Ok("Actions unavailable".into());
     }
     let runs: Runs = parse_json(response)?;
@@ -154,7 +161,7 @@ fn overview<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBo
             let response = within_response_limit(get(conn, &path, &[]).await)?;
             let summary = match response {
                 None => "Repository response too large".into(),
-                Some(response) if response.status == 404 => "Repository unavailable".into(),
+                Some(response) if unavailable(response.status) => "Repository unavailable".into(),
                 Some(response) => {
                     let repo: Repo = parse_json(response)?;
                     let actions = if repo.has_actions {
@@ -206,6 +213,9 @@ mod tests {
                 r#"{"workflow_runs":[{"status":"success"}]}"#,
             ),
             ("GET /prefix/api/v1/repos/o/big HTTP/1.1", 200, &oversized),
+            ("GET /prefix/api/v1/repos/o/private HTTP/1.1", 403, r#"{"message":"forbidden"}"#),
+            ("GET /prefix/api/v1/repos/o/gone HTTP/1.1", 410, ""),
+            ("GET /prefix/api/v1/repos/o/legal HTTP/1.1", 451, ""),
             (VERSION, 200, r#"{"version":"1.26.0"}"#),
             (USER_REPOS, 403, r#"{"message":"token does not have at least one of required scope(s), required=[read:user]"}"#),
             (VERSION, 200, "{}"),
@@ -234,7 +244,10 @@ mod tests {
             },
             async |conn| {
                 conn.run(test(conn)).await.unwrap();
-                let options = Values::from_iter([("repositories".into(), json!(["o/r", "o/big"]))]);
+                let options = Values::from_iter([(
+                    "repositories".into(),
+                    json!(["o/r", "o/big", "o/private", "o/gone", "o/legal"]),
+                )]);
                 let body = super::super::fetch(conn, &GITEA.widgets[0], &options)
                     .await
                     .unwrap();
@@ -243,7 +256,10 @@ mod tests {
                     json!([
                         ["Visible repositories", "12"],
                         ["o/r", "2 issues · 3 PRs · Last task: success"],
-                        ["o/big", "Repository response too large"]
+                        ["o/big", "Repository response too large"],
+                        ["o/private", "Repository unavailable"],
+                        ["o/gone", "Repository unavailable"],
+                        ["o/legal", "Repository unavailable"]
                     ])
                 );
                 assert_test_fault(conn, &GITEA, Class::Auth).await;

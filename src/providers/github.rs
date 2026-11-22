@@ -273,7 +273,14 @@ async fn optional(
     query: &[(&str, Input<'_>)],
 ) -> Result<Option<client::Response>, Fault> {
     let response = within_response_limit(limits.get(conn, path, query).await)?;
-    Ok(response.filter(|response| !matches!(response.status, 403 | 404 | 410)))
+    Ok(response.filter(|response| !unavailable(response.status)))
+}
+
+/// Statuses that make one repository unavailable without failing the others:
+/// private or blocked (403), missing (404), removed (410) or withheld for
+/// legal reasons (451). Rate-limit 403s are classified before this.
+pub(super) fn unavailable(status: u16) -> bool {
+    matches!(status, 403 | 404 | 410 | 451)
 }
 
 /// With one result per page, the last page number is the count. Never follow links.

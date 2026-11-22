@@ -537,7 +537,9 @@ The connection test checks `/api/v1/version`, then a one-item
 separate issue and PR counts for up to eight configured `owner/repository`
 names. It reads the most recent Actions run on Gitea 1.26 and Forgejo 15.
 If the run endpoint is absent, it reads the latest Actions task when
-available (including on Gitea 1.24), and labels it as a task.
+available (including on Gitea 1.24), and labels it as a task. A repository
+that answers 403, 404, 410 or 451 shows "Repository unavailable" without
+failing the other rows.
 
 Verified from the [Gitea 1.26 API](https://github.com/go-gitea/gitea/blob/v1.26.0/templates/swagger/v1_json.tmpl),
 [Gitea 1.24 Actions API](https://docs.gitea.com/api/1.24/operations/list-action-tasks/)
@@ -715,7 +717,9 @@ components, and ignores valid build metadata. Unknown versions, including
 prerelease suffixes, are displayed beside the latest tag without a comparison.
 The refresh interval is one hour. Like repository activity, the watcher
 returns the repositories checked within the provider deadline and marks the
-rest "Not checked this refresh (time limit)".
+rest "Not checked this refresh (time limit)". A repository that answers
+403, 404, 410 or 451 (other than a rate limit) shows "Latest release
+unavailable" without failing the other rows.
 
 Verified from: [latest GitHub release](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
 [GitHub REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)

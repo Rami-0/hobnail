@@ -111,12 +111,8 @@ async fn release(
     repo: &str,
     current: &str,
 ) -> Result<(String, Option<String>), Fault> {
-    let response = within_response_limit(
-        limits
-            .get(conn, &format!("repos/{repo}/releases/latest"), &[])
-            .await,
-    )?;
-    let Some(response) = response.filter(|response| response.status != 404) else {
+    let path = format!("repos/{repo}/releases/latest");
+    let Some(response) = optional(conn, limits, &path, &[]).await? else {
         return Ok((
             format!("Current {current} · Latest release unavailable"),
             None,
@@ -209,16 +205,22 @@ mod tests {
             Exchange { request: "GET /prefix/repos/o/big/releases/latest HTTP/1.1", status: 200, body: &oversized },
             Exchange { request: path, status: 200, body: r#"{"tag_name":"v1.10.0","html_url":"https://github.com/o/r/releases/tag/v1.10.0"}"# },
             Exchange { request: "GET /prefix/repos/o/missing/releases/latest HTTP/1.1", status: 404, body: "{}" },
+            Exchange { request: "GET /prefix/repos/o/private/releases/latest HTTP/1.1", status: 403, body: r#"{"message":"Resource not accessible by integration"}"# },
+            Exchange { request: "GET /prefix/repos/o/gone/releases/latest HTTP/1.1", status: 410, body: "{}" },
+            Exchange { request: "GET /prefix/repos/o/legal/releases/latest HTTP/1.1", status: 451, body: "{}" },
             Exchange { request: "GET /prefix/repos/o/big/releases/latest HTTP/1.1", status: 429, body: "{}" },
         ], |i, wire| {
             assert!(!wire.contains("authorization:"));
-            if i == 3 { "Retry-After: 600\r\n" } else { "" }
+            if i == 6 { "Retry-After: 600\r\n" } else { "" }
         }, async |conn| {
-            let options = values(json!(["o/big | 1", "o/r | 1.9", "o/missing | custom"]));
+            let options = values(json!(["o/big | 1", "o/r | 1.9", "o/missing | custom", "o/private | 1", "o/gone | 1", "o/legal | 1"]));
             let body = serde_json::to_value(latest(conn, &limits, &options, budget()).await.unwrap()).unwrap();
             assert_eq!(body["items"][0]["secondary"], "Current 1 · Latest release unavailable");
             assert_eq!(body["items"][1]["secondary"], "Current 1.9 · Latest v1.10.0 · New version available");
             assert_eq!(body["items"][2]["secondary"], "Current custom · Latest release unavailable");
+            for index in 3..6 {
+                assert_eq!(body["items"][index]["secondary"], "Current 1 · Latest release unavailable");
+            }
             for _ in 0..2 {
                 assert!(matches!(latest(conn, &limits, &options, budget()).await.unwrap_err().class, Class::RateLimited));
             }
