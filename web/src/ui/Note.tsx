@@ -74,7 +74,7 @@ export function EmptyState({ icon, title, children, tone, actions, compact, test
   return (
     <div className={cls} data-testid={testId}>
       <div className="empty-ic">{icon}</div>
-      <h3>{title}</h3>
+      <h2>{title}</h2>
       {children && <div className="empty-p">{children}</div>}
       {actions && <div className="acts">{actions}</div>}
     </div>
