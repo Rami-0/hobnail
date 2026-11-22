@@ -28,6 +28,9 @@ COPY --from=web /web/dist ./web/dist
 ARG RH_GIT_SHA=dev
 ARG RH_BUILD_TIME=unknown
 ENV RH_GIT_SHA=${RH_GIT_SHA} RH_BUILD_TIME=${RH_BUILD_TIME} CARGO_TARGET_DIR=/target RH_REQUIRE_WEB_DIST=1
+# Hobnail's schemas and queries use neither full-text and spatial indexes nor
+# the dbstat virtual table or extension loader. Keep SQLite JSON and STAT4.
+ENV LIBSQLITE3_FLAGS="-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_OMIT_LOAD_EXTENSION"
 # Stale-binary guard (plan 4.4): cargo decides freshness by mtime, the
 # target cache is shared and every build is at /src, so a checkout whose
 # files are older than the last build could ship the previous binary.
