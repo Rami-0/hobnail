@@ -759,7 +759,9 @@ independent of file-configured widgets or dashboard-icons.
 Provider widgets require access to both the board and the integration. A board
 viewer without the integration grant sees a neutral **Widget unavailable**
 placeholder. That viewer's live stream does not receive widget data or start
-polling. Removing the integration grant also removes access on open streams.
+polling. An integration tile is likewise shown as **Integration unavailable**,
+without its integration ID or custom title; a scoped editor saving the board
+keeps the tile as it was. Removing the integration grant also removes access on open streams.
 An admin can add a provider widget only when granted access to its integration
 and the board.
 

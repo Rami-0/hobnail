@@ -2173,6 +2173,55 @@ async fn credentialed_json_widgets_require_specific_paths() {
 }
 
 #[tokio::test]
+async fn integration_tiles_are_masked_without_the_grant_and_round_trip() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Shared").await;
+    let integration = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({"kind":"http","name":"Hidden name","enabled":true,"base_url":"http://service.test/"}),
+            201,
+        )
+        .await;
+    let integration = integration["id"].as_str().unwrap().to_owned();
+    let path = format!("/api/v1/boards/{board}");
+    let tile = |title: &str| {
+        json!({"position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+            "payload":{"kind":"integration","integration_id":integration,"title":title}})
+    };
+    let doc = json!({"version":0,"sections":[{"title":"Tiles","position":0,"items":[tile("Custom private title")]}]});
+    let saved = owner.json("PUT", &path, doc, 200).await;
+    let scopes = json!({"boards":[board],"integrations":[]});
+    let editor = owner.guest("tile-editor", "admin", scopes).await;
+    let seen = editor.json("GET", &path, Value::Null, 200).await;
+    let text = seen.to_string();
+    assert!(!text.contains(&integration), "{text}");
+    assert!(!text.contains("Custom private title"), "{text}");
+    assert!(text.contains("Integration unavailable"), "{text}");
+    let item = &seen["document"]["sections"][0]["items"][0];
+    assert_eq!(item["payload"]["integration_id"], item["id"]);
+    // Saving the masked board (draft and board) keeps the real tile.
+    let mut doc = seen["document"].clone();
+    doc["sections"][0]["title"] = json!("Renamed");
+    editor
+        .json("PUT", &format!("{path}/draft"), doc.clone(), 200)
+        .await;
+    editor.json("PUT", &path, doc, 200).await;
+    let after = owner.json("GET", &path, Value::Null, 200).await;
+    let payload = &after["document"]["sections"][0]["items"][0]["payload"];
+    assert_eq!(payload["integration_id"], json!(integration));
+    assert_eq!(payload["title"], "Custom private title");
+    assert_eq!(after["document"]["sections"][0]["title"], "Renamed");
+    assert_eq!(
+        after["resolved"][0]["integration"]["id"],
+        saved["resolved"][0]["integration"]["id"]
+    );
+}
+
+#[tokio::test]
 async fn provider_widgets_require_board_and_integration_grants() {
     use std::time::Duration;
 

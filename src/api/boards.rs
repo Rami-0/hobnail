@@ -828,6 +828,22 @@ fn mask_provider_widgets(
             matches!(&item.payload, BoardPayload::Widget { widget_id, .. } if widget_id.starts_with("provider:"))
         });
         for item in &mut section.items {
+            if let BoardPayload::Integration {
+                integration_id,
+                title,
+            } = &mut item.payload
+            {
+                // Hide which integration it is and its custom title. The
+                // item's own ID stands in (unique, and never an integration
+                // ID), so a scoped editor can round-trip the board.
+                if let Some(stand_in) = item.id.as_ref() {
+                    if !user.can_see_integration(integration_id) {
+                        integration_id.clone_from(stand_in);
+                        *title = Some(INTEGRATION_UNAVAILABLE.into());
+                    }
+                }
+                continue;
+            }
             let BoardPayload::Widget { widget_id, title } = &mut item.payload else {
                 continue;
             };
@@ -856,6 +872,50 @@ fn mask_provider_widgets(
         }
     }
     Ok(())
+}
+
+const INTEGRATION_UNAVAILABLE: &str = "Integration unavailable";
+
+/// Undo [`mask_provider_widgets`]' integration stand-ins in a scoped
+/// editor's input, before validation: an item that still carries its own ID
+/// as the integration gets the saved integration (and title, unless edited).
+fn restore_masked_integrations(input: &mut BoardDocument, original: &BoardDocument) {
+    let saved: HashMap<_, _> = original
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .filter_map(|item| match &item.payload {
+            BoardPayload::Integration {
+                integration_id,
+                title,
+            } => Some((item.id.as_ref()?, (integration_id, title))),
+            _ => None,
+        })
+        .collect();
+    for item in input
+        .sections
+        .iter_mut()
+        .flat_map(|section| &mut section.items)
+    {
+        let (
+            Some(id),
+            BoardPayload::Integration {
+                integration_id,
+                title,
+            },
+        ) = (item.id.as_ref(), &mut item.payload)
+        else {
+            continue;
+        };
+        if let Some((original, original_title)) = saved.get(id) {
+            if integration_id == id {
+                integration_id.clone_from(original);
+                if title.as_deref() == Some(INTEGRATION_UNAVAILABLE) {
+                    title.clone_from(original_title);
+                }
+            }
+        }
+    }
 }
 
 fn restore_masked_titles(
@@ -1171,6 +1231,9 @@ pub(super) async fn route(
                     return Ok(Err(board.version));
                 }
                 let original = document(c, &board)?;
+                if user.is_scoped() {
+                    restore_masked_integrations(&mut input, &original);
+                }
                 validate(&input, &original, user, c, &state.config.current())?;
                 if user.is_scoped() {
                     let mut masked = original.clone();
@@ -1263,7 +1326,11 @@ pub(super) async fn route(
             let result = db.dashboard(|c| -> Result<_, ApiError> {
                 let board = get(c,id)?;
                 if board.version != input.version { return Ok(Err(board.version)); }
-                validate(&input,&document(c,&board)?,user,c,&state.config.current())?;
+                let original = document(c, &board)?;
+                if user.is_scoped() {
+                    restore_masked_integrations(&mut input, &original);
+                }
+                validate(&input,&original,user,c,&state.config.current())?;
                 c.execute("INSERT INTO drafts (user_id,key,value,updated) VALUES (?1,?2,?3,?4)
                     ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value,updated=excluded.updated",
                     params![user.id,draft_key,encode(&input)?,now])?;
