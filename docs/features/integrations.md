@@ -295,6 +295,9 @@ View on Proxy Hosts and SSL Certificates is sufficient for the records
 visible to that account. Hobnail exchanges the credentials for a Bearer
 token and verifies it using the account endpoint.
 
+The test signs in and reads the account profile. Access to the proxy host
+and certificate lists is checked when the widget refreshes.
+
 **Proxy hosts and certificates** counts visible proxy hosts and certificates
 and lists up to ten certificate expiration dates. The two lists have no
 documented page controls in v2.12.3. An oversized list shows Unavailable

@@ -605,10 +605,16 @@ pub(super) async fn test_connection(
         Ok(()) => (VerdictClass::Success, None),
         Err(error) => (error.class, error.fingerprint),
     };
+    let message = match (class, provider.map(|provider| provider.id)) {
+        (VerdictClass::Success, Some("nginx_proxy_manager")) => {
+            "Signed in and read the account profile. Widget list permissions are unchecked."
+        }
+        _ => class.message(),
+    };
     IntegrationVerdict {
         ok: matches!(class, VerdictClass::Success),
         class,
-        message: class.message(),
+        message,
         latency_ms: started.elapsed().as_millis() as u64,
         fingerprint,
     }
