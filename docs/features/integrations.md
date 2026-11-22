@@ -103,7 +103,9 @@ access without per-route scopes. Hobnail uses read endpoints only and sends
 the key in the `Authorization` header using the MediaBrowser scheme.
 
 **Active streams** counts sessions with a current media item, including
-paused playback, and lists up to ten titles and clients. **Library counts**
+paused playback, and lists up to ten titles and clients. The unpaged
+`/Sessions` response can exceed the size limit, leaving active streams
+unavailable while other widgets can still refresh. **Library counts**
 shows server-wide movies, series, episodes, albums, songs and books.
 **Latest added** shows up to ten recently created library entries, newest
 first. Its server-wide `/Items` query works with an application key alone.
