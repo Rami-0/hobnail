@@ -49,11 +49,11 @@
 .ctbl th.c-num{text-align:right}
 .ctbl th.c-num .sort-b{justify-content:flex-end}
 .ctbl .row td:first-child{padding-left:14px}
-.c-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-name{white-space:nowrap;overflow:hidden}
 .c-name>.dot{margin-right:9px;vertical-align:1px}
 .c-name>.icon{width:16px;height:16px;border-radius:4px;margin-right:8px;vertical-align:-3px;font-size:calc(9rem/14)}
 .c-name .nm{color:var(--text);font:500 var(--fs-sm) var(--mono)}
-.c-name .nm-t{white-space:nowrap}
+.c-name .nm-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .c-name .sub{margin-left:8px;font-size:calc(11.5rem/14);color:var(--text-3)}
 .c-name .badge{margin-left:8px}
 .c-stack{width:12%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -128,4 +128,4 @@ tbody.none td{padding:0}
  .port{margin-block:2px}
  .grp-t{height:44px}
 }
-.ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
+.ctbl .nm{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit);max-width:calc(100% - 44px);overflow:hidden}
