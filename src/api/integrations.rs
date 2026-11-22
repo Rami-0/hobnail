@@ -612,6 +612,9 @@ pub(super) async fn test_connection(
         (VerdictClass::Success, Some("immich")) => {
             "Read storage statistics. Library statistics and job permissions are unchecked."
         }
+        (VerdictClass::Success, Some("technitium")) => {
+            "Read the zone list. Dashboard permissions are unchecked."
+        }
         _ => class.message(),
     };
     IntegrationVerdict {

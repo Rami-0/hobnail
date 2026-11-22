@@ -235,6 +235,9 @@ Enter the web console URL and an API token created for a user with
 Dashboard View, Zones View and View on each zone you want counted. Hobnail sends the token in the form
 body of each read request.
 
+The connection test verifies zone list access. Dashboard View permission
+is checked when the widget refreshes.
+
 **DNS activity** shows queries and blocks from the last hour and the total
 number of zones visible to that user. Hobnail requests one zone per page
 and reads only the total. Verified against Technitium DNS Server v14.3.0.
