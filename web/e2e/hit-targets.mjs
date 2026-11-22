@@ -2,7 +2,7 @@
 export const MEASURE = `((scope) => {
   const root = scope ? document.querySelector(scope) : document;
   const vis = (el) => { const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return false; const s = getComputedStyle(el); if (s.visibility !== "visible") return false;
-    for (let e = el; e; e = e.parentElement) { if (e.hidden || e.inert || getComputedStyle(e).display === "none") return false; if (e.tagName === "DETAILS" && !e.open && e !== el && !e.querySelector(":scope>summary").contains(el)) return false; } return true; };
+    for (let e = el; e; e = e.parentElement) { if (e.hidden || e.inert || getComputedStyle(e).display === "none") return false; if (e.tagName === "DETAILS" && !e.open && e !== el && !e.querySelector(":scope>summary")?.contains(el)) return false; } return true; };
   const inline = (el) => el.tagName === "A" && getComputedStyle(el).display === "inline" && el.parentElement && el.parentElement.textContent.trim().length > el.textContent.trim().length + 20;
   const name = (el) => (el.getAttribute("aria-label") || el.title || el.textContent || el.placeholder || el.name || "").trim().replace(/\\s+/g, " ").slice(0, 40);
   const sel = (el) => { let s = el.tagName.toLowerCase(); const c = (el.getAttribute("class") || "").trim().split(/\\s+/).filter(Boolean).slice(0, 2).join("."); if (c) s += "." + c; const p = el.parentElement; if (p) { let ps = p.tagName.toLowerCase(); const pc = (p.getAttribute("class") || "").trim().split(/\\s+/).filter(Boolean).slice(0, 1).join("."); if (pc) ps += "." + pc; s = ps + ">" + s; } return s; };
