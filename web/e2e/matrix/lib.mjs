@@ -200,6 +200,9 @@ const LAYOUT = `(() => {
       if (sx || sy) { scrolls = true; break; }
       const q = p.getBoundingClientRect();
       const w = Math.min(r.right, q.right) - Math.max(r.left, q.left), h = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
+      // Designed truncation: an ellipsis on the clipping cell, with the
+      // control still at least 24 px wide and fully tall.
+      if (s.textOverflow === "ellipsis" && w >= Math.min(24, r.width) && h >= r.height - 1.5) break;
       if (w < r.width - 1.5 || h < r.height - 1.5) { why = "cut by " + tag(p) + " (" + Math.round(Math.max(0, w)) + "x" + Math.round(Math.max(0, h)) + " of " + Math.round(r.width) + "x" + Math.round(r.height) + ")"; break; }
     }
     if (!why && !scrolls && (r.left < -1 || r.right > vw + 1)) why = "outside the viewport (" + Math.round(r.left) + ".." + Math.round(r.right) + ")";

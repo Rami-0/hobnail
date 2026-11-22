@@ -224,6 +224,9 @@ export const flows = {
       await h.state("chart read-out", { focus: false });
     }
     await go(h, f, "/app/containers/svc001?tab=metrics", tid("ctr-tabs"));
+    // The history charts load when their section scrolls into view; on a
+    // phone it starts below the fold, so scroll as a user would.
+    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
     await page.locator('[data-testid^="chart-"]').first().waitFor({ timeout: 20000 });
     await h.state("container metrics charts");
   },
