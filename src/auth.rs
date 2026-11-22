@@ -132,9 +132,27 @@ impl VerifySamples {
 /// allocator fragmentation, kernel and socket memory and cold file cache.
 pub(crate) const LEGACY_VERIFY_MIN_LIMIT: u64 = 36 << 20;
 
-/// This process's cgroup v2 memory limit; `max` or unreadable is no limit.
+/// This process's memory limit: cgroup v2 `memory.max`, else cgroup v1
+/// `memory.limit_in_bytes`. `max`, a v1 "unlimited" value or nothing
+/// readable is no limit.
 pub(crate) fn read_memory_limit() -> Option<u64> {
-    parse_memory_max(&std::fs::read_to_string("/sys/fs/cgroup/memory.max").ok()?)
+    let read = |path| std::fs::read_to_string(path).ok();
+    memory_limit_from(
+        read("/sys/fs/cgroup/memory.max").as_deref(),
+        read("/sys/fs/cgroup/memory/memory.limit_in_bytes").as_deref(),
+    )
+}
+
+/// cgroup v1 reports "no limit" as a huge page-aligned number
+/// (9223372036854771712 on 4 KiB pages) rather than `max`; anything at or
+/// above 2^60 bytes is treated as unlimited.
+const V1_UNLIMITED: u64 = 1 << 60;
+
+fn memory_limit_from(v2: Option<&str>, v1: Option<&str>) -> Option<u64> {
+    match v2 {
+        Some(text) => parse_memory_max(text),
+        None => parse_memory_max(v1?).filter(|&limit| limit < V1_UNLIMITED),
+    }
 }
 
 fn parse_memory_max(text: &str) -> Option<u64> {
@@ -1420,6 +1438,13 @@ mod tests {
         assert_eq!(parse_memory_max("max\n"), None);
         assert_eq!(parse_memory_max(""), None);
         assert_eq!(parse_memory_max("20971520\n"), Some(20 << 20));
+        // cgroup v2 wins when present; v1 is the fallback.
+        assert_eq!(memory_limit_from(Some("max\n"), Some("20971520\n")), None);
+        assert_eq!(memory_limit_from(Some("20971520\n"), None), Some(20 << 20));
+        assert_eq!(memory_limit_from(None, Some("20971520\n")), Some(20 << 20));
+        assert_eq!(memory_limit_from(None, Some("9223372036854771712\n")), None);
+        assert_eq!(memory_limit_from(None, Some("garbage")), None);
+        assert_eq!(memory_limit_from(None, None), None);
         assert!(legacy_verify_fits(None));
         assert!(!legacy_verify_fits(Some(20 << 20)));
         assert!(!legacy_verify_fits(Some(LEGACY_VERIFY_MIN_LIMIT - 1)));

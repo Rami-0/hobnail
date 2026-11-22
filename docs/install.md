@@ -115,8 +115,10 @@ successful sign-in rehashes each password at 7 MiB. Even an unsuccessful
 attempt against an old hash uses the original work factor. In M5 the first
 successful sign-in peaked at about 20.5 MiB.
 
-If the server's cgroup v2 memory limit (`/sys/fs/cgroup/memory.max`) is below
-36 MiB, Hobnail does not verify legacy hashes at all. Sign-in to such an
+If the server's memory limit is below 36 MiB, Hobnail does not verify
+legacy hashes at all. It reads cgroup v2 `/sys/fs/cgroup/memory.max`, or on
+a cgroup v1 host `/sys/fs/cgroup/memory/memory.limit_in_bytes` (where a value
+of 2^60 bytes or more means no limit). Under such a limit, sign-in to a legacy
 account fails exactly like a wrong password, with the same response delay,
 and the server logs a one-line warning naming `hobnail reset-password`
 (without the username or password). The 36 MiB threshold is the 12.45 MiB
