@@ -77,6 +77,19 @@ A database migrated from the legacy shared-password model is locked against
 browser ownership claims: the old password is discarded and host recovery is
 required. Keep a pre-upgrade database copy; migrations only move forward.
 
+Existing 19 MiB Argon2id hashes keep their original work factor until each
+account's next successful sign-in rehashes its password. The first sign-in with
+an old hash peaked at about 20.5 MiB in M5. If you run Hobnail with a hard
+20 MiB container memory limit, raise it temporarily for that first sign-in.
+The shipped Compose and deploy configurations set no memory limit.
+
+Cold SQLite reads can also raise the container's reported memory usage. The
+kernel charges file-cache pages to the container that brings them into cache
+and can reclaim them under memory pressure. The capped M5 cold run completed
+startup, authentication with the new hash profile, and 40 full-history reads
+at 20 MiB with no OOM kills. See the
+[M5 memory results](../plans/react-port-phase-2-5.md#finish-hobnail-m5-server-memory).
+
 ## Guided setup
 
 After browser owner creation, setup opens Appearance → Discover services →

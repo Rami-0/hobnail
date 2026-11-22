@@ -110,6 +110,19 @@ If the database had a legacy password, browser ownership claims are locked.
 Run `hobnail set-password [username]` on the host to recover the owner. Old
 sessions are discarded. Fresh databases use browser setup instead.
 
+Existing account passwords hashed with the old 19 MiB Argon2id profile keep
+that work factor until the next successful sign-in for each account rehashes
+its password. That first sign-in peaked at about 20.5 MiB in M5. Temporarily
+raise a hard 20 MiB container memory limit for the first sign-in after
+upgrading. The shipped Compose and deploy configurations set no memory limit.
+
+Reads from a cold SQLite database can increase reported container memory
+because the kernel charges file-cache pages to the container that reads
+them. This cache is reclaimable under memory pressure. The capped M5 cold
+run completed startup, authentication with the new hash profile, and 40
+full-history reads under the 20 MiB cap with no OOM kills.
+[M5 memory results](plans/react-port-phase-2-5.md#finish-hobnail-m5-server-memory)
+
 The old UI exists on `rust-only`. Its URLs are gone; `/` returns 404 with a
 link to `/app`, without redirecting. There is no RH_UI=classic fallback or
 old-URL compatibility. The React application needs JavaScript.
