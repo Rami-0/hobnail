@@ -337,6 +337,7 @@ try {
     await capture("first-board", board);
     await fixtureState("fail");
     await require("widget keeps its last good reading with an aged badge and error", `${text(board, "42 units")} && ${text(stale, "stale · ")} && ${el(stale)}.title.includes("HTTP 503")`);
+    await require("only the error is a live region, not the ticking age", `!${el(stale)}.closest('[role="status"]') && ${el(stale)}.parentElement.querySelector('[role="status"]')?.textContent.includes("HTTP 503")`);
     await capture("widget-stale", board, stale);
     await tab.send("Page.reload");
     await require("widget stale data survives board reload", `${text(board, "42 units")} && ${text(stale, "stale · ")} && !${el(tour)}`);
