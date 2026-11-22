@@ -931,6 +931,13 @@ It also misses a secret Base64-encoded inside a larger blob, unless the secret
 starts the encoded data on a 3-byte boundary, because the surrounding bytes
 change its encoding. A provider must not display fields that can carry such
 echoes.
+Every saved credential field is a redaction needle, including usernames
+stored as secrets (qBittorrent, AdGuard Home, wg-easy, and the optional
+HTTP Basic users of Transmission, Glances and Nextcloud). A short or common username such as `admin` is therefore
+replaced with `<redacted>` wherever it appears in display text, for
+example inside a torrent, client or monitor name. This fails safe: labels
+can be mangled, but no credential is shown. Use a distinctive username if
+the mangling gets in the way.
 Exercise connection tests and fetches against a local fake service.
 
 See [Boards](boards.md), [Login and security](login.md) and [API](../api.md).
