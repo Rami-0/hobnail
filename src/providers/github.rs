@@ -73,21 +73,29 @@ struct Cooldown {
 }
 
 #[derive(Default)]
-struct RateLimits {
-    cooldowns: Mutex<Vec<(Identity, Cooldown)>>,
+struct Cooldowns {
+    entries: Vec<(Identity, Cooldown)>,
+    overflow_until: Option<Instant>,
 }
 
-static LIMITS: RateLimits = RateLimits {
-    cooldowns: Mutex::new(Vec::new()),
-};
+#[derive(Default)]
+struct RateLimits {
+    cooldowns: Mutex<Cooldowns>,
+}
+
+static LIMITS: std::sync::LazyLock<RateLimits> = std::sync::LazyLock::new(RateLimits::default);
 
 fn header<'a>(response: &'a client::Response, name: &str) -> Option<&'a str> {
     response.headers.get(name)?.to_str().ok()
 }
 
 fn numeric_header(response: &client::Response, name: &str) -> Option<u64> {
-    let value = header(response, name)?;
-    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+    let mut values = response.headers.get_all(name).iter();
+    let value = values.next()?.to_str().ok()?;
+    if values.next().is_some()
+        || value.is_empty()
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
         return None;
     }
     value.parse().ok()
@@ -96,18 +104,23 @@ fn numeric_header(response: &client::Response, name: &str) -> Option<u64> {
 impl RateLimits {
     fn blocked(&self, identity: Identity, now: Instant) -> bool {
         let mut cooldowns = self.cooldowns.lock().unwrap();
-        cooldowns.retain(|(_, entry)| now < entry.until + Duration::from_secs(MAX_WAIT));
-        if let Some((_, entry)) = cooldowns.iter().find(|(key, _)| *key == identity) {
+        cooldowns
+            .entries
+            .retain(|(_, entry)| now < entry.until + Duration::from_secs(MAX_WAIT));
+        if let Some((_, entry)) = cooldowns.entries.iter().find(|(key, _)| *key == identity) {
             return now < entry.until;
         }
         // Never evict an active cooldown to make room for another identity.
-        cooldowns.len() == MAX_COOLDOWNS && cooldowns.iter().all(|(_, entry)| now < entry.until)
+        cooldowns.overflow_until.is_some_and(|until| now < until)
+            || (cooldowns.entries.len() == MAX_COOLDOWNS
+                && cooldowns.entries.iter().all(|(_, entry)| now < entry.until))
     }
 
     fn update(&self, identity: Identity, now: Instant, delay: Option<u64>) {
         let mut cooldowns = self.cooldowns.lock().unwrap();
-        let existing = cooldowns.iter().position(|(key, _)| *key == identity);
-        let previous = existing.map(|index| &cooldowns[index].1);
+        let entries = &mut cooldowns.entries;
+        let existing = entries.iter().position(|(key, _)| *key == identity);
+        let previous = existing.map(|index| &entries[index].1);
         let secondary_wait = delay.is_none().then(|| {
             previous
                 .map_or(60, |entry| entry.secondary_wait.saturating_mul(2).max(60))
@@ -120,16 +133,20 @@ impl RateLimits {
             secondary_wait: secondary_wait.unwrap_or(0),
         };
         if let Some(index) = existing {
-            cooldowns[index].1 = entry;
-        } else if cooldowns.len() < MAX_COOLDOWNS {
-            cooldowns.push((identity, entry));
-        } else if let Some((index, _)) = cooldowns
+            entries[index].1 = entry;
+        } else if entries.len() < MAX_COOLDOWNS {
+            entries.push((identity, entry));
+        } else if let Some((index, _)) = entries
             .iter()
             .enumerate()
             .filter(|(_, (_, entry))| entry.until <= now)
             .min_by_key(|(_, (_, entry))| entry.until)
         {
-            cooldowns[index] = (identity, entry);
+            entries[index] = (identity, entry);
+        } else {
+            // Concurrent responses may fill the map after a request starts.
+            // Keep their deadline for unknown identities rather than losing it.
+            cooldowns.overflow_until = cooldowns.overflow_until.max(Some(until));
         }
     }
 
@@ -181,11 +198,6 @@ impl RateLimits {
         };
         if rate_limited || remaining_zero {
             self.update(identity, now, retry.into_iter().chain(reset).max());
-        } else if (200..300).contains(&response.status) {
-            self.cooldowns
-                .lock()
-                .unwrap()
-                .retain(|(key, entry)| *key != identity || entry.until > started);
         }
         if rate_limited {
             return Err(Class::RateLimited.into());
@@ -433,11 +445,10 @@ mod tests {
     #[tokio::test]
     async fn anonymous_test_is_credential_free_and_honors_primary_reset() {
         let limits = RateLimits::default();
-        let reset_headers: &'static str = format!(
+        let reset_headers = format!(
             "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: {}\r\n",
             unix_now() + 120,
-        )
-        .leak();
+        );
         let path = "GET /prefix/rate_limit HTTP/1.1";
         exercise(
             &GITHUB,
@@ -458,7 +469,7 @@ mod tests {
             |index, wire| {
                 assert!(!wire.contains("authorization:"));
                 if index == 1 {
-                    reset_headers
+                    &reset_headers
                 } else {
                     ""
                 }

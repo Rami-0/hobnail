@@ -13,12 +13,12 @@ pub(super) struct Exchange<'a> {
     pub body: &'a str,
 }
 
-pub(super) async fn exercise(
+pub(super) async fn exercise<'a>(
     provider: &Provider,
     secrets: &[(&str, &str)],
     options: Values,
     exchanges: &[Exchange<'_>],
-    inspect: impl Fn(usize, &str) -> &'static str,
+    inspect: impl Fn(usize, &str) -> &'a str,
     verify: impl AsyncFnOnce(&Conn<'_>),
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
