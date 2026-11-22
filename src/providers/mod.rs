@@ -47,6 +47,7 @@ mod home_assistant;
 mod immich;
 mod jellyfin;
 mod jellyseerr;
+mod markdown_note;
 mod nextcloud;
 mod nginx_proxy_manager;
 mod paperless;
@@ -115,6 +116,7 @@ pub const REGISTRY: &[Provider] = &[
     weather::WEATHER,
     clock::CLOCK,
     bookmarks::BOOKMARKS,
+    markdown_note::MARKDOWN_NOTE,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
@@ -231,7 +233,7 @@ impl Field {
                     && (self.choices.is_empty() || self.choices.contains(&url))
             }),
             Kind::Secret => text().is_some_and(|s| !s.chars().any(char::is_control)),
-            Kind::Text => text().is_some(),
+            Kind::Text | Kind::Multiline => text().is_some(),
             Kind::Decimal => text()
                 .and_then(|s| s.trim().parse::<f64>().ok())
                 .is_some_and(|n| {
@@ -263,6 +265,7 @@ impl Field {
 pub enum Kind {
     Url,
     Text,
+    Multiline,
     Secret,
     Number,
     Decimal,
@@ -609,6 +612,26 @@ impl OutputRedactor {
                         .is_some_and(|time| self.matches(&time.to_string()))
                     {
                         item.time = None;
+                    }
+                }
+            }
+            RichText { blocks } => {
+                let redact = |span: &mut widgets::RichSpan| {
+                    self.redact(&mut span.text);
+                    if span.link.as_ref().is_some_and(|link| self.matches(link)) {
+                        span.link = None;
+                    }
+                };
+                for block in blocks {
+                    use widgets::RichBlock::*;
+                    match block {
+                        Heading { spans, .. } | Paragraph { spans } => {
+                            spans.iter_mut().for_each(redact)
+                        }
+                        List { items, .. } => items.iter_mut().flatten().for_each(redact),
+                        Code { text } => {
+                            self.redact(text);
+                        }
                     }
                 }
             }

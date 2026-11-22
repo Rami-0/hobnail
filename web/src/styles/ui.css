@@ -297,3 +297,8 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .tbl tr:last-child td{border-bottom-color:transparent}
 .tbl tbody tr:hover td{background:var(--muted)}
 .tbl :is(th,td):is(.num,.c-num){text-align:right;font-variant-numeric:tabular-nums}
+
+.widget-rich{display:grid;gap:var(--s-2);overflow-wrap:anywhere}
+.widget-rich h1{font-size:var(--fs-title)}.widget-rich h2{font-size:var(--fs-body)}
+.widget-rich :is(ol,ul){margin:0;padding-inline-start:1.5em}
+.widget-rich pre{margin:0;padding:var(--s-2);background:var(--surface);white-space:pre-wrap}

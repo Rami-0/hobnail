@@ -1,5 +1,6 @@
 import { createElement as h, type ReactNode } from "react";
 import type { StructuredBody } from "../api/gen/StructuredBody.ts";
+import { RichText } from "./RichText.ts";
 import { Clock } from "./Clock.ts";
 import { widgetLink } from "./widgetLink.ts";
 
@@ -27,6 +28,8 @@ export function StructuredWidget({ body, renderIcon }: {
           item.secondary && ` · ${item.secondary}`,
           date && Number.isFinite(date.getTime()) && h("time", { dateTime: date.toISOString() }, ` · ${date.toLocaleString()}`));
       }));
+    case "rich_text":
+      return h(RichText, body);
     case "clock":
       return h(Clock, body);
     case "meter":

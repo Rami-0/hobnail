@@ -79,6 +79,9 @@ mod tests;
 pub use path::Path;
 pub use template::Template;
 
+mod rich;
+pub use rich::{RichBlock, RichKind, RichSpan};
+
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
@@ -225,6 +228,9 @@ pub enum StructuredBody {
         hour12: bool,
         calendar: bool,
     },
+    RichText {
+        blocks: Vec<RichBlock>,
+    },
     Meter {
         label: String,
         percent: u8,
@@ -292,6 +298,10 @@ impl StructuredBody {
                                 + i.link.as_ref().map_or(0, String::capacity)
                         })
                         .sum::<usize>()
+            }
+            Self::RichText { blocks } => {
+                blocks.capacity() * size_of::<RichBlock>()
+                    + blocks.iter().map(RichBlock::retained_bytes).sum::<usize>()
             }
             Self::Table { headings, rows } => {
                 strings(headings)

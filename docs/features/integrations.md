@@ -661,6 +661,22 @@ Verified from: [URL Standard](https://url.spec.whatwg.org/) and Hobnail's
 
 UNVERIFIED: Third-party dashboard-icons slug availability.
 
+## Markdown note
+
+Notes are local and limited to 8 KiB, 64 blocks and 160 inline spans or
+empty list entries. Use `#` through `###` headings, blank lines between
+paragraphs, and ordinary newlines for visible line breaks. Consecutive
+`- item`, `+ item` or `* item` lines form a bulleted list. Use `1. item` for
+numbered lists. Use `**bold**`, `*italic*` (or underscores), backticks for
+inline code, triple-backtick fences for code blocks and `[label](URL)` for
+absolute HTTP(S) or mailto links. Inline markup is single-line and
+non-nesting. Fenced code and HTML display as literal text. Images, relative
+links and other Markdown constructs are outside this subset.
+
+Verified from: [CommonMark 0.31.2 syntax](https://spec.commonmark.org/0.31.2/).
+
+UNVERIFIED: Other Markdown dialects and their extensions.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
@@ -737,7 +753,8 @@ in `src/providers/mod.rs`. Document the actual destinations in `contacts` and
 set `public_internet` if the provider intrinsically requires a public service.
 
 Declare write-only secret fields alongside the URL, enabled flag and provider
-options. Settings and Guided Setup render the same schema. Keep sensitive
+options. Local providers omit the URL and credentials. Settings and Guided
+Setup render the same schema. Keep sensitive
 values out of ordinary options. Test and Fetch receive a `Conn` for the whole
 operation. Fetch also receives the effective widget options, with the refresh
 interval handled by the scheduler.
@@ -772,8 +789,8 @@ leaf. A certificate inspection does not relax verification on HTTP requests.
 
 Return a typed `Fault`. Keep raw responses, credentials and sessions out of
 errors and logs. A widget returns a `StructuredBody` with display data. Choose
-among a stat, stat grid, status list, item list, meter, table or unavailable
-message. The React client renders these shapes from the schema and registry.
+among a stat, stat grid, status list, item list, meter, table, clock, rich text
+or unavailable message. The React client renders these shapes from the schema and registry.
 The shared output boundary redacts credentials and known sessions, including
 textual escapes and standard or URL-safe Base64. Redact JSON before truncating
 or formatting it so an encoded credential cannot survive as a partial display

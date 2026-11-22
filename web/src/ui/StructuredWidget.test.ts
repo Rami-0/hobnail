@@ -32,3 +32,21 @@ test("clock handles unknown zones and renders a calendar for the first valid zon
   assert.match(markup, /<dt title="UTC">Universal<\/dt><dd>\d{2}:\d{2}:\d{2}<\/dd>/);
   assert.match(markup, /<caption>.+<\/caption>.*aria-current="date"/);
 });
+
+test("rich text escapes HTML and permits only HTTP(S) and mailto navigation", () => {
+  const markup = render({ kind: "rich_text", blocks: [
+    { kind: "heading", level: 2, spans: [{ kind: "text", text: "Title" }] },
+    { kind: "paragraph", spans: [
+      { kind: "text", text: '<img src="bad" onerror="evil()">' },
+      { kind: "link", text: "Unsafe", link: "javascript:alert(1)" },
+      { kind: "link", text: "Email", link: "mailto:help@example.test" },
+      { kind: "link", text: 'Unsafe attribute "onclick"', link: "https://example.test/" },
+    ] },
+    { kind: "list", start: 4, items: [[{ kind: "italic", text: "Item" }]] },
+  ] });
+  assert.match(markup, /<h2>Title<\/h2>/);
+  assert.ok(markup.includes("&lt;img src=&quot;bad&quot; onerror=&quot;evil()&quot;&gt;Unsafe"));
+  assert.match(markup, /<a href="mailto:help@example.test">Email<\/a>/);
+  assert.match(markup, /<ol start="4"><li><em>Item<\/em><\/li><\/ol>/);
+  assert.ok(!/<img|javascript:| onclick=/.test(markup));
+});

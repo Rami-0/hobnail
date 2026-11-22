@@ -32,7 +32,8 @@ export function SchemaForm({ id, schema, values, errors, onChange, bound, cleare
       <Field id={name} label={kind === "bool" ? null : label} error={errors?.[key]} hint={hint}>
         {kind === "bool" ? <Switch label={label} aria-required={required || undefined} checked={value === true || value === "true"} onChange={change} />
           : kind === "select" ? <Select label={label} required={required} options={field.choices.map((option) => ({ value: option, label: option }))} value={text} onChange={change} />
-          : kind === "list" ? <Textarea name={key} required={required} rows={3} value={text} onChange={(e) => change(e.target.value)} />
+          : kind === "list" || kind === "multiline" ? <Textarea name={key} required={required} rows={kind === "list" ? 3 : 8}
+            maxLength={kind === "multiline" ? field.max_length ?? undefined : undefined} value={text} onChange={(e) => change(e.target.value)} />
           : <TextInput name={key} required={required} type={secret ? "password" : kind === "url" || kind === "number" ? kind : "text"}
             autoComplete={secret ? "new-password" : undefined} maxLength={field.max_length ?? undefined}
             min={field.min ?? undefined} max={field.max ?? undefined} value={text} onChange={(e) => change(e.target.value)} />}
