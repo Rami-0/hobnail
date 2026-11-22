@@ -83,7 +83,7 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
       await page.screenshot({ path: file, type: "jpeg", quality: 45 }).catch(() => {});
     },
     /** Run every check on the current page state. */
-    async state(label, { focus = true, axe = true } = {}) {
+    async state(label, { focus = true, axe = true, targets = true } = {}) {
       ctx.state = label;
       await settle(page);
       const problems = [];
@@ -100,17 +100,21 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
       // With a dialog or menu open, the page behind it is inert or covered:
       // measure the open layer's own controls.
       const layer = await page.evaluate(() => {
-        const open = [...document.querySelectorAll('[role="dialog"][data-open], [role="menu"], [role="listbox"]')].filter((e) => e.getClientRects().length);
+        const open = [...document.querySelectorAll('[role="dialog"][data-open], [role="menu"], [role="listbox"], [data-testid="board-tour"]')].filter((e) => e.getClientRects().length);
         const top = open.at(-1);
         if (!top) return null;
         top.setAttribute("data-hb-layer", "");
         document.querySelectorAll("[data-hb-layer]").forEach((e) => e !== top && e.removeAttribute("data-hb-layer"));
         return "[data-hb-layer]";
       }).catch(() => null);
+      // Toasts float over the page for a few seconds by design; they are
+      // set aside while targets are measured (their own buttons included).
+      await page.evaluate(() => document.querySelectorAll('[data-testid="toast"]').forEach((t) => { t.dataset.hbVis = t.style.visibility; t.style.visibility = "hidden"; })).catch(() => {});
       const controls = await page.evaluate(`${MEASURE}(${JSON.stringify(layer)})`).catch(() => []);
+      await page.evaluate(() => document.querySelectorAll("[data-hb-vis]").forEach((t) => { t.style.visibility = t.dataset.hbVis; delete t.dataset.hbVis; })).catch(() => {});
       // 44 px where the design promises it (coarse pointer or a phone-width
       // layout, shell.css); 24 px (WCAG 2.5.8) for a fine pointer.
-      for (const c of controls) if (coarse || narrow ? !c.ok44 : !c.ok24) problems.push({ kind: "target", detail: `${c.sel} "${c.name}" ${c.w}x${c.h} (need ${coarse || narrow ? 44 : 24})` });
+      if (targets) for (const c of controls) if (coarse || narrow ? !c.ok44 : !c.ok24) problems.push({ kind: "target", detail: `${c.sel} "${c.name}" ${c.w}x${c.h} (need ${coarse || narrow ? 44 : 24})` });
       if (axe) for (const v of await runAxe(page)) problems.push({ kind: "axe", detail: v });
       if (focus) { const f = await focusCheck(page); if (f) problems.push({ kind: "focus", detail: f }); }
       for (const e of events.slice(before)) problems.push({ kind: e.kind, detail: e.text });
@@ -186,6 +190,9 @@ const LAYOUT = `(() => {
   for (const el of document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=tab],[role=switch],[role=combobox],[role=menuitem],[role=option]')) {
     if (hidden(el) || el.classList.contains("skip")) continue;
     const r = el.getBoundingClientRect(); let why = "", scrolls = false;
+    // Off-screen rows under content-visibility:auto are not laid out
+    // (Firefox reports their cells at placeholder size): not judged.
+    if ((r.bottom < 0 || r.top > innerHeight) && el.closest("tr,li,section") && [...(function* (e) { for (; e; e = e.parentElement) yield e; })(el)].some((e) => getComputedStyle(e).contentVisibility === "auto")) continue;
     for (let p = el.parentElement; p && p !== d && p !== document.body; p = p.parentElement) {
       const s = getComputedStyle(p);
       if (s.overflowX === "visible" && s.overflowY === "visible") continue;

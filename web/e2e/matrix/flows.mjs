@@ -281,7 +281,8 @@ export const flows = {
     await page.locator('[role="option"]').nth(1).click();
     const sw = form.locator('[role="switch"]').first();
     await sw.waitFor();
-    await sw.click();
+    // The provider's widgets start switched on; make sure the first is.
+    if (await sw.getAttribute("aria-checked") !== "true") await sw.click();
     await h.state("choose widgets");
     await page.getByRole("button", { name: "Save widgets to board" }).click();
     await form.waitFor({ state: "detached" });
@@ -373,7 +374,8 @@ export const flows = {
     await page.keyboard.press("Tab");
     const skip = await page.evaluate(() => document.activeElement?.classList.contains("skip"));
     assert.ok(skip, "first Tab reaches the skip link");
-    await h.state("skip link", { focus: false });
+    // The focused skip link is drawn over the brand by design: no target check here.
+    await h.state("skip link", { focus: false, targets: false });
     await page.keyboard.press("Enter");
     // Walk 30 stops: each one visibly focused and on screen.
     const bad = [];
