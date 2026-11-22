@@ -720,7 +720,10 @@ fn commit(
                 if integrations::provider(provider)
                     .is_ok_and(|provider| !provider.has_endpoint()) =>
             {
-                (None, true)
+                return Err(local(ApiError::bad_request(
+                    "Add this widget from the integration catalog after setup.",
+                    Some("provider"),
+                )));
             }
             SetupTarget::Provider {
                 provider, base_url, ..

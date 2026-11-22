@@ -378,7 +378,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             <div className="acts">
               <Button disabled={itemLimit} onClick={() => add(newItem({ kind: "board", payload: { kind: "link", title: "", url: "" } }, "New link"))}>Add a link</Button>
               <Select label="Add an integration" placeholder="Add an integration" value="" disabled={itemLimit}
-                options={providers.map((provider) => ({ value: provider.id, label: provider.name }))}
+                options={providers.filter((p) => p.fields.some((f) => f.id === "base_url")).map((provider) => ({ value: provider.id, label: provider.name }))}
                 onChange={(id) => {
                   const provider = providers.find((entry) => entry.id === id);
                   if (provider) {
