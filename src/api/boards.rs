@@ -1126,7 +1126,8 @@ pub(super) async fn route(
             let LinkTestInput { url } = super::read_json(req, 8192).await?;
             check_test_link(&url)?;
             integrations::limit_test(state, user.id)?;
-            let target = crate::providers::Target::new(url, Default::default(), true);
+            let internet = db.dashboard(|c| super::dashboard_settings::internet(c))?;
+            let target = crate::providers::Target::new(url, Default::default(), internet);
             super::json(
                 StatusCode::OK,
                 &integrations::test_connection(state, None, target).await,

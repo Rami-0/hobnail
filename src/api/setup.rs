@@ -655,7 +655,11 @@ fn target(
             boards::check_test_link(url)?;
             Ok((
                 None,
-                crate::providers::Target::new(url.clone(), Default::default(), true),
+                crate::providers::Target::new(
+                    url.clone(),
+                    Default::default(),
+                    super::dashboard_settings::internet(conn)?,
+                ),
             ))
         }
         _ => Err(ApiError::bad_request(

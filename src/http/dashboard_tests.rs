@@ -1083,6 +1083,60 @@ async fn disabled_integration_cannot_send_its_credential() {
 }
 
 #[tokio::test]
+async fn link_tests_honour_the_internet_switch_and_count_redirects_and_challenges_as_reachable() {
+    // Internet access off (the default): a public address is refused before
+    // any connection. 203.0.113.0/24 is documentation space.
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let link = |url: &str| json!({ "url": url });
+    let r = owner
+        .json(
+            "POST",
+            "/api/v1/boards/test-link",
+            link("http://203.0.113.1:9/"),
+            200,
+        )
+        .await;
+    assert_eq!(
+        (&r["ok"], &r["class"]),
+        (&json!(false), &json!("internet_off"))
+    );
+
+    let st = crate::testutil::state_with(Vec::new(), "[http]\nallow_hosts=['127.0.0.1']\n");
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", upstream.local_addr().unwrap());
+    for (status, ok, says) in [
+        ("302 Found\r\nLocation: /login", true, "302"),
+        ("401 Unauthorized\r\nWWW-Authenticate: Basic", true, "401"),
+        ("500 Internal Server Error", false, "non-success"),
+    ] {
+        let answer = async {
+            let (mut socket, _) = upstream.accept().await.unwrap();
+            upstream_request(&mut socket).await;
+            socket
+                .write_all(
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+        };
+        let (r, ()) = tokio::join!(
+            owner.json("POST", "/api/v1/boards/test-link", link(&url), 200),
+            answer
+        );
+        assert_eq!(r["ok"], ok, "{status}: {r}");
+        assert!(
+            r["message"].as_str().unwrap().contains(says),
+            "{status}: {r}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn connection_verdict_enforces_outbound_policy() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

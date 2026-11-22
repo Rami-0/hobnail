@@ -194,7 +194,11 @@ landing page.
 - POST `revision` and `item_id` to `/onboarding/test` to test a saved, included
   item. It uses the existing connection policy, rate limit and verdict format.
   A test verdict does not affect whether setup can be committed. Link tests from
-  setup and the board editor use the same outbound policy. Test URLs must use
+  setup and the board editor use the same outbound policy, including
+  Provider internet access: with it off, a public destination returns
+  `internet_off`. A link that answers with a redirect or 401/403 is reported
+  reachable (`ok: true`) with the status in the message; a saved link is
+  never shown as healthy. Test URLs must use
   HTTP or HTTPS and omit query strings and fragments.
 - POST `revision` to `/onboarding/commit` from Review. A single transaction creates
   the board and any new integrations, sets the default board and optional theme,

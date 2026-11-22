@@ -577,6 +577,24 @@ pub(super) fn limit_test(state: &AppState, account: i64) -> Result<(), ApiError>
     Ok(())
 }
 
+/// A link test's answer for a redirect or an authentication challenge: the
+/// service is up and answering (often redirecting to, or asking for, its
+/// sign-in), so the link is reachable. Only the test says so; a saved link
+/// is never shown as healthy.
+fn reachable_link(status: u16) -> Option<&'static str> {
+    Some(match status {
+        301 => "Reachable: the service answered 301 (moved permanently).",
+        302 => "Reachable: the service answered 302 (a redirect, often to its sign-in page).",
+        303 => "Reachable: the service answered 303 (a redirect, often to its sign-in page).",
+        307 => "Reachable: the service answered 307 (a temporary redirect).",
+        308 => "Reachable: the service answered 308 (a permanent redirect).",
+        300..=399 => "Reachable: the service answered with a redirect.",
+        401 => "Reachable: the service answered 401 (it asks for sign-in).",
+        403 => "Reachable: the service answered 403 (sign-in or access required).",
+        _ => return None,
+    })
+}
+
 pub(super) async fn test_connection(
     state: &AppState,
     provider: Option<&providers::Provider>,
@@ -598,29 +616,36 @@ pub(super) async fn test_connection(
                 .with_http_revision(revision);
         conn.run(async {
             match provider {
-                Some(provider) => (provider.test)(&conn).await,
-                None => providers::success_status(conn.http_status().await?.status),
+                Some(provider) => (provider.test)(&conn).await.map(|()| None),
+                None => {
+                    let status = conn.http_status().await?.status;
+                    match reachable_link(status) {
+                        Some(message) => Ok(Some(message)),
+                        None => providers::success_status(status).map(|()| None),
+                    }
+                }
             }
         })
         .await
     }
     .await;
-    let (class, fingerprint) = match result {
-        Ok(()) => (VerdictClass::Success, None),
-        Err(error) => (error.class, error.fingerprint),
+    let (class, fingerprint, reachable) = match result {
+        Ok(reachable) => (VerdictClass::Success, None, reachable),
+        Err(error) => (error.class, error.fingerprint, None),
     };
-    let message = match (class, provider.map(|provider| provider.id)) {
-        (VerdictClass::Success, Some("nginx_proxy_manager")) => {
-            "Signed in and read the account profile. Widget list permissions are unchecked."
-        }
-        (VerdictClass::Success, Some("immich")) => {
-            "Read storage statistics. Library statistics and job permissions are unchecked."
-        }
-        (VerdictClass::Success, Some("technitium")) => {
-            "Read the zone list. Dashboard permissions are unchecked."
-        }
-        _ => class.message(),
-    };
+    let message =
+        reachable.unwrap_or_else(|| match (class, provider.map(|provider| provider.id)) {
+            (VerdictClass::Success, Some("nginx_proxy_manager")) => {
+                "Signed in and read the account profile. Widget list permissions are unchecked."
+            }
+            (VerdictClass::Success, Some("immich")) => {
+                "Read storage statistics. Library statistics and job permissions are unchecked."
+            }
+            (VerdictClass::Success, Some("technitium")) => {
+                "Read the zone list. Dashboard permissions are unchecked."
+            }
+            _ => class.message(),
+        });
     IntegrationVerdict {
         ok: matches!(class, VerdictClass::Success),
         class,
