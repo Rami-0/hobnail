@@ -9,12 +9,13 @@
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS.
 import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, LayoutGridIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { lazy, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
+import { LoadBoundary } from "../ui/LoadBoundary.tsx";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
@@ -35,7 +36,7 @@ function ShellToasts() {
   const visible = useSyncExternalStore(subscribeToasts, hasToasts, hasToasts);
   // Dialog saves can release a toast in the same commit that closes the modal.
   const dialogs = useSyncExternalStore(subscribeDialogs, openDialogs, openDialogs);
-  return <Suspense fallback={null}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</Suspense>;
+  return <LoadBoundary fallback={null} failed={null}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</LoadBoundary>;
 }
 
 const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
@@ -473,8 +474,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>More</span>
         </Button>
       </nav>
-      {palette && <Suspense fallback={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></Suspense>}
-      {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}
+      {palette && <LoadBoundary fallback={null} failed={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></LoadBoundary>}
+      {keys && <LoadBoundary fallback={null} failed={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></LoadBoundary>}
       <StalePill />
       <ShellToasts />
     </>
