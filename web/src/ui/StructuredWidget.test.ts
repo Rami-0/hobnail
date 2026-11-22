@@ -25,3 +25,10 @@ test("item list preserves safe navigation and text while refusing unsafe links",
   assert.match(markup, /<li>&lt;unsafe&gt;<\/li>/);
   assert.equal(markup.includes("javascript:"), false);
 });
+
+test("clock handles unknown zones and renders a calendar for the first valid zone", () => {
+  const markup = render({ kind: "clock", zones: [["Imaginary/Zone", "Unknown"], ["UTC", "Universal"]], hour12: false, calendar: true });
+  assert.match(markup, /Unknown time zone/);
+  assert.match(markup, /<dt title="UTC">Universal<\/dt><dd>\d{2}:\d{2}:\d{2}<\/dd>/);
+  assert.match(markup, /<caption>.+<\/caption>.*aria-current="date"/);
+});

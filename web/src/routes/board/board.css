@@ -23,3 +23,4 @@
 :root.side-open .board-tour{visibility:hidden}
 
 .provider-table{overflow-x:auto}
+.widget-month{border-collapse:collapse;text-align:center;font-size:var(--fs-xs);width:100%;max-width:19rem}.widget-month caption{font-weight:600}.widget-month td[aria-current]{background:var(--accent);color:var(--accent-foreground);font-weight:700}

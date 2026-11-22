@@ -7,7 +7,7 @@ import type { Provider } from "../../api/gen/Provider.ts";
 import { api } from "../../api/session.ts";
 import { origin } from "../../boards/document.ts";
 import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
-import { connectionValues, initial, schemaValues, type Values } from "../../configuration/schema.ts";
+import { connectionValues, hasEndpoint, initial, schemaValues, type Values } from "../../configuration/schema.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -202,7 +202,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
         {!item && <p><a href={provider.docs}>Provider documentation</a></p>}
         <Field label="Name" id="integration-name" error={errors.name}><TextInput name="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
-        <SchemaForm id="integration" schema={[...provider.fields, pinField]} values={config} errors={errors}
+        <SchemaForm id="integration" schema={hasEndpoint(provider.fields) ? [...provider.fields, pinField] : provider.fields} values={config} errors={errors}
           onChange={change} bound={bound} cleared={cleared} onClear={item ? (key) => {
             change(key, "");
             setCleared({ ...cleared, [key]: !cleared[key] });

@@ -34,6 +34,7 @@ use crate::{
 
 mod adguard_home;
 mod arr;
+mod clock;
 mod connection;
 mod duplicati;
 mod feed;
@@ -111,6 +112,7 @@ pub const REGISTRY: &[Provider] = &[
     reachability::REACHABILITY,
     feed::FEED,
     weather::WEATHER,
+    clock::CLOCK,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
@@ -138,6 +140,12 @@ pub struct Provider {
     #[serde(skip)]
     #[cfg_attr(test, ts(skip))]
     pub test: Test,
+}
+
+impl Provider {
+    pub(crate) fn has_endpoint(&self) -> bool {
+        self.fields.iter().any(|field| field.id == "base_url")
+    }
 }
 
 type Job<'a, T> = Pin<Box<dyn Future<Output = Result<T, Fault>> + Send + 'a>>;
@@ -370,6 +378,10 @@ fn navigation_link(value: &str) -> bool {
         })
 }
 
+fn local_test<'a>(_: &'a Conn<'_>) -> Job<'a, ()> {
+    Box::pin(async { Ok(()) })
+}
+
 fn no_widget_options(_: &Values) -> Result<(), &'static str> {
     Ok(())
 }
@@ -593,6 +605,12 @@ impl OutputRedactor {
                     }
                 }
             }
+            Clock { zones, .. } => {
+                for (zone, label) in zones {
+                    self.redact(zone);
+                    self.redact(label);
+                }
+            }
             Meter { label, percent } => {
                 self.redact(label);
                 if self.matches(&percent.to_string()) {
@@ -652,10 +670,17 @@ mod tests {
                     && !provider.contacts.is_empty()
             );
             assert!(!provider.fields.is_empty() && !provider.widgets.is_empty());
-            assert!(provider
-                .fields
-                .iter()
-                .any(|field| field.id == "base_url" && field.kind == Kind::Url && field.required));
+            if provider.has_endpoint() {
+                assert!(provider.fields.iter().any(|field| {
+                    field.id == "base_url" && field.kind == Kind::Url && field.required
+                }));
+            } else {
+                assert!(!provider.public_internet);
+                assert!(provider
+                    .fields
+                    .iter()
+                    .all(|field| field.kind != Kind::Secret));
+            }
             assert!(provider
                 .fields
                 .iter()

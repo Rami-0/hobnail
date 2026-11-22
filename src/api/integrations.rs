@@ -265,6 +265,24 @@ pub(super) fn credential_field(
     Ok(spec.id)
 }
 
+pub(super) fn provider_origin(
+    provider: &providers::Provider,
+    url: &str,
+) -> Result<String, ApiError> {
+    if !provider.has_endpoint() && url.is_empty() {
+        return Ok(String::new());
+    }
+    if provider.has_endpoint() {
+        if let Some(origin) = client::origin(url) {
+            return Ok(origin);
+        }
+    }
+    Err(ApiError::bad_request(
+        "Enter an absolute HTTP or HTTPS URL without user information, query, or fragment.",
+        Some("base_url"),
+    ))
+}
+
 fn validated_options(input: &IntegrationInput) -> Result<providers::Values, ApiError> {
     let provider = provider(&input.kind)?;
     let mut values = input.options.clone();
@@ -280,7 +298,10 @@ fn validated_options(input: &IntegrationInput) -> Result<providers::Values, ApiE
             Some("options"),
         ));
     }
-    values.insert("base_url".into(), input.base_url.clone().into());
+    provider_origin(provider, &input.base_url)?;
+    if provider.has_endpoint() {
+        values.insert("base_url".into(), input.base_url.clone().into());
+    }
     values.insert("enabled".into(), input.enabled.into());
     let fields: Vec<_> = provider
         .fields
@@ -387,12 +408,7 @@ pub(super) fn save(
 ) -> Result<IntegrationView, ApiError> {
     super::validate_label(&input.name, "name")?;
     super::validate_icon(input.icon.as_deref())?;
-    let origin = client::origin(&input.base_url).ok_or_else(|| {
-        ApiError::bad_request(
-            "enter an absolute HTTP or HTTPS URL without user information, query, or fragment",
-            Some("base_url"),
-        )
-    })?;
+    let origin = provider_origin(provider(&input.kind)?, &input.base_url)?;
     input.options = validated_options(&input)?;
     let credentials = effective_credentials(conn, id, &mut input, &origin)?;
     let kind = &input.kind;
@@ -523,7 +539,7 @@ pub(super) fn draft_target(
             Some("enabled"),
         ));
     }
-    let origin = client::origin(&input.base_url).expect("validated origin");
+    let origin = provider_origin(provider(&input.kind)?, &input.base_url)?;
     let credentials = effective_credentials(conn, id, &mut input, &origin)?;
     let mut target = Target::new(
         input.base_url,

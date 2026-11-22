@@ -23,7 +23,7 @@ import { Note } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
-import { connectionValues, initial as defaults } from "../../configuration/schema.ts";
+import { connectionValues, hasEndpoint, initial as defaults } from "../../configuration/schema.ts";
 import type { Provider } from "../../api/gen/Provider.ts";
 import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
 import { incompleteField, move, selectedGroups, stepOrder, STEPS } from "./model.ts";
@@ -291,11 +291,13 @@ function Wizard({ initial }: { initial: SetupDraft }) {
       if (!schema) return null;
       const bound = draft.credential_bindings[id];
       const values = { ...target.options, ...target, ...Object.fromEntries(changes.map((entry) => [entry.field ?? "", entry.secret])) };
-      canTest = !!target.base_url && target.enabled;
+      const endpoint = hasEndpoint(schema);
+      const fields = endpoint ? [...schema, pinField] : schema;
+      canTest = (!endpoint || !!target.base_url) && target.enabled;
       content = <>
-        <SchemaForm id={id} schema={[...schema, pinField]} values={values} bound={bound}
+        <SchemaForm id={id} schema={fields} values={values} bound={bound}
           cleared={Object.fromEntries(changes.map((entry) => [entry.field ?? "", entry.secret === null]))}
-          errors={Object.fromEntries([...schema, pinField].map(({ id: key }) => [key, fieldError(id, key) ?? ""]))}
+          errors={Object.fromEntries(fields.map(({ id: key }) => [key, fieldError(id, key) ?? ""]))}
           onChange={(key, value) => {
             if (schema.some((field) => field.id === key && field.kind === "secret")) {
               changeSecret(item, key, target.base_url, String(value));
@@ -421,7 +423,9 @@ function Wizard({ initial }: { initial: SetupDraft }) {
               [...groups].map(([group, items]) => <section key={group}>
                 <h3>{group}</h3>
                 <ul>{items.map((item) => {
-                  const incomplete = incompleteField(item);
+                  const provider = item.target.kind === "provider" ? item.target.provider : "";
+                  const fields = providers.find((entry) => entry.id === provider)?.fields;
+                  const incomplete = incompleteField(item, !fields || hasEndpoint(fields));
                   const error = failure?.item === item.id ? failure : undefined;
                   const matchId = draft.integration_matches[item.id];
                   const matches = matchId ? draft.matching_integrations[matchId] : undefined;

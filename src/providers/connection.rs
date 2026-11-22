@@ -293,7 +293,11 @@ impl<'a> Conn<'a> {
         connections: &'a Connections,
         permit: OwnedSemaphorePermit,
     ) -> Result<Self, Fault> {
-        let origin = client::origin(&target.url).ok_or(Class::Blocked)?;
+        let origin = if target.url.is_empty() && target.credentials.is_empty() {
+            String::new()
+        } else {
+            client::origin(&target.url).ok_or(Class::Blocked)?
+        };
         let session_scope = target.session_key.as_ref().map_or_else(
             || {
                 let mut revisions = connections.revisions.lock().unwrap();

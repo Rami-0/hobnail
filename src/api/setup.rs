@@ -64,7 +64,13 @@ impl SetupItem {
                 SetupTarget::Board {
                     payload: BoardPayload::Link { url, .. },
                 } => url.trim().is_empty(),
-                SetupTarget::Provider { base_url, .. } => base_url.trim().is_empty(),
+                SetupTarget::Provider {
+                    provider, base_url, ..
+                } => {
+                    base_url.trim().is_empty()
+                        && integrations::provider(provider)
+                            .is_ok_and(|provider| provider.has_endpoint())
+                }
                 _ => false,
             }
     }
@@ -564,7 +570,8 @@ fn integration_input(
     else {
         unreachable!("provider connection");
     };
-    let origin = integration_origin(base_url)?;
+    let descriptor = integrations::provider(provider)?;
+    let origin = integrations::provider_origin(descriptor, base_url)?;
     let mut stmt = conn.prepare(
         "SELECT field,origin,secret FROM setup_credentials WHERE user_id=?1 AND item_id=?2",
     )?;
@@ -576,7 +583,6 @@ fn integration_input(
         ))
     })?;
     let mut credentials = BTreeMap::new();
-    let descriptor = integrations::provider(provider)?;
     for row in rows {
         let (field, bound, secret) = row?;
         let field = integrations::credential_field(descriptor, &field, Some(&secret))?;
@@ -710,6 +716,12 @@ fn commit(
     {
         let local = |error| item_error(&item.id, error);
         let (reuse, unique) = match &item.target {
+            SetupTarget::Provider { provider, .. }
+                if integrations::provider(provider)
+                    .is_ok_and(|provider| !provider.has_endpoint()) =>
+            {
+                (None, true)
+            }
             SetupTarget::Provider {
                 provider, base_url, ..
             } => {

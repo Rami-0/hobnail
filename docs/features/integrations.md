@@ -635,6 +635,19 @@ Verified from: [Open-Meteo Forecast API and WMO code table](https://open-meteo.c
 
 UNVERIFIED: Live API responses, quota behavior and location coverage.
 
+## Clock and calendar
+
+Enter up to eight IANA zone names, one per line. Add an optional label after
+`|`, for example `America/Chicago | Home`. Choose a 12- or 24-hour clock and
+an optional month calendar in the first recognized zone. The clock uses the
+browser's own time and zone database, pauses while the tab is hidden, and
+shows minutes only with reduced motion enabled. It makes no external requests.
+
+Verified from: [IANA Time Zone Database](https://www.iana.org/time-zones)
+and [Intl.DateTimeFormat](https://tc39.es/ecma402/#datetimeformat-objects).
+
+UNVERIFIED: Zone availability in browser builds outside the Chromium fixture.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

@@ -6,4 +6,4 @@ import type { Health } from "./Health.ts";
  * Shared provider display vocabulary. Providers select a shape, and supply text
  * values rather than markup. The legacy TOML widget body remains compatible.
  */
-export type StructuredBody = { "kind": "stat", value: string, } | { "kind": "stat_grid", rows: Array<[string, string]>, } | { "kind": "status_list", rows: Array<[string, Health]>, } | { "kind": "item_list", items: Array<BodyItem>, } | { "kind": "meter", label: string, percent: number, } | { "kind": "table", headings: Array<string>, rows: Array<Array<string>>, } | { "kind": "unavailable", message: string, };
+export type StructuredBody = { "kind": "stat", value: string, } | { "kind": "stat_grid", rows: Array<[string, string]>, } | { "kind": "status_list", rows: Array<[string, Health]>, } | { "kind": "item_list", items: Array<BodyItem>, } | { "kind": "clock", zones: Array<[string, string]>, hour12: boolean, calendar: boolean, } | { "kind": "meter", label: string, percent: number, } | { "kind": "table", headings: Array<string>, rows: Array<Array<string>>, } | { "kind": "unavailable", message: string, };

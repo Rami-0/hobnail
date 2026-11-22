@@ -1,5 +1,6 @@
 import { createElement as h } from "react";
 import type { StructuredBody } from "../api/gen/StructuredBody.ts";
+import { Clock } from "./Clock.ts";
 import { widgetLink } from "./widgetLink.ts";
 
 export function StructuredWidget({ body }: { body: StructuredBody }) {
@@ -23,6 +24,8 @@ export function StructuredWidget({ body }: { body: StructuredBody }) {
           item.secondary && ` · ${item.secondary}`,
           date && Number.isFinite(date.getTime()) && h("time", { dateTime: date.toISOString() }, ` · ${date.toLocaleString()}`));
       }));
+    case "clock":
+      return h(Clock, body);
     case "meter":
       return h("div", null, body.label, " ", h("progress", { "aria-label": body.label, value: body.percent, max: 100 }));
     case "table":

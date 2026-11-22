@@ -220,6 +220,11 @@ pub enum StructuredBody {
     ItemList {
         items: Vec<BodyItem>,
     },
+    Clock {
+        zones: Vec<(String, String)>,
+        hour12: bool,
+        calendar: bool,
+    },
     Meter {
         label: String,
         percent: u8,
@@ -262,7 +267,7 @@ impl StructuredBody {
             Self::Stat { value }
             | Self::Meter { label: value, .. }
             | Self::Unavailable { message: value } => value.capacity(),
-            Self::StatGrid { rows } => {
+            Self::Clock { zones: rows, .. } | Self::StatGrid { rows } => {
                 rows.capacity() * size_of::<(String, String)>()
                     + rows
                         .iter()

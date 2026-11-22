@@ -3,6 +3,8 @@ import type { Field } from "../api/gen/Field.ts";
 
 export type Values = Record<string, unknown>;
 
+export const hasEndpoint = (fields: Field[]) => fields.some((field) => field.id === "base_url");
+
 export function initial(fields: Field[]): Values {
   return Object.fromEntries(fields.flatMap((f) => f.default === null ? [] : [[
     f.id, ["bool", "list"].includes(f.kind) ? JSON.parse(f.default) : f.default,
