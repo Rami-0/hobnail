@@ -216,6 +216,9 @@ export const flows = {
     for (const t of toggles) assert.equal(t.tg, `${t.open === "true" ? "Fold" : "Show"} ${t.link}`, "fold toggle label");
     await go(h, f, "/app/host", tid("host-sample"));
     await h.state("host");
+    // The focusable, sideways-scrolling process table is a named region.
+    const region = await page.locator(".host-table").evaluate((e) => [e.getAttribute("role"), e.getAttribute("aria-label"), e.tabIndex]).catch(() => null);
+    if (region) assert.deepEqual(region, ["region", "Top processes", 0], "process table region");
     await go(h, f, "/app/alerts", tid("alerts"));
     await h.state("alerts");
   },

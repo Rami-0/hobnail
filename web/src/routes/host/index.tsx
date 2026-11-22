@@ -89,9 +89,9 @@ export default function Host() {
       </section>
       {host.processes && boot?.role !== "viewer" && <details className="panel hx-p hx-wide" open>
         <summary>Top processes</summary>
-        {/* It scrolls sideways on phones; keyboard users need to reach it (axe scrollable-region-focusable). */}
+        {/* It scrolls sideways on phones; keyboard users need to reach it (axe scrollable-region-focusable), and a tab stop needs a name. */}
         {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
-        {host.processes.length ? <div className="host-table" tabIndex={0}><table className="tbl"><thead><tr>
+        {host.processes.length ? <div className="host-table" role="region" aria-label="Top processes" tabIndex={0}><table className="tbl"><thead><tr>
           <th scope="col">PID</th><th scope="col">Command</th><th scope="col">Container</th>
           <th scope="col" className="num">UID</th><th scope="col" className="num">CPU</th><th scope="col" className="num">RSS</th><th scope="col" className="num">Threads</th>
         </tr></thead><tbody>{host.processes.map((p) => <tr key={p.pid}>
