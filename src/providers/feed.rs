@@ -64,19 +64,24 @@ const SUMMARY_RAW: usize = 2048;
 const SUMMARY: usize = 240;
 
 impl Entry {
-    fn body(self, summaries: bool) -> BodyItem {
-        let compact = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    /// Folding, tag stripping and entity decoding can hide a secret from the
+    /// final output pass, so each field is checked before and after them.
+    fn body(self, summaries: bool, redactor: &OutputRedactor) -> BodyItem {
+        let compact = |s: &str| {
+            redactor.transformed(&[s], s.split_whitespace().collect::<Vec<_>>().join(" "))
+        };
         let title = compact(&self.title);
-        let published = compact(&self.published);
-        let date = if published.is_empty() {
+        let date = if self.published.trim().is_empty() {
             compact(&self.updated)
         } else {
-            published
+            compact(&self.published)
         };
         let summary = if !summaries {
             String::new()
         } else if self.summary_html {
-            clip(compact(&html_text(&self.summary)), SUMMARY)
+            let text = html_text(&self.summary);
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            clip(redactor.transformed(&[&self.summary], text), SUMMARY)
         } else {
             clip(compact(&self.summary), SUMMARY)
         };
@@ -241,6 +246,11 @@ fn decode_html_entities(text: &str) -> String {
     out
 }
 
+#[cfg(test)]
+fn none() -> OutputRedactor {
+    OutputRedactor::new(std::iter::empty::<&str>())
+}
+
 fn atom_name<'a>(tag: &Tag<'a>, parents: &[Tag<'_>]) -> Option<&'a str> {
     let (prefix, local) = tag.name.split_once(':').unwrap_or(("", tag.name));
     let mut tags = std::iter::once(tag).chain(parents.iter().rev());
@@ -256,7 +266,12 @@ fn atom_name<'a>(tag: &Tag<'a>, parents: &[Tag<'_>]) -> Option<&'a str> {
 /// Parse a feed. When `complete` is false the body is only the leading
 /// [`MAX_RESPONSE`] bytes of a longer feed: the entries that closed before
 /// the cut are returned and the unfinished remainder is ignored.
-fn parse(body: &[u8], summaries: bool, complete: bool) -> Option<Vec<BodyItem>> {
+fn parse(
+    body: &[u8],
+    summaries: bool,
+    complete: bool,
+    redactor: &OutputRedactor,
+) -> Option<Vec<BodyItem>> {
     if body.len() > MAX_RESPONSE {
         return None;
     }
@@ -267,11 +282,16 @@ fn parse(body: &[u8], summaries: bool, complete: bool) -> Option<Vec<BodyItem>> 
         Err(_) => return None,
     };
     let mut items = Vec::new();
-    let whole = entries(input, summaries, &mut items).is_some();
+    let whole = entries(input, summaries, redactor, &mut items).is_some();
     (if complete { whole } else { !items.is_empty() }).then_some(items)
 }
 
-fn entries(input: &str, summaries: bool, items: &mut Vec<BodyItem>) -> Option<()> {
+fn entries(
+    input: &str,
+    summaries: bool,
+    redactor: &OutputRedactor,
+    items: &mut Vec<BodyItem>,
+) -> Option<()> {
     let mut scanner = Scanner(input.strip_prefix('\u{feff}').unwrap_or(input));
     let mut stack: Vec<Tag<'_>> = Vec::new();
     let mut root = None;
@@ -345,7 +365,7 @@ fn entries(input: &str, summaries: bool, items: &mut Vec<BodyItem>) -> Option<()
                 if tag.empty {
                     if depth + 1 == item_depth {
                         if let Some(item) = entry.take() {
-                            items.push(item.body(summaries));
+                            items.push(item.body(summaries, redactor));
                         }
                     }
                     if depth == item_depth {
@@ -365,7 +385,7 @@ fn entries(input: &str, summaries: bool, items: &mut Vec<BodyItem>) -> Option<()
                 }
                 if depth == item_depth {
                     if let Some(item) = entry.take() {
-                        items.push(item.body(summaries));
+                        items.push(item.body(summaries, redactor));
                     }
                 }
             }
@@ -389,7 +409,7 @@ async fn feed(conn: &Conn<'_>, summaries: bool) -> Result<Vec<BodyItem>, Fault> 
         Ok(true)
     };
     success(conn.scan(Step::get(""), &mut sink).await?)?;
-    parse(&body, summaries, complete).ok_or_else(|| Class::Protocol.into())
+    parse(&body, summaries, complete, &conn.output_redactor()).ok_or_else(|| Class::Protocol.into())
 }
 
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
@@ -497,8 +517,8 @@ mod tests {
         )
         .await;
         // A complete body must still be a whole document.
-        assert!(parse(&long.as_bytes()[..MAX_RESPONSE], true, true).is_none());
-        assert!(parse("<rss version='2.0'><chan".as_bytes(), true, false).is_none());
+        assert!(parse(&long.as_bytes()[..MAX_RESPONSE], true, true, &none()).is_none());
+        assert!(parse("<rss version='2.0'><chan".as_bytes(), true, false, &none()).is_none());
     }
 
     #[test]
@@ -507,13 +527,16 @@ mod tests {
             "<rss version='2.0' data-blob='{}'><channel><item><title>T</title><description>&lt;p&gt;Hello &amp;amp;&amp;nbsp;&lt;a href=\"https://example.test\"&gt;world&lt;/a&gt;&amp;#8230;&lt;/p&gt;&lt;!-- c --&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;style&gt;p{{}}&lt;/style&gt; 1 &lt; 2 &amp;unknown;</description></item></channel></rss>",
             "a".repeat(4096)
         );
-        let entry = parse(rss.as_bytes(), true, true).unwrap().pop().unwrap();
+        let entry = parse(rss.as_bytes(), true, true, &none())
+            .unwrap()
+            .pop()
+            .unwrap();
         assert_eq!(
             entry.secondary.as_deref(),
             Some("Hello & world… 1 < 2 &unknown;")
         );
         let atom = br#"<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>A</title><summary type="text">a &lt;b&gt; c</summary></entry><entry><title>B</title><summary type="html">&lt;i&gt;x&lt;/i&gt;</summary><link href="https://example.test/b" title=""/></entry></feed>"#;
-        let entries = parse(atom, true, true).unwrap();
+        let entries = parse(atom, true, true, &none()).unwrap();
         assert_eq!(entries[0].secondary.as_deref(), Some("a <b> c"));
         assert_eq!(entries[1].secondary.as_deref(), Some("x"));
         // A skipped attribute cannot stand in for a link.
@@ -521,15 +544,48 @@ mod tests {
             r#"<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>C</title><link href="https://example.test/{}"/></entry></feed>"#,
             "p".repeat(1100)
         );
-        assert!(parse(skipped.as_bytes(), true, true).unwrap()[0]
+        assert!(parse(skipped.as_bytes(), true, true, &none()).unwrap()[0]
             .link
             .is_none());
     }
 
     #[test]
+    fn secrets_reshaped_by_stripping_decoding_or_folding_are_withheld() {
+        // Each secret is hidden by a transform: tag stripping joins "pa<i>ss"
+        // into "pass", entity decoding turns "a&amp;b" into "a&b", and
+        // whitespace folding turns "two  spaces" into "two spaces".
+        let redactor = OutputRedactor::new(["pa<i>ss", "a&amp;b", "two  spaces"].into_iter());
+        let rss = "<rss version='2.0'><channel>\
+            <item><title>One</title><description>x pa&lt;i&gt;ss y</description></item>\
+            <item><title>Two</title><description>&lt;p&gt;a&amp;amp;b&lt;/p&gt;</description></item>\
+            <item><title>two  spaces</title></item></channel></rss>";
+        let items = parse(rss.as_bytes(), true, true, &redactor).unwrap();
+        assert_eq!(items[0].secondary.as_deref(), Some("<redacted>"));
+        assert_eq!(items[1].secondary.as_deref(), Some("<redacted>"));
+        assert_eq!(items[2].title, "<redacted>");
+        // Without the secrets the same text is shown.
+        let items = parse(rss.as_bytes(), true, true, &none()).unwrap();
+        assert_eq!(items[0].secondary.as_deref(), Some("x pass y"));
+        assert_eq!(items[1].secondary.as_deref(), Some("a&b"));
+        // Redaction runs before the summary is clipped, so a cut cannot
+        // leave the start of a secret.
+        let secret = "SECRET-0123456789";
+        let redactor = OutputRedactor::new([secret].into_iter());
+        let atom = format!(
+            r#"<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>T</title><summary>{} {secret}</summary></entry></feed>"#,
+            "x".repeat(SUMMARY - 6)
+        );
+        let entry = parse(atom.as_bytes(), true, true, &redactor)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(!entry.secondary.unwrap().contains("SECR"));
+    }
+
+    #[test]
     fn atom_resolves_prefixes_and_keeps_only_alternate_http_links() {
         let feed = br#"<a:feed xmlns:a="http://www.w3.org/2005/Atom"><a:entry xmlns:b="http://www.w3.org/2005/Atom"><b:title>Atom</b:title><a:link href="javascript:alert(1)"/><b:link rel="self" href="https://example.test/feed"/><b:link href="https://example.test/story"/><a:updated>2026-11-22T00:00:00Z</a:updated></a:entry></a:feed>"#;
-        let entry = parse(feed, true, true).unwrap().pop().unwrap();
+        let entry = parse(feed, true, true, &none()).unwrap().pop().unwrap();
         assert_eq!(entry.title, "Atom");
         assert_eq!(entry.link.as_deref(), Some("https://example.test/story"));
         assert_eq!(entry.secondary.as_deref(), Some("2026-11-22T00:00:00Z"));
@@ -552,17 +608,17 @@ mod tests {
             ),
         ];
         for xml in hostile {
-            assert!(parse(xml.as_bytes(), true, true).is_none());
+            assert!(parse(xml.as_bytes(), true, true, &none()).is_none());
         }
         for offset in 0..RSS.len() {
-            assert!(parse(&RSS.as_bytes()[..offset], true, true).is_none());
+            assert!(parse(&RSS.as_bytes()[..offset], true, true, &none()).is_none());
         }
         let many = format!(
             "<rss version='2.0'><channel>{}</channel></rss>",
             "<item><title>hello</title></item>".repeat(60)
         );
         assert_eq!(
-            parse(many.as_bytes(), false, true).unwrap().len(),
+            parse(many.as_bytes(), false, true, &none()).unwrap().len(),
             MAX_ITEMS
         );
     }
@@ -575,7 +631,7 @@ fn omits_rss_link_when_truncated_tail_hides_after_whitespace() {
         "<rss version=\"2.0\"><channel><item><title>Story</title><link>https://example.test/story{}<![CDATA[hidden]]></link></item></channel></rss>",
         " ".repeat(LINK + 16),
     );
-    let entries = parse(feed.as_bytes(), false, true).unwrap();
+    let entries = parse(feed.as_bytes(), false, true, &none()).unwrap();
     assert_eq!(entries[0].title, "Story");
     assert!(entries[0].link.is_none());
 }

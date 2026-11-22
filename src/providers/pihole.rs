@@ -176,12 +176,14 @@ async fn v6(
     )
     .await?;
     let entries = data[list].as_array().ok_or(Class::Protocol)?;
+    let redactor = conn.output_redactor();
     let mut rows = Vec::with_capacity(entries.len().min(TOP_COUNT));
     for entry in entries.iter().take(TOP_COUNT) {
         let label = if let Report::Clients = report {
             let ip = entry["ip"].as_str().ok_or(Class::Protocol)?;
             match entry["name"].as_str().filter(|name| !name.is_empty()) {
-                Some(name) => format!("{name} ({ip})"),
+                // Joining can reshape a secret; check the parts first.
+                Some(name) => redactor.transformed(&[name, ip], format!("{name} ({ip})")),
                 None => ip.into(),
             }
         } else {
@@ -268,13 +270,15 @@ async fn v5(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, 
     if !key.is_empty() {
         // PHP objects of name => count; clients are "hostname|ip" or "ip".
         // The JSON map loses PHP's order, so rank by count here.
+        let redactor = conn.output_redactor();
         let mut rows = data[key]
             .as_object()
             .ok_or(Class::Protocol)?
             .iter()
             .map(|(label, count)| {
+                // Splitting at '|' can reshape a secret; check the raw key.
                 let label = match label.split_once('|') {
-                    Some((name, ip)) => format!("{name} ({ip})"),
+                    Some((name, ip)) => redactor.transformed(&[label], format!("{name} ({ip})")),
                     None => label.clone(),
                 };
                 Ok((label, count.as_u64().ok_or(Class::Protocol)?))
@@ -599,6 +603,48 @@ mod tests {
         assert_eq!(
             serde_json::to_value(body).unwrap()["rows"],
             serde_json::json!([["laptop.lan (192.168.0.9)", "70"], ["192.168.0.4", "5"]])
+        );
+    }
+
+    #[tokio::test]
+    async fn client_labels_withhold_secrets_reshaped_by_splitting_or_joining() {
+        // v5: the token itself contains '|', so "tok|en42" would become
+        // "tok (en42)" and escape the final redaction pass.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = request_activity(
+            addr,
+            "v5",
+            (TOKEN, "tok|en42"),
+            Report::Clients,
+            async move {
+                let (mut socket, _) = receive(&listener).await;
+                respond(
+                    &mut socket,
+                    200,
+                    "",
+                    r#"{"top_sources":{"tok|en42":9,"laptop.lan|192.168.0.9":7}}"#,
+                )
+                .await;
+            },
+        )
+        .await;
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["rows"],
+            serde_json::json!([["<redacted>", "9"], ["laptop.lan (192.168.0.9)", "7"]])
+        );
+        // v6: name and ip are joined; a name echoing the session is withheld whole.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = request_activity(addr, "v6", (PASSWORD, "test password"), Report::Clients, async move {
+            let (mut socket, _) = receive(&listener).await;
+            respond(&mut socket, 200, "", r#"{"session":{"valid":true,"sid":"echoed-sid-1"}}"#).await;
+            let (mut socket, _) = receive(&listener).await;
+            respond(&mut socket, 200, "", r#"{"clients":[{"ip":"192.168.0.2","name":"echoed-sid-1","count":3},{"ip":"192.168.0.3","name":"tv.lan","count":1}]}"#).await;
+        }).await;
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["rows"],
+            serde_json::json!([["<redacted>", "3"], ["tv.lan (192.168.0.3)", "1"]])
         );
     }
 

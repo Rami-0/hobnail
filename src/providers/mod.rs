@@ -567,6 +567,20 @@ mod redaction;
 use redaction::OutputRedactor;
 
 impl OutputRedactor {
+    /// Display text a provider built from upstream `sources` with a transform
+    /// that can reshape them (splitting, joining, tag stripping, entity
+    /// decoding, whitespace folding). Such a transform can hide a secret from
+    /// the final output pass, so a secret in any source withholds the whole
+    /// text; otherwise the result is redacted as well. Redact before any
+    /// truncation, so a cut cannot leave part of a secret behind.
+    fn transformed(&self, sources: &[&str], mut text: String) -> String {
+        if sources.iter().any(|source| self.matches(source)) {
+            return redaction::MARKER.into();
+        }
+        self.redact(&mut text);
+        text
+    }
+
     fn json(&self, value: &mut Value) {
         if self.is_empty() {
             return;

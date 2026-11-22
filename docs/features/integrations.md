@@ -938,6 +938,11 @@ replaced with `<redacted>` wherever it appears in display text, for
 example inside a torrent, client or monitor name. This fails safe: labels
 can be mangled, but no credential is shown. Use a distinctive username if
 the mangling gets in the way.
+A provider that splits, joins, strips markup from, decodes or folds upstream
+text before display can reshape a secret so the final pass misses it. Build
+such text with `OutputRedactor::transformed`, which withholds the whole
+value when any source matches and redacts the result before any
+truncation. Pi-hole client labels and feed titles, dates and summaries use it.
 Exercise connection tests and fetches against a local fake service.
 
 See [Boards](boards.md), [Login and security](login.md) and [API](../api.md).

@@ -5,7 +5,7 @@ use super::{connection, MAX_RESPONSE};
 pub(super) const MAX_SECRETS: usize = 32;
 const MAX_SECRET_BYTES: usize = 16 * 1024;
 const MAX_LAYERS: usize = 3;
-const MARKER: &str = "<redacted>";
+pub(super) const MARKER: &str = "<redacted>";
 
 /// The only derived needles are the binary-to-text forms. Decode textual
 /// escapes on the output side so mixed encoders share the same matching path.
