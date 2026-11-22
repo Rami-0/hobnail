@@ -206,8 +206,8 @@ pub struct BoardView {
 pub struct ResolvedItem {
     id: String,
     missing: bool,
-    container: Option<ContainerRow>,
-    integration: Option<IntegrationView>,
+    container: Option<Box<ContainerRow>>,
+    integration: Option<Box<IntegrationView>>,
     widget: Option<super::widgets::WidgetView>,
 }
 
@@ -921,7 +921,7 @@ fn resolve(
             containers.entry(target).or_insert(row);
         }
     }
-    let mut resolved = Vec::new();
+    let mut resolved = Vec::with_capacity(document.sections.iter().map(|s| s.items.len()).sum());
     let mut widget_budget = BOARD_WIDGET_BYTES;
     for item in document.sections.iter().flat_map(|s| &s.items) {
         let mut container = None;
@@ -975,8 +975,8 @@ fn resolve(
         resolved.push(ResolvedItem {
             id: item.id.clone().expect("stored item ID"),
             missing,
-            container,
-            integration,
+            container: container.map(Box::new),
+            integration: integration.map(Box::new),
             widget,
         });
     }
