@@ -169,7 +169,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     {error && <Note kind="bad">{error}</Note>}<output className="sr" aria-live="polite">{announcement}</output>
     <fieldset className="editor-fields" disabled={busy}><legend className="sr">Board layout</legend>
     {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section">
-      <div className="editor-section-head"><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
+      <div className="editor-section-head"><h2 className="sr">{section.title}</h2><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
         <div className="settings-actions"><Button variant="ghost" size="icon" aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button variant="ghost" size="icon" aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => { change({ type: "delete-section", section: s }, "Section removed"); focusItem(Math.min(s, doc.sections.length - 2), 0); }}>Delete section</Button></div>
       </div><div className="board-grid">{section.items.map((item, i) => {
         const showTools = itemIndex++ < toolCount;
