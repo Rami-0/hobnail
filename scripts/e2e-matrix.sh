@@ -135,7 +135,15 @@ engine_run() {
 # restart watchers and the throwaway instances (never the container
 # "hobnail").
 pids=""
+# Container and network events on this host, with their times: lib.mjs
+# matches Chromium's net::ERR_NETWORK_CHANGED reports against them (see
+# web/e2e/matrix/README.md, engine notes).
+docker events --filter type=container --filter event=start --filter event=die \
+  --filter type=network --filter event=connect --filter event=disconnect \
+  --format '{{.TimeNano}} {{.Type}} {{.Action}} {{.Actor.Attributes.name}}' >"$OUT/docker-events.log" 2>/dev/null &
+events_pid=$!
 cleanup() {
+  kill "$events_pid" 2>/dev/null || true
   touch "$OUT/stop"
   for n in 0 1 2; do
     touch "$OUT/ctl-$((3395 + n)).stop"
@@ -153,6 +161,7 @@ for engine in $ENGINES; do
   i=$((i + 1))
 done
 for p in $pids; do wait "$p" || true; done
+kill "$events_pid" 2>/dev/null || true
 
 docker run --rm -u "$(id -u):$(id -g)" -v "$dir":/repo:ro -v "$OUT":/out "$PW_IMAGE" node /repo/web/e2e/matrix/summary.mjs /out >"$OUT/summary.txt" 2>&1 || true
 cat "$OUT/summary.txt"

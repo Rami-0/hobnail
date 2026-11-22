@@ -87,12 +87,31 @@ const screenshotProbe = (engine, e) => engine === "webkit" && e.kind === "csp" &
 // chunk's CSS, the favicon fetch). WebKit then reports "EventSource / Fetch
 // API cannot load <url> due to access control checks." as page errors, and
 // Vite's preload helper (WebKit, Firefox) throws "Unable to preload CSS for
-// <url>", which React logs. Exactly these messages are set aside when they
+// <url>", and Firefox fails a lazy chunk with "error loading dynamically
+// imported module: <url>"; React logs both. Exactly these messages are set aside when they
 // arrive while a main-frame navigation is under way (its request sent, the
 // new document not yet committed, at most 1.5 s): only the document being
 // left exists then, so they cannot come from the page the user lands on.
 // Counted in the unit's JSON as `excluded`.
-const CANCEL_SIGNATURE = /^(EventSource cannot load|Fetch API cannot load) (.+?) due to access control checks\.|Unable to preload CSS for (\S+)/;
+const CANCEL_SIGNATURE = /^(EventSource cannot load|Fetch API cannot load) (.+?) due to access control checks\.|Unable to preload CSS for (\S+)|error loading dynamically imported module: (\S+)/;
+
+// Chromium on Linux aborts the requests it has in flight with
+// net::ERR_NETWORK_CHANGED whenever a network interface of its namespace
+// changes. The browsers run with --network host, and the matrix's own
+// throwaway containers (every unit's instance and fixtures, the network-drop
+// restart, on all three engines at once) add and remove veth interfaces on
+// the host as they start and stop. Exactly Chromium's "Failed to load
+// resource: net::ERR_NETWORK_CHANGED" is set aside when the host's
+// docker-events.log (e2e-matrix.sh) shows a container start or stop, or a
+// network connect or disconnect, from 3 s before to 1 s after it; counted
+// in the unit's JSON as `excluded`.
+const hostEvents = () => { try { return fs.readFileSync(path.join(process.env.OUT || "/out", "docker-events.log"), "utf8").split("\n").filter(Boolean).map((l) => { const [ns, type, action, name] = l.split(" "); return { at: Number(BigInt(ns) / 1000000n), what: `${type} ${action} ${name}` }; }); } catch { return []; } };
+const netChange = (engine, e) => {
+  if (engine !== "chromium" || e.kind !== "console" || !/^Failed to load resource: net::ERR_NETWORK_CHANGED\b/.test(e.text)) return null;
+  const near = hostEvents().filter((x) => x.at - e.at >= -3000 && x.at - e.at <= 1000);
+  if (!near.length) { e.text += " [no container or network event on the host within 3 s]"; return null; }
+  return near.map((x) => `${x.what} ${x.at - e.at} ms`).slice(0, 3).join(", ");
+};
 
 // One harness per page: records console errors, page errors and CSP
 // violations, and checks a page state on demand. Every event recorded since
@@ -111,7 +130,7 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
   page.on("framenavigated", (fr) => { if (fr === page.mainFrame()) lastNav = Date.now(); });
   page.on("request", (r) => { if (r.isNavigationRequest() && r.frame() === page.mainFrame()) navStart = Date.now(); });
   const leaving = () => navStart > lastNav && Date.now() - navStart <= 1500;
-  const push = (e) => events.push({ ...e, flow: ctx.flow, shooting: ctx.shooting, sinceNav: Date.now() - lastNav, leaving: leaving() });
+  const push = (e) => events.push({ ...e, flow: ctx.flow, shooting: ctx.shooting, sinceNav: Date.now() - lastNav, leaving: leaving(), at: Date.now() });
   // Failed requests, for the record only (the console reports the ones a
   // page sees): URL, the engine's reason, time since the last navigation.
   results.requestsFailed ??= [];
@@ -154,7 +173,7 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
     // Allowances see the message and the URL it is about.
     if (allowed(`${text} @ ${where}`)) return;
     const at = where ? " @ " + where.replace(/^https?:\/\/[^/]+/, "").slice(0, 120) + (m.location()?.lineNumber ? ":" + m.location().lineNumber : "") : "";
-    const meta = { flow: ctx.flow, shooting: ctx.shooting, sinceNav: Date.now() - lastNav, leaving: leaving() };
+    const meta = { flow: ctx.flow, shooting: ctx.shooting, sinceNav: Date.now() - lastNav, leaving: leaving(), at: Date.now() };
     if (!/JSHandle@|^Error$|^\s*$/.test(text)) { push({ kind: "console", text: `${text.slice(0, 300)}${at}`, url: page.url() }); return; }
     const p = describe(m).then((args) => { events.push({ kind: "console", text: `${text} [${args.slice(0, 400)}]${at}`, url: page.url(), ...meta }); });
     pending.add(p); p.finally(() => pending.delete(p));
@@ -168,9 +187,11 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
     await Promise.allSettled([...pending]);
     const fresh = events.slice(seen); seen = events.length;
     const problems = [];
+    let why;
     for (const e of fresh) {
       if (screenshotProbe(engine, e)) results.excluded.push({ reason: "screenshot style probe (WebKit)", flow: e.flow, text: e.text.slice(0, 200) });
       else if (leftPage(e)) results.excluded.push({ reason: "load cancelled by leaving the page", flow: e.flow, text: e.text.slice(0, 200) });
+      else if ((why = netChange(engine, e))) results.excluded.push({ reason: "host network change (Chromium)", flow: e.flow, text: `${e.text.slice(0, 160)} [${why}]` });
       else problems.push({ kind: e.kind, detail: e.text, sinceNav: e.sinceNav });
     }
     return problems;
