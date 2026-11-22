@@ -607,6 +607,22 @@ Verified from: [TCP](https://www.rfc-editor.org/rfc/rfc9293.html),
 
 UNVERIFIED: Live endpoints and system resolver configurations outside the fixtures.
 
+## RSS / Atom
+
+Enter the feed's HTTP(S) URL. Public addresses require the provider internet
+switch. The widget displays up to 20 RSS 2.0 items or Atom 1.0 entries in feed
+order, with dates as published by the feed and optional trimmed summaries.
+Feed content displays as text. Only absolute HTTP(S) article links are used.
+The UTF-8 reader caps input at 128 KiB, XML depth at 24, attribute values at
+1 KiB and display field lengths individually. It supports CDATA, predefined
+XML entities and numeric references. DTDs and external entities are rejected.
+
+Verified from: [RSS 2.0](https://www.rssboard.org/rss-specification),
+[Atom 1.0](https://www.rfc-editor.org/rfc/rfc4287.html) and
+[XML 1.0](https://www.w3.org/TR/xml/).
+
+UNVERIFIED: Live feeds. Non-UTF-8 encodings and relative article links are unsupported.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

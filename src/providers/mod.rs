@@ -36,6 +36,7 @@ mod adguard_home;
 mod arr;
 mod connection;
 mod duplicati;
+mod feed;
 mod generic;
 mod gitea;
 mod github;
@@ -107,6 +108,7 @@ pub const REGISTRY: &[Provider] = &[
     paperless::PAPERLESS,
     ssl_expiry::SSL_EXPIRY,
     reachability::REACHABILITY,
+    feed::FEED,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
@@ -333,6 +335,19 @@ fn display_text(conn: &Conn<'_>, mut text: String) -> String {
         return format!("{}…", &text[..end]);
     }
     text
+}
+
+fn navigation_link(value: &str) -> bool {
+    if value.contains('\\') || value.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return false;
+    }
+    let Ok(uri) = value.parse::<hyper::Uri>() else {
+        return false;
+    };
+    matches!(uri.scheme_str(), Some("http" | "https"))
+        && uri.authority().is_some_and(|authority| {
+            !authority.host().is_empty() && !authority.as_str().contains(['@', '%'])
+        })
 }
 
 fn no_widget_options(_: &Values) -> Result<(), &'static str> {
