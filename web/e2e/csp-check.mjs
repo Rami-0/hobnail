@@ -40,6 +40,8 @@ try {
     await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: CSP_LISTENER });
     await fixture.installCookie(tab);
     await tab.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: inp.touch });
+    const theme = width === 390 ? 'dark' : 'light';
+    await tab.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
     const visit = async (route, selector) => {
       const response = await fetch(new URL(route, base), { headers: { Cookie: fixture.cookie } });
       const csp = response.headers.get('content-security-policy') || '';
@@ -47,6 +49,8 @@ try {
       await tab.send('Page.navigate', { url: new URL(route, base).href });
       assert.ok(await tab.until(`!!document.querySelector(${q(selector)})`,15000), route);
       await sleep(500);
+      // The chart module intentionally waits until its grid nears the viewport.
+      await tab.ev(`document.querySelector('.ch-wait')?.scrollIntoView({ block: "center" })`);
       assert.ok(await tab.until(`!document.querySelector('.ch-wait')`,20000), `all charts finish staging on ${route}`);
       console.log(`ok ${width} ${route}`); results.push({ width, route, csp });
     };
