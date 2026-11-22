@@ -67,14 +67,18 @@ export interface EmptyStateProps {
   actions?: ReactNode;
   compact?: boolean;
   testId?: string;
+  /** The title's heading level: 2 under a page title (a board, a list), 3
+   * inside a section that has its own h2 (a Settings section). */
+  level?: 2 | 3;
 }
 
-export function EmptyState({ icon, title, children, tone, actions, compact, testId }: EmptyStateProps) {
+export function EmptyState({ icon, title, children, tone, actions, compact, testId, level = 2 }: EmptyStateProps) {
+  const H = level === 3 ? "h3" : "h2";
   const cls = ["empty", tone ?? "", compact ? "compact" : ""].filter(Boolean).join(" ");
   return (
     <div className={cls} data-testid={testId}>
       <div className="empty-ic">{icon}</div>
-      <h2>{title}</h2>
+      <H>{title}</H>
       {children && <div className="empty-p">{children}</div>}
       {actions && <div className="acts">{actions}</div>}
     </div>

@@ -114,7 +114,7 @@ function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
       const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { default_board: value || null } });
       if (result.kind === "ok") { setSettings(result.data); await fetchBootstrap(); } else setError(result.message);
     }} />}
-    {!boards.length && <EmptyState icon={<span>◇</span>} title="No boards yet">Create an empty board, then add the services and links you want.</EmptyState>}
+    {!boards.length && <EmptyState level={3} icon={<span>◇</span>} title="No boards yet">Create an empty board, then add the services and links you want.</EmptyState>}
     <div className="settings-list">{boards.map((board, index) => <div key={board.id} className="settings-row"><a href={`/app/boards/${board.id}`}>{board.name}</a>{admin && <div className="settings-actions">
       <Button variant="ghost" size="icon" aria-label={`Move ${board.name} up`} disabled={busy || index === 0} onClick={() => { void move(board, boards[index - 1]); }}>↑</Button>
       <Button variant="ghost" size="icon" aria-label={`Move ${board.name} down`} disabled={busy || index === boards.length - 1} onClick={() => { void move(board, boards[index + 1]); }}>↓</Button>
@@ -159,7 +159,7 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   const close = () => setEditing(null);
   return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="default" data-testid="integration-create" disabled={!providers.length} onClick={() => setEditing("new")}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
-    {!items.length && <EmptyState icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
+    {!items.length && <EmptyState level={3} icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
     <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{item.admin?.base_url ?? item.origin}</p><IntegrationStatus integration={item} /></div>
       {admin && <div className="settings-actions"><Button variant="ghost" disabled={!providers.length} onClick={() => setEditing(item)}>Edit</Button><Button busy={busy} disabled={!item.enabled} data-testid="integration-test" onClick={async () => {
         setBusy(true); const result = await api.post(`/api/v1/integrations/${item.id}/test`);

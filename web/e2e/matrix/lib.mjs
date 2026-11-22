@@ -209,6 +209,13 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
         for (const c of layout.clipped) problems.push({ kind: "clipped", detail: c });
         if (motion === "reduce" && layout.motion) problems.push({ kind: "motion", detail: layout.motion });
       }
+      // An empty state's title is a heading under its section's own heading
+      // (Settings: section h2, empty state h3), not a sibling of it.
+      const headings = await page.evaluate(() => [...document.querySelectorAll(".empty > :is(h2,h3,h4)")].flatMap((t) => {
+        const own = t.closest("section")?.querySelector(":is(h1,h2,h3,h4)");
+        return own && own !== t && +own.tagName[1] >= +t.tagName[1] ? [`empty state "${t.textContent}" is an ${t.tagName.toLowerCase()} beside its section's ${own.tagName.toLowerCase()} "${own.textContent.trim().slice(0, 40)}"`] : [];
+      })).catch((e) => [`heading check failed: ${e}`]);
+      for (const d of headings) problems.push({ kind: "heading", detail: d });
       // Once onboarding has finished the board tour, it must not open again
       // (except as the replay a user asks for with ?tour=1).
       if (ctx.tourDone && !/[?&]tour=1/.test(page.url())) {
