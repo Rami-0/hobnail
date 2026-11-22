@@ -63,6 +63,11 @@ struct Stats {
     num_blocked_filtering: u64,
 }
 
+#[derive(Deserialize)]
+struct StatsConfig {
+    enabled: bool,
+}
+
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
     Box::pin(async move { get::<Status>(conn, "control/status").await.map(|_| ()) })
 }
@@ -70,22 +75,25 @@ fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
 fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
         let status: Status = get(conn, "control/status").await?;
-        let stats: Stats = get(conn, "control/stats").await?;
-        let percent = if stats.num_dns_queries == 0 {
-            "—".into()
+        let config: StatsConfig = get(conn, "control/stats/config").await?;
+        let (queries, blocked, percent) = if config.enabled {
+            let stats: Stats = get(conn, "control/stats").await?;
+            let percent = if stats.num_dns_queries == 0 {
+                "—".into()
+            } else {
+                format!(
+                    "{:.1}%",
+                    stats.num_blocked_filtering as f64 / stats.num_dns_queries as f64 * 100.0
+                )
+            };
+            (stats.num_dns_queries.to_string(), stats.num_blocked_filtering.to_string(), percent)
         } else {
-            format!(
-                "{:.1}%",
-                stats.num_blocked_filtering as f64 / stats.num_dns_queries as f64 * 100.0
-            )
+            ("Unavailable".into(), "Unavailable".into(), "Unavailable".into())
         };
         Ok(StructuredBody::StatGrid {
             rows: vec![
-                ("Queries".into(), stats.num_dns_queries.to_string()),
-                (
-                    "Blocked by filters".into(),
-                    stats.num_blocked_filtering.to_string(),
-                ),
+                ("Queries".into(), queries),
+                ("Blocked by filters".into(), blocked),
                 ("Blocked %".into(), percent),
                 (
                     "Protection".into(),
@@ -127,10 +135,17 @@ mod tests {
                     body: ACTIVE,
                 },
                 Exchange {
+                    request: "GET /prefix/control/stats/config HTTP/1.1",
+                    status: 200,
+                    body: r#"{"enabled":true,"interval":86400000,"ignored":[]}"#,
+                },
+                Exchange {
                     request: "GET /prefix/control/stats HTTP/1.1",
                     status: 200,
                     body: r#"{"num_dns_queries":40,"num_blocked_filtering":5}"#,
                 },
+                Exchange { request: STATUS, status: 200, body: ACTIVE },
+                Exchange { request: "GET /prefix/control/stats/config HTTP/1.1", status: 200, body: r#"{"enabled":false,"interval":86400000,"ignored":[]}"# },
                 Exchange {
                     request: STATUS,
                     status: 401,
@@ -162,6 +177,11 @@ mod tests {
                         ["Protection", "On"],
                     ])
                 );
+                let disabled = super::super::fetch(conn, &ADGUARD_HOME.widgets[0], &Values::new()).await.unwrap();
+                assert_eq!(serde_json::to_value(disabled).unwrap()["rows"], json!([
+                    ["Queries", "Unavailable"], ["Blocked by filters", "Unavailable"],
+                    ["Blocked %", "Unavailable"], ["Protection", "On"]
+                ]));
                 assert_test_fault(conn, &ADGUARD_HOME, Class::Auth).await;
                 assert_test_fault(conn, &ADGUARD_HOME, Class::Protocol).await;
             },
