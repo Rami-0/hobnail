@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use http_body_util::{BodyExt, Limited};
 use hyper::header::{
     HeaderValue, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HOST, ORIGIN, REFERER, RETRY_AFTER,
     SET_COOKIE,
@@ -972,14 +971,26 @@ pub(crate) async fn credential_route(
     {
         return limited(secs);
     }
-    let Ok(body) = Limited::new(req.into_body(), MAX_BODY).collect().await else {
-        return error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "body_too_large",
-            "request too large",
-        );
+    use crate::http::conn::{collect_body, BodyDeadline, BodyError};
+    let deadline = req.extensions().get::<BodyDeadline>().copied();
+    let body = match collect_body(deadline.as_ref(), req.into_body(), MAX_BODY).await {
+        Ok(body) => body,
+        Err(BodyError::TimedOut) => {
+            return error(
+                StatusCode::REQUEST_TIMEOUT,
+                "request_timeout",
+                "the request body did not arrive in time",
+            )
+        }
+        Err(BodyError::TooLarge) => {
+            return error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "body_too_large",
+                "request too large",
+            )
+        }
     };
-    let Ok(credentials) = serde_json::from_slice(&body.to_bytes()) else {
+    let Ok(credentials) = serde_json::from_slice(&body) else {
         return error(
             StatusCode::BAD_REQUEST,
             "bad_request",

@@ -37,7 +37,6 @@ pub(crate) mod store;
 mod tests;
 
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use hyper::{Method, Request, Response};
 use std::sync::Arc;
 
@@ -100,12 +99,17 @@ pub(crate) async fn route(
     let body = if read {
         Bytes::new()
     } else {
-        match http_body_util::Limited::new(body, api::MAX_BODY)
-            .collect()
-            .await
-        {
-            Ok(c) => c.to_bytes(),
-            Err(_) => {
+        use crate::http::conn::{collect_body, BodyDeadline, BodyError};
+        let deadline = parts.extensions.get::<BodyDeadline>();
+        match collect_body(deadline, body, api::MAX_BODY).await {
+            Ok(bytes) => bytes,
+            Err(BodyError::TimedOut) => {
+                return api::error(store::ApiError::new(
+                    hyper::StatusCode::REQUEST_TIMEOUT,
+                    "the request body did not arrive in time",
+                ))
+            }
+            Err(BodyError::TooLarge) => {
                 return api::error(store::ApiError::too_large(
                     "request body is limited to 256 KiB (or could not be read)",
                 ))

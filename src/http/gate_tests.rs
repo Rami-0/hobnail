@@ -1250,6 +1250,37 @@ async fn the_event_stream_outlives_the_header_read_timeout() {
     assert_eq!(s.next().await.0, "system");
 }
 
+#[tokio::test]
+async fn a_dripped_json_body_gets_408_and_frees_the_connection() {
+    let st = state();
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let limits = super::server::Limits {
+        body_timeout: std::time::Duration::from_millis(300),
+        ..super::server::LIMITS
+    };
+    crate::auth::set_password_for_tests(&st.db, PW);
+    tokio::spawn(super::server::serve_limited(st, l, limits));
+    let (cookie, csrf) = login(addr).await;
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(
+        format!(
+            "POST /api/v1/boards HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://{addr}\r\nCookie: {cookie}\r\nX-RH-CSRF: {csrf}\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{{\"name\""
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut out = Vec::new();
+    tokio::time::timeout(std::time::Duration::from_secs(3), s.read_to_end(&mut out))
+        .await
+        .expect("answered and closed")
+        .unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.contains("request_timeout"), "{text}");
+}
+
 /// An open `/api/v1/stream` connection (HTTP/1.0: the body is the raw
 /// event stream, no chunk framing).
 struct Stream {

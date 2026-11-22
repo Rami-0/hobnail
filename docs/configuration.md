@@ -142,14 +142,29 @@ uses the first other IP. Use bare IPv4 or IPv6 literals without ports.
 A missing list, malformed hop in the trusted part of the chain, or list
 with only trusted IPs falls back to the TCP peer.
 
-Connection limits keep slow or oversized requests within the memory budget.
-A request line plus headers (cookies included) may total 16 KiB; a larger
-request gets `431 Request Header Fields Too Large`. A connection that has not
-sent a complete request within 10 s is closed, including an idle keep-alive
-connection; open event streams are not affected. At most 128 connections are
-open at once, event streams included; further connections wait until one
-closes. A proxy that keeps a pool of idle upstream connections reconnects
-when Hobnail closes one.
+Connection limits keep slow, silent or oversized requests within the memory
+budget and stop a few peers from holding every connection:
+
+- A request line plus headers (cookies included) may total 16 KiB; a larger
+  request gets `431 Request Header Fields Too Large`.
+- A connection that has not sent a complete request head within 10 s is
+  closed, including an idle keep-alive connection.
+- A request body must arrive in full within 15 s of its head, or the request
+  gets `408 Request Timeout`.
+- A response write that makes no progress for 15 s (a client that stopped
+  reading) closes the connection. Event streams and log streams and
+  downloads are exempt.
+- At most 128 connections are open at once, event streams included; further
+  connections wait until one closes.
+- One peer may hold at most 32 of them (IPv6 peers count by /64); more get
+  `503` and are closed. Addresses in `RH_TRUSTED_PROXIES` are exempt, because
+  every client arrives through them. If clients reach Hobnail through
+  another shared address that is not a trusted proxy, such as Docker's
+  userland proxy for ports published on `127.0.0.1`, they share that peer's
+  32 connections.
+
+A proxy that keeps a pool of idle upstream connections reconnects when
+Hobnail closes one.
 
 ## Outgoing HTTP
 

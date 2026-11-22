@@ -45,17 +45,34 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   5 MiB (measured: 200 attackers against the cap, 7.8 MiB container
 ///   memory). 128 leaves room for 25 devices with an event stream and a few
 ///   parallel requests each.
+/// - `body_timeout` is the whole-body deadline, from the request head, for
+///   every handler that reads a body; past it the request gets 408. Bodies a
+///   handler does not read are not waited for (hyper closes the read side).
+/// - `write_timeout` fails a connection whose response write makes no
+///   progress for that long (a client that stopped reading). Event streams
+///   and log downloads are exempt: they stream for as long as the client
+///   stays and have their own keepalive.
+/// - `per_peer` caps one peer's connections below `connections`, so a single
+///   host cannot take every slot. IPv6 peers count by /64. Peers listed in
+///   `RH_TRUSTED_PROXIES` are exempt, since every client arrives through
+///   them. A peer over its limit gets 503 and the connection closes.
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
     pub connections: usize,
     pub header_timeout: Duration,
     pub max_buf: usize,
+    pub body_timeout: Duration,
+    pub write_timeout: Duration,
+    pub per_peer: usize,
 }
 
 pub(crate) const LIMITS: Limits = Limits {
     connections: 128,
     header_timeout: Duration::from_secs(10),
     max_buf: 16 * 1024,
+    body_timeout: Duration::from_secs(15),
+    write_timeout: Duration::from_secs(15),
+    per_peer: 32,
 };
 
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
@@ -69,6 +86,7 @@ pub(crate) async fn serve_limited(
     limits: Limits,
 ) -> Result<(), String> {
     let permits = Arc::new(Semaphore::new(limits.connections));
+    let peers = super::conn::PeerSlots::new(limits.per_peer);
     loop {
         // Wait for a free slot before accepting, so excess connections queue
         // in the kernel backlog instead of holding buffers here.
@@ -85,13 +103,34 @@ pub(crate) async fn serve_limited(
                 continue;
             }
         };
+        let peer_slot = if state.env.trusted_proxies.contains(&peer.ip()) {
+            None
+        } else {
+            match peers.take(peer.ip()) {
+                Some(slot) => Some(slot),
+                None => {
+                    let _ = stream.try_write(super::conn::PEER_BUSY);
+                    continue;
+                }
+            }
+        };
         let _ = stream.set_nodelay(true);
         let st = state.clone();
         tokio::spawn(async move {
             let _permit = permit;
+            let _peer_slot = peer_slot;
+            let exempt = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let io = super::conn::Timed::new(stream, limits.write_timeout, exempt.clone());
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
+                exempt.store(
+                    super::conn::streams(req.uri().path()),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 req.extensions_mut().insert(Peer(peer));
+                req.extensions_mut().insert(super::conn::BodyDeadline(
+                    tokio::time::Instant::now() + limits.body_timeout,
+                ));
                 async move { Ok::<_, Infallible>(respond(st, req).await) }
             });
             let _ = hyper::server::conn::http1::Builder::new()
@@ -99,7 +138,7 @@ pub(crate) async fn serve_limited(
                 .header_read_timeout(limits.header_timeout)
                 .max_buf_size(limits.max_buf)
                 .keep_alive(true)
-                .serve_connection(TokioIo::new(stream), svc)
+                .serve_connection(TokioIo::new(io), svc)
                 .await;
         });
     }
@@ -147,11 +186,7 @@ pub fn host_allowed(host: &str, env: &crate::state::Env) -> bool {
 pub struct Peer(pub SocketAddr);
 
 fn negotiates_json(path: &str) -> bool {
-    path.starts_with("/api/")
-        && !matches!(
-            path,
-            "/api/v1/stream" | "/api/logs/stream" | "/api/logs/download"
-        )
+    path.starts_with("/api/") && !super::conn::streams(path)
 }
 
 async fn respond(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
@@ -519,6 +554,86 @@ mod tests {
                 assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
                 tokio::time::sleep(Duration::from_millis(150)).await;
             }
+        }
+
+        #[tokio::test]
+        async fn a_dripped_login_body_gets_408_at_the_deadline() {
+            let limits = Limits {
+                body_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            s.write_all(
+                format!("POST /api/login HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://{addr}\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{{")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+            let started = tokio::time::Instant::now();
+            let mut buf = [0u8; 64];
+            let n = timeout(Duration::from_secs(3), s.read(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                buf[..n].starts_with(b"HTTP/1.1 408"),
+                "{:?}",
+                String::from_utf8_lossy(&buf[..n])
+            );
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+
+        #[tokio::test]
+        async fn one_peer_gets_at_most_its_share_unless_it_is_a_trusted_proxy() {
+            let limits = Limits {
+                per_peer: 2,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let _a = TcpStream::connect(addr).await.unwrap();
+            let _b = TcpStream::connect(addr).await.unwrap();
+            let mut c = TcpStream::connect(addr).await.unwrap();
+            let out = drain(&mut c, Duration::from_secs(3)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 503"),
+                "{:?}",
+                String::from_utf8_lossy(&out)
+            );
+            drop(_a);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let mut d = TcpStream::connect(addr).await.unwrap();
+            d.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut d, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .starts_with(b"HTTP/1.1 200"));
+
+            // Behind a trusted proxy every client shares its address.
+            let mut env = crate::testutil::state_with(vec![], "").env.clone();
+            env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxied = l.local_addr().unwrap();
+            tokio::spawn(serve_limited(crate::state::AppState::new(env), l, limits));
+            let _held: Vec<_> = futures_join(proxied, 3).await;
+            let mut e = TcpStream::connect(proxied).await.unwrap();
+            e.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut e, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .starts_with(b"HTTP/1.1 200"));
+        }
+
+        async fn futures_join(addr: SocketAddr, n: usize) -> Vec<TcpStream> {
+            let mut held = Vec::new();
+            for _ in 0..n {
+                held.push(TcpStream::connect(addr).await.unwrap());
+            }
+            held
         }
 
         #[tokio::test]

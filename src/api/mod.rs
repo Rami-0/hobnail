@@ -234,7 +234,6 @@ async fn read_json<T: serde::de::DeserializeOwned>(
     req: Request<Incoming>,
     limit: usize,
 ) -> Result<T, ApiError> {
-    use http_body_util::{BodyExt, Limited};
     let json = req
         .headers()
         .get(hyper::header::CONTENT_TYPE)
@@ -248,18 +247,23 @@ async fn read_json<T: serde::de::DeserializeOwned>(
             "send application/json",
         ));
     }
-    let bytes = Limited::new(req.into_body(), limit)
-        .collect()
+    use crate::http::conn::{collect_body, BodyDeadline, BodyError};
+    let deadline = req.extensions().get::<BodyDeadline>().copied();
+    let bytes = collect_body(deadline.as_ref(), req.into_body(), limit)
         .await
-        .map_err(|_| {
-            ApiError::new(
+        .map_err(|error| match error {
+            BodyError::TimedOut => ApiError::new(
+                StatusCode::REQUEST_TIMEOUT,
+                "request_timeout",
+                "the request body did not arrive in time",
+            ),
+            BodyError::TooLarge => ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body_too_large",
                 "request too large",
-            )
+            ),
         })?;
-    serde_json::from_slice(&bytes.to_bytes())
-        .map_err(|_| ApiError::bad_request("invalid JSON body", None))
+    serde_json::from_slice(&bytes).map_err(|_| ApiError::bad_request("invalid JSON body", None))
 }
 
 impl From<rusqlite::Error> for ApiError {
