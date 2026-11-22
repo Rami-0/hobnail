@@ -4,17 +4,17 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 // it is drawn with a known session; the browser checks wait for it).
 // The Containers and container pages are lazy chunks (their default
 // exports); the charts under the container page are a further lazy chunk.
-import { lazy, Suspense, use, useEffect, type ComponentType } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
 
 import { useSession } from "../api/session.ts";
 import { Home } from "../routes/Home.tsx";
-import { Login } from "../routes/Login.tsx";
 import { NotFound } from "../routes/NotFound.tsx";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
 import { SignInPrompt } from "../ui/SignInPrompt.tsx";
 import { matchRoute } from "./paths.ts";
 import { navigate, useRoute, type Route } from "./router.ts";
+import { loadSetupPage, loadLogsPage, loadAlertsPage, loadOverviewPage, loadHostPage, loadHistoryPage, loadAccountPage, loadSettingsPage, loadBoardPage, loadContainersPage, loadContainerPage, loadLogin } from "./route-pages.ts";
 import { Shell } from "./Shell.tsx";
 
 // Start the direct-entry route while the session request is in flight.
@@ -23,26 +23,37 @@ function pageChunk(loader: () => Promise<{ default: ComponentType }>, ...routes:
   if (!routes.includes(opened)) return lazy(loader);
   let Resolved: ComponentType | undefined;
   const initial = loader().then((module) => (Resolved = module.default));
-  void initial.catch(() => {});
-  // Keep the same component across query changes, and skip suspension when
-  // the direct-entry module has already resolved by the time we render.
+  // The direct entry already has a reserved placeholder. Publish its module
+  // as soon as it resolves, without adding a Suspense fallback delay.
+  let error: unknown;
+  let failed = false;
+  void initial.catch((reason) => { failed = true; error = reason; });
   return function EntryPage() {
-    const Page = Resolved ?? use(initial);
-    return <Page />;
+    const [, refresh] = useState(false);
+    useEffect(() => {
+      let active = true;
+      const ready = () => { if (active) refresh(true); };
+      void initial.then(ready, ready);
+      return () => { active = false; };
+    }, []);
+    if (Resolved) return <Resolved />;
+    if (failed) throw error;
+    return <Loading />;
   };
 }
 
-const SetupPage = lazy(() => import("../routes/setup/GuidedSetup.tsx"));
-const LogsPage = pageChunk(() => import("../routes/logs/index.tsx"), "logs", "container_logs", "stack_logs");
-const AlertsPage = pageChunk(() => import("../routes/alerts/index.tsx"), "alerts");
-const OverviewPage = pageChunk(() => import("../routes/overview/index.tsx"), "overview");
-const HostPage = pageChunk(() => import("../routes/host/index.tsx"), "host");
-const HistoryPage = pageChunk(() => import("../routes/history/index.tsx"), "history");
-const AccountPage = pageChunk(() => import("../routes/account/index.tsx"), "account");
-const SettingsPage = pageChunk(() => import("../routes/settings/index.tsx"), "settings");
-const BoardPage = pageChunk(() => import("../routes/board/index.tsx"), "board");
-const ContainersPage = pageChunk(() => import("../routes/containers/index.tsx"), "containers");
-const ContainerPage = pageChunk(() => import("../routes/container/index.tsx"), "container");
+const SetupPage = pageChunk(loadSetupPage, "setup");
+const LogsPage = pageChunk(loadLogsPage, "logs", "container_logs", "stack_logs");
+const AlertsPage = pageChunk(loadAlertsPage, "alerts");
+const OverviewPage = pageChunk(loadOverviewPage, "overview");
+const HostPage = pageChunk(loadHostPage, "host");
+const HistoryPage = pageChunk(loadHistoryPage, "history");
+const AccountPage = pageChunk(loadAccountPage, "account");
+const SettingsPage = pageChunk(loadSettingsPage, "settings");
+const BoardPage = pageChunk(loadBoardPage, "board");
+const ContainersPage = pageChunk(loadContainersPage, "containers");
+const ContainerPage = pageChunk(loadContainerPage, "container");
+const LoginPage = lazy(() => loadLogin().then((m) => ({ default: m.Login })));
 
 function titleOf(r: Route): string {
   switch (r.name) {
@@ -115,7 +126,7 @@ export function App() {
   }
 
   if (showCredentials) {
-    return <Login token={route.name === "invite" ? route.token : undefined} />;
+    return <Suspense fallback={<Loading />}><LoginPage token={route.name === "invite" ? route.token : undefined} /></Suspense>;
   }
   if (!s.session?.user) {
     if (s.session && route.name === "settings") return <main className="page narrow" id="main">

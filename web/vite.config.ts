@@ -114,7 +114,6 @@ export default defineConfig(({ command }) => {
     build: {
       outDir: "dist",
       target: "esnext",
-      cssCodeSplit: false,
       modulePreload: { polyfill: false },
       assetsDir: "assets",
       emptyOutDir: true,
@@ -125,7 +124,6 @@ export default defineConfig(({ command }) => {
       rolldownOptions: { input: ["index.html", entryReads], output: {
         chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup|ProviderDialog|SchemaForm)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
-        { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
         { name: "settings-pages", test: /\/src\/routes\/settings\/(?!ProviderDialog\.tsx$)[^/]+\.tsx$/, includeDependenciesRecursively: false },
         { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
         { name: "charts-vendor-deps", test: /node_modules\/(?:d3-[^/]+|internmap|clsx|eventemitter3|reselect|redux(?:-thunk)?|react-redux|immer|use-sync-external-store|es-toolkit|decimal\.js-light|victory-vendor|@reduxjs\/toolkit|@standard-schema\/[^/]+)\//, includeDependenciesRecursively: false },
