@@ -493,7 +493,9 @@ export class LogPane {
       if (element) this.box.scrollTop += element.getBoundingClientRect().top - this.box.getBoundingClientRect().top + this.anchor.offset;
       this.lastTop = this.box.scrollTop;
     }
-    requestAnimationFrame(() => { this.restoring = false; this.lastTop = this.box.scrollTop; });
+    // A keyboard or scrollbar scroll whose event arrived while this flush held
+    // the position is still the reader's: apply it rather than adopt it.
+    requestAnimationFrame(() => { this.restoring = false; if (Math.abs(this.box.scrollTop - this.lastTop) > 0.1) this.scroll(); });
     if ((this.pending.length || this.pendingOlder.length) && !this.options.paused) this.schedule();
     this.highlight();
     this.report({ state: this.options.paused && this.state === "live" ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
