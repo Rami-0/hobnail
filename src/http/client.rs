@@ -191,9 +191,10 @@ impl fmt::Debug for BoundCredential {
     }
 }
 
-/// Receives a streamed response body one chunk at a time. Return `Err` to
-/// stop reading; the request then fails as an unexpected response.
-pub(crate) type BodySink<'a> = &'a mut (dyn FnMut(&[u8]) -> Result<(), ()> + Send);
+/// Receives a streamed response body one chunk at a time. Return `Ok(true)`
+/// for more, `Ok(false)` to stop reading and succeed with what was seen, or
+/// `Err` to stop and fail as an unexpected response.
+pub(crate) type BodySink<'a> = &'a mut (dyn FnMut(&[u8]) -> Result<bool, ()> + Send);
 
 /// How a bound request reads a successful response body.
 #[derive(Default)]
@@ -612,7 +613,9 @@ async fn scan_body(mut body: Incoming, limit: usize, sink: BodySink<'_>) -> Resu
         if total > limit {
             return Err("response too large".into());
         }
-        sink(&data).map_err(|()| "unexpected streamed body".to_string())?;
+        if !sink(&data).map_err(|()| "unexpected streamed body".to_string())? {
+            break; // Dropping the body closes the connection.
+        }
     }
     Ok(())
 }

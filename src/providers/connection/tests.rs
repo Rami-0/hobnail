@@ -893,7 +893,7 @@ async fn scan_streams_bodies_in_bounded_chunks_and_caps_the_total() {
         let mut sink = |chunk: &[u8]| {
             total += chunk.len();
             largest = largest.max(chunk.len());
-            Ok(())
+            Ok(true)
         };
         let response = conn.scan(Step::get(""), &mut sink).await.unwrap();
         assert!(response.body.is_empty());
@@ -902,7 +902,7 @@ async fn scan_streams_bodies_in_bounded_chunks_and_caps_the_total() {
         let mut seen = 0;
         let mut sink = |chunk: &[u8]| {
             seen += chunk.len();
-            Ok(())
+            Ok(true)
         };
         let fault = conn.scan(Step::get(""), &mut sink).await.unwrap_err();
         assert!(matches!(fault.class, Class::TooLarge));

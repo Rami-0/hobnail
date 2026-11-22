@@ -92,13 +92,17 @@ impl<'a> Scanner<'a> {
                     .trim_start_matches(space);
                 let quote = rest.chars().next().filter(|q| matches!(q, '\'' | '"'))?;
                 let (value, after) = rest[1..].split_once(quote)?;
-                if value.len() > ATTR_LIMIT || value.contains('<') {
+                if value.contains('<') {
                     return None;
                 }
+                // An oversized value (an inline image, a tracking blob) is
+                // skipped, not fatal. It still occupies its name, empty, so
+                // duplicates are caught and it cannot match an expected value.
                 let mut decoded = String::new();
-                if !append(value, true, &mut decoded, ATTR_LIMIT + 3)? {
-                    attrs.push((key, decoded));
+                if value.len() > ATTR_LIMIT || append(value, true, &mut decoded, ATTR_LIMIT + 3)? {
+                    decoded.clear();
                 }
+                attrs.push((key, decoded));
                 rest = after;
             }
         }

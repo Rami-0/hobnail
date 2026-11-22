@@ -151,7 +151,7 @@ async fn heartbeats(
     ids: impl Iterator<Item = u64>,
 ) -> Result<Heartbeats, Fault> {
     let mut scanner = Scanner::new(Heartbeats::new(ids));
-    let mut sink = |chunk: &[u8]| scanner.feed(chunk).map_err(drop);
+    let mut sink = |chunk: &[u8]| scanner.feed(chunk).map(|()| true).map_err(drop);
     let path = format!("api/status-page/heartbeat/{slug}");
     success(conn.scan(Step::get(&path), &mut sink).await?)?;
     scanner.finish().map_err(|_| Class::Protocol)?;

@@ -420,9 +420,10 @@ impl<'a> Conn<'a> {
 
     /// Send `step` and pass a successful body to `sink` chunk by chunk, up to
     /// [`MAX_STREAM`] bytes, without retaining it. Use this to count or pick
-    /// values from responses larger than [`MAX_RESPONSE`]; the sink must keep
-    /// its own state bounded. The returned response has an empty body when
-    /// the status is 2xx, and the usual capped body otherwise.
+    /// values from responses larger than [`MAX_RESPONSE`], or to keep a
+    /// bounded prefix (the sink returns `Ok(false)` to stop reading); the
+    /// sink must keep its own state bounded. The returned response has an
+    /// empty body when the status is 2xx, and the usual capped body otherwise.
     pub fn scan<'b>(
         &'b self,
         step: Step<'b>,

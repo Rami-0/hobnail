@@ -674,12 +674,26 @@ Enter the feed's HTTP(S) URL. Public addresses require the provider internet
 switch. The widget displays up to 20 RSS 2.0 items or Atom 1.0 entries in feed
 order, with dates as published by the feed and optional trimmed summaries.
 Feed content displays as text. Only absolute HTTP(S) article links are used.
-The UTF-8 reader caps input at 128 KiB, XML depth at 24, attribute values at
-1 KiB and display field lengths individually. It supports CDATA, predefined
-XML entities and numeric references. DTDs and external entities are rejected.
+The UTF-8 reader keeps at most the first 128 KiB and stops downloading
+there. For a longer feed it shows the entries that end within that prefix and
+ignores the rest, so a feed with very long entries can show fewer than 20.
+If no entry ends within 128 KiB, the widget reports an unexpected response.
+XML depth is capped at 24 and display field lengths individually. An
+attribute value over 1 KiB, such as an inline image, is skipped rather than
+rejecting the feed. It supports CDATA, predefined XML entities and numeric
+references. DTDs and external entities are rejected.
+
+RSS descriptions and Atom summaries marked `type="html"` are HTML, often
+entity-escaped. Hobnail shows their text: it drops tags, comments and
+script or style content, and decodes common HTML entities. Atom text
+summaries are shown as written. Summaries never render as HTML, and the
+visible summary is capped at 240 bytes after markup is removed (from up to
+2 KiB of markup per entry).
 
 Verified from: [RSS 2.0](https://www.rssboard.org/rss-specification),
-[Atom 1.0](https://www.rfc-editor.org/rfc/rfc4287.html) and
+[Atom 1.0](https://www.rfc-editor.org/rfc/rfc4287.html) (including
+[text constructs](https://www.rfc-editor.org/rfc/rfc4287.html#section-3.1)),
+[RSS best practices on HTML in descriptions](https://www.rssboard.org/rss-profile#element-channel-item-description) and
 [XML 1.0](https://www.w3.org/TR/xml/).
 
 UNVERIFIED: Live feeds. Non-UTF-8 encodings and relative article links are unsupported.

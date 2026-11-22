@@ -160,7 +160,7 @@ async fn scan<V: Visit + Send>(
     visitor: V,
 ) -> Result<V, Fault> {
     let mut scanner = Scanner::new(visitor);
-    let mut sink = |chunk: &[u8]| scanner.feed(chunk).map_err(drop);
+    let mut sink = |chunk: &[u8]| scanner.feed(chunk).map(|()| true).map_err(drop);
     let response = conn
         .scan(
             Step {
