@@ -127,7 +127,7 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
   const xt = useMemo(() => ticks(series.from, series.to), [series.from, series.to]);
   const [off, setOff] = useState<string[]>(loadOff);
   const toggle = useCallback((l: Layer) => {
-    setOff((o) => {
+    startTransition(() => setOff((o) => {
       const n = o.includes(l) ? o.filter((x) => x !== l) : [...o, l];
       try {
         localStorage.setItem(OFF_KEY, JSON.stringify(n));
@@ -135,7 +135,7 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
         /* not remembered */
       }
       return n;
-    });
+    }));
   }, []);
   // Another tab changed the layers.
   useEffect(() => {
@@ -145,32 +145,16 @@ export default function UsageCharts({ series, onZoom, onMarker, recording = true
     window.addEventListener("storage", on);
     return () => window.removeEventListener("storage", on);
   }, []);
-  // One chart per task: the first after the page's head has painted, the
-  // second in the next task (a first Recharts render is the costly part).
-  const [stage, setStage] = useState(0);
-  useEffect(() => {
-    if (stage >= (metrics?.length ?? 2)) return;
-    let timer = 0;
-    const frame = requestAnimationFrame(() => {
-      timer = window.setTimeout(() => startTransition(() => setStage((n) => n + 1)), 0);
-    });
-    return () => { cancelAnimationFrame(frame); window.clearTimeout(timer); };
-  }, [stage, metrics?.length]);
   const common = { rows, series, markers, xt, off, toggle, onZoom, onMarker, recording };
-  if (metrics) return <div className="charts two">
-    {metrics.map((metric, i) => {
+  return <div className="charts two">
+    {metrics ? metrics.map((metric) => {
       const [title, unit] = metricLabel(metric.key);
-      return i < stage
-        ? <HistoryChart key={metric.key} metric={metric} title={title} unit={unit} {...common} />
-        : <div key={metric.key} className="chart ch-wait" aria-busy="true" />;
-    })}
+      return <HistoryChart key={metric.key} metric={metric} title={title} unit={unit} {...common} />;
+    }) : <>
+      <OneChart kind="cpu" title="CPU" {...common} />
+      <OneChart kind="mem" title="Memory" {...common} />
+    </>}
   </div>;
-  return (
-    <div className="charts two">
-      {stage >= 1 ? <OneChart kind="cpu" title="CPU" {...common} /> : <div className="chart ch-wait" aria-busy="true" />}
-      {stage >= 2 ? <OneChart kind="mem" title="Memory" {...common} /> : <div className="chart ch-wait" aria-busy="true" />}
-    </div>
-  );
 }
 
 function HistoryChart({ metric, ...props }: Omit<OneProps, "kind"> & { metric: HistoryMetric }) {
@@ -219,7 +203,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
   const [layout, setLayout] = useState<Plot | null>(null);
   const onPlot = useCallback((p: Plot) => {
     plot.current = p;
-    setLayout((l) => (l && l.x === p.x && l.width === p.width ? l : p));
+    startTransition(() => setLayout((l) => (l && l.x === p.x && l.width === p.width ? l : p)));
   }, []);
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -254,17 +238,18 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
     near.observe(canvas);
     return () => { near.disconnect(); size.disconnect(); plotMounts.delete(mount); };
   }, [hasValues]);
-  const [sel, setSel] = useState<{ left: number; width: number } | null>(null);
-  const drag = useRef<{ x0: number; id: number; cleanup: () => void } | null>(null);
+  const selection = useRef<HTMLDivElement>(null);
+  const drag = useRef<(() => void) | null>(null);
 
-  useEffect(() => () => drag.current?.cleanup(), []);
+  useEffect(() => () => drag.current?.(), []);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (e.target instanceof Element && e.target.closest(".mk")) return;
     const box = wrap.current;
     const p = plot.current;
-    if (!box || !p || drag.current) return;
+    const sel = selection.current;
+    if (!box || !p || !sel || drag.current) return;
     if (e.pointerType === "mouse") e.preventDefault();
     const r0 = box.getBoundingClientRect();
     const left = r0.left + p.x;
@@ -272,11 +257,11 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
     const end = (commitX: number | null) => {
       const d = drag.current;
       if (!d) return;
-      d.cleanup();
+      d();
       drag.current = null;
-      setSel(null);
+      sel.hidden = true;
       if (commitX === null) return;
-      const z = zoomTo(d.x0, commitX, p.width, series.from, series.to);
+      const z = zoomTo(x0, commitX, p.width, series.from, series.to);
       if (z) onZoom(z.from, z.to);
     };
     const move = (ev: PointerEvent) => {
@@ -284,7 +269,11 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
       const x1 = ev.clientX - left;
       const a = Math.max(0, Math.min(x0, x1));
       const b = Math.min(p.width, Math.max(x0, x1));
-      setSel(b - a >= 3 ? { left: p.x + a, width: b - a } : null);
+      sel.hidden = b - a < 3;
+      if (!sel.hidden) {
+        sel.style.left = `${p.x + a}px`;
+        sel.style.width = `${b - a}px`;
+      }
     };
     const up = (ev: PointerEvent) => {
       if (ev.pointerId === e.pointerId) end(ev.clientX - left);
@@ -303,15 +292,11 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", key, true);
-    drag.current = {
-      x0,
-      id: e.pointerId,
-      cleanup: () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        window.removeEventListener("pointercancel", cancel);
-        window.removeEventListener("keydown", key, true);
-      },
+    drag.current = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", key, true);
     };
   };
 
@@ -348,6 +333,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
             data={plotRows}
             syncId={sync}
             syncMethod="value"
+            throttleDelay={48}
             width={width}
             height={180}
             margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
@@ -401,7 +387,7 @@ const OneChart = memo(function OneChart({ kind, title, rows, series, markers, xt
             <MarkerLines markers={markers} />
             <PlotProbe onPlot={onPlot} />
           </ComposedChart>}
-          {sel && <div className="ch-sel" style={{ left: sel.left, width: sel.width }} aria-hidden="true" />}
+          <div className="ch-sel" ref={selection} hidden aria-hidden="true" />
           {layout && (
             <div className="ch-marks" style={{ left: layout.x, width: layout.width }}>
               {markers.map((m) => {
@@ -483,6 +469,8 @@ function PlotProbe({ onPlot }: { onPlot: (p: Plot) => void }) {
 }
 
 /** The tooltip body; Recharts passes the hover state (active, label, payload) into the element. */
+let tipDate: Intl.DateTimeFormat | undefined;
+
 function Tip({ kind, unit, compare, span, markers, ...p }: Partial<TooltipContentProps> & { kind: Kind; unit: Unit; compare: boolean; span: number; markers: Marker[] }) {
   if (!p.active || p.label === undefined) return null;
   const t = Number(p.label);
@@ -492,11 +480,8 @@ function Tip({ kind, unit, compare, span, markers, ...p }: Partial<TooltipConten
   const max = (kind === "cpu" ? row?.cpuBand : row?.memBand)?.[1];
   // A marker within 1 % of the window from the crosshair says what happened (OV-17).
   const mk = markers.find((m) => Math.abs(m.at - t) <= span / 100);
-  const d = new Date(t * 1000);
-  const when =
-    span <= 86400
-      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-      : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const when = span <= 86400 ? tickLabel(t, span)
+    : (tipDate ??= new Intl.DateTimeFormat([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).format(t * 1000);
   return (
     <div className="ch-tip">
       <span className="ch-tip-t">{when}</span>

@@ -3,7 +3,7 @@
 // bar), Meter (a used-of-total bar). Stretched to their box; CSS sets the
 // size. The drawing rules
 // are in svg.ts.
-import type { CSSProperties } from "react";
+import type { CSSProperties, Ref } from "react";
 
 import { sparkPaths, stripClass, stripRuns, stripSummary } from "./svg.ts";
 
@@ -113,8 +113,8 @@ export function Meter({ value, max, label, className }: MeterProps) {
 }
 
 /** Reserve the whole chart grid while data and the plotting module arrive. */
-export function ChartPlaceholder({ count }: { count: number }) {
-  return <div className="charts two" aria-label="Loading charts" aria-busy="true">
+export function ChartPlaceholder({ count, ref }: { count: number; ref?: Ref<HTMLDivElement> }) {
+  return <div ref={ref} className="charts two" aria-label="Loading charts" aria-busy="true">
     {Array.from({ length: count }, (_, index) => (
       // Placeholder positions are fixed until the complete grid replaces them.
       // eslint-disable-next-line react/no-array-index-key

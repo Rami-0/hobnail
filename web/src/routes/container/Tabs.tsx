@@ -1,4 +1,5 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
+import { NearCharts } from "./NearCharts.tsx";
 import type { ContainerDetail } from "../../api/gen/ContainerDetail.ts";
 import type { ContainerInspect } from "../../api/gen/ContainerInspect.ts";
 import type { ContainerEnvironment } from "../../api/gen/ContainerEnvironment.ts";
@@ -14,7 +15,6 @@ import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { eventLabel } from "./events.ts";
 import { apiQuery, logsAt, parseWindow, type Tab } from "./range.ts";
 
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const KINDS = [["all", "All"], ["lifecycle", "Lifecycle"], ["alerts", "Alerts"], ["die", "Exits"], ["health", "Health"], ["oom", "OOM"], ["start", "Starts"]];
 
 interface Props {
@@ -69,15 +69,11 @@ function Metrics({ root, detail, recording, onZoom, onMarker }: Props & { root: 
       {data.network === "host" && <p>Traffic is counted on the <a href="/app/host">host</a>.</p>}
       {data.network === "shared" && <p>Traffic is counted in the shared network namespace.</p>}
     </section>}
-    <Suspense fallback={<p role="status">Loading charts…</p>}>
-      <Charts series={s} metrics={metrics} recording={recording} onZoom={onZoom} onMarker={onMarker} />
-    </Suspense>
+    <NearCharts series={s} metrics={metrics} recording={recording} onZoom={onZoom} onMarker={onMarker} />
     <h3>Log levels</h3>
-    {levels?.points.length ? <Suspense fallback={<p role="status">Loading log-level charts…</p>}>
-      <Charts series={s} metrics={["error", "warn"].map((level, i) => ({
+    {levels?.points.length ? <NearCharts series={s} metrics={["error", "warn"].map((level, i) => ({
         key: `log_${level}`, step: levels.step, points: levels.points.filter(([t]) => t >= s.from && t <= s.to).map(([t, counts]): [number, number] => [t, counts[i] ?? 0]), max: null, yesterday: null,
-      }))} recording={recording} onZoom={onZoom} onMarker={onMarker} />
-    </Suspense> : <p>No log lines counted in this range yet. <a href="/app/alerts">Add a log alert</a> to count errors and warnings for this container.</p>}
+      }))} recording={recording} onZoom={onZoom} onMarker={onMarker} /> : <p>No log lines counted in this range yet. <a href="/app/alerts">Add a log alert</a> to count errors and warnings for this container.</p>}
     {!!zeroed.length && <p className="muted">Zero over this range · {zeroed.map((item) => item.key.replaceAll("_", " ")).join(", ")}</p>}
   </>;
 }

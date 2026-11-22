@@ -41,7 +41,7 @@
 .cd-hnote{margin:-4px 0 0}
 .cd .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}
 .cd .cols>*{min-width:0}
-.chart.ch-wait{height:216px;background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));opacity:.6}
+.chart.ch-wait{height:calc(188px + var(--ctl-h-sm) + 2 * var(--s-3));background:linear-gradient(90deg,var(--surface),var(--surface-2),var(--surface));opacity:.6}
 
 /* timeline */
 .cd .events{list-style:none;margin:0;padding:0}

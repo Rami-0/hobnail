@@ -13,8 +13,9 @@ import {
   ScrollTextIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { NearCharts } from "./NearCharts.tsx";
 import type { ContainerDetail } from "../../api/gen/ContainerDetail.ts";
 import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { Why } from "../../api/gen/Why.ts";
@@ -46,12 +47,7 @@ import "../containers/containers.css";
 import "./container.css";
 import "../history/history.css";
 
-// Memoised: the charts re-render only when their series (or handlers) change.
-// The chunk is asked for when this page's module loads, so it downloads
-// while the detail is fetched.
 const ExtraTab = lazy(() => import("./Tabs.tsx"));
-const chartsChunk = import("../../charts/RechartsUsage.tsx");
-const UsageCharts = memo(lazy(() => chartsChunk));
 
 type Load =
   | { kind: "loading" }
@@ -294,16 +290,7 @@ export default function ContainerPage() {
             )}
           </p>
         )}
-        {tab === "overview" && <Suspense
-          fallback={
-            <div className="charts two" aria-busy="true">
-              <div className="chart ch-wait" />
-              <div className="chart ch-wait" />
-            </div>
-          }
-        >
-          <UsageCharts series={s} onZoom={onZoom} onMarker={onMarker} />
-        </Suspense>}
+        {tab === "overview" && <NearCharts series={s} onZoom={onZoom} onMarker={onMarker} />}
       </section>}
       {tab !== "overview" && <Suspense fallback={<p role="status">Loading tab…</p>}>
         <ExtraTab key={tab} tab={tab} detail={detail} admin={canEdit} scoped={!!bootstrap?.scoped} recording={!!bootstrap?.features.history} onZoom={onZoom} onMarker={onMarker} />

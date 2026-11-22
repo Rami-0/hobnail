@@ -3,6 +3,7 @@ import { ActivityIcon, ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, CheckIcon, Cl
 import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, memo, useEffect, useState } from "react";
+import { NearCharts } from "../container/NearCharts.tsx";
 import type { OverviewView } from "../../api/gen/OverviewView.ts";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { BookmarkView } from "../../api/gen/BookmarkView.ts";
@@ -12,7 +13,7 @@ import { useBootstrap, useContainers, useNow, useStatsMap, useStrips, useSystem,
 import { useRead } from "../../live/read.ts";
 import { bytes, duration, pct } from "../../format/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
-import { ChartPlaceholder, HealthStrip, Meter } from "../../ui/Sparkline.tsx";
+import { HealthStrip, Meter } from "../../ui/Sparkline.tsx";
 import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import { SEEN, overviewPath, readSeen } from "./request.ts";
 import { MemoryMap } from "./MemoryMap.tsx";
@@ -21,13 +22,12 @@ import "./overview.css";
 
 const EditBookmarks = lazy(() => import("../settings/Bookmarks.tsx"));
 const EditWidgets = lazy(() => import("../settings/Widgets.tsx"));
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const HostCharts = memo(function HostCharts({ overview, recording }: { overview: OverviewView; recording: boolean }) {
-  return <Suspense fallback={<ChartPlaceholder count={4} />}><Charts
+  return <NearCharts
     series={{ from: overview.now - 3600, to: overview.now, range: "1h", step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: overview.markers }}
     metrics={overview.hour} recording={recording}
     onZoom={(from, to) => navigate(`/app/history?from=${from}&to=${to}`)}
-    onMarker={(id, at) => navigate(`/app/history?from=${at-1800}&to=${at+1800}#ev-${id}`)} /></Suspense>;
+    onMarker={(id, at) => navigate(`/app/history?from=${at-1800}&to=${at+1800}#ev-${id}`)} />;
 });
 
 export default function Overview() {

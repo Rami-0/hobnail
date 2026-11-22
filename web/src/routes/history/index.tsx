@@ -1,7 +1,8 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { Checkbox } from "../../ui/Checkbox.tsx";
 import { eventLabel } from "../container/events.ts";
-import { lazy, memo, Suspense, useEffect } from "react";
+import { memo, useEffect } from "react";
+import { NearCharts } from "../container/NearCharts.tsx";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
 import { useRead } from "../../live/read.ts";
 import { containerHref, logsHref } from "../../app/paths.ts";
@@ -12,8 +13,6 @@ import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { historyWindow, RANGES, windowSteps } from "./window.ts";
 import "./history.css";
-
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 
 export default function History() {
   const { search, hash } = useRoute();
@@ -89,13 +88,11 @@ export default function History() {
 }
 
 const HistoryCharts = memo(function HistoryCharts({ data }: { data: HistoryView }) {
-  return <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
-        <Charts
-          series={{ from: data.from, to: data.to, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
-          metrics={data.metrics}
-          recording={data.recording}
-          onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
-          onMarker={(id) => navigate(`/app/history?${historyWindow(new URLSearchParams(window.location.search)).query}#ev-${id}`)}
-        />
-      </Suspense>;
+  return <NearCharts
+    series={{ from: data.from, to: data.to, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
+    metrics={data.metrics}
+    recording={data.recording}
+    onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
+    onMarker={(id) => navigate(`/app/history?${historyWindow(new URLSearchParams(window.location.search)).query}#ev-${id}`)}
+  />;
 });

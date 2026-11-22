@@ -4,7 +4,7 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 // it is drawn with a known session; the browser checks wait for it).
 // The Containers and container pages are lazy chunks (their default
 // exports); the charts under the container page are a further lazy chunk.
-import { lazy, Suspense, useDeferredValue, useEffect, type ComponentType } from "react";
+import { lazy, Suspense, use, useEffect, type ComponentType } from "react";
 
 import { useSession } from "../api/session.ts";
 import { Home } from "../routes/Home.tsx";
@@ -20,10 +20,16 @@ import { Shell } from "./Shell.tsx";
 // Start the direct-entry route while the session request is in flight.
 const opened = matchRoute(window.location.pathname).name;
 function pageChunk(loader: () => Promise<{ default: ComponentType }>, ...routes: Route["name"][]) {
-  const initial = routes.includes(opened) ? loader() : null;
-  // Keep a single component type for the lifetime of the route. Switching
-  // to the raw component after an early load can remount the focused filter.
-  return lazy(() => initial ?? loader());
+  if (!routes.includes(opened)) return lazy(loader);
+  let Resolved: ComponentType | undefined;
+  const initial = loader().then((module) => (Resolved = module.default));
+  void initial.catch(() => {});
+  // Keep the same component across query changes, and skip suspension when
+  // the direct-entry module has already resolved by the time we render.
+  return function EntryPage() {
+    const Page = Resolved ?? use(initial);
+    return <Page />;
+  };
 }
 
 const SetupPage = lazy(() => import("../routes/setup/GuidedSetup.tsx"));
@@ -61,9 +67,6 @@ function titleOf(r: Route): string {
   }
 }
 
-/** Font weights the pages use (each is a font lookup the first time it is laid out). */
-const WARM = [400, 500, 600, 700];
-
 function Loading() {
   return (
     <div className="page" aria-busy="true">
@@ -72,15 +75,6 @@ function Loading() {
         <Skeleton />
         <Skeleton />
         <Skeleton />
-        {/* The fonts the shell and the table use, laid out in this cheap
-            first frame, so their first use does not land in a later, larger one. */}
-        <span className="sr" aria-hidden="true">
-          {WARM.map((w) => (
-            <span key={w} style={{ fontWeight: w }}>
-              Aa0 <code>Aa0</code>
-            </span>
-          ))}
-        </span>
       </div>
     </div>
   );
@@ -89,10 +83,6 @@ function Loading() {
 export function App() {
   const { route, pathname, query, hash } = useRoute();
   const s = useSession();
-  // The first render is a placeholder; the shell and the page follow in a
-  // transition, which React renders in slices (a plain first render is one
-  // long task on a slow phone).
-  const ready = useDeferredValue(true, false);
   const authPage = route.name === "login" || route.name === "invite";
   const owner = s.session?.user?.role === "owner";
   const setupPage = route.name === "setup";
@@ -104,14 +94,13 @@ export function App() {
   }, [redirect]);
   const showCredentials = authPage && s.session !== null;
   useEffect(() => {
-    if (ready && (showCredentials || (setupPage && s.session?.user))) document.getElementById("root")?.setAttribute("data-ready", "1");
-  }, [ready, showCredentials, setupPage, s.session?.user]);
-
+    if (showCredentials || (setupPage && s.session?.user)) document.getElementById("root")?.setAttribute("data-ready", "1");
+  }, [showCredentials, setupPage, s.session?.user]);
 
 
   // The placeholder has the shell's frame (sidebar column, top bar), so
   // nothing moves when the shell arrives.
-  if (!ready) {
+  if (s.status === "loading") {
     return (
       <div className="app">
         <aside className="side" aria-hidden="true" />

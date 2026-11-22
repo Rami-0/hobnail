@@ -1,6 +1,7 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { ActivityIcon, CpuIcon, MemoryStickIcon, ThermometerIcon } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { NearCharts } from "../container/NearCharts.tsx";
 import type { HostValue } from "../../api/gen/HostValue.ts";
 import type { HostView } from "../../api/gen/HostView.ts";
 import type { HostHistory } from "../../api/gen/HostHistory.ts";
@@ -17,7 +18,6 @@ import { historyHref } from "../container/events.ts";
 import "../history/history.css";
 import "./host.css";
 
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const HISTORY = [["cpu", "CPU"], ["psi", "Pressure"], ["mem swap", "Memory"], ["disk mount", "Disks"], ["net", "Network"], ["temp", "Temperatures"]];
 
 function format(value: number | null, unit: string): string {
@@ -162,12 +162,12 @@ function History({ recording }: { recording: boolean }) {
     </div>
     {error && <p role="alert">{error}</p>}
     {!metrics.length && <p>{data ? "No samples for this group." : "Loading host history…"}</p>}
-    {data && !!metrics.length && <Suspense fallback={null}><Charts
+    {data && !!metrics.length && <NearCharts
       series={{ from: data.from, to: data.to, range, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
       metrics={metrics}
       recording={recording}
       onZoom={(from, to) => setSearch({ from: String(from), to: String(to) })}
       onMarker={(id, at) => navigate(historyHref(id, at, data.markers.find((e) => e.id === id)?.level ?? "warn"))}
-    /></Suspense>}
+    />}
   </section>;
 }
