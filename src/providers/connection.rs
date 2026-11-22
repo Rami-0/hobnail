@@ -3,7 +3,7 @@ use std::{
     fmt,
     future::Future,
     net::IpAddr,
-    sync::Mutex,
+    sync::{atomic::AtomicBool, Mutex},
     time::Instant,
 };
 
@@ -285,6 +285,7 @@ pub struct Conn<'a> {
     policy: &'a HttpPolicy,
     connections: &'a Connections,
     auth_output: Mutex<HashSet<String>>,
+    reached_public: AtomicBool,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -316,6 +317,7 @@ impl<'a> Conn<'a> {
             policy,
             connections,
             auth_output: Mutex::default(),
+            reached_public: AtomicBool::new(false),
             _permit: permit,
         })
     }
@@ -438,7 +440,11 @@ impl<'a> Conn<'a> {
         ))
     }
 
-    async fn request_inner(&self, step: Step<'_>, mode: BodyMode<'_>) -> Result<Response, Fault> {
+    async fn request_inner<'b>(
+        &'b self,
+        step: Step<'_>,
+        mode: BodyMode<'b>,
+    ) -> Result<Response, Fault> {
         let mut url = join(&self.target.url, step.path)?;
         if client::origin(&url).as_deref() != Some(self.origin.as_str()) {
             return Err(Class::Blocked.into());
@@ -568,6 +574,7 @@ impl<'a> Conn<'a> {
                 headers,
                 revision: self.revision.clone(),
                 body: mode,
+                reached_public: Some(&self.reached_public),
             },
         )
         .await
@@ -581,7 +588,16 @@ impl<'a> Conn<'a> {
             policy: self.policy,
             revision: &self.revision,
             local_only: !self.target.internet_enabled,
+            reached_public: &self.reached_public,
         }
+    }
+
+    /// Whether any request or probe so far resolved to a public address. The
+    /// scheduler then applies the public refresh floor to this fetch key,
+    /// whatever the provider declares (a feed or HTTP check on the internet).
+    pub(crate) fn reached_public(&self) -> bool {
+        self.reached_public
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Resolve A/AAAA addresses for the bound target using the system resolver.

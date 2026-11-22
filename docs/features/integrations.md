@@ -838,12 +838,21 @@ body at 128 KiB and the request body at 16 KiB. Changing the outbound
 policy, service URL, credentials or TLS pin cancels affected operations
 and closes their upstream sockets. The standard widget refresh defaults to
 60 seconds and ranges from 15 seconds to one hour. Public-internet providers
-have a ten-minute minimum. A failed refresh keeps the last good data with its
+have a ten-minute minimum. So does any widget whose last fetch resolved its
+destination to a public address, such as an RSS feed, Generic HTTP check,
+SSL expiry or reachability check aimed at an internet host: after the first
+such fetch it refreshes at most every ten minutes, whatever interval was
+chosen. The widget options still show the chosen interval. The floor is
+re-evaluated on each fetch, so moving the URL to a LAN host drops it after
+the next fetch. A destination that fails before its name resolves (for
+example a DNS error) is not known to be public and retries on its normal
+interval. A failed refresh keeps the last good data with its
 stale timestamp and error. After a change to an integration's URL,
 credentials or TLS pin, the internet switch or `[http] allow_hosts`, its
 widgets keep showing their last data, marked stale, and refetch on the next
-tick; public-internet providers wait for their minimum instead, to protect
-the service's quota. Saving other settings or editing `config.toml` leaves
+tick; public-internet providers and widgets whose last fetch reached a
+public address wait for their minimum instead, to protect the service's
+quota. Saving other settings or editing `config.toml` leaves
 provider widget data in place. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
 file-configured widgets, with up to 128 provider fetch slots. Browser background
 tabs release their subscriptions after the normal live-stream delay.

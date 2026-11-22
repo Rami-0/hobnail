@@ -16,6 +16,7 @@ use hyper::{Method, Request as HRequest, Response as HResponse};
 use hyper_util::rt::TokioIo;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -218,6 +219,8 @@ pub(crate) struct BoundPolicy<'a> {
     pub max_body: Option<usize>,
     pub status_only: bool,
     pub body: BodyMode<'a>,
+    /// Set when the destination resolved to any non-local address.
+    pub reached_public: Option<&'a AtomicBool>,
 }
 
 struct IntegrationPolicy<'a> {
@@ -228,6 +231,7 @@ struct IntegrationPolicy<'a> {
     max_body: usize,
     status_only: bool,
     body: BodyMode<'a>,
+    reached_public: Option<&'a AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -293,6 +297,7 @@ pub(crate) async fn send_step(
         max_body: options.max_body.unwrap_or(MAX_BODY).min(MAX_BODY),
         status_only: options.status_only,
         body: options.body,
+        reached_public: options.reached_public,
     };
     send_with_policy(req, policy, Some(integration))
         .await
@@ -323,6 +328,14 @@ fn local_ip(ip: IpAddr) -> bool {
             Some(ip) => local_ip(ip.into()),
             None => ip.is_unique_local() || ip.is_loopback() || ip.is_unicast_link_local(),
         },
+    }
+}
+
+/// Record whether a provider destination resolved to a public address, so
+/// its scheduler can apply the public refresh floor.
+pub(crate) fn note_public(addresses: &[SocketAddr], flag: &AtomicBool) {
+    if addresses.iter().any(|address| !local_ip(address.ip())) {
+        flag.store(true, Ordering::Relaxed);
     }
 }
 
@@ -445,6 +458,12 @@ async fn send_inner(
                 .map(|policy| (&policy.revision, policy.local_only)),
         )
         .await?;
+    if let Some(flag) = integration
+        .as_ref()
+        .and_then(|policy| policy.reached_public)
+    {
+        note_public(&addresses, flag);
+    }
     // Connect using the exact addresses that passed the policy check.
     let tcp = TcpStream::connect(addresses.as_slice())
         .await

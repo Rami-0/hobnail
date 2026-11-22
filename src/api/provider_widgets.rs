@@ -719,7 +719,11 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
                 return Ok(None);
             };
             let key = cache_key(provider.id, &integration, widget.id, &options);
-            let refresh = widget.refresh(&options, provider.public_internet);
+            // A user-URL provider (feed, HTTP check) aimed at a public host
+            // gets the public floor once a fetch has resolved it publicly.
+            let public =
+                provider.public_internet || state.widgets.lock().unwrap().attempt_public(&key);
+            let refresh = widget.refresh(&options, public);
             state.provider_viewers.remember(
                 id,
                 Scheduled::Fetch {
@@ -837,15 +841,23 @@ pub(crate) fn poll(
         let visible = visible.clone();
         tokio::spawn(async move {
             let start = Instant::now();
+            let reached_public = std::sync::atomic::AtomicBool::new(false);
             let result = tokio::select! {
                 biased;
                 _ = unviewed(&state, &poll, visible) => None,
                 result = async {
                     let conn = providers::Conn::new(&poll.target, &config.http, &state.provider_connections, permit)?
                         .with_http_revision(revision);
-                    providers::fetch(&conn, poll.widget, &poll.options).await
+                    let result = providers::fetch(&conn, poll.widget, &poll.options).await;
+                    if conn.reached_public() {
+                        reached_public.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    result
                 } => Some(result),
             };
+            if reached_public.into_inner() {
+                state.widgets.lock().unwrap().mark_public(&poll.key);
+            }
             let cancelled = result.is_none();
             if let Some(result) = result.filter(|_| poll.target.revision.check().is_ok()) {
                 let mut output = WidgetOutput {

@@ -507,6 +507,21 @@ impl WidgetCache {
         Some(refresh_deadline(at, refresh))
     }
 
+    /// The fetch for `id` reached a public address: from now on its refresh
+    /// floor and invalidation follow the public rules, like a public provider.
+    pub(crate) fn mark_public(&mut self, id: &str) {
+        if let Some(attempt) = self.provider_attempts.get_mut(id) {
+            attempt.public = true;
+        }
+    }
+
+    /// Whether the last fetch of `id` was public (declared or resolved).
+    pub(crate) fn attempt_public(&self, id: &str) -> bool {
+        self.provider_attempts
+            .get(id)
+            .is_some_and(|attempt| attempt.public)
+    }
+
     pub(crate) fn begin_provider(&mut self, id: &str, started: Instant, public: bool) -> u64 {
         self.provider_attempts.insert(
             id.into(),

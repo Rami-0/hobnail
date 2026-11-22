@@ -72,6 +72,7 @@ pub(crate) struct ProbeTarget<'a> {
     pub policy: &'a HttpPolicy,
     pub revision: &'a Revision,
     pub local_only: bool,
+    pub reached_public: &'a std::sync::atomic::AtomicBool,
 }
 
 impl ProbeTarget<'_> {
@@ -85,6 +86,7 @@ impl ProbeTarget<'_> {
             .resolve(self.policy, Some((self.revision, self.local_only)))
             .await
             .map_err(bound_error)?;
+        client::note_public(&addresses, self.reached_public);
         Ok((target.host.to_owned(), addresses))
     }
 

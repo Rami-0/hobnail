@@ -932,3 +932,30 @@ fn invalidating_an_integration_keeps_stale_data_and_refetches_unless_public() {
     assert!(cache.get(local).is_none());
     assert_eq!(cache.deadline(local, refresh), None);
 }
+
+#[test]
+fn a_fetch_that_reached_a_public_host_gets_the_public_floor() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let key = "provider-fetch:feed:one:items";
+    let feed = crate::providers::get("feed").unwrap();
+    assert!(!feed.public_internet);
+    let spec = &feed.widgets[0];
+    let options = serde_json::from_str(r#"{"refresh":15}"#).unwrap();
+    let attempt = cache.begin_provider(key, now, feed.public_internet);
+    assert!(cache.record(key, attempt, now, WidgetOutput::default()));
+    assert!(!cache.attempt_public(key));
+    assert_eq!(spec.refresh(&options, cache.attempt_public(key)).as_secs(), 15);
+    cache.mark_public(key);
+    let refresh = spec.refresh(&options, cache.attempt_public(key));
+    assert_eq!(refresh.as_secs(), u64::from(crate::providers::MIN_PUBLIC_REFRESH));
+    assert_eq!(cache.deadline(key, refresh), Some(now + refresh));
+    // Invalidation keeps a public key's deadline, as for public providers.
+    cache.invalidate_providers("provider-fetch:feed:one:");
+    assert_eq!(cache.deadline(key, refresh), Some(now + refresh));
+    // Each fetch starts from the declared flag, so a URL moved to the LAN
+    // drops the floor after its next fetch stays local.
+    let later = now + refresh;
+    cache.begin_provider(key, later, feed.public_internet);
+    assert!(!cache.attempt_public(key));
+}

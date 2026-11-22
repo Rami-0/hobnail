@@ -910,3 +910,30 @@ async fn scan_streams_bodies_in_bounded_chunks_and_caps_the_total() {
     };
     tokio::join!(server, client);
 }
+
+#[tokio::test]
+async fn reports_whether_a_destination_resolved_publicly() {
+    let connections = Connections::default();
+    for (url, public) in [
+        ("http://127.0.0.1:9", false),
+        ("http://192.168.1.10:9", false),
+        ("http://100.64.0.7:9", false),
+        ("http://192.0.2.1:9", true),
+        ("http://[2001:db8::1]:9", true),
+    ] {
+        let target = Target::new(url.into(), Credentials::new(), true);
+        let host = client::origin(url).unwrap();
+        let host = host.trim_start_matches("http://").rsplit_once(':').unwrap().0;
+        let policy = HttpPolicy {
+            allow_hosts: vec![host.trim_matches(['[', ']']).into()],
+        };
+        let permit = std::sync::Arc::new(Semaphore::new(1))
+            .try_acquire_owned()
+            .unwrap();
+        let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
+        assert!(!conn.reached_public());
+        // IP literals resolve without the network.
+        conn.dns_lookup().await.unwrap();
+        assert_eq!(conn.reached_public(), public, "{url}");
+    }
+}
