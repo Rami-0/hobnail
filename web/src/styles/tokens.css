@@ -72,7 +72,8 @@ h1{font-size:var(--fs-display);letter-spacing:-.025em}
 h2,h3{font-size:var(--fs-title)}
 p{margin:0}
 a{color:var(--accent-fg);text-decoration:none}
-a:hover,p a:not([class]){text-decoration:underline}
+/* Links in running text; not the link-only lines (.foot-line, .p-link). */
+a:hover,p:not(.foot-line,.p-link) a:not([class]){text-decoration:underline}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .focus-in:focus-visible,.focus-in :focus-visible{outline-offset:-2px}
