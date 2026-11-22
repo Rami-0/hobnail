@@ -592,6 +592,21 @@ Verified from: [RFC 9525](https://www.rfc-editor.org/rfc/rfc9525.html) and
 
 UNVERIFIED: Live certificate chains and TLS endpoints.
 
+## Reachability
+
+Choose one TCP, HTTP or DNS check per integration. TCP connect replaces ICMP
+ping, which requires additional privileges on some hosts. TCP shows connect
+time, HTTP checks an inclusive status range (200–299 by default), and DNS
+uses the server resolver for A/AAAA addresses with an optional expected IP.
+HTTP checks stop at the first response status. Public destinations require
+the provider internet switch.
+
+Verified from: [TCP](https://www.rfc-editor.org/rfc/rfc9293.html),
+[HTTP semantics](https://www.rfc-editor.org/rfc/rfc9110.html) and
+[DNS AAAA](https://www.rfc-editor.org/rfc/rfc3596.html).
+
+UNVERIFIED: Live endpoints and system resolver configurations outside the fixtures.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

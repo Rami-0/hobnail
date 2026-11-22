@@ -53,6 +53,7 @@ mod prowlarr;
 mod proxmox;
 mod qbittorrent;
 mod radarr;
+mod reachability;
 mod repositories;
 mod sabnzbd;
 mod sonarr;
@@ -105,6 +106,7 @@ pub const REGISTRY: &[Provider] = &[
     github::GITHUB,
     paperless::PAPERLESS,
     ssl_expiry::SSL_EXPIRY,
+    reachability::REACHABILITY,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
