@@ -12,7 +12,7 @@ import {
   keepOrder,
   matches,
   noneWhy,
-  orderOf,
+  orderForPin,
   parseView,
   remember,
   select,
@@ -154,9 +154,9 @@ test("counts, matching and folded stacks", () => {
   assert.equal(noneWhy(q("state=problem&q=x")), "filter");
 });
 
-test("keepOrder: shown rows stay put, new ones follow, gone ones drop", () => {
+test("freezing uses the committed order even when live resources have already changed", () => {
   const before = select(GROUPS, q("group=flat&sort=cpu"), NOW);
-  const keys = orderOf(before);
+  const committed = { key: "cpu", sections: before };
   // zeta's CPU drops: a fresh sort would move it below alpha.
   const g2 = [
     group("a", [row("alpha", "a", { cpu_pct: 5 }), row("new", "a", { cpu_pct: 90 })]),
@@ -164,8 +164,9 @@ test("keepOrder: shown rows stay put, new ones follow, gone ones drop", () => {
   ];
   const fresh = select(g2, q("group=flat&sort=cpu"), NOW);
   assert.deepEqual(fresh[0]?.rows.map((r) => r.name), ["new", "alpha", "zeta"]);
-  const kept = keepOrder(fresh, keys);
+  const kept = keepOrder(fresh, orderForPin("cpu", fresh, committed));
   assert.deepEqual(kept[0]?.rows.map((r) => r.name), ["zeta", "alpha", "new"]);
+  assert.deepEqual(keepOrder(fresh, orderForPin("mem", fresh, committed)), fresh);
 });
 
 test("live cells: only changed rows are told, one scale per column", () => {

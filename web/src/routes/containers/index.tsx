@@ -29,6 +29,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -58,7 +59,7 @@ import {
   isGrouped,
   keepOrder,
   noneWhy,
-  orderOf,
+  orderForPin,
   parseView,
   remember,
   select,
@@ -179,7 +180,10 @@ export default function ContainersPage() {
   }, []);
 
   // ---- the order: recomputed, unless the reader is in the table ----
-  const [inTable, setInTable] = useState({ focus: false, pointer: false });
+  type Snapshot = { key: string; sections: Section[] };
+  const [inTable, setInTable] = useState<{ focus: boolean; pointer: boolean; snapshot: Snapshot | null }>({
+    focus: false, pointer: false, snapshot: null,
+  });
   const frozen = inTable.focus || inTable.pointer;
   const groups = useMemo<GroupRow[]>(() => data?.groups ?? [], [data]);
   const now = useNow();
@@ -193,13 +197,24 @@ export default function ContainersPage() {
   );
   // The order on screen when the reader came in; a change of the view
   // itself (a sort click) is the reader's own and starts a new one.
+  const committed = useRef<Snapshot>(null);
   const [pin, setPin] = useState<{ key: string; keys: string[] } | null>(null);
-  if (frozen && (!pin || pin.key !== canonical)) setPin({ key: canonical, keys: orderOf(fresh) });
+  if (frozen && (!pin || pin.key !== canonical)) {
+    setPin({ key: canonical, keys: orderForPin(canonical, fresh, inTable.snapshot) });
+  }
   if (!frozen && pin) setPin(null);
   const sections = useMemo(
     () => (frozen && pin && pin.key === canonical ? keepOrder(fresh, pin.keys) : fresh),
     [frozen, pin, canonical, fresh],
   );
+  useLayoutEffect(() => {
+    committed.current = { key: canonical, sections };
+  }, [canonical, sections]);
+
+  const enter = (kind: "focus" | "pointer") => {
+    const snapshot = committed.current;
+    setInTable((s) => s[kind] ? s : { ...s, [kind]: true, snapshot: s.focus || s.pointer ? s.snapshot : snapshot });
+  };
 
   // ---- live cells: fed by the stats store, outside React; only the cells
   // whose numbers changed re-render ----
@@ -309,12 +324,12 @@ export default function ContainersPage() {
     body = (
       <div
         className="tablewrap"
-        onFocus={() => setInTable((s) => (s.focus ? s : { ...s, focus: true }))}
+        onFocus={() => enter("focus")}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setInTable((s) => ({ ...s, focus: false }));
         }}
         onPointerEnter={(e) => {
-          if (e.pointerType === "mouse") setInTable((s) => ({ ...s, pointer: true }));
+          if (e.pointerType === "mouse") enter("pointer");
         }}
         onPointerLeave={() => setInTable((s) => (s.pointer ? { ...s, pointer: false } : s))}
       >
