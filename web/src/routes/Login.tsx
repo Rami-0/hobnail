@@ -9,7 +9,7 @@ import { api, refreshSession, useSession } from "../api/session.ts";
 import { safeNext, useRoute } from "../app/router.ts";
 import { Button } from "../ui/Button.tsx";
 
-export function Login({ token }: { token?: string }) {
+export default function Login({ token }: { token?: string }) {
   const { session } = useSession();
   const loc = useRoute();
   const next = safeNext(loc.search.get("next"));

@@ -1,4 +1,5 @@
-import { lazy, memo, startTransition, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, memo, startTransition, useEffect, useRef, useState } from "react";
+import { LoadBoundary } from "../../ui/LoadBoundary.tsx";
 import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
 import type { UsageChartsProps } from "../../charts/RechartsUsage.tsx";
 
@@ -20,5 +21,5 @@ export const NearCharts = memo(function NearCharts(props: UsageChartsProps) {
     return () => observer.disconnect();
   }, [near]);
   const placeholder = <ChartPlaceholder count={props.metrics?.length ?? 2} ref={ref} />;
-  return <Suspense fallback={placeholder}>{near ? <Charts {...props} /> : placeholder}</Suspense>;
+  return <LoadBoundary fallback={placeholder}>{near ? <Charts {...props} /> : placeholder}</LoadBoundary>;
 });
