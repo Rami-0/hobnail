@@ -1048,6 +1048,25 @@ async fn run_credential(
     task.await.unwrap_or(Err(Attempt::Failed))
 }
 
+/// Measures one current-profile verify at boot, so the floor is not just
+/// the 150 ms constant until the first sign-in after a restart. Runs only
+/// while legacy hashes remain (the floor applies only then), under the
+/// permit, so it never overlaps a sign-in; it costs one 7 MiB hash.
+pub(crate) async fn calibrate_floor(state: &Arc<AppState>) {
+    let Some(permit) = state.credential_queue.acquire().await else {
+        return;
+    };
+    let st = state.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let started = Instant::now();
+        let _ = verify_password(DUMMY_HASH, "calibration");
+        st.credential_queue
+            .observe_verify(started.elapsed(), Instant::now());
+    })
+    .await;
+}
+
 fn authenticate(
     state: &AppState,
     ip: IpAddr,

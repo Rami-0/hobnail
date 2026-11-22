@@ -110,6 +110,17 @@ async fn serve() -> i32 {
         }
     }
 
+    // The sign-in floor applies while legacy hashes remain (or the scan
+    // fails); measure the hash speed once instead of starting from 150 ms.
+    if !st
+        .db
+        .legacy_hash_users()
+        .is_ok_and(|users| users.is_empty())
+    {
+        let s = st.clone();
+        tokio::spawn(async move { auth::calibrate_floor(&s).await });
+    }
+
     st.db.record_event(
         util::unix_now() as i64,
         "app.start",

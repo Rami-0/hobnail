@@ -135,6 +135,10 @@ at least 150 ms and at most 500 ms. Only real current-profile verifications
 are measured: never a legacy one, whose time would reveal the profile, and
 never a request refused before hashing. A slow outlier stops widening the
 floor within five minutes; at the cap, two sign-ins a second still pass.
+While legacy hashes remain, the server verifies one current-profile dummy
+hash at start (under the credential permit) so the floor is measured
+before the first sign-in. This raised the boot peak from about 4.2 MiB to
+about 8.8 MiB in M5 measurements, well under a 20 MiB limit.
 
 In a loopback test of the pre-fix release, 30 failed attempts per profile
 had medians of 68.85 ms for legacy hashes, 44.52 ms for current hashes and
