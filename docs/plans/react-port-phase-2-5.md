@@ -788,6 +788,161 @@ requested profile. The final log sweep above also served as the Logs
 regression check. The Board and History captures were inspected at both
 requested profiles.
 
+#### Second browser budget pass
+
+The final build ran two sweeps on port 3396 with the same release profile,
+150-container fixture, route order, cold browser caches, 1440×900 desktop at
+1× CPU and 390×844 touch phone at 4×. The readiness selectors, three live
+windows and input scripts stayed the same. All 32 visits reached readiness.
+One fresh four-profile Logs sweep followed. Compilation and automated tests
+finished before measuring. Host CPU pressure averaged 9.56% over the minute
+before sweep one and 3.05% before sweep two, so some run-to-run variance
+remains. Raw browser results, build sizes and host pressure
+are in
+`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5b2/`.
+The directories `entry`, `routes-safe` and `final` contain the timed sweeps.
+
+LCP across routes is the median and worst of each sweep's slowest route.
+Live values use the largest task in the three windows of each sweep.
+Pass/fail uses the worse sample. Times are in milliseconds.
+
+| Budget | Cap | Pass 1 median/worst | Pass 2 median/worst | Result |
+|---|---:|---:|---:|---|
+| Desktop LCP across routes | 400 | 782/784 | 668/696 | Fail |
+| Phone LCP across routes | 1,200 | 2,190/2,636 | 1,756/1,772 | Fail |
+| Phone table LCP | 1,200 | 2,108/2,636 | 1,084/1,188 | Pass |
+| Phone table load trace | 200 | 237.85/311.8 | 147/155.7 | Pass |
+| Phone table load observer | 200 | 287.5/370 | 217/233 | Fail |
+| Phone first container plot | 200 | 297.55/316.3 | 285.5/295.8 | Fail |
+| Phone first History plot | 200 | 289.05/304.4 | 251.45/255.8 | Fail |
+| Phone Settings load observer | 200 | 218/228 | 219/230 | Fail |
+| Desktop table live | 50 | 62.45/70.1 | 56.45/58.4 | Fail |
+| Phone History live | 50 | 107.7/118.2 | 51.35/54.5 | Fail |
+| Desktop History live | 50 | 51.35/54.5 | 25.2/29.2 | Pass |
+| Phone History INP | 200 | 204/240 | 72/112 | Pass |
+| CLS across routes | 0.1 | 0.0575/0.0575 | 0.0575/0.0575 | Pass |
+
+The early-read entry alone moved the phone table bootstrap start to
+607–647 ms, from up to 1,166 ms in pass 1. Its phone table LCP was
+1,502/1,512 ms and its load trace was 160/161.1 ms. The all-route desktop
+LCP was 792/816 ms. The final build adds same-origin `Link` preloads for
+authenticated dashboard requests, with the existing API authorization
+and D5 session/CSRF flow. The phone table bootstrap started at 53–74 ms,
+before the session at 70–104 ms. Bootstrap completed at 64–88 ms and the
+phone table reached LCP at 980–1,188 ms. Dashboard responses with these hints
+vary by cookie and retain the document CSP.
+
+The active page starts early and the direct-entry placeholder is replaced
+when its module resolves. Link hover and focus prime subsequent routes.
+Sign-in and route styles load separately from the shell. The first route
+split hit the 30 s readiness timeout on the phone table and container
+chart because a grouped chunk pulled React into the entry's initialization
+cycle. The one completed desktop table visit in that run was 408 ms LCP.
+Removing the runtime grouping fixed that cycle. With automatic icon
+splitting, all four Settings visits still timed out at 30 s with React
+error 130. Among the other completed visits, desktop LCP was 660/680 ms,
+phone LCP was 1,904/2,100 ms and phone History INP was 192/200 ms. The
+icon split was reversed. Both final Settings profiles reached readiness
+on both sweeps. The source module breakdown from the trial put React DOM
+first in the entry chunk, followed by SDK utilities and the shell.
+
+Plots now prepare tick labels before mount and defer tooltips and event
+decorations to a later frame. The existing pixel-width downsampling stays
+in place. History applies refreshes after active input settles and feeds
+updated plots one per frame. The worst History input delay fell from
+143.2 ms to 96.6 ms. The table reuses completed section renders, shares one
+resource subscription per visible row, skips live sort snapshots for static
+sorts, compares stable row fields directly and formats each resource value
+with one decimal conversion. Desktop table cold-load tracing increased
+from 62/63.9 to 108.4/108.7 ms, while its live maximum fell by 11.7 ms. The
+final sweeps tested the preload, chart and table changes together, so their
+overall gains cannot be assigned to a single change.
+
+A larger combined build was rejected by the size gate at 1,350,691 B raw
+and 446,421 B gzip. The retained build fits the existing limits.
+
+| Bundle gate | Pass 1 B | Pass 2 B | Pass 2 headroom B |
+|---|---:|---:|---:|
+| Whole dist raw (1,350,000) | 1,346,772 | 1,349,605 | 395 |
+| Whole dist gzip (450,000) | 437,641 | 444,293 | 5,707 |
+| First route gzip (180,000) | 144,667 | 136,716 | 43,284 |
+| Largest capped lazy chunk gzip (60,000) | 54,814 | 54,812 | 5,188 |
+
+The slowest LCP route in both sweeps was container Logs on both profiles.
+In the slower phone visit, the log picker was downloaded by 68 ms and
+the shell painted at 716 ms. The log heading painted at 1,424 ms and the
+visible summary was the final LCP at 1,772 ms. On desktop the picker
+finished by 78 ms, FCP was 296 ms and a visible log line was LCP at 696 ms.
+Further LCP reductions need to shorten the first render of the shell,
+route and log pane. The data transfers alone are too short to close either
+LCP gap. The same client could do less work before those elements paint.
+Server-rendering them would change the binding architecture.
+
+A supplemental visit recorded named renderer events with extra CDP
+categories. Its timings diagnose the remaining work. The budget table
+uses the two standard sweeps. The phone Logs profile attributed 149.5 ms
+to a shell-bundle callback and 126.2 ms to a later task that included a
+log-pane frame callback, layout and paint.
+
+- The phone table and Settings observer peaks are startup tasks. The
+  supplemental observer saw 217 ms starting at 350 ms for the table
+  and 215 ms starting at 271 ms for Settings. Bootstrap and the first
+  data reads had finished by 82 ms and 59 ms respectively. For the phone
+  table the longest traced load work included 52.7 ms in layout, 30.4 ms
+  in style updates and 18.3 ms in paint. The longest Settings trace task
+  spent 95.2 of 127.4 ms in one app-script call. The observer and trace
+  record different task boundaries. Hitting both limits calls for smaller
+  table layout batches and less synchronous Settings startup work.
+- First CPU plot mounts coincided with the largest phone trace tasks.
+  In the supplemental visit, an app-script call accounted for 359.4 of
+  360.1 ms on the container plot and 338.2 of 340.6 ms on History. Named
+  style work inside those calls was at most 15.5 ms. The next plotted
+  charts took 112.4 and 106.2 ms. Splitting work inside the first React
+  and Recharts commit is a better candidate than further thinning the
+  plotted points at the tested width.
+- The named parts of a 61.9 ms desktop table live task included 9.8 ms
+  of paint, 5 ms of layout, 3.2 ms of style work and an 8 ms animation
+  frame callback. The trace leaves part of that task unattributed. The
+  listed frame costs point to work in the browser after the row comparison.
+  Less cell redraw and layout work is needed to take the remaining time
+  out of the update window.
+- The phone History live profiler saw 52.8 ms in a frame callback inside
+  its longest 70.1 ms task, including calls in the app and chart vendor
+  dependencies. The remaining miss needs a smaller per-plot update, even
+  with plots already staged across frames.
+
+The traces identify client work that can still be shortened within the
+current architecture. They give no evidence that larger caps or reduced
+features are required.
+
+The largest recorded INP across routes was 152/168 ms. The desktop
+container chart returned no eligible event timing in either sweep, so
+there is no desktop chart INP conclusion. The separate drag-to-zoom
+regression checks the interaction itself.
+
+The web check, 152 web tests, build, size check, Rust fmt, clippy and
+501 Rust tests passed.
+
+The Logs functional and burst checks passed in all four profiles. The
+single/four-pane maximum tasks were 0/0 ms at 1440 dark and 1440 light,
+61/0 ms at 390 dark, and 53/0 ms at 390 light. The previous four profiles
+were 0/0, 0/0, 0/0, and 0/53 ms in the same order. Zero means the observer
+recorded no task of at least 50 ms. There were no console errors or CSP
+violations.
+
+The board check passed 107 assertions. The read-page checks, including
+History SVG and drag-to-zoom, passed at 1440 light and 390 dark. Guided
+setup passed 35 checks at each width and theme. Representative Board and
+History screenshots were inspected at both sizes.
+
+The initial CSP sweep completed seven route visits before timing out
+on below-viewport chart placeholders on desktop Host and phone Overview.
+The runner now reveals a pending chart grid before waiting for it and
+sets 1440 light and 390 dark explicitly. The first corrected attempt
+terminated during desktop after 39 visits. The fresh retry completed all
+80 visits with zero failed profiles and zero CSP violations. The timed
+performance probe kept its original viewport and interaction behavior.
+
 ## Browser checks and logs
 
 **[exp]** Fresh fake instance at 3398 with `--log-fixtures`, same image;
@@ -945,20 +1100,22 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 ## Budgets still missed
 
 - Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The final
-  build is 1,346,772 B raw and 437,641 B gzip. The configured size checks pass.
+  build is 1,349,605 B raw and 444,293 B gzip. The configured size checks pass.
 - Preferred lifetime memory under 10 MiB. M5 peaked at 12.45 MiB with full history.
 - Uncapped cold SQLite database peak under 20 MiB. The cold probe reached
   187,559,936 B (178.87 MiB), primarily charged file cache.
 - First sign-in with a legacy hash exceeded 20 MiB in the migration probe.
   Fresh-hash workload results are in the M5 table above.
-- LCP ≤400/1,200 ms. Each final route/profile pair missed in at least one run.
-  The worst desktop result was 784 ms and the worst phone result was 2,636 ms.
-- Phone table load ≤200 ms. The final maxima were 311.8 ms by tracing and
-  370 ms by observer. The first container and History plots reached 316.3 ms
-  and 304.4 ms, and the Settings phone observer reached 228 ms.
-- Live-update ≤50 ms. The desktop table peaked at 70.1 ms, phone History at
-  118.2 ms and desktop History at 54.5 ms.
-- Scripted INP ≤200 ms. The phone History click reached 240 ms.
+- LCP ≤400/1,200 ms. The second pass peaked at 696 ms desktop and
+  1,772 ms phone, both on container Logs. The phone table passed.
+- Phone load ≤200 ms. The table passed tracing and reached 233 ms by the
+  observer. The first container and History plots reached 295.8 ms and
+  255.8 ms. The Settings observer reached 230 ms.
+- Live update ≤50 ms. The desktop table peaked at 58.4 ms and phone
+  History at 54.5 ms. Desktop History passed at 29.2 ms.
+- The desktop container chart emitted no qualifying entry for the scripted
+  INP measurement. The measured interactions passed, including phone
+  History at 112 ms.
 
 Passing checks at raised caps do not constitute the owner's acceptance of
 these deviations. [QA outcomes](../qa/QA.md#react-port-outcomes-of-the-deferred-findings)
