@@ -89,17 +89,14 @@ try {
       await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: 5 });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
 
-      await load("/app/overview", ".overview-map rect");
+      await load("/app/overview", "[data-testid=overview] .overview-counts");
+      await wait(exists(".mm .mm-a"), "memory treemap renders links after the first sample", 30000);
       await wait('document.querySelector("[data-testid=overview]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
       await wait('document.querySelector("#w-pages-health")?.textContent.includes("Health check: ok")', "widget renders a structured body");
       await tab.shot(path.join(out, `${label}-overview.png`));
 
       if (size === sizes[0] && scheme === schemes[0]) {
         const alarmConfig = await api("/api/settings/config");
-        const containers = await api("/api/v1/containers");
-        const names = containers.groups.flatMap(g => g.containers)
-          .filter(c => ["unhealthy", "restarting", "dead"].includes(c.label)).map(c => c.name);
-        assert.ok(names.length > 0, "fixture has problem containers to hide");
         await wait('document.title.startsWith("(")', "visible title has a problem count");
         // Keep the real ten-second stream pause, accelerate only the minute poll.
         await tab.ev(`(() => {
@@ -108,18 +105,29 @@ try {
           Object.defineProperty(document, "hidden", { configurable: true, value: true });
           document.dispatchEvent(new Event("visibilitychange"));
         })()`);
-        await sleep(11000);
-        await api("/api/settings/containers/override", { base_hash: alarmConfig.hash, names, set: { hide: true } });
-        assert.equal((await api("/api/v1/alarm")).problems, 0);
-        await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm");
-        await wait('!document.title.startsWith("(")', "hidden tab title updates to the filtered alarm count");
-        await tab.ev(`(() => {
-          window.setInterval = window.alarmInterval;
-          delete document.hidden;
-          document.dispatchEvent(new Event("visibilitychange"));
-        })()`);
-        const hiddenConfig = await api("/api/settings/config");
-        await api("/api/settings/config", { base_hash: hiddenConfig.hash, text: alarmConfig.text });
+        try {
+          await sleep(11000);
+          // Churn continues while the tab is hidden. Hide the problems
+          // in the snapshot we actually apply the override to.
+          const containers = await api("/api/v1/containers");
+          const names = containers.groups.flatMap(g => g.containers)
+            .filter(c => ["unhealthy", "restarting", "dead"].includes(c.label)).map(c => c.name);
+          assert.ok(names.length > 0, "fixture has problem containers to hide");
+          await api("/api/settings/containers/override", { base_hash: alarmConfig.hash, names, set: { hide: true } });
+          await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm");
+          await wait('!document.title.startsWith("(")', "hidden tab title updates to the filtered alarm count");
+          assert.equal((await api("/api/v1/alarm")).problems, 0);
+        } finally {
+          await tab.ev(`(() => {
+            window.setInterval = window.alarmInterval;
+            delete document.hidden;
+            document.dispatchEvent(new Event("visibilitychange"));
+          })()`);
+          const hiddenConfig = await api("/api/settings/config");
+          if (hiddenConfig.hash !== alarmConfig.hash) {
+            await api("/api/settings/config", { base_hash: hiddenConfig.hash, text: alarmConfig.text });
+          }
+        }
       }
 
       const palette = '[data-testid="palette"] [role="combobox"]';
@@ -219,6 +227,7 @@ try {
       await load("/app/history?range=1h&level=all", '[data-testid="chart-cpu"] .ch-canvas');
       await wait(exists('[data-testid="chart-net_tx"]'), "History chart group mounts");
       await tab.shot(path.join(out, `${label}-history.png`));
+      await wait(exists('[data-testid="chart-cpu"] .ch-canvas svg'), "CPU plot is drawn before dragging");
       const plot = await inp.box('[data-testid="chart-cpu"] .ch-canvas');
       assert.ok(plot, "CPU chart has a plot");
       const from = plot.left + plot.width * .28;
@@ -238,7 +247,10 @@ try {
       await tab.shot(path.join(out, `${label}-host.png`));
 
       const root = "/app/containers/svc043";
-      await load(root + "?range=24h&tab=metrics", '[data-testid="chart-pids"]', "metrics");
+      await load(root + "?range=24h&tab=metrics", "main .charts.two");
+      await tab.ev('document.querySelector("main .charts.two").scrollIntoView({ block: "start" })');
+      await wait(exists('[data-testid="chart-pids"]'), "Metrics chart grid mounts when revealed");
+      await tab.shot(path.join(out, `${label}-metrics.png`));
       assert.ok(await tab.ev(exists('[data-testid="why"]')), "Metrics keeps the Why banner");
       await inp.click('[data-testid="ctr-tabs"] a[href*="tab=inspect"]');
       await wait(exists('[data-testid="container-inspect"]'), "opens Inspect");
