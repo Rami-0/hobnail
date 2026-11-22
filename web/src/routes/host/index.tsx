@@ -127,7 +127,7 @@ function Pressure({ values }: { values: HostValue[] | undefined }) {
   if (!values?.length) return <p className="muted">Pressure information is unavailable.</p>;
   const byLabel = new Map(values.map((entry) => [entry.label, entry.value]));
   return <>
-    <table className="tbl hx-t"><thead><tr><th scope="col" aria-label="Resource" />
+    <table className="tbl hx-t"><thead><tr><th scope="col"><span className="sr">Resource</span></th>
       {["Now", "10 s", "1 min", "5 min", "Full 10 s"].map((label) => <th scope="col" className="num" key={label}>{label}</th>)}
     </tr></thead><tbody>{[["cpu", "CPU"], ["memory", "Memory"], ["io", "I/O"]].map(([key, label]) => <tr key={key}>
       <th scope="row">{label}</th>
