@@ -142,6 +142,15 @@ uses the first other IP. Use bare IPv4 or IPv6 literals without ports.
 A missing list, malformed hop in the trusted part of the chain, or list
 with only trusted IPs falls back to the TCP peer.
 
+Connection limits keep slow or oversized requests within the memory budget.
+A request line plus headers (cookies included) may total 16 KiB; a larger
+request gets `431 Request Header Fields Too Large`. A connection that has not
+sent a complete request within 10 s is closed, including an idle keep-alive
+connection; open event streams are not affected. At most 128 connections are
+open at once, event streams included; further connections wait until one
+closes. A proxy that keeps a pool of idle upstream connections reconnects
+when Hobnail closes one.
+
 ## Outgoing HTTP
 
 ```toml

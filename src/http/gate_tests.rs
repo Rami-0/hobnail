@@ -1231,6 +1231,25 @@ async fn api_v1_container_window_and_names() {
     }
 }
 
+#[tokio::test]
+async fn the_event_stream_outlives_the_header_read_timeout() {
+    let st = state();
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let limits = super::server::Limits {
+        header_timeout: std::time::Duration::from_millis(200),
+        ..super::server::LIMITS
+    };
+    crate::auth::set_password_for_tests(&st.db, PW);
+    tokio::spawn(super::server::serve_limited(st.clone(), l, limits));
+    let (cookie, _) = login(addr).await;
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=system", &cookie).await;
+    assert_eq!(s.next().await.0, "hello");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    crate::live::refresh_system(&st);
+    assert_eq!(s.next().await.0, "system");
+}
+
 /// An open `/api/v1/stream` connection (HTTP/1.0: the body is the raw
 /// event stream, no chunk framing).
 struct Stream {

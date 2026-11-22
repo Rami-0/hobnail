@@ -5,12 +5,13 @@ use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 use crate::state::AppState;
 
@@ -24,9 +25,58 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
     serve_listener(state, listener).await
 }
 
+/// Per-connection limits for the accept loop.
+///
+/// Without them, 40 connections each sending an unterminated 400 KiB header
+/// (under hyper's default buffer cap) pinned 18.9 MiB and 100 pinned
+/// 43.8 MiB, against a 20 MiB container budget.
+/// - `max_buf` caps hyper's per-connection read buffer, so a request head
+///   (request line plus headers, cookies included) may be at most 16 KiB,
+///   Node's default and twice nginx's 8 KiB per header line. Hobnail's own
+///   cookies are under 100 bytes. Larger heads get 431 and are closed.
+/// - `header_timeout` closes a connection that has not sent a complete head
+///   within 10 s, including an idle keep-alive connection waiting for its
+///   next request. A response being streamed (the event stream) is not
+///   affected.
+/// - `connections` caps open connections, event streams included. At the
+///   cap the server stops accepting; new connections wait in the kernel
+///   backlog until one closes. A connection holding a head just under 16 KiB
+///   costs about 34 KiB, so a full cap of such connections adds about
+///   5 MiB (measured: 200 attackers against the cap, 7.8 MiB container
+///   memory). 128 leaves room for 25 devices with an event stream and a few
+///   parallel requests each.
+#[derive(Clone, Copy)]
+pub(crate) struct Limits {
+    pub connections: usize,
+    pub header_timeout: Duration,
+    pub max_buf: usize,
+}
+
+pub(crate) const LIMITS: Limits = Limits {
+    connections: 128,
+    header_timeout: Duration::from_secs(10),
+    max_buf: 16 * 1024,
+};
+
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
 pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Result<(), String> {
+    serve_limited(state, listener, LIMITS).await
+}
+
+pub(crate) async fn serve_limited(
+    state: Arc<AppState>,
+    listener: TcpListener,
+    limits: Limits,
+) -> Result<(), String> {
+    let permits = Arc::new(Semaphore::new(limits.connections));
     loop {
+        // Wait for a free slot before accepting, so excess connections queue
+        // in the kernel backlog instead of holding buffers here.
+        let permit = permits
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| e.to_string())?;
         let (stream, peer) = match listener.accept().await {
             Ok(x) => x,
             Err(e) => {
@@ -38,12 +88,16 @@ pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Resu
         let _ = stream.set_nodelay(true);
         let st = state.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
                 req.extensions_mut().insert(Peer(peer));
                 async move { Ok::<_, Infallible>(respond(st, req).await) }
             });
             let _ = hyper::server::conn::http1::Builder::new()
+                .timer(TokioTimer::new())
+                .header_read_timeout(limits.header_timeout)
+                .max_buf_size(limits.max_buf)
                 .keep_alive(true)
                 .serve_connection(TokioIo::new(stream), svc)
                 .await;
@@ -378,6 +432,116 @@ mod tests {
             "/api/logs/download",
         ] {
             assert!(!negotiates_json(path), "{path}");
+        }
+    }
+
+    mod limits {
+        use super::super::*;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+        use tokio::time::timeout;
+
+        async fn start(limits: Limits) -> SocketAddr {
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = l.local_addr().unwrap();
+            let st = crate::testutil::state_with(vec![], "");
+            tokio::spawn(serve_limited(st, l, limits));
+            addr
+        }
+
+        /// Reads until the server closes; returns what it sent.
+        async fn drain(s: &mut TcpStream, within: Duration) -> Option<Vec<u8>> {
+            let mut out = Vec::new();
+            timeout(within, s.read_to_end(&mut out)).await.ok()?.ok()?;
+            Some(out)
+        }
+
+        #[tokio::test]
+        async fn production_limits_fit_large_cookies_and_refuse_bigger_heads() {
+            let addr = start(LIMITS).await;
+            // A 12 KiB cookie header still gets an answer.
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let cookie = "a".repeat(12 * 1024);
+            s.write_all(
+                format!("GET /healthz HTTP/1.1\r\nHost: localhost\r\nCookie: x={cookie}\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+            let out = drain(&mut s, Duration::from_secs(5)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 200"),
+                "{:?}",
+                String::from_utf8_lossy(&out[..out.len().min(40)])
+            );
+            // A head past 32 KiB is refused and the connection closed, without
+            // waiting for the rest of it.
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let pad = "a".repeat(LIMITS.max_buf + 1024);
+            s.write_all(
+                format!("GET /healthz HTTP/1.1\r\nHost: localhost\r\nX-Pad: {pad}").as_bytes(),
+            )
+            .await
+            .unwrap();
+            let out = drain(&mut s, Duration::from_secs(5)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 431"),
+                "{:?}",
+                String::from_utf8_lossy(&out[..out.len().min(40)])
+            );
+        }
+
+        #[tokio::test]
+        async fn a_slow_or_idle_head_is_closed_but_prompt_keep_alive_requests_are_served() {
+            let limits = Limits {
+                header_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut slow = TcpStream::connect(addr).await.unwrap();
+            slow.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nX-Pad: a")
+                .await
+                .unwrap();
+            let mut idle = TcpStream::connect(addr).await.unwrap();
+            assert!(drain(&mut slow, Duration::from_secs(3)).await.is_some());
+            assert!(drain(&mut idle, Duration::from_secs(3)).await.is_some());
+            // Each wait between keep-alive requests restarts the timer.
+            let mut kept = TcpStream::connect(addr).await.unwrap();
+            for _ in 0..3 {
+                kept.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .await
+                    .unwrap();
+                let mut buf = [0u8; 256];
+                let n = timeout(Duration::from_secs(3), kept.read(&mut buf))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+        }
+
+        #[tokio::test]
+        async fn connections_past_the_cap_wait_for_a_free_slot() {
+            let limits = Limits {
+                connections: 2,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let first = TcpStream::connect(addr).await.unwrap();
+            let _second = TcpStream::connect(addr).await.unwrap();
+            // The kernel completes the handshake; the server does not accept.
+            let mut third = TcpStream::connect(addr).await.unwrap();
+            third
+                .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut third, Duration::from_millis(500))
+                .await
+                .is_none());
+            drop(first);
+            let out = drain(&mut third, Duration::from_secs(5)).await.unwrap();
+            assert!(out.starts_with(b"HTTP/1.1 200"));
         }
     }
 
