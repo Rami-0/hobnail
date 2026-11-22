@@ -234,7 +234,7 @@ tr.kfocus>td:first-child{box-shadow:inset 2px 0 0 var(--ring)}
 li.kfocus{box-shadow:inset 2px 0 0 var(--ring)}
 
 /* ---- pressed, disabled (§11.4) ---- */
-:is(.icon-btn,.ia,.tab,.nav-item,.menu-item,.bb-i,.stack>summary,.ctr>a,.chip):active{background-image:linear-gradient(var(--tint-2),var(--tint-2))}
+:is(.icon-btn,.ia,.tab,.nav-item,.menu-item,.bb-i,.ctr>a,.chip):active{background-image:linear-gradient(var(--tint-2),var(--tint-2))}
 :is(.icon-btn,.ia):active:not(:disabled){transform:translateY(1px)}
 :is(.icon-btn,.tab,.menu-item):is(:disabled,[aria-disabled=true]){opacity:.5;cursor:not-allowed;background-image:none}
 

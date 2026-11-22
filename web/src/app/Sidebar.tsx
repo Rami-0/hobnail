@@ -147,18 +147,11 @@ const StackItem = memo(function StackItem({
   const hasActive = active !== null && ctrs.some((c) => c.name === active);
   const open = filtering || hasActive || !folded;
   return (
-    <details
-      className="stack"
-      data-testid="tree-stack"
-      data-stack={stack.name}
-      open={open}
-      onToggle={(e) => {
-        const now = e.currentTarget.open;
-        if (now !== open && !filtering) onFold(stack.name, !now);
-      }}
-    >
-      <summary className={hasActive ? "cur" : undefined}>
-        {CHEVRON_RIGHT_ICON}
+    // Not <details>: its <summary> may not hold the stack's links (nested
+    // controls). The toggle spans the row; the links sit above it.
+    <div className="stack" data-testid="tree-stack" data-stack={stack.name}>
+      <div className={hasActive ? "sh cur" : "sh"}>
+        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={stack.title} onClick={() => { if (!filtering) onFold(stack.name, open); }}>{CHEVRON_RIGHT_ICON}</Button>
         <a className="stack-name" href={`${appHref("/containers")}?stack=${encodeURIComponent(stack.name)}`} title={stack.title}>
           {stack.title}
         </a>
@@ -176,7 +169,7 @@ const StackItem = memo(function StackItem({
           </a>
         )}
         {strip && strip.length > 0 && <HealthStrip codes={strip} label={stack.title} />}
-      </summary>
+      </div>
       {/* A folded stack's items are drawn when it opens (fewer nodes at load). */}
       {open && (
       <ul>
@@ -194,7 +187,7 @@ const StackItem = memo(function StackItem({
         ))}
       </ul>
       )}
-    </details>
+    </div>
   );
 }, sameStack);
 

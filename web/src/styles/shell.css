@@ -38,16 +38,16 @@
 .tree-note{padding:6px 10px;font-size:calc(12rem/14);color:var(--text-3);display:flex;gap:6px;align-items:center}
 .tree-note svg{width:14px;height:14px;flex:none}
 .tree-note.bad{color:var(--bad-fg)}
-.stack>summary{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 4px;border-radius:var(--r-sm);cursor:pointer;list-style:none;color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600;user-select:none}
-.stack>summary::-webkit-details-marker{display:none}
-.stack>summary:hover{background:var(--surface-2);color:var(--text)}
-.stack>summary .chev{width:12px;height:12px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-io)}
-.stack[open]>summary .chev{transform:rotate(90deg)}
+.sh{display:flex;align-items:center;gap:6px;height:28px;padding-right:8px;border-radius:var(--r-sm);color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600}
+.sh:hover{background:var(--surface-2);color:var(--text)}
+.sh>.tg{width:var(--hit);height:var(--hit);min-width:0;padding:0;margin-right:-6px;color:var(--text-3)}.sh>.tg:hover{background:none}
+.tg .chev{width:12px;height:12px;transition:transform var(--dur-2) var(--ease-io)}
+.tg[aria-expanded=true] .chev{transform:rotate(90deg)}
 .stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:underline}
 .stack .cnt{font:calc(11rem/14) var(--mono);color:var(--text-3)}
 .stack .cnt:not(.all-up){color:var(--text-2)}
-.stack>summary .hstrip{flex:none;width:44px;height:6px;opacity:.9}
+.sh .hstrip{flex:none;width:44px;height:6px;opacity:.9}
 .stack ul{list-style:none;margin:0 0 4px;padding:0}
 .ctr{display:flex;align-items:center;gap:2px}
 .ctr>a:first-child{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:26px;padding:0 8px 0 24px;border-radius:var(--r-sm);color:var(--text-2);font:calc(12.5rem/14) var(--mono)}
@@ -58,7 +58,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 /* the logs action of a tree item and of a stack: visible at rest (NAV-07) */
 .tree .ia.logs{width:26px;height:26px}
 .tree .ia.logs svg{width:14px;height:14px}
-.stack summary .ia.logs{width:24px;height:24px;margin:0 -2px}
+.sh .ia.logs{width:24px;height:24px;margin:0 -2px}
 .side-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:calc(11rem/14);color:var(--text-3);flex:none}
 .side-foot code{font-size:calc(11rem/14);color:var(--text-3)}
 .live{display:flex;align-items:center;gap:6px}
@@ -179,15 +179,15 @@ main>.banner{max-width:var(--page-max);margin:0 auto 16px}
 .live-off .dot{flex:none;background:var(--warn)}
 
 /* ---- motion ---- */
-.nav-item,.ctr>a:first-child,.icon-btn,.chip,.bb-i,.stack>summary,.menu-item{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.nav-item,.ctr>a:first-child,.icon-btn,.chip,.bb-i,.menu-item{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
 
 /* ---- 44 px targets on touch and phones (A11Y-18) ---- */
 @media (pointer:coarse),(max-width:699px){
- .tree .ia.logs,.stack summary .ia.logs{width:44px;height:44px;margin:0}
+ .tree .ia.logs,.sh .ia.logs{width:44px;height:44px;margin:0}
  .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px}
  .nav-item,.tree-filter input{height:44px}
  .tree-filter input{font-size:var(--fs-input)}
- .ctr>a:first-child,.stack>summary{height:44px}
+ .ctr>a:first-child,.sh{height:44px}
 }
 /* Compact text actions retain a keyboard and pointer target. */
 a.stack-name,.side-foot .keys-btn{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
