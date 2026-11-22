@@ -1,5 +1,5 @@
 import { ScrollTextIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { logsHref } from "../../app/paths.ts";
 import { containerHref } from "../../app/router.ts";
 import { bytes } from "../../format/index.ts";
@@ -23,21 +23,25 @@ export function MemoryMap({ rows }: { rows: MemoryRow[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const [[W, H], setSize] = useState([0, 0]);
   // ResizeObserver reports once on observe, then on every size change.
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setSize([el.clientWidth, el.clientHeight]));
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const w = Math.round(entry.contentRect.width), h = Math.round(entry.contentRect.height);
+      setSize((size) => size[0] === w && size[1] === h ? size : [w, h]);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
   const total = rows.reduce((n, r) => n + r.mem, 0);
   const map = W > 0 && H > 0 ? treemap(rows.map((r) => r.mem), W, H, MIN) : null;
+  const others = map ? rows.slice(map.shown) : [];
   return <>
     <p className="mm-sum"><b>{bytes(total)}</b> in {rows.length} containers</p>
     <div className="mm" ref={ref}>
       {map?.boxes.map(([x, y, w, h], i) => {
         const row = i < map.shown ? rows[i] : null;
-        const others = rows.slice(map.shown);
         const mem = row ? row.mem : others.reduce((n, r) => n + r.mem, 0);
         const label = row ? row.title : `+${others.length} others`;
         const share = total ? Math.round(mem / total * 100) : 0;

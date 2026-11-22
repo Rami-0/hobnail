@@ -1,7 +1,7 @@
 // React hooks over the live layer (runtime.ts). Each hook asks for what it
 // shows while mounted: the stream's topics follow the mounted hooks, and
 // the first one to mount fetches the initial data.
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useDeferredValue, useEffect, useSyncExternalStore } from "react";
 
 import type { Bootstrap } from "../api/gen/Bootstrap.ts";
 import type { ContainersView } from "../api/gen/ContainersView.ts";
@@ -85,7 +85,7 @@ export function useStat(name: string): Stat {
  */
 export function useStatsMap(enabled: boolean): ReadonlyMap<string, Stat> {
   const sub = useCallback((fn: () => void) => (enabled ? stats.subscribeAll(fn) : () => {}), [enabled]);
-  return useSyncExternalStore(sub, stats.snapshot, stats.snapshot);
+  return useDeferredValue(useSyncExternalStore(sub, stats.snapshot, stats.snapshot));
 }
 
 /** The latest host sample from the `system` topic; null until the first one. */

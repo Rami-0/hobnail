@@ -612,27 +612,7 @@ interface RowProps {
 /** Fields a row shows apart from the live numbers (those are the cells' own). */
 function sameRow(a: RowProps, b: RowProps): boolean {
   if (a.strip !== b.strip || a.host !== b.host || a.cells !== b.cells || a.stripStep !== b.stripStep) return false;
-  const x = a.row;
-  const y = b.row;
-  if (x === y) return Math.floor(a.now / 60) === Math.floor(b.now / 60);
-  // Uptime is shown in minutes at the finest: a new `now` matters once a minute.
-  if (Math.floor(a.now / 60) !== Math.floor(b.now / 60) && x.started_at !== null) return false;
-  return (
-    x.name === y.name &&
-    x.title === y.title &&
-    x.image === y.image &&
-    x.stack === y.stack &&
-    x.icon === y.icon &&
-    x.link === y.link &&
-    x.dot === y.dot &&
-    x.label === y.label &&
-    x.state === y.state &&
-    x.exit_code === y.exit_code &&
-    x.restarts === y.restarts &&
-    x.started_at === y.started_at &&
-    JSON.stringify(x.ports) === JSON.stringify(y.ports) &&
-    JSON.stringify(x.attention) === JSON.stringify(y.attention)
-  );
+  return a.row === b.row && Math.floor(a.now / 60) === Math.floor(b.now / 60);
 }
 
 const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: RowProps) {
@@ -740,7 +720,7 @@ function LiveCell({
 }) {
   const sub = useCallback((fn: () => void) => (visible ? cells.subscribe(name, fn) : () => {}), [cells, name, visible]);
   const cell = useSyncExternalStore(sub, () => cells.get(name));
-  const scale = useSyncExternalStore(near && visible ? cells.subscribeScale : noSub, cells.getScale);
+  const scale = useSyncExternalStore(near && visible ? cells.subscribeScale : noSub, () => cells.getScale()[kind]);
   const v = kind === "cpu" ? cell.cpu : cell.mem;
   return (
     <td className={`c-num c-${kind}`} data-l={kind === "cpu" ? "CPU" : "Memory"}>
@@ -748,7 +728,7 @@ function LiveCell({
       {running && near && (
         <Sparkline
           values={kind === "cpu" ? cell.cpuHist : cell.memHist}
-          max={kind === "cpu" ? scale.cpu : scale.mem}
+          max={scale}
           label=""
           color={kind === "cpu" ? "--ch-cpu" : "--ch-mem"}
           className="cell-spark"

@@ -4,6 +4,7 @@ import { eventLabel } from "../container/events.ts";
 import { logsHref } from "../../app/paths.ts";
 import { lazy, Suspense, memo, useEffect, useState } from "react";
 import { NearCharts } from "../container/NearCharts.tsx";
+import type { GroupRow } from "../../api/gen/GroupRow.ts";
 import type { OverviewView } from "../../api/gen/OverviewView.ts";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
 import type { BookmarkView } from "../../api/gen/BookmarkView.ts";
@@ -51,9 +52,7 @@ export default function Overview() {
   }, [allowed]);
   const { data: bookmarks } = useRead<BookmarkView[]>(allowed ? "/api/v1/bookmarks" : null);
   const { data: containers } = useContainers();
-  const stats = useStatsMap(allowed && !!boot?.features.stats);
   const strips = useStrips();
-  const system = useSystem();
   useEffect(() => {
     if (!allowed) return;
     const mark = () => {
@@ -75,15 +74,9 @@ export default function Overview() {
     const group = bookmark.group || "Bookmarks";
     bookmarkGroups.set(group, [...bookmarkGroups.get(group) ?? [], bookmark]);
   }
-  const groups = containers?.groups ?? [];
+  const groups = containers.groups;
   const rows = groups.flatMap((g) => g.containers);
   const names = new Set(rows.map((r) => r.name));
-  const consumers = (rows.length ? rows : overview?.consumers ?? []).map((r) => {
-    const s = stats.get(r.name);
-    return { name: r.name, title: r.title, stack: "stack" in r && typeof r.stack === "string" ? r.stack : "", cpu: s?.cpu_pct ?? r.cpu_pct, mem: s?.mem_bytes ?? r.mem_bytes };
-  });
-  const top = consumers.filter((r) => r.cpu !== null).toSorted((a, b) => (b.cpu ?? 0) - (a.cpu ?? 0)).slice(0, 8);
-  const memory = consumers.flatMap((r) => r.mem ? [{ ...r, mem: r.mem }] : []).toSorted((a, b) => b.mem - a.mem);
   const running = groups.reduce((n, g) => n + g.running, 0);
   const stopped = groups.reduce((n, g) => n + g.stopped, 0);
   const problems = rows.filter((r) => r.attention !== null).length;
@@ -151,17 +144,10 @@ export default function Overview() {
     </section>
     {boot?.features.system && <section className="sec">
       <div className="sec-h"><h2 className="label">Host</h2><a className="more" href="/app/host">Host details <ArrowRightIcon aria-hidden="true" /></a></div>
-      <HostStrip system={system} />
+      <HostStrip />
       {!!overview.hour.length && <HostCharts overview={overview} recording={boot.features.history} />}
     </section>}
-    {boot?.features.stats && <section className="overview-consumers" aria-label="Where resources go">
-        <div className="panel res-mem"><div className="panel-h"><h2>Memory by container</h2><a className="more" href="/app/containers?sort=mem">All <ArrowRightIcon aria-hidden="true" /></a></div>
-          {memory.length ? <MemoryMap rows={memory} /> : <p>No memory samples yet.</p>}</div>
-        <div className="panel res-cpu"><div className="panel-h"><h2>Top CPU</h2><a className="more" href="/app/containers?sort=cpu">All <ArrowRightIcon aria-hidden="true" /></a></div>{!top.length && <p>No CPU samples yet.</p>}<ul className="history-events">{top.map((r) => <li key={r.name}>
-          <a href={containerHref(r.name)}>{r.title}</a> · {pct(r.cpu)}
-          <Meter value={r.cpu ?? 0} max={Math.max(100, top[0]?.cpu ?? 0)} label={`${r.title} CPU`} />
-        </li>)}</ul></div>
-    </section>}
+    {boot?.features.stats && <ResourceConsumers groups={groups} fallback={overview.consumers} />}
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
       {admin && <a href="/app/overview?add=widget">Add widget</a>}
       <div className="overview-widget-grid">{widgets?.map((widget) => widgetUpdates[widget.id] ?? widget).map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
@@ -196,7 +182,27 @@ function rate(value: number | null | undefined) {
   return typeof value === "number" ? bytes(value) + "/s" : "—";
 }
 
-function HostStrip({ system }: { system: ReturnType<typeof useSystem> }) {
+const ResourceConsumers = memo(function ResourceConsumers({ groups, fallback }: { groups: GroupRow[]; fallback: OverviewView["consumers"] }) {
+  const stats = useStatsMap(true);
+  const rows = groups.flatMap((g) => g.containers);
+  const consumers = (rows.length ? rows : fallback).map((r) => {
+    const s = stats.get(r.name);
+    return { name: r.name, title: r.title, stack: "stack" in r && typeof r.stack === "string" ? r.stack : "", cpu: s?.cpu_pct ?? r.cpu_pct, mem: s?.mem_bytes ?? r.mem_bytes };
+  });
+  const top = consumers.filter((r) => r.cpu !== null).toSorted((a, b) => (b.cpu ?? 0) - (a.cpu ?? 0)).slice(0, 8);
+  const memory = consumers.flatMap((r) => r.mem ? [{ ...r, mem: r.mem }] : []).toSorted((a, b) => b.mem - a.mem);
+  return <section className="overview-consumers" aria-label="Where resources go">
+    <div className="panel res-mem"><div className="panel-h"><h2>Memory by container</h2><a className="more" href="/app/containers?sort=mem">All <ArrowRightIcon aria-hidden="true" /></a></div>
+      {memory.length ? <MemoryMap rows={memory} /> : <p>No memory samples yet.</p>}</div>
+    <div className="panel res-cpu"><div className="panel-h"><h2>Top CPU</h2><a className="more" href="/app/containers?sort=cpu">All <ArrowRightIcon aria-hidden="true" /></a></div>{!top.length && <p>No CPU samples yet.</p>}<ul className="history-events">{top.map((r) => <li key={r.name}>
+      <a href={containerHref(r.name)}>{r.title}</a> · {pct(r.cpu)}
+      <Meter value={r.cpu ?? 0} max={Math.max(100, top[0]?.cpu ?? 0)} label={`${r.title} CPU`} />
+    </li>)}</ul></div>
+  </section>;
+});
+
+function HostStrip() {
+  const system = useSystem();
   const disk = system?.disks.find((volume) => volume.total > 0);
   const temperature = system?.temp_c;
   const widgets = [

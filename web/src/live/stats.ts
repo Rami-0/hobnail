@@ -20,7 +20,7 @@ export class StatsHub {
   private byName = new Map<string, Set<() => void>>();
   private batch = new Set<(changed: readonly string[]) => void>();
   private ver = 0;
-  private snap: ReadonlyMap<string, Stat> = new Map();
+  private snap: ReadonlyMap<string, Stat> | null = null;
 
   get = (name: string): Stat => this.map.get(name) ?? NO_STAT;
 
@@ -28,7 +28,7 @@ export class StatsHub {
   version = (): number => this.ver;
 
   /** Every container's numbers; a new map after each change (an immutable snapshot). */
-  snapshot = (): ReadonlyMap<string, Stat> => this.snap;
+  snapshot = (): ReadonlyMap<string, Stat> => (this.snap ??= new Map(this.map));
 
   names(): IterableIterator<string> {
     return this.map.keys();
@@ -92,7 +92,7 @@ export class StatsHub {
   private emit(changed: string[], removed: boolean): void {
     if (!changed.length && !removed) return;
     this.ver++;
-    this.snap = new Map(this.map);
+    this.snap = null;
     for (const n of changed) {
       const s = this.byName.get(n);
       if (s) for (const fn of Array.from(s)) fn();
