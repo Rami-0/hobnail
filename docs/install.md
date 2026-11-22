@@ -96,8 +96,8 @@ those lines can live outside git. Consider a socket proxy (e.g.
 Before upgrading, stop Hobnail and copy the data volume, including
 `hobnail.db` and any SQLite WAL sidecar, to a separate backup location.
 For an online backup, use SQLite's backup command to make a consistent copy.
-Keep the previous image or binary version. The provider framework upgrades
-the database to schema version 14. Older builds refuse to open a database
+Keep the previous image or binary version. This release upgrades the
+database to schema version 15. Older builds refuse to open a database
 with a newer schema version and run with database-backed features disabled.
 
 To roll back, stop the upgraded instance and keep its data volume separately
