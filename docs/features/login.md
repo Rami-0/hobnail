@@ -128,13 +128,22 @@ unknown or disabled account, back-off refusal after queueing, and success)
 is answered no earlier than a floor after it obtained the single credential
 permit, and the permit is held until then. A queued request therefore waits
 for the previous holder's deadline rather than its hash, and a client that
-disconnects does not release the permit early. The floor is twice
-the slowest current-profile password verification of the last two and a
-half to five minutes (or the latest one when there is none that recent),
-at least 150 ms and at most 500 ms. Only real current-profile verifications
-are measured: never a legacy one, whose time would reveal the profile, and
-never a request refused before hashing. A slow outlier stops widening the
-floor within five minutes; at the cap, two sign-ins a second still pass.
+disconnects does not release the permit early.
+
+The floor is an estimate of a legacy verification: twice the slowest
+current-profile verification of the last two and a half to five minutes,
+plus 50 ms, at least 150 ms and at most two seconds. A legacy verify costs
+1.09 times a current one by memory and passes, and 1.55 times in M5.
+Only current-profile verifications are measured, including the dummy
+record checked for unknown and disabled accounts. Legacy verifications are
+never measured, so the floor does not move in a way that depends on which
+account was tried. Requests refused before hashing record nothing. When
+nothing recent was measured, the latest sample holds, so the floor does not
+fall below the last measured hash speed. A slow outlier ages out within five
+minutes. An operation that still runs past its floor is answered two
+seconds after it obtained the permit, so the size of an overrun is not
+measurable.
+
 While legacy hashes remain, the server verifies one current-profile dummy
 hash at start (under the credential permit) so the floor is measured
 before the first sign-in. This raised the boot peak from about 4.2 MiB to
@@ -143,10 +152,13 @@ about 8.8 MiB in M5 measurements, well under a 20 MiB limit.
 In a loopback test of the pre-fix release, 30 failed attempts per profile
 had medians of 68.85 ms for legacy hashes, 44.52 ms for current hashes and
 51.44 ms for unknown accounts. Their maxima were 82.52, 67.69 and 106.20 ms,
-respectively. The factor of two covers that 1.55 legacy/current ratio. On
-hardware where a legacy verification takes longer than the floor (beyond
-500 ms, or above twice the recent current-profile time), and in normal
-variation under load, response times can still differ between profiles.
+respectively. Residual risk: a legacy verification slower than the
+estimate (for example right after the host's load rises, before a current
+verification has measured it) answers at the two-second overrun time,
+which differs from the usual answer time. Past two seconds no padding is
+applied. On hardware where a current verification takes about 975 ms or
+more, the floor sits at two seconds and sign-ins are limited to about one
+every two seconds while legacy hashes remain.
 
 Cold SQLite reads can also raise the container's reported memory usage. The
 kernel charges file-cache pages to the container that brings them into cache

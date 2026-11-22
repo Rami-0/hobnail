@@ -38,10 +38,18 @@ const CREDENTIAL_WAIT: Duration = Duration::from_secs(5);
 /// Sign-in responses while legacy hashes remain take at least this long
 /// after the request obtains the credential permit.
 pub(crate) const MIN_CREDENTIAL_FLOOR: Duration = Duration::from_millis(150);
-/// Upper bound of the adaptive floor. It covers a current-profile verify of
-/// 250 ms (over five times the 45 ms measured in M5) and still lets two
-/// sign-ins a second through while legacy hashes remain.
-pub(crate) const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_millis(500);
+/// The most the floor can grow to, and the fixed answer time (from obtaining
+/// the permit) of any operation that outran its floor. With the factor and
+/// margin below it covers the legacy estimate for current-profile verifies
+/// up to 975 ms, over 20 times the 45 ms measured in M5.
+pub(crate) const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_secs(2);
+/// Legacy verify cost relative to a current one. By work alone it is
+/// 19,456 KiB x 2 / (7,168 KiB x 5) = 1.09; M5 measured 1.55 (68.85 / 44.52 ms
+/// medians); 2 leaves room above that.
+const LEGACY_COST_FACTOR: u32 = 2;
+/// Added to the scaled estimate for scheduling jitter (the M5 legacy maximum
+/// was 82.52 ms against a 44.52 ms current median: 2 x 44.52 + 50 covers it).
+const LEGACY_MARGIN: Duration = Duration::from_millis(50);
 /// Verify times are kept for one to two of these windows.
 const SAMPLE_WINDOW: Duration = Duration::from_secs(150);
 
@@ -64,10 +72,12 @@ impl Default for CredentialQueue {
     }
 }
 
-/// Current-profile verify times: the maximum over the last 150 to 300
-/// seconds, falling back to the latest sample once both windows are empty.
-/// An outlier (a loaded host) therefore stops widening the floor within
-/// five minutes, and only real verifications are recorded.
+/// Current-profile verify times (real accounts and the dummy record used for
+/// unknown and disabled ones): the maximum over the last 150 to 300 seconds,
+/// falling back to the latest sample once both windows are empty. An outlier
+/// (a loaded host) therefore stops widening the floor within five minutes.
+/// Legacy verifications are never recorded: the bound must not move in a way
+/// that depends on which account was tried.
 #[derive(Debug)]
 struct VerifySamples {
     started: Instant,
@@ -153,14 +163,27 @@ fn may_verify(state: &AppState, stored: &str) -> bool {
     false
 }
 
-/// Twice the recent current-profile verify time. Legacy verifies are never
-/// measured (their time would move the floor and reveal which profile the
-/// previous holder checked); they are derived instead. By work alone a
-/// legacy verify costs 19,456 KiB x 2 / (7,168 KiB x 5) = 1.09 times a
-/// current one; M5 measured 1.55 (68.85 / 44.52 ms medians), and 2 leaves
-/// room above that.
-fn credential_floor(verify: Duration) -> Duration {
-    (verify * 2).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
+/// The floor for a current-profile bound: the legacy estimate (the bound
+/// scaled by [`LEGACY_COST_FACTOR`] plus [`LEGACY_MARGIN`]), so every padded
+/// attempt, legacy or not, answers at the same time; at least 150 ms and at
+/// most [`MAX_CREDENTIAL_FLOOR`].
+fn credential_floor(bound: Duration) -> Duration {
+    (bound * LEGACY_COST_FACTOR + LEGACY_MARGIN).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
+}
+
+/// When to answer: at the floor deadline, or, if the work ran past it, at the
+/// fixed cap, so how far it overran is not measurable. Work that outlasts
+/// even the cap is answered when it ends.
+fn answer_at(
+    acquired: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+    finished: tokio::time::Instant,
+) -> tokio::time::Instant {
+    if finished <= deadline {
+        deadline
+    } else {
+        finished.max(acquired + MAX_CREDENTIAL_FLOOR)
+    }
 }
 
 impl CredentialQueue {
@@ -1025,7 +1048,8 @@ async fn run_credential(
     action: CredentialAction,
     credentials: Credentials,
 ) -> Result<String, Attempt> {
-    let deadline = tokio::time::Instant::now() + state.credential_queue.floor();
+    let acquired = tokio::time::Instant::now();
+    let deadline = acquired + state.credential_queue.floor();
     let st = state.clone();
     let task = tokio::spawn(async move {
         let joined = tokio::task::spawn_blocking(move || {
@@ -1040,7 +1064,8 @@ async fn run_credential(
         .await;
         let (outcome, padded) = joined.unwrap_or((Err(Attempt::Failed), true));
         if padded {
-            tokio::time::sleep_until(deadline).await;
+            let finished = tokio::time::Instant::now();
+            tokio::time::sleep_until(answer_at(acquired, deadline, finished)).await;
         }
         drop(permit);
         outcome
@@ -1051,7 +1076,8 @@ async fn run_credential(
 /// Measures one current-profile verify at boot, so the floor is not just
 /// the 150 ms constant until the first sign-in after a restart. Runs only
 /// while legacy hashes remain (the floor applies only then), under the
-/// permit, so it never overlaps a sign-in; it costs one 7 MiB hash.
+/// permit, so it never overlaps a sign-in; it costs one 7 MiB hash. The
+/// legacy estimate is derived from it (no 19 MiB hash runs at boot).
 pub(crate) async fn calibrate_floor(state: &Arc<AppState>) {
     let Some(permit) = state.credential_queue.acquire().await else {
         return;
@@ -1271,47 +1297,61 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[test]
-    fn credential_floor_follows_recent_verifies_within_bounds() {
+    fn the_floor_is_the_scaled_legacy_estimate_of_recent_verifies() {
+        let ms = Duration::from_millis;
         assert_eq!(credential_floor(Duration::ZERO), MIN_CREDENTIAL_FLOOR);
-        assert_eq!(
-            credential_floor(Duration::from_millis(69)),
-            MIN_CREDENTIAL_FLOOR
-        );
-        assert_eq!(
-            credential_floor(Duration::from_millis(200)),
-            Duration::from_millis(400)
-        );
-        assert_eq!(
-            credential_floor(Duration::from_secs(9)),
-            MAX_CREDENTIAL_FLOOR
-        );
+        assert_eq!(credential_floor(ms(45)), MIN_CREDENTIAL_FLOOR);
+        assert_eq!(credential_floor(ms(200)), ms(450));
+        assert_eq!(credential_floor(ms(975)), MAX_CREDENTIAL_FLOOR);
+        assert_eq!(credential_floor(ms(9_000)), MAX_CREDENTIAL_FLOOR);
 
         let queue = CredentialQueue::default();
         let t0 = Instant::now();
-        let ms = Duration::from_millis;
         assert_eq!(queue.floor_at(t0), MIN_CREDENTIAL_FLOOR, "no sample yet");
-        queue.observe_verify(ms(240), t0); // an outlier under load
-        queue.observe_verify(ms(90), t0 + ms(10));
-        assert_eq!(queue.floor_at(t0 + ms(20)), ms(480));
+        queue.observe_verify(ms(400), t0); // an outlier under load
+        queue.observe_verify(ms(45), t0 + ms(10));
+        assert_eq!(queue.floor_at(t0 + ms(20)), ms(850));
         // Still inside the previous window.
         let later = t0 + SAMPLE_WINDOW + ms(30);
-        queue.observe_verify(ms(100), later);
-        assert_eq!(queue.floor_at(later), ms(480));
-        // Two windows on, only the newer samples count.
+        queue.observe_verify(ms(60), later);
+        assert_eq!(queue.floor_at(later), ms(850));
+        // Two windows on, the outlier is gone: 2 x 60 + 50 ms.
         let much_later = later + SAMPLE_WINDOW;
-        assert_eq!(queue.floor_at(much_later), ms(200));
-        // Without any recent sample the latest one is kept.
-        let idle = much_later + SAMPLE_WINDOW * 2;
-        assert_eq!(queue.floor_at(idle), ms(200));
+        assert_eq!(queue.floor_at(much_later), ms(170));
+        // Without a recent sample the latest one holds: never below the
+        // estimate of the last measured hash speed.
+        queue.observe_verify(ms(300), much_later);
+        assert_eq!(queue.floor_at(much_later + SAMPLE_WINDOW * 5), ms(650));
     }
 
     #[test]
-    fn only_current_profile_verifies_are_measured() {
+    fn an_overrun_answers_at_the_fixed_cap() {
+        let t0 = tokio::time::Instant::now();
+        let ms = Duration::from_millis;
+        let deadline = t0 + ms(150);
+        assert_eq!(answer_at(t0, deadline, t0 + ms(80)), deadline);
+        assert_eq!(answer_at(t0, deadline, deadline), deadline);
+        assert_eq!(
+            answer_at(t0, deadline, t0 + ms(151)),
+            t0 + MAX_CREDENTIAL_FLOOR
+        );
+        assert_eq!(
+            answer_at(t0, deadline, t0 + ms(1999)),
+            t0 + MAX_CREDENTIAL_FLOOR
+        );
+        assert_eq!(answer_at(t0, deadline, t0 + ms(2500)), t0 + ms(2500));
+    }
+
+    #[test]
+    fn legacy_account_attempts_never_change_the_bound() {
         let state = crate::testutil::state_with(vec![], "");
-        let legacy = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        state.db.recover_owner(None, legacy, 0).unwrap();
+        let legacy = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &legacy, 0).unwrap();
         let state = with_memory_limit(state, || None);
-        // A legacy verify (or a request rejected before hashing) leaves no sample.
+        let snapshot = |st: &AppState| format!("{:?}", st.credential_queue.samples.lock().unwrap());
+        let before = snapshot(&state);
+        // A wrong password, a refusal before hashing, and the same under a
+        // memory limit that refuses the legacy verify.
         assert!(matches!(
             login_attempt(&state, 1, "admin", "wrong horse"),
             Err(Attempt::Wrong)
@@ -1320,21 +1360,22 @@ mod tests {
             login_attempt(&state, 1, "admin", "wrong horse"),
             Err(Attempt::Limited(_))
         ));
-        let samples = state.credential_queue.samples.lock().unwrap();
-        assert!(samples.latest.is_zero(), "{samples:?}");
-        drop(samples);
-        // An unknown account verifies the current-profile dummy: measured.
+        let state = with_memory_limit(state, || Some(20 << 20));
         assert!(matches!(
-            login_attempt(&state, 2, "nobody", "wrong horse"),
+            login_attempt(&state, 2, "admin", "correct horse"),
             Err(Attempt::Wrong)
         ));
-        assert!(!state
-            .credential_queue
-            .samples
-            .lock()
-            .unwrap()
-            .latest
-            .is_zero());
+        assert_eq!(snapshot(&state), before);
+        // A successful legacy sign-in rehashes, still without a sample.
+        let state = with_memory_limit(state, || None);
+        login_attempt(&state, 3, "admin", "correct horse").unwrap();
+        assert_eq!(snapshot(&state), before);
+        // An unknown account verifies the current-profile dummy: recorded.
+        assert!(matches!(
+            login_attempt(&state, 4, "nobody", "wrong horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert_ne!(snapshot(&state), before);
     }
 
     #[tokio::test]
