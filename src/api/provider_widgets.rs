@@ -378,7 +378,12 @@ pub(super) fn placements_changed(state: &AppState) {
     state.wake.notify_one();
 }
 
-fn cache_key(provider: &str, integration: &str, widget: &str, options: &Values) -> String {
+pub(super) fn cache_key(
+    provider: &str,
+    integration: &str,
+    widget: &str,
+    options: &Values,
+) -> String {
     let mut inputs = options.clone();
     inputs.remove("refresh");
     let material =
@@ -719,7 +724,7 @@ pub(crate) fn poll(
                     ..Default::default()
                 };
                 match result {
-                    Ok(body) => output.structured = Some(body),
+                    Ok(body) => output.structured = Some(Arc::new(body)),
                     Err(error) => output.error = Some(error.class.message().into()),
                 }
                 let _ = state.db.dashboard(|conn| -> rusqlite::Result<()> {

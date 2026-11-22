@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use hyper::{Response, StatusCode};
 use serde::Serialize;
 
@@ -20,10 +22,28 @@ pub(super) struct WidgetView {
     body: Option<WidgetBody>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
-    structured: Option<StructuredBody>,
+    structured: Option<Arc<StructuredBody>>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     values: std::collections::BTreeMap<String, serde_json::Value>,
     error: Option<String>,
+}
+
+impl WidgetView {
+    pub(super) fn fit_board_budget(&mut self, remaining: &mut usize) {
+        if self.body.is_none() && self.structured.is_none() && self.values.is_empty() {
+            return;
+        }
+        let mut size = super::boards::JsonSize::default();
+        if serde_json::to_writer(&mut size, &self).is_ok() && size.0 <= *remaining {
+            *remaining -= size.0;
+        } else {
+            self.body = None;
+            self.structured = None;
+            self.values.clear();
+            self.status = "error";
+            self.error = Some("Widget data unavailable within the board response limit.".into());
+        }
+    }
 }
 
 pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {

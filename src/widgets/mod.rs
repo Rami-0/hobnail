@@ -85,6 +85,7 @@ pub use rich::{RichBlock, RichKind, RichSpan};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -318,7 +319,7 @@ pub struct WidgetOutput {
     #[serde(skip)]
     pub display: WidgetBody,
     #[serde(skip)]
-    pub structured: Option<StructuredBody>,
+    pub structured: Option<Arc<StructuredBody>>,
     /// Extracted values by name, for alert rules (`widget` rules read these).
     /// Every field, plus `_status` (HTTP status / exit code), `_ms`
     /// (latency), `_ok` (status rule result, when one is set) and `_text`
@@ -363,10 +364,9 @@ fn value_bytes(value: &Value) -> usize {
 impl WidgetOutput {
     fn retained_bytes(&self) -> usize {
         size_of::<Self>()
-            + self
-                .structured
-                .as_ref()
-                .map_or(0, StructuredBody::retained_bytes)
+            + self.structured.as_ref().map_or(0, |body| {
+                size_of::<StructuredBody>() + 2 * size_of::<usize>() + body.retained_bytes()
+            })
             + self.display.rows.capacity() * size_of::<(String, String)>()
             + self
                 .display

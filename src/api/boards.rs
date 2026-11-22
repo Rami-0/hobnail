@@ -17,6 +17,43 @@ use crate::{http::server::Body, model::Container, state::AppState};
 // after the server adds section and item IDs.
 const MAX_DOCUMENT: usize = 2 * 1024 * 1024;
 
+// Reserve most of the response for the editable document and resolved metadata.
+const MAX_BOARD_RESPONSE: usize = 4 * 1024 * 1024;
+const BOARD_WIDGET_BYTES: usize = 512 * 1024;
+
+#[derive(Default)]
+pub(super) struct JsonSize(pub usize);
+
+impl std::io::Write for JsonSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 += bytes.len();
+        if self.0 > MAX_BOARD_RESPONSE {
+            return Err(std::io::Error::other(
+                "board response exceeded its size limit",
+            ));
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn board_response(view: &BoardView) -> Result<Response<Body>, ApiError> {
+    let mut size = JsonSize::default();
+    serde_json::to_writer(&mut size, view).map_err(|_| {
+        ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "board_too_large",
+            "Board metadata exceeds the 4 MiB response limit.",
+        )
+    })?;
+    let mut bytes = Vec::with_capacity(size.0);
+    serde_json::to_writer(&mut bytes, view).expect("board view serialized during sizing");
+    Ok(super::json_bytes(StatusCode::OK, bytes))
+}
+
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardSummary {
@@ -877,6 +914,7 @@ fn resolve(
         }
     }
     let mut resolved = Vec::new();
+    let mut widget_budget = BOARD_WIDGET_BYTES;
     for item in document.sections.iter().flat_map(|s| &s.items) {
         let mut container = None;
         let mut integration = None;
@@ -912,6 +950,9 @@ fn resolve(
                         .find(|w| w.id == *widget_id)
                         .map(|config| super::widgets::view(state, config))
                 };
+                if let Some(widget) = &mut widget {
+                    widget.fit_board_budget(&mut widget_budget);
+                }
                 widget.is_none()
             }
             BoardPayload::Integration { integration_id, .. } => {
@@ -1091,10 +1132,7 @@ pub(super) async fn route(
                 mask_provider_widgets(c, id, user, &mut doc)?;
                 Ok((board, doc, integrations::list(state, c, user)?))
             })?;
-            super::json(
-                StatusCode::OK,
-                &resolve(state, now, board, doc, visible, user),
-            )
+            board_response(&resolve(state, now, board, doc, visible, user))?
         }
         Handler::BoardSuggestions => {
             let (doc, integrations, targets) = db.dashboard(|c| -> Result<_, ApiError> {
@@ -1146,10 +1184,7 @@ pub(super) async fn route(
                     super::provider_widgets::placements_changed(state);
                     publish(state, id, board.version);
                     state.changed("groups");
-                    super::json(
-                        StatusCode::OK,
-                        &resolve(state, now, board, doc, visible, user),
-                    )
+                    board_response(&resolve(state, now, board, doc, visible, user))?
                 }
                 Err(version) => conflict(version),
             }
@@ -1254,6 +1289,105 @@ pub(super) fn publish(state: &AppState, id: &str, version: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn full_board_shares_cached_widget_bodies_and_bounds_response_allocation() {
+        use super::super::provider_widgets::cache_key;
+        use crate::{
+            providers::Values,
+            testutil::{measure_allocations, state_with},
+            widgets::{StructuredBody, WidgetOutput},
+        };
+        use http_body_util::BodyExt;
+
+        let state = state_with(vec![], "");
+        state.db.recover_owner(None, "fixture-owner", 1).unwrap();
+        let owner = state.db.accounts().unwrap().pop().unwrap();
+        let mut document = BoardDocument {
+            version: 0,
+            sections: vec![BoardSection {
+                id: None,
+                title: "Widgets".into(),
+                position: 0,
+                items: Vec::new(),
+            }],
+        };
+        let board = state.db.dashboard(|conn| -> rusqlite::Result<_> {
+            conn.execute("INSERT INTO boards (id,name,created,updated) VALUES ('fixture','Board',0,0)", [])?;
+            conn.execute(
+                "INSERT INTO integrations (id,name,kind,origin) VALUES ('clock','Fixture','clock','')",
+                [],
+            )?;
+            for position in 0..512 {
+                let id = format!("{position:032x}");
+                let widget_id = format!("provider:{id}");
+                conn.execute(
+                    "INSERT INTO provider_widgets VALUES (?1,'clock','fixture','clock','{}')",
+                    [&widget_id],
+                )?;
+                let payload = BoardPayload::Widget { widget_id, title: None };
+                conn.execute(
+                    "INSERT INTO board_items (id,board_id,kind,config) VALUES (?1,'fixture','widget',?2)",
+                    params![id, serde_json::to_string(&payload).unwrap()],
+                )?;
+                document.sections[0].items.push(BoardItem {
+                    id: Some(id),
+                    position,
+                    spans: GridSpans::default(),
+                    payload,
+                });
+            }
+            Ok(get(conn, "fixture").unwrap())
+        }).unwrap();
+        let body = std::sync::Arc::new(StructuredBody::Stat {
+            value: "x".repeat(31_000),
+        });
+        {
+            let mut cache = state.widgets.lock().unwrap();
+            let key = cache_key("clock", "clock", "clock", &Values::new());
+            let attempt = cache.begin(&key);
+            assert!(cache.record(
+                &key,
+                attempt,
+                std::time::Instant::now(),
+                WidgetOutput {
+                    structured: Some(body.clone()),
+                    ..Default::default()
+                }
+            ));
+        }
+        let ((response, shown), peak) = measure_allocations(|| {
+            let view = resolve(&state, 1, board, document, vec![], &owner);
+            let shown = std::sync::Arc::strong_count(&body) - 2;
+            (board_response(&view).unwrap(), shown)
+        });
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        println!(
+            "full board response: {} bytes, peak additional heap: {} bytes",
+            bytes.len(),
+            peak
+        );
+        assert!(
+            (1..32).contains(&shown),
+            "expected only budgeted Arc references"
+        );
+        assert!(bytes.len() < 768 * 1024);
+        assert!(peak < 1024 * 1024);
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let resolved = json["resolved"].as_array().unwrap();
+        assert_eq!(resolved.len(), 512);
+        assert_eq!(
+            resolved
+                .iter()
+                .filter(|item| item["widget"].get("structured").is_some())
+                .count(),
+            shown
+        );
+        assert_eq!(
+            resolved[511]["widget"]["error"],
+            "Widget data unavailable within the board response limit."
+        );
+    }
 
     #[test]
     fn board_validation_checks_ids_links_spans_and_targets() {

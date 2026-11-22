@@ -220,7 +220,11 @@ pub(crate) async fn route(
 
 /// A JSON response that no cache stores (every `/api/v1` answer).
 pub fn json(status: StatusCode, v: &impl Serialize) -> Response<Body> {
-    let mut r = full(status, serde_json::to_vec(v).unwrap_or_default());
+    json_bytes(status, serde_json::to_vec(v).unwrap_or_default())
+}
+
+fn json_bytes(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
+    let mut r = full(status, bytes);
     set(&mut r, CONTENT_TYPE, "application/json");
     set(&mut r, CACHE_CONTROL, "no-store");
     r
