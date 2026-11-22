@@ -41,8 +41,7 @@
 .tree-note svg{width:14px;height:14px;flex:none}
 .tree-note.bad{color:var(--bad-fg)}
 .sh{display:flex;align-items:center;gap:6px;height:28px;padding-right:8px;border-radius:var(--r-sm);color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600}
-.sh:hover{background:var(--surface-2);color:var(--text)}
-.sh>.tg{flex:none;width:var(--hit);height:var(--hit);min-width:0;padding:0;margin-right:-6px;color:var(--text-3)}.sh>.tg:hover{background:none}
+.sh>.tg{flex:none;width:var(--hit);height:var(--hit);min-width:0;padding:0;margin-right:-6px;color:var(--text-3)}
 .tg .chev{width:12px;height:12px;transition:transform var(--dur-2) var(--ease-io)}
 .tg[aria-expanded=true] .chev{transform:rotate(90deg)}
 .stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

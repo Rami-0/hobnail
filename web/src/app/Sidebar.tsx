@@ -148,10 +148,11 @@ const StackItem = memo(function StackItem({
   const open = filtering || hasActive || !folded;
   return (
     // Not <details>: its <summary> may not hold the stack's links (nested
-    // controls). The toggle spans the row; the links sit above it.
+    // controls). The chevron folds the stack; the name links to its
+    // containers. Each shows its own hover.
     <div className="stack" data-testid="tree-stack" data-stack={stack.name}>
       <div className={hasActive ? "sh cur" : "sh"}>
-        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={stack.title} onClick={() => { if (!filtering) onFold(stack.name, open); }}>{CHEVRON_RIGHT_ICON}</Button>
+        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={`${open ? "Fold" : "Show"} ${stack.title}`} onClick={() => { if (!filtering) onFold(stack.name, open); }}>{CHEVRON_RIGHT_ICON}</Button>
         <a className="stack-name" href={`${appHref("/containers")}?stack=${encodeURIComponent(stack.name)}`} title={stack.title}>
           {stack.title}
         </a>

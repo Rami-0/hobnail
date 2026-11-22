@@ -205,8 +205,15 @@ export const flows = {
     await h.state("signed in again");
   },
   async overview(h, f) {
+    const { page } = h;
     await go(h, f, "/app/overview", `${tid("overview")} .overview-counts`);
     await h.state("overview");
+    // Each stack's fold toggle says what it does and is not named like the
+    // stack's own link.
+    const toggles = await page.$$eval(`${tid("tree-stack")} .sh`, (rows) => rows.map((r) => ({ tg: r.querySelector(".tg")?.getAttribute("aria-label"), open: r.querySelector(".tg")?.getAttribute("aria-expanded"), link: r.querySelector(".stack-name")?.textContent.trim() })));
+    // (Phones mount the tree only in the open drawer.)
+    if (h.profile.width >= 700) assert.ok(toggles.length > 0, "the sidebar lists stacks");
+    for (const t of toggles) assert.equal(t.tg, `${t.open === "true" ? "Fold" : "Show"} ${t.link}`, "fold toggle label");
     await go(h, f, "/app/host", tid("host-sample"));
     await h.state("host");
     await go(h, f, "/app/alerts", tid("alerts"));
