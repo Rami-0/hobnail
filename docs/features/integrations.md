@@ -845,6 +845,12 @@ or formatting it so an encoded credential cannot survive as a partial display
 value. The redactor checks up to 128 KiB per string, 32 distinct secret values
 up to 16 KiB apiece, and three layers of percent, JSON and common HTML escapes.
 It withholds a string or link that exceeds the applicable bounds.
+Matching is exact, so the redactor does not detect every echo of a secret. It
+misses a secret whose letter case was changed or that was re-encoded in hex.
+It also misses a secret Base64-encoded inside a larger blob, unless the secret
+starts the encoded data on a 3-byte boundary, because the surrounding bytes
+change its encoding. A provider must not display fields that can carry such
+echoes.
 Exercise connection tests and fetches against a local fake service.
 
 See [Boards](boards.md), [Login and security](login.md) and [API](../api.md).
