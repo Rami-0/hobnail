@@ -715,16 +715,26 @@ fn commit(
         .filter(|item| item.included && !item.incomplete())
     {
         let local = |error| item_error(&item.id, error);
-        let (reuse, unique) = match &item.target {
-            SetupTarget::Provider { provider, .. }
-                if integrations::provider(provider)
-                    .is_ok_and(|provider| !provider.has_endpoint()) =>
-            {
-                return Err(local(ApiError::bad_request(
-                    "Add this widget from the integration catalog after setup.",
-                    Some("provider"),
-                )));
+        let endpoint_free = match &item.target {
+            SetupTarget::Provider { provider, .. } => {
+                integrations::provider(provider).is_ok_and(|provider| !provider.has_endpoint())
             }
+            SetupTarget::Board {
+                payload: BoardPayload::Integration { integration_id, .. },
+            } => conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM integrations WHERE id=?1 AND origin='')",
+                [integration_id],
+                |row| row.get(0),
+            )?,
+            _ => false,
+        };
+        if endpoint_free {
+            return Err(local(ApiError::bad_request(
+                "Add this widget from the integration catalog after setup.",
+                Some("provider"),
+            )));
+        }
+        let (reuse, unique) = match &item.target {
             SetupTarget::Provider {
                 provider, base_url, ..
             } => {
@@ -824,7 +834,7 @@ pub(super) async fn route(
             let integrations = db.dashboard(|conn| {
                 let saved = read(conn, user.id)?;
                 require_revision(&saved, saved.revision)?;
-                integrations::suggestion_targets(conn, user)
+                integrations::suggestion_targets(conn, user, false)
             })?;
             let snap = state.snapshot();
             let docker = if !config.docker.enabled {

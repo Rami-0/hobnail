@@ -201,9 +201,13 @@ pub(super) fn list(
 pub(super) fn suggestion_targets(
     conn: &Connection,
     user: &Principal,
+    include_local: bool,
 ) -> Result<Vec<(String, String)>, ApiError> {
-    let mut stmt = conn.prepare("SELECT id, name FROM integrations ORDER BY name, id")?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get(1)?)))?;
+    let mut stmt = conn
+        .prepare("SELECT id, name FROM integrations WHERE ?1 OR origin <> '' ORDER BY name, id")?;
+    let rows = stmt.query_map([include_local], |row| {
+        Ok((row.get::<_, String>(0)?, row.get(1)?))
+    })?;
     let mut visible = Vec::new();
     for row in rows {
         let (id, name) = row?;

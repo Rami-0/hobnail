@@ -1147,7 +1147,7 @@ pub(super) async fn route(
                 let doc = document(c, &get(c, id)?)?;
                 Ok((
                     doc,
-                    integrations::suggestion_targets(c, user)?,
+                    integrations::suggestion_targets(c, user, true)?,
                     user.container_targets(c)?,
                 ))
             })?;
