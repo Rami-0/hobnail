@@ -10,7 +10,7 @@
 // `changeOrigin: false` keeps `Host: localhost:5173` and the browser's
 // `Origin`, so the server's Host guard and same-origin write check pass
 // without any dev-only allowance (plan 4.4).
-import { defineConfig, type CSSOptions } from "vite";
+import { defineConfig, type CSSOptions, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 
@@ -76,6 +76,24 @@ const sdkStyles: PostcssPlugin = {
   },
 };
 
+// Vite combines module scripts in the HTML entry. Give early reads an
+// independent graph so they can run as soon as their own imports arrive.
+const entryReads = "src/api/entry-reads.ts";
+const earlyReads: Plugin = {
+  name: "hobnail-entry-reads",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler(_, { bundle }) {
+      const entry = Object.values(bundle ?? {}).find(
+        (file) => file.type === "chunk" && file.isEntry && file.facadeModuleId?.endsWith("/" + entryReads),
+      );
+      if (!entry) throw new Error("Missing entry reads chunk");
+      return [{ tag: "script", attrs: { type: "module", async: true, src: "/" + entry.fileName }, injectTo: "head-prepend" }];
+    },
+  },
+};
+
 export default defineConfig(({ command }) => {
   let proxy: Record<string, { target: string; changeOrigin: false; ws: boolean }> | undefined;
   if (command === "serve") {
@@ -91,7 +109,7 @@ export default defineConfig(({ command }) => {
   }
   return {
     base: "/",
-    plugins: [react()],
+    plugins: [react(), earlyReads],
     css: { postcss: { plugins: [sdkStyles] } },
     build: {
       outDir: "dist",
@@ -104,7 +122,7 @@ export default defineConfig(({ command }) => {
       // Keep Recharts' mutually dependent selectors in one lazy chunk.
       // Keep its dependencies in a separate lazy chunk so a chart vendor
       // never has to import an initializer from the chart route itself.
-      rolldownOptions: { output: {
+      rolldownOptions: { input: ["index.html", entryReads], output: {
         chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup|ProviderDialog|SchemaForm)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
         { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },

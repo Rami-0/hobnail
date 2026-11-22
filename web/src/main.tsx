@@ -3,7 +3,7 @@
 // first-paint limit), then the session request, then React. The live
 // stream starts with the first component that asks for live data.
 //
-import "./api/entry-reads.ts";
+import { refreshSession } from "./api/session.ts";
 import "@ui-sdk/core/web.css";
 import "./styles/global.css";
 
@@ -18,6 +18,7 @@ import { applyStoredTheme } from "./app/theme.ts";
 applyStoredTheme();
 applyStoredRail();
 interceptLinks();
+void refreshSession();
 
 const el = document.getElementById("root");
 if (!el) throw new Error("index.html has no #root");
