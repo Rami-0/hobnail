@@ -38,6 +38,7 @@ mod connection;
 mod duplicati;
 mod generic;
 mod gitea;
+mod github;
 mod glances;
 mod home_assistant;
 mod immich;
@@ -99,8 +100,10 @@ pub const REGISTRY: &[Provider] = &[
     proxmox::PROXMOX,
     truenas::TRUENAS,
     gitea::GITEA,
+    github::GITHUB,
 ];
 pub const MIN_REFRESH: u64 = 15;
+pub const MIN_PUBLIC_REFRESH: u32 = 600;
 pub const DEFAULT_REFRESH: u64 = 60;
 pub const MAX_RESPONSE: usize = 128 * 1024;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -191,7 +194,10 @@ impl Field {
             })
         };
         match self.kind {
-            Kind::Url => text().and_then(client::origin).is_some(),
+            Kind::Url => text().is_some_and(|url| {
+                client::origin(url).is_some()
+                    && (self.choices.is_empty() || self.choices.contains(&url))
+            }),
             Kind::Secret => text().is_some_and(|s| !s.chars().any(char::is_control)),
             Kind::Text => text().is_some(),
             Kind::Bool => value.is_boolean(),
@@ -339,6 +345,12 @@ pub const REFRESH: Field = Field {
     )
 };
 
+const PUBLIC_REFRESH: Field = Field {
+    min: Some(MIN_PUBLIC_REFRESH),
+    default: Some("600"),
+    ..REFRESH
+};
+
 pub struct Fault {
     pub class: Class,
     pub fingerprint: Option<String>,
@@ -422,11 +434,13 @@ pub enum Class {
     Busy,
     Changed,
     Conflict,
+    RateLimited,
 }
 
 impl Class {
     pub fn message(self) -> &'static str {
         match self {
+            Self::RateLimited => "The service rate limited requests. Hobnail will retry after the cooldown.",
             Self::Changed => "Connection settings changed. Try again.",
             Self::Conflict => "The service returned a session conflict.",
             Self::Busy => "Other connections are in progress. Try again shortly.",
@@ -458,12 +472,18 @@ pub fn fingerprint(url: &str, value: Option<&str>) -> Result<Option<[u8; 32]>, &
         .transpose()
 }
 
-pub fn refresh(values: &Values) -> Duration {
+pub fn refresh(values: &Values, public_internet: bool) -> Duration {
+    let min = if public_internet {
+        u64::from(MIN_PUBLIC_REFRESH)
+    } else {
+        MIN_REFRESH
+    };
     Duration::from_secs(
         values
             .get("refresh")
             .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_REFRESH),
+            .unwrap_or(DEFAULT_REFRESH)
+            .max(min),
     )
 }
 
@@ -647,7 +667,7 @@ mod tests {
         assert_eq!(validate(spec.fields, &mut values), Err("refresh".into()));
         values.remove("refresh");
         validate(spec.fields, &mut values).unwrap();
-        assert_eq!(refresh(&values), Duration::from_secs(60));
+        assert_eq!(refresh(&values, false), Duration::from_secs(60));
         values.insert("paths".into(), serde_json::json!(["foo[nope]"]));
         validate(spec.fields, &mut values).unwrap();
         assert_eq!((spec.validate)(&values), Err("paths"));

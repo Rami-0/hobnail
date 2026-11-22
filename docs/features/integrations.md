@@ -254,7 +254,8 @@ Hobnail sends it only to the origin it was saved for.
 **Tailnet devices** counts devices connected to Tailscale’s control service
 and shows last seen for up to ten devices. **Expiring device keys** lists
 up to ten device keys expiring in the next 30 days, earliest first. The
-widgets read the API v2 device list.
+widgets read the API v2 device list and refresh at intervals of ten minutes
+or longer.
 
 Verified from:
 
@@ -532,6 +533,34 @@ and [Forgejo 15 API](https://codeberg.org/forgejo/forgejo/src/tag/v15.0.0/templa
 
 UNVERIFIED: older API releases, private installations and custom token middleware.
 
+## GitHub
+
+GitHub contacts only `https://api.github.com` and requires the public
+internet setting, which is off by default. Leave the token blank for public
+repos, or use a fine-grained token with Metadata, Pull requests and Actions
+read permissions for the selected repos. Hobnail uses Bearer authentication
+and tests `/user` with a token or `/rate_limit` without one.
+
+**Repository activity** shows stars, open issues and PRs, and the latest
+workflow status for up to eight configured `owner/repository` names. It
+bounds the pulls and runs requests to one result each. If the PR count is
+unavailable, it displays GitHub's combined issue and PR count. For public
+widgets, the minimum interval is ten minutes. GitHub defaults to 30 minutes.
+Anonymous requests share GitHub's 60 requests per hour per IP. Multiple
+widgets or shorter intervals can exhaust that budget. Rate-limited responses
+retain stale data and suppress further requests until the cooldown expires.
+Anonymous and authenticated cooldowns are tracked separately in memory.
+
+Verified from GitHub's [repositories](https://docs.github.com/en/rest/repos/repos#get-a-repository),
+[pull requests](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests),
+[pagination](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api),
+[workflow runs](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository)
+and [rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+REST API documentation.
+
+UNVERIFIED: live tokens, enterprise policy behavior and concurrent changes
+to issue and PR counts between the two requests.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
@@ -584,9 +613,10 @@ allows four provider operations at once. Each operation has five seconds
 total, including logins, DNS, TLS and retries. Each step caps the response
 body at 128 KiB and the request body at 16 KiB. Changing the outbound
 policy, service URL, credentials or TLS pin cancels affected operations
-and closes their upstream sockets. Widget refresh defaults to 60 seconds and can range from 15 seconds to
-one hour. A failed refresh keeps the last good data with its stale timestamp
-and error. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
+and closes their upstream sockets. The standard widget refresh defaults to
+60 seconds and ranges from 15 seconds to one hour. Public-internet providers
+have a ten-minute minimum. A failed refresh keeps the last good data with its
+stale timestamp and error. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
 file-configured widgets, with up to 128 provider fetch slots. Browser background
 tabs release their subscriptions after the normal live-stream delay.
 

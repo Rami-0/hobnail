@@ -334,6 +334,10 @@ impl<'a> Conn<'a> {
         &self.target.options
     }
 
+    pub(super) fn base_url_is_one_of(&self, urls: &[&str]) -> bool {
+        urls.contains(&self.target.url.as_str())
+    }
+
     pub fn has_credential(&self, field: &str) -> bool {
         self.target.credentials.contains_key(field)
     }

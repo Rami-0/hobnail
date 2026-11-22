@@ -86,23 +86,29 @@ pub(super) async fn route(
         }
         let options = state.db.dashboard(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT widget, id, options FROM provider_widgets pw
-                 WHERE integration_id=?1 AND board_id=?2 AND EXISTS (
+                "SELECT pw.widget, pw.id, pw.options, i.kind FROM provider_widgets pw
+                 JOIN integrations i ON i.id=pw.integration_id
+                 WHERE pw.integration_id=?1 AND pw.board_id=?2 AND EXISTS (
                    SELECT 1 FROM board_items item WHERE item.board_id=?2 AND item.kind='widget'
                    AND json_extract(item.config,'$.widget_id')=pw.id
-                 ) ORDER BY id",
+                 ) ORDER BY pw.id",
             )?;
             let rows = stmt.query_map([id, board], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })?;
             let mut options = HashMap::<_, Vec<_>>::new();
             for row in rows {
-                let (widget, id, value) = row?;
-                if let Ok(value) = serde_json::from_str::<Values>(&value) {
+                let (widget, id, value, kind) = row?;
+                if let Ok(mut value) = serde_json::from_str::<Values>(&value) {
+                    if providers::get(&kind).is_some_and(|provider| provider.public_internet) {
+                        let seconds = providers::refresh(&value, true).as_secs();
+                        value.insert("refresh".into(), seconds.into());
+                    }
                     options
                         .entry(widget)
                         .or_default()
@@ -594,7 +600,7 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
                 .widgets
                 .lock()
                 .unwrap()
-                .deadline(&key, providers::refresh(&options))
+                .deadline(&key, providers::refresh(&options, provider.public_internet))
                 .is_some_and(|at| now < at)
             {
                 return Ok(None);
