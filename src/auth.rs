@@ -47,6 +47,8 @@ pub(crate) struct CredentialQueue {
     waiters: Semaphore,
     /// The slowest credential operation seen so far, in microseconds.
     slowest_us: AtomicU64,
+    /// The memory limit source (the cgroup in production, fixed in tests).
+    pub(crate) memory_limit: fn() -> Option<u64>,
 }
 
 impl Default for CredentialQueue {
@@ -55,8 +57,46 @@ impl Default for CredentialQueue {
             active: Arc::new(Semaphore::new(1)),
             waiters: Semaphore::new(CREDENTIAL_WAITERS),
             slowest_us: AtomicU64::new(0),
+            memory_limit: read_memory_limit,
         }
     }
+}
+
+/// The smallest memory limit under which a legacy 19 MiB hash is verified.
+/// The heaviest measured M5 workload peaked at 12.45 MiB without it; adding
+/// the 19 MiB Argon2 block gives 31.45 MiB, and the rest is headroom for
+/// allocator fragmentation, kernel and socket memory and cold file cache.
+pub(crate) const LEGACY_VERIFY_MIN_LIMIT: u64 = 36 << 20;
+
+/// This process's cgroup v2 memory limit; `max` or unreadable is no limit.
+pub(crate) fn read_memory_limit() -> Option<u64> {
+    parse_memory_max(&std::fs::read_to_string("/sys/fs/cgroup/memory.max").ok()?)
+}
+
+fn parse_memory_max(text: &str) -> Option<u64> {
+    text.trim().parse().ok()
+}
+
+pub(crate) fn legacy_verify_fits(limit: Option<u64>) -> bool {
+    limit.is_none_or(|limit| limit >= LEGACY_VERIFY_MIN_LIMIT)
+}
+
+/// Whether `stored` may be verified now. A legacy hash under a memory limit
+/// too small for it is refused (and logged) instead of risking an OOM kill.
+fn may_verify(state: &AppState, stored: &str) -> bool {
+    if !is_legacy_hash(stored) {
+        return true;
+    }
+    let limit = (state.credential_queue.memory_limit)();
+    if legacy_verify_fits(limit) {
+        return true;
+    }
+    crate::warn!(
+        "legacy Argon2id hash not verified: the memory limit is too small; reset the account with hobnail reset-password <username>",
+        limit = limit.unwrap_or_default(),
+        required = LEGACY_VERIFY_MIN_LIMIT,
+    );
+    false
 }
 
 /// Twice the slowest observed operation, so a legacy hash (measured at about
@@ -339,6 +379,11 @@ pub(crate) fn change_password_for(
         .db
         .credential(&session.account.name)
         .ok_or("sign in required")?;
+    if !may_verify(state, &stored) {
+        return Err(
+            "this account's old password hash needs more memory than the server may use; ask the owner to run hobnail reset-password".into(),
+        );
+    }
     if current.len() > MAX_PASSWORD_BYTES || verify_password(&stored, current).is_none() {
         lock().failure(key, now_ms());
         state.db.record_event(
@@ -961,8 +1006,13 @@ fn authenticate(
     let expires = now + SESSION_TTL_SECS;
     let result = if action == CredentialAction::Login {
         let credential = db.credential(&username);
-        let stored = credential.as_ref().map_or(DUMMY_HASH, |(_, hash, _)| hash);
-        let verified = (password.len() <= MAX_PASSWORD_BYTES)
+        // Unknown and disabled accounts can never sign in: check the dummy
+        // record, so a disabled legacy account costs no 19 MiB hash.
+        let stored = match &credential {
+            Some((_, hash, false)) => hash.as_str(),
+            _ => DUMMY_HASH,
+        };
+        let verified = (password.len() <= MAX_PASSWORD_BYTES && may_verify(state, stored))
             .then(|| verify_password(stored, &password))
             .flatten();
         match (credential, verified) {
@@ -1138,6 +1188,86 @@ mod tests {
         queue.observe(Duration::from_millis(200));
         queue.observe(Duration::from_millis(100));
         assert_eq!(queue.floor(), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn memory_limits_gate_legacy_verification() {
+        assert_eq!(parse_memory_max("max\n"), None);
+        assert_eq!(parse_memory_max(""), None);
+        assert_eq!(parse_memory_max("20971520\n"), Some(20 << 20));
+        assert!(legacy_verify_fits(None));
+        assert!(!legacy_verify_fits(Some(20 << 20)));
+        assert!(!legacy_verify_fits(Some(LEGACY_VERIFY_MIN_LIMIT - 1)));
+        assert!(legacy_verify_fits(Some(LEGACY_VERIFY_MIN_LIMIT)));
+    }
+
+    fn with_memory_limit(mut state: Arc<AppState>, limit: fn() -> Option<u64>) -> Arc<AppState> {
+        Arc::get_mut(&mut state)
+            .unwrap()
+            .credential_queue
+            .memory_limit = limit;
+        state
+    }
+
+    fn login_attempt(
+        state: &AppState,
+        host: u8,
+        username: &str,
+        password: &str,
+    ) -> Result<String, Attempt> {
+        authenticate(
+            state,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, host)),
+            CredentialAction::Login,
+            Credentials {
+                username: username.into(),
+                password: password.into(),
+                token: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_small_memory_limit_refuses_legacy_verification_like_a_wrong_password() {
+        let state = with_memory_limit(crate::testutil::state_with(vec![], ""), || Some(20 << 20));
+        let previous = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &previous, 0).unwrap();
+        crate::log::capture_test_logs();
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "correct horse"),
+            Err(Attempt::Wrong)
+        ));
+        let logs = crate::log::take_test_logs().join("");
+        assert!(logs.contains("hobnail reset-password"), "{logs}");
+        assert!(!logs.contains("correct horse") && !logs.contains("\"admin\""));
+        assert_eq!(state.db.credential("admin").unwrap().1, previous);
+
+        // Without a limit the same password signs in and migrates.
+        let state = with_memory_limit(state, || None);
+        login_attempt(&state, 2, "admin", "correct horse").unwrap();
+        assert!(state.db.legacy_hash_users().unwrap().is_empty());
+    }
+
+    #[test]
+    fn disabled_accounts_are_checked_against_the_dummy_hash() {
+        let state = with_memory_limit(crate::testutil::state_with(vec![], ""), || Some(20 << 20));
+        set_password_for_tests(&state.db, "owner password");
+        let legacy = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated,disabled)
+                 VALUES ('gone',?1,'viewer',0,0,1)",
+                [&legacy],
+            )?;
+            Ok(())
+        });
+        crate::log::capture_test_logs();
+        assert!(matches!(
+            login_attempt(&state, 1, "gone", "correct horse"),
+            Err(Attempt::Wrong)
+        ));
+        // The legacy record was never chosen for verification.
+        assert_eq!(crate::log::take_test_logs(), Vec::<String>::new());
     }
 
     #[test]

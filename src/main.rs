@@ -101,10 +101,12 @@ async fn serve() -> i32 {
 
     if let Ok(users) = st.db.legacy_hash_users() {
         if !users.is_empty() {
-            warn!(
-                "legacy Argon2id hashes: first sign-in needs about 20.5 MiB; allow more than 20 MiB until each account signs in or is reset with hobnail reset-password <username>; check with hobnail list-legacy-hashes",
-                count = users.len(),
-            );
+            let message = if auth::legacy_verify_fits(auth::read_memory_limit()) {
+                "legacy Argon2id hashes: first sign-in needs about 20.5 MiB; allow more than 20 MiB until each account signs in or is reset with hobnail reset-password <username>; check with hobnail list-legacy-hashes"
+            } else {
+                "legacy Argon2id hashes: the memory limit is too small to verify them, so these accounts cannot sign in; reset each with hobnail reset-password <username> without the limit or from a one-off container with the server stopped; check with hobnail list-legacy-hashes"
+            };
+            warn!(message, count = users.len());
         }
     }
 

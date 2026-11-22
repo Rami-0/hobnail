@@ -27,7 +27,12 @@ pub fn state_with(containers: Vec<Container>, toml: &str) -> Arc<AppState> {
         allowed_hosts: vec![],
         trusted_proxies: vec![],
     };
-    let st = AppState::new(env);
+    let mut st = AppState::new(env);
+    // Tests never depend on the cgroup they happen to run in.
+    Arc::get_mut(&mut st)
+        .expect("a fresh state")
+        .credential_queue
+        .memory_limit = || None;
     st.containers.send_replace(Arc::new(Snapshot {
         containers,
         fetched_at: 1,
