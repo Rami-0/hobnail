@@ -152,7 +152,9 @@ const StackItem = memo(function StackItem({
     // containers. Each shows its own hover.
     <div className="stack" data-testid="tree-stack" data-stack={stack.name}>
       <div className={hasActive ? "sh cur" : "sh"}>
-        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={`${open ? "Fold" : "Show"} ${stack.title}`} onClick={() => { if (!filtering) onFold(stack.name, open); }}>{CHEVRON_RIGHT_ICON}</Button>
+        {/* A filter or the open container's stack keeps the stack open:
+            the toggle has nothing to do then. */}
+        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={`${open ? "Fold" : "Show"} ${stack.title}`} disabled={filtering || hasActive} onClick={() => onFold(stack.name, open)}>{CHEVRON_RIGHT_ICON}</Button>
         <a className="stack-name" href={`${appHref("/containers")}?stack=${encodeURIComponent(stack.name)}`} title={stack.title}>
           {stack.title}
         </a>

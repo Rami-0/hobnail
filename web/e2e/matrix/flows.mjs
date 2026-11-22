@@ -234,6 +234,13 @@ export const flows = {
     await row.click();
     await page.locator(tid("ctr-tabs")).waitFor();
     await h.state("detail overview");
+    // The open container's stack stays open, so its fold toggle is off.
+    // (Phones mount the tree only in the open drawer.)
+    if (h.profile.width >= 700) {
+      await page.locator(`${tid("tree-stack")} .sh.cur .tg`).waitFor({ state: "attached" });
+      assert.equal(await page.locator(`${tid("tree-stack")} .sh.cur .tg`).isDisabled(), true, "the open container's fold toggle is disabled");
+      assert.equal(await page.locator(`${tid("tree-stack")} .sh:not(.cur) .tg`).first().isDisabled(), false, "other stacks' fold toggles work");
+    }
     for (const tab of ["metrics", "inspect", "events", "processes"]) {
       const url = new URL(page.url()); url.searchParams.set("tab", tab);
       await page.locator(`${tid("ctr-tabs")} a[href*="tab=${tab}"]`).first().click();

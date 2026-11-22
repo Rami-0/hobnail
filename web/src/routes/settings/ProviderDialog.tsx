@@ -204,7 +204,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
             onChange={(key, value) => setSelected({ ...selected, [id]: { ...selected[id], [key]: value } })} />}
         </div>)}
       </> : <>
-        {!item && <p className="p-link"><a href={provider.docs}>Provider documentation</a></p>}
+        {!item && <p className="p-link"><a href={provider.docs} target="_blank" rel="noreferrer">Provider documentation (new tab)</a></p>}
         <Field label="Name" id="integration-name" error={errors.name}><TextInput name="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
         <SchemaForm id="integration" schema={hasEndpoint(provider.fields) ? [...provider.fields, pinField] : provider.fields} values={config} errors={errors}
