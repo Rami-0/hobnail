@@ -252,8 +252,9 @@ fn commit_checked(
     crate::info!("config saved from the app", note = d.note, user = user);
     {
         let mut widgets = state.widgets.lock().unwrap();
+        let previous = state.config.current();
         if state.config.reload() {
-            widgets.clear();
+            crate::live::reloaded(state, &previous, &mut widgets);
         }
     }
     state.changed("reload");

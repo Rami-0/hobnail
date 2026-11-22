@@ -396,6 +396,14 @@ impl WidgetOutput {
         }
     }
 
+    /// Keep the display but show it as stale (from its fetch time) until the
+    /// next result replaces it. An error with no retained data is left as is.
+    fn mark_stale(&mut self) {
+        if self.stale_since.is_none() && self.error.is_none() {
+            self.stale_since = Some(self.fetched_at);
+        }
+    }
+
     pub(crate) fn record(&mut self, mut next: Self) {
         if next.error.is_some() {
             let last_good = self
@@ -419,7 +427,17 @@ pub(crate) struct WidgetCache {
     retained_bytes: usize,
     next_attempt: u64,
     // Live provider fetch keys outlast evictable body slots and config reloads.
-    provider_attempts: std::collections::HashMap<String, Instant>,
+    provider_attempts: std::collections::HashMap<String, ProviderAttempt>,
+}
+
+const PROVIDER_PREFIX: &str = "provider-fetch:";
+
+/// When a provider fetch key last started or completed, and whether its
+/// provider is declared public (its refresh floor protects a public quota).
+#[derive(Clone, Copy)]
+pub(crate) struct ProviderAttempt {
+    at: Instant,
+    public: bool,
 }
 
 #[derive(Default)]
@@ -431,9 +449,49 @@ struct WidgetSlot {
 }
 
 impl WidgetCache {
+    /// After a config.toml reload: drop the file-configured widgets' output.
+    /// Provider fetches do not read config.toml (apart from `[http]
+    /// allow_hosts`, see [`Self::invalidate_providers`]), so their last
+    /// output stays on screen.
     pub(crate) fn clear(&mut self) {
-        self.slots.clear();
-        self.retained_bytes = 0;
+        self.slots.retain(|id, slot| {
+            let keep = id.starts_with(PROVIDER_PREFIX);
+            if !keep {
+                self.retained_bytes -= slot.bytes;
+            }
+            keep
+        });
+    }
+
+    /// The inputs of the provider fetch keys under `prefix` changed (an
+    /// integration's credential, URL or pin, the internet switch or the
+    /// allowed hosts). Each keeps its last output, marked stale, until the
+    /// next fetch; fetches already in flight cannot record. Keys of
+    /// non-public providers become due at once; public ones keep their
+    /// deadline, whose floor protects the public service's quota.
+    pub(crate) fn invalidate_providers(&mut self, prefix: &str) {
+        let first = self.next_attempt + 1;
+        let attempts = &mut self.provider_attempts;
+        for (id, slot) in self.slots.iter_mut() {
+            if !id.starts_with(PROVIDER_PREFIX) || !id.starts_with(prefix) {
+                continue;
+            }
+            slot.first_attempt = first;
+            if let Some(output) = slot.output.as_deref_mut() {
+                output.mark_stale();
+            }
+            if !attempts.get(id).is_some_and(|attempt| attempt.public) {
+                slot.completed = None;
+            }
+        }
+        attempts.retain(|id, attempt| attempt.public || !id.starts_with(prefix));
+    }
+
+    /// Forget the provider fetch keys under `prefix` (a deleted integration).
+    pub(crate) fn remove_providers(&mut self, prefix: &str) {
+        self.remove_prefix(prefix);
+        self.provider_attempts
+            .retain(|id, _| !id.starts_with(prefix));
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<&WidgetOutput> {
@@ -444,22 +502,29 @@ impl WidgetCache {
         let at = self
             .provider_attempts
             .get(id)
-            .copied()
+            .map(|attempt| attempt.at)
             .or_else(|| self.slots.get(id)?.completed.map(|(_, at)| at))?;
         Some(refresh_deadline(at, refresh))
     }
 
-    pub(crate) fn begin_provider(&mut self, id: &str, started: Instant) -> u64 {
-        self.provider_attempts.insert(id.into(), started);
+    pub(crate) fn begin_provider(&mut self, id: &str, started: Instant, public: bool) -> u64 {
+        self.provider_attempts.insert(
+            id.into(),
+            ProviderAttempt {
+                at: started,
+                public,
+            },
+        );
         self.begin(id)
     }
 
-    pub(crate) fn provider_attempts(&mut self) -> &mut std::collections::HashMap<String, Instant> {
+    pub(crate) fn provider_attempts(
+        &mut self,
+    ) -> &mut std::collections::HashMap<String, ProviderAttempt> {
         &mut self.provider_attempts
     }
 
     pub(crate) fn begin(&mut self, id: &str) -> u64 {
-        const PROVIDER_PREFIX: &str = "provider-fetch:";
         const MAX_PROVIDER_SLOTS: usize = 128;
         if id.starts_with(PROVIDER_PREFIX) && !self.slots.contains_key(id) {
             let mut providers = self
@@ -514,8 +579,8 @@ impl WidgetCache {
             return false;
         }
         slot.completed = Some((attempt, completed));
-        if let Some(at) = self.provider_attempts.get_mut(id) {
-            *at = completed;
+        if let Some(attempt) = self.provider_attempts.get_mut(id) {
+            attempt.at = completed;
         }
         out.bound();
         self.retained_bytes -= slot.bytes;

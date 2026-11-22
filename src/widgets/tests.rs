@@ -837,13 +837,13 @@ fn provider_refresh_floors_survive_eviction_at_128_slots() {
     ];
     for (provider, widget, _) in fixtures {
         let id = format!("provider-fetch:{provider}:{widget}");
-        let attempt = cache.begin_provider(&id, now);
+        let attempt = cache.begin_provider(&id, now, false);
         assert!(cache.record(&id, attempt, now, WidgetOutput::default()));
     }
     for n in 1..=128 {
         let id = format!("provider-fetch:fixture:{n}");
         let completed = now + Duration::from_secs(n);
-        let attempt = cache.begin_provider(&id, completed);
+        let attempt = cache.begin_provider(&id, completed, false);
         assert!(cache.record(&id, attempt, completed, WidgetOutput::default()));
     }
     for (provider, widget, seconds) in fixtures {
@@ -862,4 +862,73 @@ fn provider_refresh_floors_survive_eviction_at_128_slots() {
         assert!(cache.get(&id).is_none());
         assert_eq!(cache.deadline(&id, refresh), Some(now + refresh));
     }
+}
+
+#[test]
+fn a_config_reload_keeps_provider_output() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let provider = "provider-fetch:fixture:key";
+    let attempt = cache.begin_provider(provider, now, false);
+    assert!(cache.record(provider, attempt, now, WidgetOutput::default()));
+    let attempt = cache.begin("file-widget");
+    assert!(cache.record("file-widget", attempt, now, WidgetOutput::default()));
+    cache.clear();
+    assert!(cache.get("file-widget").is_none());
+    assert!(cache.get(provider).is_some());
+    assert_eq!(
+        cache.deadline(provider, Duration::from_secs(60)),
+        Some(now + Duration::from_secs(60))
+    );
+}
+
+#[test]
+fn invalidating_an_integration_keeps_stale_data_and_refetches_unless_public() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let refresh = Duration::from_secs(300);
+    let local = "provider-fetch:lan:key";
+    let public = "provider-fetch:cloud:key";
+    let other = "provider-fetch:other:key";
+    for (id, is_public) in [(local, false), (public, true), (other, false)] {
+        let attempt = cache.begin_provider(id, now, is_public);
+        let output = WidgetOutput {
+            fetched_at: 1_000,
+            ..Default::default()
+        };
+        assert!(cache.record(id, attempt, now, output));
+    }
+    // A fetch started before the change must not record after it.
+    let in_flight = cache.begin_provider(local, now, false);
+    cache.invalidate_providers("provider-fetch:lan:");
+    cache.invalidate_providers("provider-fetch:cloud:");
+    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    assert_eq!(cache.deadline(local, refresh), None, "due at once");
+    assert_eq!(cache.get(public).unwrap().stale_since, Some(1_000));
+    assert_eq!(cache.deadline(public, refresh), Some(now + refresh));
+    assert_eq!(cache.get(other).unwrap().stale_since, None);
+    assert_eq!(cache.deadline(other, refresh), Some(now + refresh));
+    assert!(!cache.record(local, in_flight, now, WidgetOutput::default()));
+    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    // The refetch replaces the stale data; a failed one keeps it.
+    let later = now + Duration::from_secs(1);
+    let attempt = cache.begin_provider(local, later, false);
+    let failed = WidgetOutput {
+        error: Some("down".into()),
+        fetched_at: 1_001,
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, failed));
+    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    let attempt = cache.begin_provider(local, later, false);
+    let fresh = WidgetOutput {
+        fetched_at: 1_002,
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, fresh));
+    assert_eq!(cache.get(local).unwrap().stale_since, None);
+    // Deleting the integration drops its data and deadline.
+    cache.remove_providers("provider-fetch:lan:");
+    assert!(cache.get(local).is_none());
+    assert_eq!(cache.deadline(local, refresh), None);
 }

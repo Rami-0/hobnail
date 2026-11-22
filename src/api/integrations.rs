@@ -714,7 +714,7 @@ pub(super) async fn route(
         }
         Handler::IntegrationDelete => {
             db.dashboard(|c| -> Result<_, ApiError> {
-                super::provider_widgets::invalidate(state, Some(id));
+                super::provider_widgets::forget(state, id);
                 if c.execute("DELETE FROM integrations WHERE id=?1", [id])? == 0 {
                     return Err(ApiError::not_found());
                 }

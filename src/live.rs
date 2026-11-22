@@ -21,11 +21,28 @@ pub async fn config_watcher(state: Arc<AppState>) {
         let mut widgets = state.widgets.lock().unwrap();
         let previous = state.config.current();
         if state.config.poll() {
-            if !Arc::ptr_eq(&previous, &state.config.current()) {
-                widgets.clear();
-            }
+            reloaded(&state, &previous, &mut widgets);
             state.changed("reload");
         }
+    }
+}
+
+/// After a config.toml reload, with the widget cache lock held: drop the
+/// file-configured widgets' output. Provider widgets keep theirs; only an
+/// `[http] allow_hosts` change affects them, and then they refetch (public
+/// providers at their floor) showing the last data as stale.
+pub(crate) fn reloaded(
+    state: &AppState,
+    previous: &Arc<crate::config::Config>,
+    widgets: &mut crate::widgets::WidgetCache,
+) {
+    let current = state.config.current();
+    if Arc::ptr_eq(previous, &current) {
+        return;
+    }
+    widgets.clear();
+    if previous.http.allow_hosts != current.http.allow_hosts {
+        widgets.invalidate_providers("provider-fetch:");
     }
 }
 

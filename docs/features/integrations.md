@@ -770,7 +770,12 @@ policy, service URL, credentials or TLS pin cancels affected operations
 and closes their upstream sockets. The standard widget refresh defaults to
 60 seconds and ranges from 15 seconds to one hour. Public-internet providers
 have a ten-minute minimum. A failed refresh keeps the last good data with its
-stale timestamp and error. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
+stale timestamp and error. After a change to an integration's URL,
+credentials or TLS pin, the internet switch or `[http] allow_hosts`, its
+widgets keep showing their last data, marked stale, and refetch on the next
+tick; public-internet providers wait for their minimum instead, to protect
+the service's quota. Saving other settings or editing `config.toml` leaves
+provider widget data in place. Output shares the 32 KiB per-widget and 256 KiB aggregate cache with
 file-configured widgets, with up to 128 provider fetch slots. Browser background
 tabs release their subscriptions after the normal live-stream delay.
 

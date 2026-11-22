@@ -522,13 +522,33 @@ pub(super) fn board_targets(
         .unwrap_or_default()
 }
 
-pub(super) fn invalidate(state: &AppState, integration: Option<&str>) {
-    state.provider_connections.invalidate(integration);
-    let prefix = integration.map_or_else(
+fn fetch_prefix(integration: Option<&str>) -> String {
+    integration.map_or_else(
         || "provider-fetch:".into(),
         |id| format!("provider-fetch:{id}:"),
-    );
-    state.widgets.lock().unwrap().remove_prefix(&prefix);
+    )
+}
+
+/// An integration's connection inputs changed (or, with `None`, a setting
+/// every provider reads). Its widgets keep their last data, marked stale,
+/// and non-public ones refetch on the next tick.
+pub(crate) fn invalidate(state: &AppState, integration: Option<&str>) {
+    state.provider_connections.invalidate(integration);
+    state
+        .widgets
+        .lock()
+        .unwrap()
+        .invalidate_providers(&fetch_prefix(integration));
+}
+
+/// The integration was deleted: drop its widgets' data.
+pub(super) fn forget(state: &AppState, integration: &str) {
+    state.provider_connections.invalidate(Some(integration));
+    state
+        .widgets
+        .lock()
+        .unwrap()
+        .remove_providers(&fetch_prefix(Some(integration)));
 }
 
 pub(crate) struct Viewers {
@@ -603,6 +623,7 @@ impl Drop for Subscription {
 struct Poll {
     key: String,
     provider: &'static str,
+    public: bool,
     integration: String,
     target: Target,
     widget: &'static providers::Widget,
@@ -655,6 +676,7 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
             Ok(Some(Poll {
                 key,
                 provider: provider.id,
+                public: provider.public_internet,
                 integration,
                 target,
                 widget,
@@ -737,7 +759,7 @@ pub(crate) fn poll(
             }
             let mut cache = state.widgets.lock().unwrap();
             Ok(Arc::ptr_eq(config, &state.config.current())
-                .then(|| cache.begin_provider(&poll.key, now)))
+                .then(|| cache.begin_provider(&poll.key, now, poll.public)))
         });
         let Ok(Some(attempt)) = attempt else {
             continue;
