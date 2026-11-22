@@ -304,6 +304,107 @@ From the repository root, use `python3 "$scratch/disk/bench.py" hobnail-m5:histo
 <new-output-name> --mode full --port 3396`, where `scratch` is the directory
 above. Add `--hard` to apply the cap.
 
+### Finish-hobnail M5 release image follow-up
+
+The x86-64 release uses `scratch` with one filesystem layer. Before the
+follow-up, `hobnail-m5:history` contained the 8,964,656 B stripped executable
+and a 1,038,696 B static BusyBox, plus a `/bin/sh` symlink and directories.
+The OCI layer was 10,007,552 B as tar and 5,124,361 B compressed. Docker's
+image-list metric, used by the 13,500,000 B gate, was 15,147,903 B. The
+rebuild of `d2c5fd8` produced the same executable length and a 15,147,846 B
+image-list reading.
+
+The executable included 75 raw web files (1,349,132 B) and the 75 gzip
+copies (438,069 B). The distribution contained no source maps or
+byte-identical raw files, and every gzip copy was smaller than its
+corresponding raw file. The four embedded PWA icons contributed another
+13,320 B. The remainder of the executable was 7,164,135 B. There was
+no separately copied frontend, CA bundle or debug file. Relative
+relocations, code and read-only data accounted for 219,216 B, 5,566,136 B
+and 2,406,124 B of ELF sections respectively, including the asset bytes
+in read-only data. In an unstripped z-profile diagnostic build,
+`nm -S --size-sort -C` showed a 151,552 B Ring P-256 table,
+a 93,793 B settings dispatcher, a 33,096 B rustls handshake parser and a
+26,493 B SQLite virtual-machine executor among the largest symbols.
+
+| Rebuilt milestone | Stripped executable (B) | Raw web (B) | Gzip web (B) | Image gate metric (B) |
+|---|---:|---:|---:|---:|
+| `e8d6b62` | 8,141,360 | 1,344,761 | 436,679 | 13,969,622 |
+| `4aac6f1` | 8,530,480 | 1,344,761 | 436,679 | 14,521,392 |
+| `1edc993` | 8,759,856 | 1,344,761 | 436,679 | 14,846,578 |
+| `98678e3` | 8,882,736 | 1,349,071 | 438,103 | 15,027,044 |
+| `822075a` | 8,956,464 | 1,349,132 | 438,069 | 15,135,961 |
+| `d2c5fd8` | 8,964,656 | 1,349,132 | 438,069 | 15,147,846 |
+
+The executable grew by 823,296 B from the end of M3 to the original M5
+head, including 5,761 B from the web assets. BusyBox was 1,038,696 B in
+each rebuild.
+
+| Cumulative release trial | Stripped executable (B) | Image gate metric (B) | Image savings from previous row (B) |
+|---|---:|---:|---:|
+| Original release profile at `d2c5fd8` | 8,964,656 | 15,147,846 | — |
+| Size optimization `z` | 8,337,968 | 14,198,016 | 949,830 |
+| Pack static PIE relative relocations | 8,112,760 | 13,932,606 | 265,410 |
+| Share the TOML parser with the editor | 8,092,280 | 13,895,080 | 37,526 |
+| Omit unused bundled SQLite extensions | 7,779,480 | 13,400,510 | 494,570 |
+| Share the provider request future | 7,775,384 | 13,394,792 | 5,718 |
+
+The SQLite change omits full-text and spatial indexes, the `dbstat` virtual
+table and the dynamic extension loader. Hobnail's schema and queries use
+none of those. JSON and STAT4 remain enabled. The default `serde_json`
+feature set includes `std`, which the bounded JSON writer uses. The image
+still embeds both raw and gzip assets. Provider TLS keeps TLS 1.2 support,
+the compiled public roots and Ring.
+
+The bundled `rust-lld` identical-code-folding trial failed to link Ring's
+zlib-compressed debug sections. It produced no comparable image.
+Throughput overrides for Argon2 and Blake2 kept the executable at
+7,775,384 B and added 4,817 B to the image-list metric. Two alternating
+seven-login trials gave medians of 70.0 and 78.3 ms for the normal z build
+and 70.1 and 137.3 ms for the override. The overrides were discarded.
+
+The stock Dockerfile built `hobnail-m5-image:final` from the runtime
+sources at `5881a44` (content hash
+`bf2f4e098f4f4214dca887fa8af46d114b27a5445eb5d3776f815dbb8a093fec`).
+`scripts/check-image-size.py` passed at **13,394,739 B** against the
+13,500,000 B gate, with **105,261 B** of headroom. The executable is
+7,775,384 B and BusyBox is 1,038,696 B. The single OCI filesystem layer
+is 8,818,176 B as tar and 4,559,021 B compressed. The image-list metric
+decreased by 1,753,164 B from the original M5 image.
+
+The final short workload ran twice per image, in baseline/final and
+final/baseline order, with no builds running. Both images used the 20 MiB
+memory and swap settings, warmed executable pages, the 175 MB seeded
+database with 100,000 events, and the isolated fake Docker fixture.
+The driver analyzed the fixture before starting the measured container
+to keep maintenance out of the timed History interval. It ran 25 live
+clients for 12 seconds, followed by 40 History reads and twelve log
+streams. All requests completed and all four cgroups reported
+`max=0`, `oom=0` and `oom_kill=0`.
+
+| Metric across the two runs | Original M5 | Final |
+|---|---:|---:|
+| Startup kernel peak (MiB) | 4.14–4.15 | 4.15–4.43 |
+| Owner creation and login kernel peak (MiB) | 9.04–9.35 | 9.41–9.52 |
+| Owner creation and login sampled anonymous maximum (MiB) | 8.22 | 8.21–8.22 |
+| 25 clients sampled current maximum (MiB) | 6.77–7.07 | 6.82–6.86 |
+| Full-history sampled current maximum (MiB) | 11.42–11.45 | 11.41–11.71 |
+| Lifetime kernel peak (MiB) | 11.66–11.84 | 11.71–11.78 |
+| Login request (ms) | 38.8–45.9 | 39.4–39.6 |
+| 25-client request p50 / p99 (ms) | 0.5 / 22.3–27.6 | 0.5 / 25.7–26.1 |
+| Full-history request p50 / p99 (ms) | 85.2–126.2 / 310.6–380.3 | 105.0–109.2 / 303.0–304.3 |
+| Bulk log request p50 / p99 (ms) | 92.5–104.7 / 136.1–138.0 | 106.2–124.1 / 155.7–183.4 |
+
+The client and History latencies were comparable across the two pairs.
+Bulk log p99 was higher in both final runs, based on twelve requests per
+run. The final image was measured on x86-64. The raw requests and cgroup
+samples are in the `quiescent-*` directories of the
+`hobnail-m5-image-scratch` Docker volume.
+
+Web check, test, build and bundle budgets passed. Rust formatting,
+all-target Clippy with warnings denied, and all 500 tests passed. The
+release Dockerfile also passed its build-time checks and self-version test.
+
 ### Earlier React port measurements
 
 **[exp]** `PORT=3395 scripts/bench-mem.sh hobnail-rp:m5 <fresh-output-dir>`;
@@ -713,8 +814,6 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
   187,559,936 B (178.87 MiB), primarily charged file cache.
 - First sign-in with a legacy hash exceeded 20 MiB in the migration probe.
   Fresh-hash workload results are in the M5 table above.
-- Unpacked release image ceiling of 13.5 MB. M5 is 15,147,903 B, compared
-  with 15,135,612 B at the pre-M5 baseline.
 - LCP ≤400/1,200 ms on the failing route/profile rows; phone table load ≤200 ms
   in run 1; first chart/History mounts also exceed that diagnostic threshold.
 - Live-update ≤50 ms on table and several other routes; INP ≤200 ms on chart
