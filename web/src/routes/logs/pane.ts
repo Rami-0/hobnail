@@ -95,6 +95,7 @@ export class LogPane {
   private top = document.createElement("div");
   private content = document.createElement("div");
   private observer: ResizeObserver;
+  private needsFit = true;
   private width = 0;
   private done = false;
   private last = new Map<string, number>();
@@ -123,8 +124,9 @@ export class LogPane {
     box.addEventListener("keydown", this.key);
     box.addEventListener("click", this.click);
     box.addEventListener("mouseover", this.hover);
-    this.observer = new ResizeObserver(() => {
-      if (this.width !== box.clientWidth) { this.width = box.clientWidth; this.heights.clear(); this.signature = ""; }
+    this.observer = new ResizeObserver((entries) => {
+      // A replacement log window needs a row measurement, not a pane resize.
+      if (entries.some((entry) => entry.target !== this.content)) this.needsFit = true;
       this.schedule();
     });
     this.observer.observe(box); this.observer.observe(this.content);
@@ -262,7 +264,7 @@ export class LogPane {
     this.following = false; this.anchor = { id, offset: 0 };
     this.box.scrollTop = this.offsets[i] ?? 0; this.lastTop = this.box.scrollTop;
   }
-  private resize = () => { this.restoring = true; this.schedule(); };
+  private resize = () => { this.needsFit = this.restoring = true; this.schedule(); };
   private touch = () => { this.restoring = false; };
   private wheel = (e: WheelEvent) => { this.restoring = false; if (e.deltaY < 0) { this.following = false; this.mark(); this.schedule(); } };
   private scroll = () => {
@@ -312,7 +314,6 @@ export class LogPane {
     const el = (e.target as Element).closest<HTMLElement>("[data-log-id]");
     const row = el && this.visible.find((r) => r.id === Number(el.dataset.logId));
     if (row) { this.pinned = true; this.selected = row; this.select(row, false); this.signature = ""; this.schedule(); }
-    if ((e.target as Element).closest("summary")) requestAnimationFrame(() => { this.measure(); this.schedule(); });
   };
   private hover = (e: MouseEvent) => {
     if (this.pinned) return;
@@ -343,7 +344,7 @@ export class LogPane {
     return 8 + 20 * Math.max(1, Math.ceil((row.fold?.summary.length ?? row.plain.length) / columns));
   }
   private layout(): number {
-    let height = 0; this.offsets = [];
+    let height = 0; this.offsets.length = 0;
     for (const row of this.visible) { this.offsets.push(height); height += this.heights.get(row.id) ?? this.estimate(row); }
     return height;
   }
@@ -382,7 +383,7 @@ export class LogPane {
   }
   private flush(): void {
     this.restoring = true;
-    this.fit();
+    if (this.needsFit) { this.needsFit = false; this.fit(); }
     const width = this.box.clientWidth;
     if (width !== this.width) { this.width = width; this.heights.clear(); this.signature = ""; }
     let accepted = 0;
@@ -421,7 +422,7 @@ export class LogPane {
     const searchStarted = performance.now();
     if (query && regex && !search.error) this.searchRegex(query, sensitive);
     const only = this.options.only && !search.error && !this.searchPaused && (!regex || this.searchedRows !== null);
-    const filtered = filterRows(this.ring.rows, regex ? (_, id) => this.regexHits.has(id) : search.test, only, this.options.context, this.options.levels);
+    const filtered = filterRows(this.ring.rows, !query ? null : regex ? (_, id) => this.regexHits.has(id) : search.test, only, this.options.context, this.options.levels);
     this.box.dataset.searchMs = (performance.now() - searchStarted).toFixed(3);
     this.box.dataset.searchLines = String(this.ring.rows.length);
     this.visible = filtered.rows; this.hits = filtered.hits; this.counts = filtered.counts;
@@ -452,7 +453,8 @@ export class LogPane {
       if (signature !== this.signature) {
         this.signature = signature;
         const fragment = document.createDocumentFragment();
-        for (const row of slice) fragment.append(this.row(row));
+        const today = new Date().toDateString();
+        for (const row of slice) fragment.append(this.row(row, today));
         this.content.replaceChildren(fragment);
       }
       this.content.style.transform = `translateY(${this.offsets[start] ?? 0}px)`;
@@ -529,14 +531,14 @@ export class LogPane {
   }
   private searchKey = "";
   private countsKey = "";
-  private row(row: Row): HTMLElement {
+  private row(row: Row, today: string): HTMLElement {
     const el = document.createElement("div");
     el.className = `log-row ${this.options.wrap ? "" : "log-nowrap"} ${row.id === this.current ? "log-current" : ""} ${row.id === this.selected?.id ? "log-selected" : ""}`;
     el.dataset.logId = String(row.id); el.dataset.level = row.l ?? "o"; el.dataset.timestamp = String(row.t);
     if (this.options.time) {
       const time = document.createElement("time");
       const date = new Date(row.t); time.dateTime = date.toISOString();
-      time.textContent = (date.toDateString() === new Date().toDateString() ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
+      time.textContent = (date.toDateString() === today ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
       el.append(time);
     }
     if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = chipName(row.c, new URLSearchParams(this.query).get("stack") ?? "", this.width < 700 ? 12 : 20); chip.title = row.c;
@@ -556,7 +558,8 @@ export class LogPane {
       details.append(summary, pre); text.append(details);
     } else {
       for (const segment of row.segments) {
-        const span = document.createElement("span"); span.className = segment.classes;
+        const span = segment.classes || segment.fg || segment.bg ? document.createElement("span") : text;
+        if (segment.classes) span.className = segment.classes;
         if (segment.fg) span.style.color = segment.fg; if (segment.bg) span.style.backgroundColor = segment.bg;
         // Link only explicit http(s) URLs, with no interpretation of other text.
         const urls = /https?:\/\/[^\s<>"']+/g; let end = 0;
@@ -564,7 +567,8 @@ export class LogPane {
           span.append(document.createTextNode(segment.text.slice(end, url.index)));
           const a = document.createElement("a"); a.href = url[0]; a.rel = "noreferrer noopener"; a.target = "_blank"; a.textContent = url[0]; span.append(a); end = url.index + url[0].length;
         }
-        span.append(document.createTextNode(segment.text.slice(end))); text.append(span);
+        span.append(document.createTextNode(segment.text.slice(end)));
+        if (span !== text) text.append(span);
       }
     }
     const start = this.starts.get(row.c);
