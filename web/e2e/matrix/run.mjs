@@ -8,7 +8,7 @@
 // Writes $OUT/<engine>-<profile>-<unit>-<theme>.json; exit 1 on any failure.
 import fs from "node:fs";
 import path from "node:path";
-import { PROFILES, assertTarget, contextOptions, harness, launch } from "./lib.mjs";
+import { PROFILES, assertTarget, contextOptions, guardNetwork, harness, launch } from "./lib.mjs";
 import { ensureSignedIn, flows, onboarding, sweep, tourStaysClosed } from "./flows.mjs";
 import { sweepFixture } from "../sweep-fixture.mjs";
 
@@ -28,14 +28,7 @@ const tag = `${engine}-${profileName}-${unit}-${theme}${motion === "reduce" ? "-
 const results = { engine, profile: profileName, unit, theme, motion, flows: [], states: [], started: new Date().toISOString() };
 const f = { base, password, fixture };
 
-const browser = await launch(engine);
-results.version = browser.version();
-const options = contextOptions(engine, profile, { theme, motion });
-const context = await browser.newContext(options);
-context.setDefaultTimeout(15000);
-const page = await context.newPage();
-const h = await harness(page, { engine, profileName, profile, out, unit, motion, results });
-h.contextOptions = options;
+let browser = null, context = null, page = null, h = null;
 
 async function run(name, fn) {
   if (only.length && !only.includes(name) && !name.startsWith("onboarding") && name !== "tour stays closed") return;
@@ -55,6 +48,16 @@ async function run(name, fn) {
 }
 
 try {
+  // Inside the try: a browser that does not start is a fatal result too.
+  browser = await launch(engine);
+  results.version = browser.version();
+  const options = contextOptions(engine, profile, { theme, motion });
+  context = await browser.newContext(options);
+  context.setDefaultTimeout(15000);
+  page = await context.newPage();
+  h = await harness(page, { engine, profileName, profile, out, unit, motion, results });
+  h.contextOptions = options;
+  await guardNetwork(context, (u) => h.record({ kind: "network", text: `request to a non-local address blocked: ${u}` }));
   if (unit === "flows") {
     await run("onboarding: every step", onboarding.full);
     if (!f.board) throw new Error("onboarding failed; the flows need its board");
@@ -86,7 +89,7 @@ try {
   results.finished = new Date().toISOString();
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, `${tag}.json`), JSON.stringify(results, null, 1));
-  await context.close().catch(() => {});
-  await browser.close().catch(() => {});
+  await context?.close().catch(() => {});
+  await browser?.close().catch(() => {});
 }
 process.exitCode = results.fatal || results.flows.some((x) => !x.ok) ? 1 : 0;

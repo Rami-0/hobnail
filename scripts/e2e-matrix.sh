@@ -19,7 +19,9 @@ set -eu
 [ $# -eq 1 ] || { echo "usage: scripts/e2e-matrix.sh <hobnail image>" >&2; exit 2; }
 image=$1
 dir=$(cd "$(dirname "$0")/.." && pwd)
-PW_IMAGE=mcr.microsoft.com/playwright:v1.64.1-noble
+# Pinned by digest (the image checked in ccd0eaa: created 2026-11-01,
+# release v1.64.1 of 2026-10-14).
+PW_IMAGE=mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f
 VOL=hobnail-m6-pw
 ENGINES=${ENGINES:-chromium firefox webkit}
 docker image inspect "$image" >/dev/null || { echo "matrix: no image $image" >&2; exit 2; }
@@ -74,6 +76,22 @@ PLAN
 )
 fi
 
+# The units every engine must report: "<engine>-<profile>-<unit>-<theme>[-rm]".
+# A unit that writes no result (instance or browser failure) is a fatal
+# result, and summary.mjs fails the run on any missing one.
+: >"$OUT/expected.txt"
+for engine in $ENGINES; do
+  echo "$plan" | while read -r unit profile theme motion; do
+    [ -n "$unit" ] || continue
+    case $unit in \#*) continue ;; esac
+    echo "$engine-$profile-$unit-$theme$( [ "$motion" != reduce ] || echo -rm)"
+  done >>"$OUT/expected.txt"
+done
+
+fatal() { # tag engine unit profile theme motion message
+  printf '{"engine":"%s","unit":"%s","profile":"%s","theme":"%s","motion":"%s","flows":[],"states":[],"fatal":"%s"}\n' "$2" "$3" "$4" "$5" "$6" "$7" >"$OUT/$1.json"
+}
+
 engine_run() {
   engine=$1; port=$2
   [ "$port" != 3200 ] || exit 2
@@ -82,31 +100,58 @@ engine_run() {
   # watcher restarts the throwaway server (never the container "hobnail"),
   # which cuts the open stream; see web/e2e/matrix/README.md.
   ctl="$OUT/ctl-$port"; rm -f "$ctl".*
-  ( while [ ! -f "$ctl.stop" ]; do
+  ( trap 'exit 0' TERM; while [ ! -f "$ctl.stop" ]; do
       if [ -f "$ctl.restart" ]; then rm -f "$ctl.restart"; docker restart -t 1 "hobnail-p0-h-$port" >/dev/null 2>&1; touch "$ctl.done"; fi
       sleep 0.2
     done ) &
   echo "$plan" | while read -r unit profile theme motion; do
     [ -n "$unit" ] || continue
     case $unit in \#*) continue ;; esac
-    TMPDIR=${TMPDIR:-/tmp} "$dir/web/e2e/fake-instance.sh" start "$image" "$port" --m2-fixtures --log-fixtures --churn 30 >>"$log" 2>&1 || { echo "FAIL $engine $unit $profile: instance did not start" >>"$log"; continue; }
+    tag="$engine-$profile-$unit-$theme$( [ "$motion" != reduce ] || echo -rm)"
+    rm -f "$OUT/$tag.json"
+    [ ! -f "$OUT/stop" ] || { fatal "$tag" "$engine" "$unit" "$profile" "$theme" "$motion" "run interrupted"; continue; }
+    if ! TMPDIR=${TMPDIR:-/tmp} "$dir/web/e2e/fake-instance.sh" start "$image" "$port" --m2-fixtures --log-fixtures --churn 30 >>"$log" 2>&1; then
+      echo "FAIL $engine $unit $profile: instance did not start" >>"$log"
+      fatal "$tag" "$engine" "$unit" "$profile" "$theme" "$motion" "instance did not start"
+      "$dir/web/e2e/fake-instance.sh" stop "$port" >/dev/null 2>&1 || true
+      continue
+    fi
     control="http://$(docker port "hobnail-p0-h-fd-$port" 8081/tcp | head -1)"
     echo "== $engine $unit $profile $theme $motion" >>"$log"
-    docker run --rm --init --network host --shm-size 1g -u "$(id -u):$(id -g)" -e HOME=/tmp \
+    docker run --rm --init --name "hobnail-m6-run-$port" --network host --shm-size 1g -u "$(id -u):$(id -g)" -e HOME=/tmp \
       -v "$VOL":/pw:ro -v "$dir":/repo:ro -w /repo -v "$OUT":/out -e OUT=/out \
       -e HB_PASSWORD -e ENGINE="$engine" -e PROFILE="$profile" -e UNIT="$unit" -e THEME="$theme" -e MOTION="$motion" -e FLOWS="${FLOWS:-}" \
       "$PW_IMAGE" node /repo/web/e2e/matrix/run.mjs "http://127.0.0.1:$port" "$control" >>"$log" 2>&1 || true
+    # run.mjs writes its JSON even when a flow fails; none means the
+    # browser container itself failed.
+    [ -f "$OUT/$tag.json" ] || { echo "FAIL $engine $unit $profile: no result" >>"$log"; fatal "$tag" "$engine" "$unit" "$profile" "$theme" "$motion" "the runner wrote no result"; }
     "$dir/web/e2e/fake-instance.sh" stop "$port" >/dev/null 2>&1 || true
   done
   touch "$ctl.stop"
+  wait
 }
 
-i=0; pids=""
+# Installed before any engine starts: stop the browser containers, the
+# restart watchers and the throwaway instances (never the container
+# "hobnail").
+pids=""
+cleanup() {
+  touch "$OUT/stop"
+  for n in 0 1 2; do
+    touch "$OUT/ctl-$((3395 + n)).stop"
+    docker rm -f "hobnail-m6-run-$((3395 + n))" >/dev/null 2>&1 || true
+  done
+  for p in $pids; do kill "$p" 2>/dev/null || true; done
+  for n in 0 1 2; do "$dir/web/e2e/fake-instance.sh" stop $((3395 + n)) >/dev/null 2>&1 || true; done
+  exit 130
+}
+trap cleanup INT TERM
+rm -f "$OUT/stop"
+i=0
 for engine in $ENGINES; do
   engine_run "$engine" $((3395 + i)) & pids="$pids $!"
   i=$((i + 1))
 done
-trap 'for p in $pids; do kill $p 2>/dev/null; done; for n in 0 1 2; do "$dir/web/e2e/fake-instance.sh" stop $((3395 + n)) >/dev/null 2>&1; done' INT TERM
 for p in $pids; do wait "$p" || true; done
 
 docker run --rm -u "$(id -u):$(id -g)" -v "$dir":/repo:ro -v "$OUT":/out "$PW_IMAGE" node /repo/web/e2e/matrix/summary.mjs /out >"$OUT/summary.txt" 2>&1 || true
