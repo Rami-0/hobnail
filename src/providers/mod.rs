@@ -56,6 +56,7 @@ mod radarr;
 mod repositories;
 mod sabnzbd;
 mod sonarr;
+mod ssl_expiry;
 mod syncthing;
 mod tailscale;
 mod technitium;
@@ -103,6 +104,7 @@ pub const REGISTRY: &[Provider] = &[
     gitea::GITEA,
     github::GITHUB,
     paperless::PAPERLESS,
+    ssl_expiry::SSL_EXPIRY,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;

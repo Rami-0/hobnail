@@ -62,6 +62,7 @@ pub struct TlsLeaf {
     /// Unix seconds.
     pub not_after: i64,
     pub sans: Vec<SubjectAltName>,
+    pub name_matches: bool,
     pub fingerprint: [u8; 32],
     pub verification: TlsVerification,
 }
@@ -115,7 +116,7 @@ impl ProbeTarget<'_> {
         let name = rustls::pki_types::ServerName::try_from(host).map_err(|_| Class::Tls)?;
         let (verifier, config) = Leaf::inspect(pin, client::roots());
         let tls = tokio_rustls::TlsConnector::from(config)
-            .connect(name, socket)
+            .connect(name.clone(), socket)
             .await
             .map_err(|_| Class::Tls)?;
         self.revision.check().map_err(bound_error)?;
@@ -137,7 +138,9 @@ impl ProbeTarget<'_> {
             (None, Ok(())) => TlsVerification::Trusted,
             (None, Err(error)) => TlsVerification::Rejected(error.clone()),
         };
-        certificate::read(leaf.as_ref(), fingerprint, verification)
+        let name_matches = rustls::server::ParsedCertificate::try_from(leaf)
+            .is_ok_and(|cert| rustls::client::verify_server_name(&cert, &name).is_ok());
+        certificate::read(leaf.as_ref(), fingerprint, verification, name_matches)
     }
 }
 

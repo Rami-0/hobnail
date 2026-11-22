@@ -730,7 +730,7 @@ async fn tls_probe_reports_untrusted_leaves_without_sending_http() {
     use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
     use std::sync::Arc;
 
-    const CERT: &[u8] = include_bytes!("../../http/testdata/integration-self-signed.der");
+    const CERT: &[u8] = include_bytes!("../../http/testdata/integration-expired.der");
     const KEY: &[u8] = include_bytes!("../../http/testdata/integration-test-key.der");
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -751,7 +751,7 @@ async fn tls_probe_reports_untrusted_leaves_without_sending_http() {
         )
         .unwrap();
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (socket, _) = listener.accept().await.unwrap();
             let mut tls = acceptor.accept(socket).await.unwrap();
             match tls.read(&mut [0]).await {
@@ -776,11 +776,11 @@ async fn tls_probe_reports_untrusted_leaves_without_sending_http() {
         )
         .unwrap();
         let leaf = conn.run(conn.tls_leaf()).await.unwrap();
-        assert_eq!(leaf.subject, "CN=localhost");
-        assert_eq!(leaf.issuer, "CN=localhost");
+        assert_eq!(leaf.subject, "CN=Expired-fixture");
+        assert_eq!(leaf.issuer, "CN=Expired-fixture");
         assert_eq!(leaf.sans, [SubjectAltName::Ip(addr.ip())]);
-        assert!(leaf.not_before < leaf.not_after);
-        assert_eq!(leaf.not_after, 2_425_723_887);
+        assert!(leaf.name_matches);
+        assert!(leaf.not_after < crate::util::unix_now() as i64);
         assert_eq!(leaf.fingerprint, fingerprint);
         match pin {
             None => assert!(matches!(leaf.verification, TlsVerification::Rejected(_))),
@@ -790,6 +790,22 @@ async fn tls_probe_reports_untrusted_leaves_without_sending_http() {
             Some(_) => assert_eq!(leaf.verification, TlsVerification::PinMismatch),
         }
     }
+    let target = Target::new(format!("https://{addr}"), Credentials::new(), false);
+    let conn = Conn::new(
+        &target,
+        &policy,
+        &connections,
+        semaphore.try_acquire_owned().unwrap(),
+    )
+    .unwrap();
+    let widget = &crate::providers::get("ssl_expiry").unwrap().widgets[0];
+    let view = crate::providers::fetch(&conn, widget, &Values::new())
+        .await
+        .unwrap();
+    let view = serde_json::to_value(view).unwrap();
+    assert!(view["rows"][0][1].as_str().unwrap().starts_with("Expired"));
+    assert_eq!(view["rows"][1][1], "Untrusted");
+    assert_eq!(view["rows"][4][1], "Matches SAN");
     fake.await.unwrap();
 }
 

@@ -13,14 +13,20 @@ pub(super) fn read(
     bytes: &[u8],
     fingerprint: [u8; 32],
     verification: TlsVerification,
+    name_matches: bool,
 ) -> Result<TlsLeaf, Fault> {
     if bytes.len() > MAX_LEAF {
         return Err(Class::TooLarge.into());
     }
-    parse(bytes, fingerprint, verification).ok_or_else(|| Class::Protocol.into())
+    parse(bytes, fingerprint, verification, name_matches).ok_or_else(|| Class::Protocol.into())
 }
 
-fn parse(bytes: &[u8], fingerprint: [u8; 32], verification: TlsVerification) -> Option<TlsLeaf> {
+fn parse(
+    bytes: &[u8],
+    fingerprint: [u8; 32],
+    verification: TlsVerification,
+    name_matches: bool,
+) -> Option<TlsLeaf> {
     let mut certificate = Der(bytes).read(0x30)?;
     let mut tbs = certificate.read(0x30)?;
     if tbs.starts_with(0xa0) {
@@ -50,6 +56,7 @@ fn parse(bytes: &[u8], fingerprint: [u8; 32], verification: TlsVerification) -> 
         not_before,
         not_after,
         sans,
+        name_matches,
         fingerprint,
         verification,
     })

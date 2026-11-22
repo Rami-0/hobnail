@@ -578,6 +578,20 @@ and [statistics source](https://github.com/paperless-ngx/paperless-ngx/blob/v2.2
 
 UNVERIFIED: other API versions, reverse-proxy auth and live permission setups.
 
+## SSL certificate expiry
+
+Configure one TLS hostname per integration as `https://host[:port]`. The
+widget runs a TLS handshake from Hobnail and reports time remaining, expiry
+urgency (14 and 7 days by default), issuer, subject, DNS/IP SANs, hostname
+match and the public trust or configured pin verdict. An expired or
+untrusted leaf is still displayed. LAN targets use the normal outbound policy.
+Public targets require the provider internet switch.
+
+Verified from: [RFC 9525](https://www.rfc-editor.org/rfc/rfc9525.html) and
+[rustls name verification](https://docs.rs/rustls/latest/rustls/client/fn.verify_server_name.html).
+
+UNVERIFIED: Live certificate chains and TLS endpoints.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each
