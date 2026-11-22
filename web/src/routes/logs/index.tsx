@@ -171,7 +171,7 @@ export default function LogsPage() {
   const download = new URLSearchParams(stack ? { stack } : { c: panes.join(",") });
   if (!range) download.set("tail", String(picker.ring));
   const filters = [..."ewido"].filter((l) => !levels.includes(l)).length + Number(show !== "all") + Number(!!range);
-  return <div className="page logs-page" data-testid="logs-viewer"><nav className="crumb" aria-label="Breadcrumb"><a href="/app/logs">Logs</a></nav>
+  return <div className="page logs-page" data-testid="logs-viewer"><div className="crumb"><a href="/app/logs">Logs</a></div>
     {route.route.name === "container_logs" ? <ContainerContext name={route.route.ctr} query={route.query} /> :
       <PageHeader title={stack ?? (panes.length === 1 ? panes[0] : "Side by side")} />}
     {(missing.length > 0 || (stack !== null && !stackExists)) && <p className="banner warn" role="alert">Not found: {missing.join(", ") || stack}</p>}
