@@ -1,14 +1,14 @@
 import { createElement as h, Fragment, useEffect, useMemo, useState } from "react";
 import type { StructuredBody } from "../api/gen/StructuredBody.ts";
 
-function month(now: number, timeZone: string) {
-  const date = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
-  const parts = date.formatToParts(now);
-  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
-  const year = get("year"), index = get("month") - 1, today = get("day");
+const captionDate = new Intl.DateTimeFormat(undefined, { timeZone: "UTC", calendar: "gregory", month: "long", year: "numeric" });
+
+function month(date: string) {
+  const [number, today, year] = date.split("/").map(Number);
+  const index = number - 1;
   const first = new Date(Date.UTC(year, index, 1)).getUTCDay();
   const days = new Date(Date.UTC(year, index + 1, 0)).getUTCDate();
-  const caption = new Intl.DateTimeFormat(undefined, { timeZone, calendar: "gregory", month: "long", year: "numeric" }).format(now);
+  const caption = captionDate.format(Date.UTC(year, index, 1));
   return h("table", { className: "widget-month" },
     h("caption", null, caption),
     h("thead", null, h("tr", null,
@@ -56,7 +56,12 @@ export function Clock({ zones, hour12, calendar }: Extract<StructuredBody, { kin
     }
   }), [zones, hour12, reduced]);
   const firstZone = zones[clocks.findIndex(Boolean)]?.[0];
+  const dayDate = useMemo(() => calendar && firstZone && new Intl.DateTimeFormat("en-US", {
+    timeZone: firstZone,
+  }), [calendar, firstZone]);
+  const day = dayDate && dayDate.format(now);
+  const grid = useMemo(() => day && month(day), [day]);
   return h(Fragment, null, h("dl", null, zones.map(([zone, label], key) =>
     h("div", { key }, h("dt", { title: zone }, label), h("dd", null, clocks[key]?.format(now) ?? "Unknown time zone")))),
-    calendar && firstZone && month(now, firstZone));
+    grid);
 }
