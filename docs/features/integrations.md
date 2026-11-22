@@ -63,10 +63,24 @@ blocked and blocking status. The v6 widget reads `/api/stats/summary`
 and `/api/dns/blocking`. The v5 widget reads all four values from the
 legacy summary.
 
+**Top domains** lists the ten most queried domains with their query counts.
+Turn on **Show blocked domains** to list the ten most blocked instead.
+**Top clients** lists the ten clients that sent the most queries, with the
+hostname when Pi-hole knows one. v6 reads `/api/stats/top_domains` (with
+`blocked=true` for blocked domains) and `/api/stats/top_clients`, both
+with `count=10` and the session header. v5 reads `topItems=10` (its
+`top_queries` or `top_ads` map) or `getQuerySources=10` (`top_sources`,
+keyed `hostname|ip`) from `/admin/api.php` with the token. The v5 maps
+arrive as JSON objects, so Hobnail ranks them by count, then name. Both
+versions return an empty array or 401 without a valid credential, which
+Hobnail reports as an authentication failure.
+
 Verified against the public [authentication documentation](https://docs.pi-hole.net/api/auth/),
-the upstream [v6 summary](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/stats.yaml)
+the upstream [v6 summary, top domains and top clients](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/stats.yaml)
+(paths in [main.yaml](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/main.yaml))
 and [blocking](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/dns.yaml)
-schema files, and the tagged [v5.21 summary](https://github.com/pi-hole/web/blob/v5.21/api_FTL.php)
+schema files, and the tagged [v5.21 summary, `topItems` and `getQuerySources`](https://github.com/pi-hole/web/blob/v5.21/api_FTL.php)
+(authorization in [api.php](https://github.com/pi-hole/web/blob/v5.21/api.php))
 and [token handling](https://github.com/pi-hole/web/blob/v5.21/scripts/pi-hole/php/password.php)
 source. The v6 summary schema gives totals without specifying a calendar-day
 window, so the widget labels that count **Queries**. Request flow and response

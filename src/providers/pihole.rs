@@ -8,7 +8,7 @@ pub const PI_HOLE: Provider = Provider {
     name: "Pi-hole",
     category: "Network",
     icon: "pi-hole",
-    description: "Show DNS query counts and blocking status.",
+    description: "Show DNS query counts, blocking status, and top domains and clients.",
     docs: "https://docs.pi-hole.net/api/auth/",
     public_internet: false,
     contacts: "Your configured Pi-hole service. Public addresses require internet access.",
@@ -40,35 +40,79 @@ pub const PI_HOLE: Provider = Provider {
         },
     ],
     test,
-    widgets: &[Widget {
-        id: "dns",
-        name: "DNS activity",
-        description: "Show queries, blocked queries, percentage blocked, and blocking status.",
-        recommended: true,
-        fields: &[REFRESH],
-        validate: |_| Ok(()),
-        fetch,
-    }],
+    widgets: &[
+        Widget {
+            id: "dns",
+            name: "DNS activity",
+            description: "Show queries, blocked queries, percentage blocked, and blocking status.",
+            recommended: true,
+            fields: &[REFRESH],
+            validate: |_| Ok(()),
+            fetch,
+        },
+        Widget {
+            id: "top_domains",
+            name: "Top domains",
+            description: "The ten most queried domains, or the ten most blocked.",
+            recommended: false,
+            fields: &[
+                Field {
+                    default: Some("false"),
+                    ..Field::new("blocked", "Show blocked domains", Kind::Bool, "")
+                },
+                REFRESH,
+            ],
+            validate: |_| Ok(()),
+            fetch: top_domains,
+        },
+        Widget {
+            id: "top_clients",
+            name: "Top clients",
+            description: "The ten clients that sent the most queries.",
+            recommended: false,
+            fields: &[REFRESH],
+            validate: |_| Ok(()),
+            fetch: top_clients,
+        },
+    ],
 };
 
+const TOP_COUNT: usize = 10;
+
+#[derive(Clone, Copy)]
+enum Report {
+    Summary,
+    Domains { blocked: bool },
+    Clients,
+}
+
 fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
-    Box::pin(async { activity(conn).await.map(drop) })
+    Box::pin(async { activity(conn, Report::Summary).await.map(drop) })
 }
 
 fn fetch<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, widgets::StructuredBody> {
-    Box::pin(async { activity(conn).await })
+    Box::pin(async { activity(conn, Report::Summary).await })
 }
 
-async fn activity(conn: &Conn<'_>) -> Result<widgets::StructuredBody, Fault> {
+fn top_domains<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, widgets::StructuredBody> {
+    let blocked = options.get("blocked").and_then(Value::as_bool) == Some(true);
+    Box::pin(async move { activity(conn, Report::Domains { blocked }).await })
+}
+
+fn top_clients<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, widgets::StructuredBody> {
+    Box::pin(async { activity(conn, Report::Clients).await })
+}
+
+async fn activity(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, Fault> {
     if conn.options().get("version").and_then(Value::as_str) == Some("v5") {
-        return v5(conn).await;
+        return v5(conn, report).await;
     }
     if !conn.has_credential(PASSWORD) {
-        return v6(conn, None).await;
+        return v6(conn, None, report).await;
     }
     if !conn.uses_session_cache() {
         let sid = login(conn).await?;
-        let result = v6(conn, Some(&sid)).await;
+        let result = v6(conn, Some(&sid), report).await;
         let _ = conn
             .request(Step {
                 verb: Verb::Delete,
@@ -80,7 +124,7 @@ async fn activity(conn: &Conn<'_>) -> Result<widgets::StructuredBody, Fault> {
     }
     conn.retry_session(
         || async { login(conn).await.map(Some) },
-        |sid| async move { v6(conn, sid.as_ref()).await },
+        |sid| async move { v6(conn, sid.as_ref(), report).await },
     )
     .await
 }
@@ -105,9 +149,66 @@ async fn login(conn: &Conn<'_>) -> Result<Session, Fault> {
     conn.session(session["sid"].as_str().ok_or(Class::Protocol)?)
 }
 
-async fn v6(conn: &Conn<'_>, session: Option<&Session>) -> Result<widgets::StructuredBody, Fault> {
+async fn v6(
+    conn: &Conn<'_>,
+    session: Option<&Session>,
+    report: Report,
+) -> Result<widgets::StructuredBody, Fault> {
     let auth = session.map(|sid| [Auth::Header("x-ftl-sid", Input::Session(sid))]);
     let auth = auth.as_ref().map_or(&[][..], |auth| &auth[..]);
+    let count = TOP_COUNT.to_string();
+    let (path, list, name, blocked) = match report {
+        Report::Summary => return v6_summary(conn, auth).await,
+        Report::Domains { blocked } => ("/api/stats/top_domains", "domains", "Domain", blocked),
+        Report::Clients => ("/api/stats/top_clients", "clients", "Client", false),
+    };
+    let query = [
+        ("count", Input::Text(&count)),
+        ("blocked", Input::Text("true")),
+    ];
+    let data = json(
+        conn,
+        Step {
+            auth,
+            query: if blocked { &query } else { &query[..1] },
+            ..Step::get(path)
+        },
+    )
+    .await?;
+    let entries = data[list].as_array().ok_or(Class::Protocol)?;
+    let mut rows = Vec::with_capacity(entries.len().min(TOP_COUNT));
+    for entry in entries.iter().take(TOP_COUNT) {
+        let label = if let Report::Clients = report {
+            let ip = entry["ip"].as_str().ok_or(Class::Protocol)?;
+            match entry["name"].as_str().filter(|name| !name.is_empty()) {
+                Some(name) => format!("{name} ({ip})"),
+                None => ip.into(),
+            }
+        } else {
+            entry["domain"].as_str().ok_or(Class::Protocol)?.into()
+        };
+        rows.push((label, entry["count"].as_u64().ok_or(Class::Protocol)?));
+    }
+    Ok(table(conn, name, rows))
+}
+
+/// A ranked name and count table, most queries first.
+fn table(conn: &Conn<'_>, name: &str, rows: Vec<(String, u64)>) -> widgets::StructuredBody {
+    if rows.is_empty() {
+        return widgets::StructuredBody::Stat {
+            value: "No queries recorded".into(),
+        };
+    }
+    widgets::StructuredBody::Table {
+        headings: vec![name.into(), "Queries".into()],
+        rows: rows
+            .into_iter()
+            .map(|(label, count)| vec![display_text(conn, label), count.to_string()])
+            .collect(),
+    }
+}
+
+async fn v6_summary(conn: &Conn<'_>, auth: &[Auth<'_>]) -> Result<widgets::StructuredBody, Fault> {
     let summary = json(
         conn,
         Step {
@@ -134,9 +235,17 @@ async fn v6(conn: &Conn<'_>, session: Option<&Session>) -> Result<widgets::Struc
     )
 }
 
-async fn v5(conn: &Conn<'_>) -> Result<widgets::StructuredBody, Fault> {
+async fn v5(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, Fault> {
+    let count = TOP_COUNT.to_string();
+    let (request, key, name) = match report {
+        Report::Summary => ("summaryRaw", "", ""),
+        Report::Domains { blocked: false } => ("topItems", "top_queries", "Domain"),
+        Report::Domains { blocked: true } => ("topItems", "top_ads", "Domain"),
+        Report::Clients => ("getQuerySources", "top_sources", "Client"),
+    };
+    let value = if key.is_empty() { "" } else { count.as_str() };
     let query = [
-        ("summaryRaw", Input::Text("")),
+        (request, Input::Text(value)),
         ("auth", Input::Credential(TOKEN)),
     ];
     let query = if conn.has_credential(TOKEN) {
@@ -152,9 +261,28 @@ async fn v5(conn: &Conn<'_>) -> Result<widgets::StructuredBody, Fault> {
         },
     )
     .await?;
-    // The v5.21 PHP endpoint returns an empty array for an unauthorized summary.
+    // The v5.21 PHP endpoint returns an empty array for an unauthorized request.
     if data.as_array().is_some_and(Vec::is_empty) {
         return Err(Class::Auth.into());
+    }
+    if !key.is_empty() {
+        // PHP objects of name => count; clients are "hostname|ip" or "ip".
+        // The JSON map loses PHP's order, so rank by count here.
+        let mut rows = data[key]
+            .as_object()
+            .ok_or(Class::Protocol)?
+            .iter()
+            .map(|(label, count)| {
+                let label = match label.split_once('|') {
+                    Some((name, ip)) => format!("{name} ({ip})"),
+                    None => label.clone(),
+                };
+                Ok((label, count.as_u64().ok_or(Class::Protocol)?))
+            })
+            .collect::<Result<Vec<_>, Fault>>()?;
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows.truncate(TOP_COUNT);
+        return Ok(table(conn, name, rows));
     }
     stats(
         "Queries today",
@@ -221,6 +349,7 @@ mod tests {
         addr: std::net::SocketAddr,
         version: &'static str,
         credential: (&'static str, &'static str),
+        report: Report,
         fake: impl Future<Output = ()> + Send + 'static,
     ) -> widgets::StructuredBody {
         let origin = format!("http://{addr}");
@@ -246,7 +375,7 @@ mod tests {
         let permit = Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap();
         let conn = Conn::new(&target, &policy, &connections, permit).unwrap();
         let task = tokio::spawn(fake);
-        let body = conn.run(activity(&conn)).await.unwrap();
+        let body = conn.run(activity(&conn, report)).await.unwrap();
         task.await.unwrap();
         body
     }
@@ -255,34 +384,40 @@ mod tests {
     async fn v6_renews_an_expired_sid_and_fetches_stats_and_blocking() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let body = request_activity(addr, "v6", (PASSWORD, "test password"), async move {
-            for (sid, status) in [("first", 401), ("second", 200)] {
+        let body = request_activity(
+            addr,
+            "v6",
+            (PASSWORD, "test password"),
+            Report::Summary,
+            async move {
+                for (sid, status) in [("first", 401), ("second", 200)] {
+                    let (mut socket, wire) = receive(&listener).await;
+                    assert!(wire.starts_with("POST /dns/api/auth HTTP/1.1"));
+                    assert!(wire.ends_with(r#"{"password":"test password"}"#));
+                    respond(
+                        &mut socket,
+                        200,
+                        "",
+                        &format!(r#"{{"session":{{"valid":true,"sid":"{sid}"}}}}"#),
+                    )
+                    .await;
+                    let (mut socket, wire) = receive(&listener).await;
+                    assert!(wire.starts_with("GET /dns/api/stats/summary HTTP/1.1"));
+                    assert!(wire.contains(&format!("x-ftl-sid: {sid}\r\n")));
+                    respond(
+                        &mut socket,
+                        status,
+                        "",
+                        r#"{"queries":{"total":42,"blocked":21,"percent_blocked":50}}"#,
+                    )
+                    .await;
+                }
                 let (mut socket, wire) = receive(&listener).await;
-                assert!(wire.starts_with("POST /dns/api/auth HTTP/1.1"));
-                assert!(wire.ends_with(r#"{"password":"test password"}"#));
-                respond(
-                    &mut socket,
-                    200,
-                    "",
-                    &format!(r#"{{"session":{{"valid":true,"sid":"{sid}"}}}}"#),
-                )
-                .await;
-                let (mut socket, wire) = receive(&listener).await;
-                assert!(wire.starts_with("GET /dns/api/stats/summary HTTP/1.1"));
-                assert!(wire.contains(&format!("x-ftl-sid: {sid}\r\n")));
-                respond(
-                    &mut socket,
-                    status,
-                    "",
-                    r#"{"queries":{"total":42,"blocked":21,"percent_blocked":50}}"#,
-                )
-                .await;
-            }
-            let (mut socket, wire) = receive(&listener).await;
-            assert!(wire.starts_with("GET /dns/api/dns/blocking HTTP/1.1"));
-            assert!(wire.contains("x-ftl-sid: second\r\n"));
-            respond(&mut socket, 200, "", r#"{"blocking":"enabled"}"#).await;
-        })
+                assert!(wire.starts_with("GET /dns/api/dns/blocking HTTP/1.1"));
+                assert!(wire.contains("x-ftl-sid: second\r\n"));
+                respond(&mut socket, 200, "", r#"{"blocking":"enabled"}"#).await;
+            },
+        )
         .await;
         assert_eq!(
             serde_json::to_value(body).unwrap()["rows"],
@@ -299,7 +434,7 @@ mod tests {
     async fn v5_uses_an_encoded_token_and_reads_the_legacy_summary() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let body = request_activity(addr, "v5", (TOKEN, "test+/=&"), async move {
+        let body = request_activity(addr, "v5", (TOKEN, "test+/=&"), Report::Summary, async move {
             let (mut socket, wire) = receive(&listener).await;
             assert!(wire.starts_with("GET /dns/admin/api.php?summaryRaw=&auth=test%2B%2F%3D%26 HTTP/1.1"));
             respond(&mut socket, 200, "", r#"{"dns_queries_today":100.0,"ads_blocked_today":15,"ads_percentage_today":15.0,"status":"disabled"}"#).await;
@@ -312,6 +447,93 @@ mod tests {
                 ["Blocked percentage", "15.0%"],
                 ["Blocking", "Disabled"],
             ])
+        );
+    }
+
+    #[tokio::test]
+    async fn v6_top_lists_use_the_session_and_rank_domains_and_clients() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let login = async |listener: &TcpListener| {
+            let (mut socket, wire) = receive(listener).await;
+            assert!(wire.starts_with("POST /dns/api/auth HTTP/1.1"));
+            respond(
+                &mut socket,
+                200,
+                "",
+                r#"{"session":{"valid":true,"sid":"top-sid","csrf":"x","validity":1800}}"#,
+            )
+            .await;
+        };
+        let body = request_activity(addr, "v6", (PASSWORD, "test password"), Report::Domains { blocked: true }, async move {
+            login(&listener).await;
+            let (mut socket, wire) = receive(&listener).await;
+            assert!(wire.starts_with("GET /dns/api/stats/top_domains?count=10&blocked=true HTTP/1.1"));
+            assert!(wire.contains("x-ftl-sid: top-sid\r\n"));
+            respond(&mut socket, 200, "", r#"{"domains":[{"domain":"doubleclick.net","count":8516},{"domain":"ads.example","count":12}],"total_queries":29160,"blocked_queries":6379,"took":0.001}"#).await;
+        }).await;
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({"kind":"table","headings":["Domain","Queries"],"rows":[["doubleclick.net","8516"],["ads.example","12"]]})
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = request_activity(addr, "v6", (PASSWORD, "test password"), Report::Clients, async move {
+            login(&listener).await;
+            let (mut socket, wire) = receive(&listener).await;
+            assert!(wire.starts_with("GET /dns/api/stats/top_clients?count=10 HTTP/1.1"));
+            let clients: Vec<_> = (0..12).map(|i| serde_json::json!({"ip":format!("192.168.0.{i}"),"name":if i == 0 { "raspberrypi.lan" } else { "" },"count":100 - i})).collect();
+            respond(&mut socket, 200, "", &serde_json::json!({"clients":clients,"total_queries":29160,"blocked_queries":6379,"took":0.001}).to_string()).await;
+        }).await;
+        let body = serde_json::to_value(body).unwrap();
+        assert_eq!(body["headings"], serde_json::json!(["Client", "Queries"]));
+        assert_eq!(body["rows"].as_array().unwrap().len(), TOP_COUNT);
+        assert_eq!(
+            body["rows"][0],
+            serde_json::json!(["raspberrypi.lan (192.168.0.0)", "100"])
+        );
+        assert_eq!(body["rows"][1], serde_json::json!(["192.168.0.1", "99"]));
+    }
+
+    #[tokio::test]
+    async fn v5_top_lists_use_the_token_and_rank_the_php_maps() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = request_activity(addr, "v5", (TOKEN, "test+/=&"), Report::Domains { blocked: false }, async move {
+            let (mut socket, wire) = receive(&listener).await;
+            assert!(wire.starts_with("GET /dns/admin/api.php?topItems=10&auth=test%2B%2F%3D%26 HTTP/1.1"));
+            respond(&mut socket, 200, "", r#"{"top_queries":{"a.example":3,"z.example":40,"m.example":40},"top_ads":{"ads.example":9}}"#).await;
+        }).await;
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["rows"],
+            serde_json::json!([["m.example", "40"], ["z.example", "40"], ["a.example", "3"]])
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let body = request_activity(
+            addr,
+            "v5",
+            (TOKEN, "test+/=&"),
+            Report::Clients,
+            async move {
+                let (mut socket, wire) = receive(&listener).await;
+                assert!(wire.starts_with(
+                    "GET /dns/admin/api.php?getQuerySources=10&auth=test%2B%2F%3D%26 HTTP/1.1"
+                ));
+                respond(
+                    &mut socket,
+                    200,
+                    "",
+                    r#"{"top_sources":{"laptop.lan|192.168.0.9":70,"192.168.0.4":5}}"#,
+                )
+                .await;
+            },
+        )
+        .await;
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["rows"],
+            serde_json::json!([["laptop.lan (192.168.0.9)", "70"], ["192.168.0.4", "5"]])
         );
     }
 
