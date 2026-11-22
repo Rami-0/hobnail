@@ -50,16 +50,24 @@ pub(super) const FEED: Provider = Provider {
 struct Entry {
     title: String,
     link: String,
-    link_overflow: bool,
     published: String,
     updated: String,
     summary: String,
     summary_html: bool,
+    /// Per [`FieldName`]: the field was longer than it may be captured.
+    overflow: [bool; 5],
 }
 
-/// Raw summary bytes kept per entry. Markup is stripped afterwards, so this
-/// leaves room for tags around the visible text.
-const SUMMARY_RAW: usize = 2048;
+/// Decoded bytes captured per text field, as large as the largest secret
+/// the redactor takes. Redaction sees the whole field before anything is
+/// shortened for display, so no cut can leave the start of a secret in the
+/// text. A field longer than this is not shown at all: its cut might.
+/// One entry is held at a time, so this bounds the extra memory to a few
+/// fields of an entry.
+const FIELD_RAW: usize = 16 * 1024;
+/// Visible bytes per field after redaction.
+const TITLE: usize = 160;
+const DATE: usize = 80;
 /// Visible summary bytes after markup is stripped.
 const SUMMARY: usize = 240;
 
@@ -67,16 +75,25 @@ impl Entry {
     /// Folding, tag stripping and entity decoding can hide a secret from the
     /// final output pass, so each field is checked before and after them.
     fn body(self, summaries: bool, redactor: &OutputRedactor) -> BodyItem {
+        let shown = |field: FieldName, text: &str| {
+            !self.overflow[field as usize] && !text.trim().is_empty()
+        };
         let compact = |s: &str| {
             redactor.transformed(&[s], s.split_whitespace().collect::<Vec<_>>().join(" "))
         };
-        let title = compact(&self.title);
-        let date = if self.published.trim().is_empty() {
-            compact(&self.updated)
+        let title = if shown(FieldName::Title, &self.title) {
+            clip(compact(&self.title), TITLE)
         } else {
-            compact(&self.published)
+            String::new()
         };
-        let summary = if !summaries {
+        let date = if shown(FieldName::Published, &self.published) {
+            clip(compact(&self.published), DATE)
+        } else if shown(FieldName::Updated, &self.updated) && self.published.trim().is_empty() {
+            clip(compact(&self.updated), DATE)
+        } else {
+            String::new()
+        };
+        let summary = if !summaries || !shown(FieldName::Summary, &self.summary) {
             String::new()
         } else if self.summary_html {
             let text = html_text(&self.summary);
@@ -98,8 +115,10 @@ impl Entry {
             } else {
                 title
             },
-            link: (!self.link_overflow && link.len() <= LINK && navigation_link(link))
-                .then(|| link.into()),
+            link: (!self.overflow[FieldName::Link as usize]
+                && link.len() <= LINK
+                && navigation_link(link))
+            .then(|| link.into()),
             secondary: (!secondary.is_empty()).then_some(secondary),
             time: None,
         }
@@ -129,11 +148,11 @@ impl FieldName {
 
     fn target(self, item: &mut Entry) -> (&mut String, usize) {
         match self {
-            Self::Title => (&mut item.title, 160),
+            Self::Title => (&mut item.title, FIELD_RAW),
             Self::Link => (&mut item.link, LINK + 8),
-            Self::Published => (&mut item.published, 80),
-            Self::Updated => (&mut item.updated, 80),
-            Self::Summary => (&mut item.summary, SUMMARY_RAW),
+            Self::Published => (&mut item.published, FIELD_RAW),
+            Self::Updated => (&mut item.updated, FIELD_RAW),
+            Self::Summary => (&mut item.summary, FIELD_RAW),
         }
     }
 }
@@ -307,8 +326,8 @@ fn entries(
                 }
                 if let (Some(entry), Some(field)) = (&mut entry, field) {
                     let (out, max) = FieldName::target(field, entry);
-                    if xml::append(text, entities, out, max)? && matches!(field, FieldName::Link) {
-                        entry.link_overflow = true;
+                    if xml::append(text, entities, out, max)? {
+                        entry.overflow[field as usize] = true;
                     }
                 } else {
                     xml::append(text, entities, &mut String::new(), 0)?;
@@ -580,6 +599,57 @@ mod tests {
             .pop()
             .unwrap();
         assert!(!entry.secondary.unwrap().contains("SECR"));
+    }
+
+    #[test]
+    fn a_secret_across_a_display_cap_is_redacted_whole() {
+        // Each field used to be cut while it was read (title 160, date 80,
+        // summary 2048 raw bytes), before redaction, so a secret across the
+        // cut left its first bytes in the text.
+        let secret = "SECRET-0123456789";
+        let redactor = OutputRedactor::new([secret].into_iter());
+        let rss = format!(
+            "<rss version='2.0'><channel>\
+             <item><title>{} {secret}</title></item>\
+             <item><title>Dated</title><pubDate>{} {secret}</pubDate></item>\
+             <item><title>Tagged</title><description>{}{secret}</description></item>\
+             </channel></rss>",
+            "t".repeat(150),
+            "d".repeat(70),
+            "&lt;b&gt;&lt;/b&gt;".repeat(290),
+        );
+        let items = parse(rss.as_bytes(), true, true, &redactor).unwrap();
+        for item in &items {
+            let text = format!("{} {}", item.title, item.secondary.as_deref().unwrap_or(""));
+            assert!(!text.contains("SECR"), "{text}");
+        }
+        assert_eq!(items[0].title, "<redacted>");
+        assert_eq!(items[1].secondary.as_deref(), Some("<redacted>"));
+        assert_eq!(items[2].secondary.as_deref(), Some("<redacted>"));
+        // Without the secret the fields are clipped for display afterwards.
+        let items = parse(rss.as_bytes(), true, true, &none()).unwrap();
+        assert!(items[0].title.len() <= TITLE && items[0].title.starts_with("ttt"));
+        assert!(items[1].secondary.as_deref().unwrap().len() <= DATE);
+        assert_eq!(items[2].secondary.as_deref(), Some(secret));
+    }
+
+    #[test]
+    fn a_field_longer_than_its_capture_is_not_shown() {
+        let secret = "SECRET-0123456789";
+        let redactor = OutputRedactor::new([secret].into_iter());
+        let rss = format!(
+            "<rss version='2.0'><channel><item><title>{}{secret}</title><description>{}{secret}</description><pubDate>Sun</pubDate></item></channel></rss>",
+            "t".repeat(FIELD_RAW - 8),
+            " ".repeat(FIELD_RAW - 8),
+        );
+        for redactor in [&redactor, &none()] {
+            let entry = parse(rss.as_bytes(), true, true, redactor)
+                .unwrap()
+                .pop()
+                .unwrap();
+            assert_eq!(entry.title, "Untitled entry");
+            assert_eq!(entry.secondary.as_deref(), Some("Sun"));
+        }
     }
 
     #[test]

@@ -684,7 +684,9 @@ The UTF-8 reader keeps at most the first 128 KiB and stops downloading
 there. For a longer feed it shows the entries that end within that prefix and
 ignores the rest, so a feed with very long entries can show fewer than 20.
 If no entry ends within 128 KiB, the widget reports an unexpected response.
-XML depth is capped at 24 and display field lengths individually. An
+XML depth is capped at 24. Each title, date and summary is read whole, up
+to 16 KiB, redacted, and only then shortened for display, so a cut never
+leaves the start of a credential; a longer field is not shown at all. An
 attribute value over 1 KiB, such as an inline image, is skipped rather than
 rejecting the feed. It supports CDATA, predefined XML entities and numeric
 references. DTDs and external entities are rejected.
