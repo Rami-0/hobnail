@@ -47,7 +47,7 @@ export class LogPane {
     for (const pane of LogPane.panes) {
       pane.current = pane.query === next.pane ? next.id : null;
       if (pane.current !== null) pane.seek(pane.current);
-      pane.signature = ""; pane.schedule();
+      pane.schedule();
     }
   }
   private static initialMatch(): void {
@@ -91,7 +91,6 @@ export class LogPane {
   private state = "connecting";
   private message = "";
   private counts: Record<string, number> = {};
-  private signature = "";
   private top = document.createElement("div");
   private content = document.createElement("div");
   private observer: ResizeObserver;
@@ -103,6 +102,7 @@ export class LogPane {
   private pickedTarget = false;
   readonly box: HTMLElement;
   readonly query: string;
+  private stack: string | null;
   readonly cap: number;
   readonly tail: number;
   private options: ViewOptions;
@@ -116,6 +116,7 @@ export class LogPane {
     this.box = box; this.query = query; this.cap = cap; this.tail = tail;
     this.options = options; this.range = range; this.target = target; this.report = report; this.select = select;
     this.ring = new Ring(cap);
+    this.stack = new URLSearchParams(query).get("stack");
     this.top.setAttribute("aria-hidden", "true");
     this.content.className = "log-window";
     box.replaceChildren(this.top, this.content);
@@ -145,7 +146,7 @@ export class LogPane {
     if (!this.following && !this.anchor) this.mark();
     this.restoring = true;
     this.options = options;
-    if (changed) { this.heights.clear(); this.signature = ""; }
+    if (changed) this.heights.clear();
     this.schedule();
   }
   private pagehide = () => { this.suspended = true; this.disconnect(); };
@@ -175,23 +176,22 @@ export class LogPane {
     if (this.closed || this.suspended || this.done) return;
     const latest = Math.min(...this.last.values()), now = Date.now();
     const params = streamParams(this.query, this.range, this.tail, this.cap, Number.isFinite(latest) ? latest : null, this.target, now);
-    if (this.target !== null && this.target > now + 5000) this.message = "That moment is still to come: showing the live tail.";
+    if (this.target !== null && this.target > now + 5000) this.message = "That moment is still to come. Showing the live tail.";
     this.state = "connecting"; this.schedule();
     const reconnectFloor = new Map(this.last);
-    const reconnecting = reconnectFloor.size > 0;
     const es = this.source = new EventSource(`/api/logs/stream?${params}`);
     es.addEventListener("hello", () => { this.state = "live"; this.delay = 2000; this.schedule(); });
     es.addEventListener("meta", (e) => {
       const m = JSON.parse((e as MessageEvent<string>).data) as { c: number; name: string; running: boolean; status: string };
       this.names.set(m.c, m.name);
-      if (!m.running) this.message = this.query.startsWith("stack=") ? `${m.name} is stopped. Showing its last lines. ${m.status}` : `This container is stopped. ${m.status}`;
+      if (!m.running) this.message = this.stack !== null ? `${m.name} is stopped. Showing its last lines. ${m.status}` : `This container is stopped. ${m.status}`;
       this.schedule();
     });
     es.addEventListener("l", (e) => {
       const lines = this.decode((e as MessageEvent<string>).data);
       for (const line of lines) {
         const previous = reconnectFloor.get(line.c);
-        if (previous !== undefined && line.t <= previous && reconnecting) continue;
+        if (previous !== undefined && line.t <= previous) continue;
         this.pending.push(line);
         this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
       }
@@ -205,7 +205,7 @@ export class LogPane {
     });
     es.addEventListener("end", (e) => {
       const end = JSON.parse((e as MessageEvent<string>).data) as { cut?: boolean };
-      if (end.cut) this.message = "Showing the first lines of the range; the server line limit was reached.";
+      if (end.cut) this.message = "Showing the first lines up to the server limit.";
     });
     es.addEventListener("done", () => { this.done = true; es.close(); if (this.state !== "error" && this.state !== "not found") this.state = "ended"; this.schedule(); });
     es.addEventListener("error", () => {
@@ -215,9 +215,10 @@ export class LogPane {
       void api.get<{ groups: Array<{ name: string; project: boolean; containers: Array<{ name: string }> }> }>("/api/v1/logs/picker").then((result) => {
         if (this.closed || this.suspended) return;
         if (result.kind === "sign_in" || result.kind === "forbidden") { this.state = "no access"; this.message = "Sign in to read these logs."; this.done = true; this.schedule(); return; }
-        const query = new URLSearchParams(this.query);
-        if (result.kind === "ok" && !(query.has("stack") ? result.data.groups.some((g) => g.project && g.name === query.get("stack")) : result.data.groups.some((g) => g.containers.some((c) => c.name === query.get("c"))))) {
-          this.state = "not found"; this.message = "This container is no longer available."; this.done = true; this.schedule(); return;
+        const name = new URLSearchParams(this.query).get("c");
+        if (result.kind === "ok" && !result.data.groups.some((g) => this.stack === null
+          ? g.containers.some((c) => c.name === name) : g.project && g.name === this.stack)) {
+          this.state = "not found"; this.message = "Container no longer available."; this.done = true; this.schedule(); return;
         }
         this.retry = window.setTimeout(() => this.connect(), this.delay);
         this.delay = Math.min(30000, this.delay * 2);
@@ -230,8 +231,8 @@ export class LogPane {
   }
   loadOlder(): void {
     if (this.older || this.pendingOlder.length) this.message = "Older lines are already loading.";
-    else if (!this.ring.rows.length) this.message = "No loaded lines to search before.";
-    else if (this.ring.rows.length >= this.cap) this.message = "The ring is full; choose an earlier range to read older lines.";
+    else if (!this.ring.rows.length) this.message = "No loaded lines yet.";
+    else if (this.ring.rows.length >= this.cap) this.message = "The ring is full. Choose an earlier range.";
     else this.message = "";
     if (this.message) { this.schedule(); return; }
     this.message = "Loading older lines…";
@@ -299,7 +300,7 @@ export class LogPane {
     if (e.key === "Enter" && e.target === this.box) {
       e.preventDefault();
       const row = this.visible.find((r) => r.id === this.current) ?? this.visible[this.indexAt(this.box.scrollTop)];
-      if (row) { this.pinned = true; this.selected = row; this.select(row, true); this.signature = ""; this.schedule(); }
+      if (row) { this.pinned = true; this.selected = row; this.select(row, true); this.schedule(); }
     }
   };
   private click = (e: MouseEvent) => {
@@ -313,19 +314,19 @@ export class LogPane {
     if ((e.target as Element).closest("a,button,pre")) return;
     const el = (e.target as Element).closest<HTMLElement>("[data-log-id]");
     const row = el && this.visible.find((r) => r.id === Number(el.dataset.logId));
-    if (row) { this.pinned = true; this.selected = row; this.select(row, false); this.signature = ""; this.schedule(); }
+    if (row) { this.pinned = true; this.selected = row; this.select(row, false); this.schedule(); }
   };
   private hover = (e: MouseEvent) => {
     if (this.pinned) return;
     const element = (e.target as Element).closest<HTMLElement>("[data-log-id]");
     const row = element && this.visible.find((line) => line.id === Number(element.dataset.logId));
-    if (row && row.id !== this.selected?.id) { this.selected = row; this.select(row, false); this.signature = ""; this.schedule(); }
+    if (row && row.id !== this.selected?.id) { this.selected = row; this.select(row, false); this.schedule(); }
   };
-  clearSelection(): void { this.pinned = false; this.selected = null; this.select(null, false); this.signature = ""; this.schedule(); }
+  clearSelection(): void { this.pinned = false; this.selected = null; this.select(null, false); this.schedule(); }
   moveSelected(direction: number): void {
     const i = this.visible.findIndex((r) => r.id === this.selected?.id);
     const next = this.visible[i + direction];
-    if (next) { this.selected = next; this.select(next, true); this.seek(next.id); this.signature = ""; this.schedule(); }
+    if (next) { this.selected = next; this.select(next, true); this.seek(next.id); this.schedule(); }
   }
   private schedule(): void {
     if (this.closed) return;
@@ -339,7 +340,7 @@ export class LogPane {
   }
   private estimate(row: Row): number {
     if (!this.options.wrap) return 28;
-    const reserved = (this.options.time ? 116 : 0) + (this.query.startsWith("stack=") ? 100 : 0) + 24;
+    const reserved = (this.options.time ? 116 : 0) + (this.stack !== null ? 100 : 0) + 24;
     const columns = Math.max(15, (this.width - reserved) / 7.5);
     return 8 + 20 * Math.max(1, Math.ceil((row.fold?.summary.length ?? row.plain.length) / columns));
   }
@@ -385,14 +386,16 @@ export class LogPane {
     this.restoring = true;
     if (this.needsFit) { this.needsFit = false; this.fit(); }
     const width = this.box.clientWidth;
-    if (width !== this.width) { this.width = width; this.heights.clear(); this.signature = ""; }
+    const resizedChips = (width < 700) !== (this.width < 700);
+    if (width !== this.width) { this.width = width; this.heights.clear(); }
+    this.content.classList.toggle("log-nowrap", !this.options.wrap);
+    this.content.classList.toggle("log-no-time", !this.options.time);
     let accepted = 0;
     if (!this.options.paused && this.pending.length) {
       const batch = this.pending.splice(0, 128); accepted = batch.length;
       if (!this.following) this.unseen += batch.length;
       this.ring.append(batch);
       for (const line of batch) {
-        this.last.set(line.c, Math.max(this.last.get(line.c) ?? 0, line.t));
         const start = this.starts.get(line.c);
         this.starts.set(line.c, { t: start?.t ?? line.t, count: (start?.count ?? 0) + 1 });
       }
@@ -410,9 +413,9 @@ export class LogPane {
       }
       this.ring.append(batch, true);
     }
-    if (this.query.startsWith("stack=")) {
-      const stack = new URLSearchParams(this.query).get("stack") ?? "";
-      const length = Math.max(1, ...[...this.names.values()].map((name) => chipName(name, stack, this.width < 700 ? 12 : 20).length));
+    if (this.stack !== null) {
+      const stack = this.stack;
+      const length = Math.max(1, ...Array.from(this.names.values(), (name) => chipName(name, stack, width < 700 ? 12 : 20).length));
       this.box.style.setProperty("--log-name-width", `${length}ch`);
     }
     const changedSearch = `${this.options.search}\n${this.options.regex}\n${this.options.sensitive}`;
@@ -449,13 +452,36 @@ export class LogPane {
       const start = Math.max(0, this.indexAt(position) - 8);
       const end = this.following ? this.visible.length : Math.min(this.visible.length, this.indexAt(this.box.scrollTop + this.box.clientHeight) + 10);
       const slice = this.visible.slice(start, end);
-      const signature = slice.map((r) => `${r.id}:${r.id === this.current}:${r.id === this.selected?.id}`).join(",") + this.options.wrap + this.options.time;
-      if (signature !== this.signature) {
-        this.signature = signature;
-        const fragment = document.createDocumentFragment();
-        const today = new Date().toDateString();
-        for (const row of slice) fragment.append(this.row(row, today));
-        this.content.replaceChildren(fragment);
+      // A row keeps its place relative to other retained rows, even if late
+      // arrivals are inserted between them. Remove only rows outside this window.
+      const ids = new Set(slice.map((row) => String(row.id)));
+      const focused = document.activeElement?.closest("[data-log-id]");
+      if (focused && this.content.contains(focused) && !ids.has(focused.getAttribute("data-log-id") ?? "")) {
+        this.box.focus({ preventScroll: true });
+      }
+      for (const el of Array.from(this.content.children) as HTMLElement[]) {
+        if (!ids.has(el.dataset.logId ?? "")) el.remove();
+      }
+      let cursor = this.content.firstElementChild as HTMLElement | null;
+      const today = new Date().toDateString();
+      for (const row of slice) {
+        const retained = cursor?.dataset.logId === String(row.id);
+        const el = retained && cursor ? cursor : this.row(row, today);
+        if (retained) cursor = el.nextElementSibling as HTMLElement | null;
+        else this.content.insertBefore(el, cursor);
+        el.classList.toggle("log-current", row.id === this.current);
+        el.classList.toggle("log-selected", row.id === this.selected?.id);
+        if (resizedChips && this.stack !== null && retained) {
+          const chip = el.querySelector(".log-name");
+          if (chip) chip.textContent = chipName(row.c, this.stack, width < 700 ? 12 : 20);
+        }
+        const first = this.starts.get(row.c);
+        if (this.stack !== null && first && first.count >= this.tail && row.t === first.t && !el.querySelector(".log-history-start")) {
+          const marker = document.createElement("span");
+          marker.className = "log-history-start";
+          marker.textContent = `Loaded history starts here for ${row.c}`;
+          el.lastElementChild?.prepend(marker);
+        }
       }
       this.content.style.transform = `translateY(${this.offsets[start] ?? 0}px)`;
       this.measure(); total = this.layout();
@@ -472,7 +498,7 @@ export class LogPane {
     this.highlight();
     this.report({ state: this.options.paused && this.state === "live" ? "paused" : this.state, count: this.ring.rows.length, matches: this.hits.length,
       current: this.hits.findIndex((r) => r.id === this.current) + 1, unseen: this.unseen, following: this.following, waiting: this.pending.length,
-      message: (this.searchPaused ? "Search too slow, paused. Narrow the expression to resume." : search.error) ?? (this.ring.rows.length && !this.visible.length ? "No lines match. Clear the search or level filters." : this.message), counts: this.counts });
+      message: (this.searchPaused ? "Search too slow, paused. Narrow the expression to resume." : search.error) ?? (this.ring.rows.length && !this.visible.length ? "No matches. Clear search or level filters." : this.message), counts: this.counts });
   }
   private searchPaused = false;
   private cancelRegex(): void {
@@ -533,15 +559,13 @@ export class LogPane {
   private countsKey = "";
   private row(row: Row, today: string): HTMLElement {
     const el = document.createElement("div");
-    el.className = `log-row ${this.options.wrap ? "" : "log-nowrap"} ${row.id === this.current ? "log-current" : ""} ${row.id === this.selected?.id ? "log-selected" : ""}`;
+    el.className = "log-row";
     el.dataset.logId = String(row.id); el.dataset.level = row.l ?? "o"; el.dataset.timestamp = String(row.t);
-    if (this.options.time) {
-      const time = document.createElement("time");
-      const date = new Date(row.t); time.dateTime = date.toISOString();
-      time.textContent = (date.toDateString() === today ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
-      el.append(time);
-    }
-    if (this.query.startsWith("stack=")) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = chipName(row.c, new URLSearchParams(this.query).get("stack") ?? "", this.width < 700 ? 12 : 20); chip.title = row.c;
+    const time = document.createElement("time");
+    const date = new Date(row.t); time.dateTime = date.toISOString();
+    time.textContent = (date.toDateString() === today ? "" : dayFormat.format(date) + " ") + clockFormat.format(date);
+    el.append(time);
+    if (this.stack !== null) { const chip = document.createElement("span"); chip.className = "log-name"; chip.textContent = chipName(row.c, this.stack, this.width < 700 ? 12 : 20); chip.title = row.c;
       const hash = [...new TextEncoder().encode(row.c)].reduce((h, b) => Math.imul(h ^ b, 16777619) >>> 0, 2166136261);
       chip.style.color = `hsl(${hash % 360} 55% var(--log-chip-lightness,68%))`; el.append(chip); }
     const text = document.createElement("span"); text.className = "log-text";
@@ -564,16 +588,12 @@ export class LogPane {
         // Link only explicit http(s) URLs, with no interpretation of other text.
         const urls = /https?:\/\/[^\s<>"']+/g; let end = 0;
         for (const url of segment.text.matchAll(urls)) {
-          span.append(document.createTextNode(segment.text.slice(end, url.index)));
+          span.append(segment.text.slice(end, url.index));
           const a = document.createElement("a"); a.href = url[0]; a.rel = "noreferrer noopener"; a.target = "_blank"; a.textContent = url[0]; span.append(a); end = url.index + url[0].length;
         }
-        span.append(document.createTextNode(segment.text.slice(end)));
+        span.append(segment.text.slice(end));
         if (span !== text) text.append(span);
       }
-    }
-    const start = this.starts.get(row.c);
-    if (this.query.startsWith("stack=") && start && start.count >= this.tail && row.t === start.t) {
-      const marker = document.createElement("span"); marker.className = "log-history-start"; marker.textContent = `Loaded history starts here for ${row.c}`; text.prepend(marker);
     }
     el.append(text); return el;
   }
@@ -585,7 +605,7 @@ export async function copyLogText(text: string): Promise<void> {
     try { await navigator.clipboard.writeText(text); return; } catch { /* Try the browser's selection command. */ }
   }
   const field = document.createElement("textarea"); field.className = "log-copy";
-  field.append(document.createTextNode(text));
+  field.value = text;
   const focused = document.activeElement;
   document.body.append(field); field.select();
   const copied = document.execCommand("copy"); field.remove();

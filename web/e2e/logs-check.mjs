@@ -98,6 +98,20 @@ try {
       await tab.shot(path.join(out, `${label}-single.png`));
       assert.equal(await tab.ev('!!document.querySelector("#hostile-log,#hostile-img") || !!globalThis.logPwned'), false, "hostile markup creates no elements");
       assert.ok(await tab.ev('document.querySelector("[data-testid=log-body]").textContent.includes("<script")'), "hostile log remains literal text");
+      // A live flush must keep the same focusable node and transfer focus
+      // to the region only when its row leaves the mounted window.
+      await tab.ev(`{
+        const body = document.querySelector('[data-testid="log-body"]');
+        window.focusedLogLine = [...body.querySelectorAll('[data-log-id] a, [data-log-id] summary')].at(-1);
+        focusedLogLine.focus({ preventScroll: true });
+        window.previousLogId = body.querySelector('[data-log-id]:last-child').dataset.logId;
+      }`);
+      await wait(`document.querySelector('[data-log-id]:last-child')?.dataset.logId !== previousLogId`, "live flush updates the window");
+      assert.ok(await tab.ev('document.activeElement === focusedLogLine'), "a retained row keeps its keyboard focus");
+      await tab.ev(`document.querySelector('[data-testid="log-body"]').scrollTop -= 1500`);
+      await wait(`!focusedLogLine.isConnected && document.activeElement?.dataset.testid === "log-body"`, "evicted row returns focus to the log region");
+      await inp.click('[data-testid="log-latest"]');
+      await wait(`!document.querySelector('[data-testid="log-latest"]')`, "returns to live logs after focus check");
       const scrollBox = await inp.box('[data-testid="log-body"]', false);
       if (width === 390) await inp.touchDrag(scrollBox.x, scrollBox.y-40, scrollBox.x, scrollBox.y+40, 16);
       else await tab.send('Input.dispatchMouseEvent', {type:'mouseWheel',x:scrollBox.x,y:scrollBox.y,deltaX:0,deltaY:-4});
