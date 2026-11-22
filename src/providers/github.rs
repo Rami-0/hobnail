@@ -1,7 +1,10 @@
 use super::*;
 use crate::util::unix_now;
 use repositories::REPOSITORIES;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use widgets::StructuredBody;
 
 mod releases;
@@ -59,35 +62,92 @@ pub const GITHUB: Provider = Provider {
     ],
 };
 
+// Keep a short history after expiry so repeated secondary limits back off.
+const MAX_COOLDOWNS: usize = 256;
+const MAX_WAIT: u64 = 3600;
+type Identity = Option<[u8; 32]>;
+
+struct Cooldown {
+    until: Instant,
+    secondary_wait: u64,
+}
+
 #[derive(Default)]
 struct RateLimits {
-    anonymous: AtomicU64,
-    authenticated: AtomicU64,
+    cooldowns: Mutex<Vec<(Identity, Cooldown)>>,
 }
 
 static LIMITS: RateLimits = RateLimits {
-    anonymous: AtomicU64::new(0),
-    authenticated: AtomicU64::new(0),
+    cooldowns: Mutex::new(Vec::new()),
 };
 
 fn header<'a>(response: &'a client::Response, name: &str) -> Option<&'a str> {
     response.headers.get(name)?.to_str().ok()
 }
 
+fn numeric_header(response: &client::Response, name: &str) -> Option<u64> {
+    let value = header(response, name)?;
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
 impl RateLimits {
+    fn blocked(&self, identity: Identity, now: Instant) -> bool {
+        let mut cooldowns = self.cooldowns.lock().unwrap();
+        cooldowns.retain(|(_, entry)| now < entry.until + Duration::from_secs(MAX_WAIT));
+        if let Some((_, entry)) = cooldowns.iter().find(|(key, _)| *key == identity) {
+            return now < entry.until;
+        }
+        // Never evict an active cooldown to make room for another identity.
+        cooldowns.len() == MAX_COOLDOWNS && cooldowns.iter().all(|(_, entry)| now < entry.until)
+    }
+
+    fn update(&self, identity: Identity, now: Instant, delay: Option<u64>) {
+        let mut cooldowns = self.cooldowns.lock().unwrap();
+        let existing = cooldowns.iter().position(|(key, _)| *key == identity);
+        let previous = existing.map(|index| &cooldowns[index].1);
+        let secondary_wait = delay.is_none().then(|| {
+            previous
+                .map_or(60, |entry| entry.secondary_wait.saturating_mul(2).max(60))
+                .min(MAX_WAIT)
+        });
+        let wait = delay.or(secondary_wait).unwrap().clamp(1, MAX_WAIT);
+        let until = now + Duration::from_secs(wait);
+        let entry = Cooldown {
+            until: previous.map_or(until, |entry| until.max(entry.until)),
+            secondary_wait: secondary_wait.unwrap_or(0),
+        };
+        if let Some(index) = existing {
+            cooldowns[index].1 = entry;
+        } else if cooldowns.len() < MAX_COOLDOWNS {
+            cooldowns.push((identity, entry));
+        } else if let Some((index, _)) = cooldowns
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, entry))| entry.until <= now)
+            .min_by_key(|(_, (_, entry))| entry.until)
+        {
+            cooldowns[index] = (identity, entry);
+        }
+    }
+
     async fn get(
         &self,
         conn: &Conn<'_>,
         path: &str,
         query: &[(&str, Input<'_>)],
     ) -> Result<client::Response, Fault> {
+        let identity = conn.credential_revision_hash(TOKEN);
         let bearer = [Auth::Bearer(Input::Credential(TOKEN))];
-        let (auth, deadline) = if conn.has_credential(TOKEN) {
-            (bearer.as_slice(), &self.authenticated)
+        let auth = if identity.is_some() {
+            bearer.as_slice()
         } else {
-            (&[][..], &self.anonymous)
+            &[]
         };
-        if unix_now() < deadline.load(Ordering::Relaxed) {
+        let started = Instant::now();
+        if self.blocked(identity, started) {
             return Err(Class::RateLimited.into());
         }
         let response = conn
@@ -104,30 +164,31 @@ impl RateLimits {
                 ..Step::get(path)
             })
             .await?;
-        let now = unix_now();
-        let retry_after = header(&response, "retry-after").and_then(|s| s.parse::<u64>().ok());
-        let remaining_zero = header(&response, "x-ratelimit-remaining") == Some("0");
+        let now = Instant::now();
+        let retry = numeric_header(&response, "retry-after");
+        let remaining_zero = numeric_header(&response, "x-ratelimit-remaining") == Some(0);
         let rate_limited = response.status == 429
             || (response.status == 403
-                && (retry_after.is_some()
+                && (retry.is_some()
                     || remaining_zero
                     || response.text().to_ascii_lowercase().contains("rate limit")));
-        let reset = header(&response, "x-ratelimit-reset")
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|reset| *reset > now);
-        let reset = reset.filter(|_| remaining_zero || (rate_limited && retry_after.is_none()));
-        if rate_limited {
-            let until = match (retry_after, reset) {
-                (None, None) => now + u64::from(MIN_PUBLIC_REFRESH),
-                (retry, reset) => now
-                    .saturating_add(retry.unwrap_or(1).max(1))
-                    .max(reset.unwrap_or(0)),
-            };
-            deadline.fetch_max(until, Ordering::Relaxed);
-            return Err(Class::RateLimited.into());
+        let reset = if remaining_zero {
+            numeric_header(&response, "x-ratelimit-reset")
+                .and_then(|reset| reset.checked_sub(unix_now()))
+                .filter(|seconds| *seconds > 0)
+        } else {
+            None
+        };
+        if rate_limited || remaining_zero {
+            self.update(identity, now, retry.into_iter().chain(reset).max());
+        } else if (200..300).contains(&response.status) {
+            self.cooldowns
+                .lock()
+                .unwrap()
+                .retain(|(key, entry)| *key != identity || entry.until > started);
         }
-        if let Some(reset) = reset {
-            deadline.fetch_max(reset, Ordering::Relaxed);
+        if rate_limited {
+            return Err(Class::RateLimited.into());
         }
         Ok(response)
     }
@@ -363,7 +424,7 @@ mod tests {
                 for _ in 0..2 {
                     assert!(matches!(fetch().await.unwrap_err().class, Class::RateLimited));
                 }
-                assert!(limits.authenticated.load(Ordering::Relaxed) >= unix_now() + 890);
+                assert!(limits.blocked(conn.credential_revision_hash(TOKEN), Instant::now() + Duration::from_secs(890)));
                 assert_test_fault(conn, &GITHUB, Class::Blocked).await;
             }
         ).await;
@@ -372,8 +433,11 @@ mod tests {
     #[tokio::test]
     async fn anonymous_test_is_credential_free_and_honors_primary_reset() {
         let limits = RateLimits::default();
-        let reset = 4_102_444_800;
-        let reset_headers = "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 4102444800\r\n";
+        let reset_headers: &'static str = format!(
+            "X-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: {}\r\n",
+            unix_now() + 120,
+        )
+        .leak();
         let path = "GET /prefix/rate_limit HTTP/1.1";
         exercise(
             &GITHUB,
@@ -407,7 +471,79 @@ mod tests {
                         Class::RateLimited
                     ));
                 }
-                assert_eq!(limits.anonymous.load(Ordering::Relaxed), reset);
+                let now = Instant::now();
+                assert!(limits.blocked(None, now + Duration::from_secs(110)));
+                assert!(!limits.blocked(None, now + Duration::from_secs(125)));
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cooldown_covers_both_widgets_but_isolates_credentials() {
+        let limits = RateLimits::default();
+        let activity_options = Values::from_iter([("repositories".into(), json!(["o/r"]))]);
+        let release_options = Values::from_iter([("tracked".into(), json!(["o/r | 1"]))]);
+        exercise(&GITHUB, &[(TOKEN, "fixture-token-a")], Values::new(), &[
+            Exchange {
+                request: "GET /prefix/repos/o/r HTTP/1.1",
+                status: 403,
+                body: r#"{"message":"You have exceeded a secondary rate limit.","documentation_url":"https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"}"#,
+            },
+        ], |_, _| "X-RateLimit-Remaining: 57\r\nX-RateLimit-Reset: 9999999999\r\nRetry-After: +900\r\n", async |conn| {
+            assert!(matches!(activity(conn, &limits, &activity_options).await.unwrap_err().class, Class::RateLimited));
+            assert!(matches!(releases::latest(conn, &limits, &release_options).await.unwrap_err().class, Class::RateLimited));
+            let identity = conn.credential_revision_hash(TOKEN);
+            let later = Instant::now() + Duration::from_secs(65);
+            assert!(!limits.blocked(identity, later));
+            limits.update(identity, later, None);
+            assert!(limits.blocked(identity, later + Duration::from_secs(119)));
+            assert!(!limits.blocked(identity, later + Duration::from_secs(121)));
+        }).await;
+        exercise(
+            &GITHUB,
+            &[(TOKEN, "fixture-token-b")],
+            Values::new(),
+            &[
+                Exchange {
+                    request: "GET /prefix/repos/o/r/releases/latest HTTP/1.1",
+                    status: 200,
+                    body: r#"{"tag_name":"v2"}"#,
+                },
+                Exchange {
+                    request: "GET /prefix/repos/o/r/releases/latest HTTP/1.1",
+                    status: 429,
+                    body: r#"{"message":"API rate limit exceeded"}"#,
+                },
+            ],
+            |index, _| {
+                if index == 1 {
+                    "Retry-After: 86400\r\n"
+                } else {
+                    ""
+                }
+            },
+            async |conn| {
+                releases::latest(conn, &limits, &release_options)
+                    .await
+                    .unwrap();
+                assert!(matches!(
+                    releases::latest(conn, &limits, &release_options)
+                        .await
+                        .unwrap_err()
+                        .class,
+                    Class::RateLimited
+                ));
+                let now = Instant::now();
+                assert!(limits.blocked(
+                    conn.credential_revision_hash(TOKEN),
+                    now + Duration::from_secs(3590)
+                ));
+                assert!(!limits.blocked(
+                    conn.credential_revision_hash(TOKEN),
+                    now + Duration::from_secs(3601)
+                ));
+                assert!(!limits.blocked(None, now));
             },
         )
         .await;

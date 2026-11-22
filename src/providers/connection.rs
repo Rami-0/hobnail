@@ -346,6 +346,16 @@ impl<'a> Conn<'a> {
         self.target.credentials.contains_key(field)
     }
 
+    /// Fingerprint the effective credential revision without retaining its value.
+    /// Integrations and drafts using the same credential share an upstream quota.
+    pub(super) fn credential_revision_hash(&self, field: &str) -> Option<[u8; 32]> {
+        let credential = self.target.credentials.get(field)?;
+        let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+        digest.update(b"hobnail:provider-quota:v1\0");
+        digest.update(credential.token.as_bytes());
+        digest.finish().as_ref().try_into().ok()
+    }
+
     pub(super) fn has_credentials(&self) -> bool {
         !self.target.credentials.is_empty()
     }

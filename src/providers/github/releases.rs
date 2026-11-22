@@ -105,7 +105,7 @@ struct Release {
     html_url: Option<String>,
 }
 
-async fn latest(
+pub(super) async fn latest(
     conn: &Conn<'_>,
     limits: &RateLimits,
     options: &Values,
@@ -114,26 +114,32 @@ async fn latest(
     let mut items = Vec::with_capacity(repos.len());
     for (repo, current) in repos {
         let response = within_response_limit(
-            limits.get(conn, &format!("repos/{repo}/releases/latest"), &[]).await,
+            limits
+                .get(conn, &format!("repos/{repo}/releases/latest"), &[])
+                .await,
         )?;
-        let (secondary, link) = if let Some(response) = response.filter(|response| response.status != 404) {
-            let release: Release = parse_json(response)?;
-            if release.tag_name.trim().is_empty() {
-                return Err(Class::Protocol.into());
-            }
-            let verdict = compare(current, &release.tag_name);
-            let tag = display_text(conn, release.tag_name);
-            (
-                format!("Current {current} · Latest {tag} · {verdict}"),
-                release.html_url.filter(|url| {
-                    url.len() <= 512
-                        && url.starts_with("https://github.com/")
-                        && navigation_link(url)
-                }),
-            )
-        } else {
-            (format!("Current {current} · Latest release unavailable"), None)
-        };
+        let (secondary, link) =
+            if let Some(response) = response.filter(|response| response.status != 404) {
+                let release: Release = parse_json(response)?;
+                if release.tag_name.trim().is_empty() {
+                    return Err(Class::Protocol.into());
+                }
+                let verdict = compare(current, &release.tag_name);
+                let tag = display_text(conn, release.tag_name);
+                (
+                    format!("Current {current} · Latest {tag} · {verdict}"),
+                    release.html_url.filter(|url| {
+                        url.len() <= 512
+                            && url.starts_with("https://github.com/")
+                            && navigation_link(url)
+                    }),
+                )
+            } else {
+                (
+                    format!("Current {current} · Latest release unavailable"),
+                    None,
+                )
+            };
         items.push(BodyItem {
             title: repo.into(),
             secondary: Some(secondary),
