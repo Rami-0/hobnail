@@ -17,7 +17,9 @@ in the script). Output goes to `$OUT` (default: a new directory under
 `$TMPDIR`): one JSON file per unit, `<engine>.log`, `summary.txt` (the
 engine × profile × flow table, problem counts by kind, and the distinct
 problems, the engine messages set aside and why), and JPEG screenshots of
-failing states in `shots/`. Exit status is 0 only when every flow passed
+failing states in `shots/`. Exit status is 0 only when `summary.txt` says
+`RESULT: PASS` (a summary that crashed or is missing fails), that is, when
+every flow passed
 with no problem on any state and every unit of the plan (listed in
 `expected.txt`: plan lines times engines) wrote a result; an instance or
 browser that fails to start writes a fatal result.

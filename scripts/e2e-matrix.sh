@@ -166,4 +166,6 @@ kill "$events_pid" 2>/dev/null || true
 docker run --rm -u "$(id -u):$(id -g)" -v "$dir":/repo:ro -v "$OUT":/out "$PW_IMAGE" node /repo/web/e2e/matrix/summary.mjs /out >"$OUT/summary.txt" 2>&1 || true
 cat "$OUT/summary.txt"
 echo "matrix: output in $OUT" >&2
-! grep -q '^RESULT: FAIL' "$OUT/summary.txt"
+# Pass only on an explicit verdict: a summary that crashed or was cut
+# short has no "RESULT: PASS" line and fails the run.
+grep -qx 'RESULT: PASS' "$OUT/summary.txt"
