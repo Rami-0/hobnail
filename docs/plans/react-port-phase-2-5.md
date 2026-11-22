@@ -204,8 +204,17 @@ with 7.84 / 11.24 / 0.45 / 0.00 MiB anon/file/kernel/sock at its highest sample.
 Startup, authentication and 40 full-history reads completed. The capped cgroup
 recorded `max=1458`, `oom=0` and `oom_kill=0`. Both short probes omitted the live
 dashboard phases. Each returned twelve HTTP 400 responses for standalone log
-requests, which require visible containers. The full warm runs exercised the log
-streams successfully.
+requests. Both ran alongside the warm workload, whose fake Docker daemon
+occupied port 8081 on the shared host network. A follow-up reproduced the
+collision and all twelve 400s. The second fake daemon opened its Unix socket
+and then exited on `EADDRINUSE`. The probe treated the leftover socket path
+as readiness, so Hobnail had no container list and could resolve none of the
+requested log targets. The fix runs the fake Docker container with
+`--network none`, checks `GET /_ping` on its Unix socket, and requires the
+four target names in `GET /api/v1/logs/picker` before reading streams. Only the
+application and its fake upstream services need the host network. With the
+same release image, the corrected capped cold replay saw all 150 fixture
+containers and completed all twelve log streams.
 
 The interval may miss short-lived maxima in the sampled breakdown. The lifetime
 peak records those maxima without identifying the underlying memory class. The
