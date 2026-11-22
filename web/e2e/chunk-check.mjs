@@ -85,6 +85,19 @@ try {
       await inp.key("Escape");
       assert.ok(await tab.until(`!document.querySelector('[data-testid="palette"]')`), "palette closes");
 
+      // A missing tour chunk leaves the board as it is.
+      await tab.send("Page.navigate", { url: new URL(`/app/boards/${fixture.board.id}`, base).href });
+      assert.ok(await tab.until(`!!document.querySelector('[data-testid="board"] [data-testid="board-tile"]')`), "board renders");
+      await block("*.js");
+      await tab.ev(`history.pushState(null, "", location.pathname + "?tour=1"), dispatchEvent(new PopStateEvent("popstate"))`);
+      assert.ok(await blocked(), "tour asset returned 404");
+      assert.ok(await tab.until(`!!document.querySelector('[data-testid="board"] [data-testid="board-tile"]')`), "missing tour chunk: board survives");
+      assert.equal(await tab.ev(`document.body.textContent.includes("Could not load") || !!document.querySelector('[data-testid="board-tour"]')`), false, "missing tour chunk: no load error, no tour");
+      await tab.send("Fetch.disable");
+      console.log(`${label}: missing tour chunk keeps the board`);
+      await tab.send("Page.navigate", { url: new URL("/app/containers", base).href });
+      assert.ok(await tab.until(`!!document.querySelector('main [data-testid="row"]')`), "table renders again");
+
       if (inp.touch) {
         // Opening the drawer focuses its first link, which prefetches that
         // page: let it finish before blocking the next chunk.

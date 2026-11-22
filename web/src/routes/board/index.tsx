@@ -17,6 +17,7 @@ import { useRoute, containerHref, navigate } from "../../app/router.ts";
 import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState, Note } from "../../ui/Note.tsx";
+import { LoadBoundary } from "../../ui/LoadBoundary.tsx";
 import { NotFound } from "../NotFound.tsx";
 import "./board.css";
 
@@ -115,10 +116,11 @@ export default function BoardPage() {
       </>} />
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) { setPicker(undefined); setEditing(draft.document); } setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {!draft && (tourReplay || (!tourClosed && session?.board_tour_pending && tourBoard(b) === id)) &&
-      <Suspense fallback={null}><Tour admin={admin} empty={view.document.sections.length === 0} onClose={() => {
+      // A missing tour chunk leaves the board as it is.
+      <LoadBoundary fallback={null} failed={null}><Tour admin={admin} empty={view.document.sections.length === 0} onClose={() => {
         setTourClosed(true);
         if (tourReplay) setSearch({ tour: null }, { replace: true });
-      }} /></Suspense>}
+      }} /></LoadBoundary>}
     {error && <Note kind="bad">{error}</Note>}
     {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty"
       actions={admin && <>
