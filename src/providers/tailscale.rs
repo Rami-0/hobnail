@@ -130,19 +130,15 @@ fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         devices.sort_by(|a, b| a.hostname.cmp(&b.hostname));
         let mut rows = vec![("Online".into(), format!("{online} / {}", devices.len()))];
         rows.extend(devices.into_iter().take(10).map(|device| {
-            let seen = timestamp(device.last_seen.as_deref()).map_or_else(
-                || "Last seen unavailable".into(),
-                |at| format!("Last seen {}", fmt_utc(at)),
-            );
             let status = if device.connected_to_control {
-                "Online"
+                "Connected now".into()
             } else {
-                "Offline"
+                timestamp(device.last_seen.as_deref()).map_or_else(
+                    || "Offline · Last seen unavailable".into(),
+                    |at| format!("Offline · Last seen {}", fmt_utc(at)),
+                )
             };
-            (
-                display_text(conn, device.hostname),
-                format!("{status} · {seen}"),
-            )
+            (display_text(conn, device.hostname), status)
         }));
         Ok(StructuredBody::StatGrid { rows })
     })
@@ -151,21 +147,22 @@ fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
 fn expirations<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
         let now = unix_now();
-        let mut expiring: Vec<_> = devices(conn)
-            .await?
-            .into_iter()
-            .filter(|device| !device.key_expiry_disabled)
-            .filter_map(|device| Some((timestamp(device.expires.as_deref())?, device.hostname)))
-            .filter(|(at, _)| (now..=now + EXPIRY_WINDOW).contains(at))
-            .collect();
+        let mut expiring = Vec::new();
+        let mut incomplete = 0;
+        for device in devices(conn).await?.into_iter().filter(|device| !device.key_expiry_disabled) {
+            match timestamp(device.expires.as_deref()) {
+                Some(at) if (now..=now + EXPIRY_WINDOW).contains(&at) => expiring.push((at, device.hostname)),
+                None => incomplete += 1,
+                _ => {}
+            }
+        }
         expiring.sort_unstable();
-        if expiring.is_empty() {
+        if expiring.is_empty() && incomplete == 0 {
             return Ok(StructuredBody::Stat {
                 value: "No device keys expiring in the next 30 days".into(),
             });
         }
-        Ok(StructuredBody::ItemList {
-            items: expiring
+        let mut items: Vec<_> = expiring
                 .into_iter()
                 .take(10)
                 .map(|(at, name)| BodyItem {
@@ -175,8 +172,17 @@ fn expirations<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody>
                     link: None,
                     time: None,
                 })
-                .collect(),
-        })
+                .collect();
+        if incomplete > 0 {
+            items.push(BodyItem {
+                title: format!("Expiry data unavailable for {incomplete} device(s)"),
+                icon: None,
+                secondary: None,
+                link: None,
+                time: None,
+            });
+        }
+        Ok(StructuredBody::ItemList { items })
     })
 }
 
@@ -191,8 +197,9 @@ mod tests {
         const PATH: &str = "GET /prefix/api/v2/tailnet/example.com/devices HTTP/1.1";
         let expiry = fmt_utc(unix_now() + 3600);
         let snapshot = json!({"devices":[
-            {"hostname":"a","connectedToControl":true,"lastSeen":"2026-11-10T01:02:03Z","keyExpiryDisabled":false,"expires":expiry},
-            {"hostname":"b","connectedToControl":false,"lastSeen":null,"keyExpiryDisabled":true,"expires":expiry}
+            {"hostname":"a","connectedToControl":true,"lastSeen":null,"keyExpiryDisabled":false,"expires":expiry},
+            {"hostname":"b","connectedToControl":false,"lastSeen":"2026-11-10T01:02:03Z","keyExpiryDisabled":true,"expires":expiry},
+            {"hostname":"c","connectedToControl":false,"keyExpiryDisabled":false}
         ]}).to_string();
         exercise(
             &TAILSCALE,
@@ -243,11 +250,13 @@ mod tests {
                     serde_json::to_value(body).unwrap()
                 };
                 let body = fetch(0).await;
-                assert_eq!(body["rows"][0], json!(["Online", "1 / 2"]));
-                assert!(body["rows"][1][1].as_str().unwrap().contains("2026-11-10"));
+                assert_eq!(body["rows"][0], json!(["Online", "1 / 3"]));
+                assert_eq!(body["rows"][1][1], "Connected now");
+                assert!(body["rows"][2][1].as_str().unwrap().contains("2026-11-10"));
                 let keys = fetch(1).await;
-                assert_eq!(keys["items"].as_array().unwrap().len(), 1);
+                assert_eq!(keys["items"].as_array().unwrap().len(), 2);
                 assert_eq!(keys["items"][0]["title"], "a");
+                assert_eq!(keys["items"][1]["title"], "Expiry data unavailable for 1 device(s)");
                 assert_test_fault(conn, &TAILSCALE, Class::Auth).await;
                 assert_test_fault(conn, &TAILSCALE, Class::Protocol).await;
             },
