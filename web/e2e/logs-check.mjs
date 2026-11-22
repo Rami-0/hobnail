@@ -165,7 +165,7 @@ try {
       await wait(`[...document.querySelectorAll('[data-log-id]')].some(r=>!r.textContent.toLowerCase().includes('ansi red'))`, "matching context");
       await inp.click('[aria-label="Match case"]'); await wait('document.querySelector("[data-testid=log-matches]").textContent === "0/0"', "case-sensitive search");
       await inp.click('[aria-label="Match case"]'); await wait('Number(document.querySelector("[data-testid=log-matches]").textContent.split("/")[1])>0', "case toggle restores matches");
-      await inp.click('[aria-label="Show error lines"]'); await wait('!document.querySelector("[data-log-id][data-level=e]")', "level exclusion"); await inp.click('[aria-label="Show error lines"]');
+      await inp.click('.log-levels button:nth-child(1)'); await wait('!document.querySelector("[data-log-id][data-level=e]")', "level exclusion"); await inp.click('.log-levels button:nth-child(1)');
       await choose("Show", "all"); await setQuery("["); await inp.click('[aria-label="Regular expression"]');
       await wait('document.querySelector("[data-testid=filter]").getAttribute("aria-invalid")==="true"', "invalid regex stays safe");
       await setQuery("(a+)+$");
