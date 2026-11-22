@@ -948,35 +948,7 @@ pub(crate) async fn credential_route(
     let Some(permit) = state.credential_queue.acquire().await else {
         return credential_busy(legacy);
     };
-    // The deadline starts when this request holds the only permit, and the
-    // permit is kept until then. A queued request therefore waits for the
-    // previous holder's deadline, never for its hash, so neither its own
-    // response time nor a later one reveals which hash profile was checked.
-    let deadline = tokio::time::Instant::now() + state.credential_queue.floor();
-    let st = state.clone();
-    let joined = tokio::task::spawn_blocking(move || {
-        // Fail closed: a scan error pads like a remaining legacy hash.
-        let padded = action == CredentialAction::Login
-            && !st
-                .db
-                .legacy_hash_users()
-                .is_ok_and(|users| users.is_empty());
-        (authenticate(&st, ip, action, credentials), padded, permit)
-    })
-    .await;
-    let outcome = match joined {
-        Ok((outcome, padded, permit)) => {
-            if padded {
-                tokio::time::sleep_until(deadline).await;
-            }
-            drop(permit);
-            outcome
-        }
-        Err(_) => {
-            tokio::time::sleep_until(deadline).await;
-            Err(Attempt::Failed)
-        }
-    };
+    let outcome = run_credential(state, permit, ip, action, credentials).await;
     let token = match outcome {
         Ok(token) => token,
         Err(Attempt::Limited(secs)) => return limited(secs),
@@ -1034,6 +1006,46 @@ pub(crate) async fn credential_route(
         &session_cookie(&token, SESSION_TTL_SECS, secure),
     );
     response
+}
+
+/// Runs one credential operation with the permit and answers no earlier than
+/// its floor deadline while legacy hashes remain.
+///
+/// The deadline starts when this request holds the only permit, and the
+/// permit is kept until then. A queued request therefore waits for the
+/// previous holder's deadline, never for its hash, so neither its own
+/// response time nor a later one reveals which hash profile was checked.
+/// The work, the wait and the release run in a detached task that owns the
+/// permit: a client that disconnects (dropping this future) cannot release
+/// it early. The task only awaits; hashing stays on the blocking pool.
+async fn run_credential(
+    state: &Arc<AppState>,
+    permit: OwnedSemaphorePermit,
+    ip: IpAddr,
+    action: CredentialAction,
+    credentials: Credentials,
+) -> Result<String, Attempt> {
+    let deadline = tokio::time::Instant::now() + state.credential_queue.floor();
+    let st = state.clone();
+    let task = tokio::spawn(async move {
+        let joined = tokio::task::spawn_blocking(move || {
+            // Fail closed: a scan error pads like a remaining legacy hash.
+            let padded = action == CredentialAction::Login
+                && !st
+                    .db
+                    .legacy_hash_users()
+                    .is_ok_and(|users| users.is_empty());
+            (authenticate(&st, ip, action, credentials), padded)
+        })
+        .await;
+        let (outcome, padded) = joined.unwrap_or((Err(Attempt::Failed), true));
+        if padded {
+            tokio::time::sleep_until(deadline).await;
+        }
+        drop(permit);
+        outcome
+    });
+    task.await.unwrap_or(Err(Attempt::Failed))
 }
 
 fn authenticate(
@@ -1304,6 +1316,43 @@ mod tests {
             .unwrap()
             .latest
             .is_zero());
+    }
+
+    #[tokio::test]
+    async fn a_dropped_sign_in_keeps_the_permit_until_its_deadline() {
+        let state = crate::testutil::state_with(vec![], "");
+        set_password_for_tests(&state.db, "correct horse");
+        state.db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated)
+                 VALUES ('old','$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA','viewer',0,0)",
+                [],
+            )?;
+            Ok(())
+        });
+        let permit = state.credential_queue.acquire().await.unwrap();
+        let acquired = tokio::time::Instant::now();
+        let sign_in = run_credential(
+            &state,
+            permit,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            CredentialAction::Login,
+            Credentials {
+                username: "admin".into(),
+                password: "wrong horse".into(),
+                token: None,
+            },
+        );
+        // The client goes away while the (fast, test-profile) hash runs.
+        assert!(tokio::time::timeout(Duration::from_millis(20), sign_in)
+            .await
+            .is_err());
+        let _next = state.credential_queue.acquire().await.unwrap();
+        assert!(
+            acquired.elapsed() >= MIN_CREDENTIAL_FLOOR,
+            "released after {:?}",
+            acquired.elapsed()
+        );
     }
 
     #[test]

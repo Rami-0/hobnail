@@ -127,7 +127,8 @@ remain, every sign-in that reaches the credential queue (wrong password,
 unknown or disabled account, back-off refusal after queueing, and success)
 is answered no earlier than a floor after it obtained the single credential
 permit, and the permit is held until then. A queued request therefore waits
-for the previous holder's deadline rather than its hash. The floor is twice
+for the previous holder's deadline rather than its hash, and a client that
+disconnects does not release the permit early. The floor is twice
 the slowest current-profile password verification of the last two and a
 half to five minutes (or the latest one when there is none that recent),
 at least 150 ms and at most 500 ms. Only real current-profile verifications
