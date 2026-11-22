@@ -448,7 +448,7 @@ mod tests {
     use super::*;
 
     fn chan(src: &str) -> ChannelConfig {
-        toml::from_str(src).unwrap()
+        toml_edit::de::from_str(src).unwrap()
     }
 
     fn vars() -> Vars {
@@ -524,8 +524,10 @@ body = '{"message":"body-secret"}'
         let e = validate("w", &chan("type='webhook'\nurl='http://x'\nchat_id=1")).unwrap_err();
         assert!(e.contains("chat_id"), "{e}");
         // Secrets cannot even be written in the config for slack/telegram.
-        assert!(toml::from_str::<ChannelConfig>("type='telegram'\ntoken='123:abc'").is_err());
-        assert!(toml::from_str::<ChannelConfig>("type='slak'").is_err());
+        assert!(
+            toml_edit::de::from_str::<ChannelConfig>("type='telegram'\ntoken='123:abc'").is_err()
+        );
+        assert!(toml_edit::de::from_str::<ChannelConfig>("type='slak'").is_err());
     }
 
     #[test]

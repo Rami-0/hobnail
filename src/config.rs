@@ -257,7 +257,7 @@ impl Config {
 /// Parse and validate. Errors are prefixed with the file path and, for syntax
 /// errors, include line and column.
 pub fn parse(text: &str, file: &str) -> Result<Config, String> {
-    let cfg: Config = toml::from_str(text).map_err(|e| {
+    let cfg: Config = toml_edit::de::from_str(text).map_err(|e| {
         let pos = e
             .span()
             .map(|s| {

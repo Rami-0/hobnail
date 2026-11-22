@@ -690,7 +690,7 @@ async fn telegram_error_never_contains_the_token() {
         format!("http://{addr}/fail"),
         "http://127.0.0.1:1".to_string(),
     ] {
-        let c: ChannelConfig = toml::from_str(&format!(
+        let c: ChannelConfig = toml_edit::de::from_str(&format!(
             "type='telegram'\ntoken_env='{var}'\nchat_id=1\napi_base='{base}'\ntimeout='1s'"
         ))
         .unwrap();
@@ -703,7 +703,7 @@ async fn telegram_error_never_contains_the_token() {
     }
     // Disallowed host: the policy error names the host only.
     let c: ChannelConfig =
-        toml::from_str(&format!("type='telegram'\ntoken_env='{var}'\nchat_id=1")).unwrap();
+        toml_edit::de::from_str(&format!("type='telegram'\ntoken_env='{var}'\nchat_id=1")).unwrap();
     let t = channels::resolve(&c).unwrap();
     let strict = crate::config::HttpPolicy {
         allow_hosts: vec!["example.com".into()],

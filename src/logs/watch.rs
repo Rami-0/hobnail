@@ -419,7 +419,7 @@ mod tests {
     use super::*;
 
     fn rule(src: &str) -> Rule {
-        let rc: RuleConfig = toml::from_str(src).unwrap();
+        let rc: RuleConfig = toml_edit::de::from_str(src).unwrap();
         Rule::from_config(&rc).unwrap()
     }
 

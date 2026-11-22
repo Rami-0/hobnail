@@ -730,7 +730,7 @@ mod tests {
     use crate::model::{Container, DiskStats};
 
     fn rule(toml_src: &str) -> RuleConfig {
-        toml::from_str(toml_src).unwrap()
+        toml_edit::de::from_str(toml_src).unwrap()
     }
 
     fn container(name: &str, state: &str, exit: Option<i64>, health: Option<&str>) -> Container {
