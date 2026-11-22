@@ -16,7 +16,7 @@
 
 ::highlight(rh-log-search){background:var(--warn);color:var(--bg)}
 
-.logs-page{--log-chip-lightness:68%}:root[data-theme=light] .logs-page{--log-chip-lightness:28%}@media(prefers-color-scheme:light){:root[data-theme=auto] .logs-page{--log-chip-lightness:28%}}
+.logs-page{--log-chip-lightness:68%;--ll:max(l,.72)}:root[data-theme=light] .logs-page{--log-chip-lightness:28%;--ll:min(l,.5)}@media(prefers-color-scheme:light){:root[data-theme=auto] .logs-page{--log-chip-lightness:28%;--ll:min(l,.5)}}.log-text [style*="--fg"]{color:oklch(from var(--fg) var(--ll) c h)}
 
 
 .lpick{display:grid;gap:12px}

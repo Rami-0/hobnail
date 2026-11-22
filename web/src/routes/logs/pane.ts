@@ -586,7 +586,9 @@ export class LogPane {
       for (const segment of row.segments) {
         const span = segment.classes || segment.fg || segment.bg ? document.createElement("span") : text;
         if (segment.classes) span.className = segment.classes;
-        if (segment.fg) span.style.color = segment.fg; if (segment.bg) span.style.backgroundColor = segment.bg;
+        // The ANSI colour's lightness is clamped per theme (logs.css), so
+        // dark red stays readable on a light pane and black on a dark one.
+        if (segment.fg) span.style.setProperty("--fg", segment.fg); if (segment.bg) span.style.backgroundColor = segment.bg;
         // Link only explicit http(s) URLs, with no interpretation of other text.
         const urls = /https?:\/\/[^\s<>"']+/g; let end = 0;
         for (const url of segment.text.matchAll(urls)) {
