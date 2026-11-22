@@ -45,6 +45,7 @@ fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         let movies: Vec<Movie> = arr::calendar(conn, &[]).await?;
         Ok(arr::upcoming(movies.into_iter().map(|movie| {
             BodyItem {
+                icon: None,
                 title: display_text(conn, movie.title),
                 secondary: movie
                     .year

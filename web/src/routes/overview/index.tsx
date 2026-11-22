@@ -165,7 +165,7 @@ export default function Overview() {
     {(admin || !!widgets?.length) && <section className="panel history-block"><h2>Widgets</h2>
       {admin && <a href="/app/overview?add=widget">Add widget</a>}
       <div className="overview-widget-grid">{widgets?.map((widget) => widgetUpdates[widget.id] ?? widget).map((w) => <article key={w.id} id={`w-${w.id}`} className="panel history-block">
-        <h3>{w.link ? <a href={w.link}>{w.title}</a> : w.title}</h3><WidgetContent widget={w} />
+        <h3>{w.link ? <a href={w.link}>{w.title}</a> : w.title}</h3><WidgetContent widget={w} remoteIcons={boot?.remote_icons} />
       </article>)}</div>
     </section>}
     <section className="panel history-block"><h2>Recent events</h2><a href="/app/history#events">Timeline</a>

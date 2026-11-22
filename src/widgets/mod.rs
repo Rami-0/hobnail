@@ -252,6 +252,9 @@ pub enum Health {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BodyItem {
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub icon: Option<String>,
     pub secondary: Option<String>,
     pub link: Option<String>,
     pub time: Option<u64>,
@@ -284,6 +287,7 @@ impl StructuredBody {
                         .iter()
                         .map(|i| {
                             i.title.capacity()
+                                + i.icon.as_ref().map_or(0, String::capacity)
                                 + i.secondary.as_ref().map_or(0, String::capacity)
                                 + i.link.as_ref().map_or(0, String::capacity)
                         })

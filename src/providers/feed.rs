@@ -77,6 +77,7 @@ impl Entry {
             .join(" · ");
         let link = self.link.trim();
         BodyItem {
+            icon: None,
             title: if title.is_empty() {
                 "Untitled entry".into()
             } else {

@@ -34,6 +34,7 @@ use crate::{
 
 mod adguard_home;
 mod arr;
+mod bookmarks;
 mod clock;
 mod connection;
 mod duplicati;
@@ -113,6 +114,7 @@ pub const REGISTRY: &[Provider] = &[
     feed::FEED,
     weather::WEATHER,
     clock::CLOCK,
+    bookmarks::BOOKMARKS,
 ];
 pub const MIN_REFRESH: u64 = 15;
 pub const MIN_PUBLIC_REFRESH: u32 = 600;
@@ -366,7 +368,9 @@ fn display_text(conn: &Conn<'_>, mut text: String) -> String {
 }
 
 fn navigation_link(value: &str) -> bool {
-    if value.contains('\\') || value.chars().any(|c| c.is_control() || c.is_whitespace()) {
+    if value.contains(['\\', '"', '<', '>'])
+        || value.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
         return false;
     }
     let Ok(uri) = value.parse::<hyper::Uri>() else {
@@ -591,6 +595,9 @@ impl OutputRedactor {
             ItemList { items } => {
                 for item in items {
                     self.redact(&mut item.title);
+                    if item.icon.as_ref().is_some_and(|icon| self.matches(icon)) {
+                        item.icon = None;
+                    }
                     if let Some(text) = &mut item.secondary {
                         self.redact(text);
                     }

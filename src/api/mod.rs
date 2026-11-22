@@ -285,13 +285,7 @@ fn validate_label(value: &str, field: &str) -> Result<(), ApiError> {
 }
 
 fn validate_icon(icon: Option<&str>) -> Result<(), ApiError> {
-    if icon.is_some_and(|name| {
-        name.is_empty()
-            || name.len() > 96
-            || !name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-    }) {
+    if icon.is_some_and(|name| !crate::http::icons::valid_slug(name)) {
         return Err(ApiError::bad_request(
             "use a dashboard-icons name",
             Some("icon"),

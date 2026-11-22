@@ -166,6 +166,14 @@ fn svg_response(body: Vec<u8>, cache: &str) -> Response<Body> {
     r
 }
 
+pub(crate) fn valid_slug(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 96
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
 fn is_safe_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() < 100

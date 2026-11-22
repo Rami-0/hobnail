@@ -169,6 +169,7 @@ fn expirations<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody>
                 .into_iter()
                 .take(10)
                 .map(|(at, name)| BodyItem {
+                    icon: None,
                     title: display_text(conn, name),
                     secondary: Some(format!("Expires {}", fmt_utc(at))),
                     link: None,

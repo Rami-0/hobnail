@@ -648,6 +648,19 @@ and [Intl.DateTimeFormat](https://tc39.es/ecma402/#datetimeformat-objects).
 
 UNVERIFIED: Zone availability in browser builds outside the Chromium fixture.
 
+## Bookmarks
+
+Make one integration per group and use its name as the group label. Enter up
+to 16 lines in the form `Name | https://example.com | optional-icon`. Only
+absolute HTTP(S) URLs without credentials are accepted. An optional
+dashboard-icons slug uses the existing opt-in icon system. The widget never
+fetches or checks the saved URLs.
+
+Verified from: [URL Standard](https://url.spec.whatwg.org/) and Hobnail's
+[icon configuration](../configuration.md).
+
+UNVERIFIED: Third-party dashboard-icons slug availability.
+
 ## Credentials and transport
 
 Hobnail stores credentials in SQLite by integration and schema field, each

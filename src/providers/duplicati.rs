@@ -168,6 +168,7 @@ fn overview<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                         |bytes| format!("{} source", human_bytes(bytes)),
                     );
                 BodyItem {
+                    icon: None,
                     title: display_text(conn, backup.name),
                     secondary: Some(format!("{completion} · {size}")),
                     link: None,

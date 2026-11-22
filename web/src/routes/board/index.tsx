@@ -42,7 +42,7 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
       p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
       p.kind === "link" ? <p className="muted">Saved link · {p.url}</p> :
       p.kind === "integration" ? <><p className="muted">{(integration?.admin?.base_url ?? integration?.origin)}</p><IntegrationStatus integration={integration} /></> :
-      widget ? <WidgetContent widget={widget} /> : <p>Waiting for widget data…</p>}
+      widget ? <WidgetContent widget={widget} remoteIcons={b?.remote_icons} /> : <p>Waiting for widget data…</p>}
   </div>;
 }
 export default function BoardPage() {

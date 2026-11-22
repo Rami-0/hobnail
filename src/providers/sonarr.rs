@@ -62,6 +62,7 @@ fn upcoming<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 |series| format!("{} · {airing}", display_text(conn, series)),
             );
             BodyItem {
+                icon: None,
                 title,
                 secondary: Some(secondary),
                 link: None,

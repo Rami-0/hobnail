@@ -193,6 +193,7 @@ fn latest<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 .into_iter()
                 .take(10)
                 .map(|item| BodyItem {
+                    icon: None,
                     title: display_text(conn, item.name.unwrap_or_else(|| "Untitled media".into())),
                     secondary: item.kind.map(|kind| display_text(conn, kind)),
                     link: None,

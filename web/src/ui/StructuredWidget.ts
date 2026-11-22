@@ -1,9 +1,11 @@
-import { createElement as h } from "react";
+import { createElement as h, type ReactNode } from "react";
 import type { StructuredBody } from "../api/gen/StructuredBody.ts";
 import { Clock } from "./Clock.ts";
 import { widgetLink } from "./widgetLink.ts";
 
-export function StructuredWidget({ body }: { body: StructuredBody }) {
+export function StructuredWidget({ body, renderIcon }: {
+  body: StructuredBody; renderIcon?: (icon: string, title: string) => ReactNode;
+}) {
   // The rows are read-only snapshots. Position keeps keys distinct when
   // display labels or values repeat.
   switch (body.kind) {
@@ -20,6 +22,7 @@ export function StructuredWidget({ body }: { body: StructuredBody }) {
         const link = widgetLink(item.link);
         const date = item.time === null ? null : new Date(item.time * 1000);
         return h("li", { key },
+          item.icon && renderIcon?.(item.icon, item.title),
           link ? h("a", { href: link }, item.title) : item.title,
           item.secondary && ` · ${item.secondary}`,
           date && Number.isFinite(date.getTime()) && h("time", { dateTime: date.toISOString() }, ` · ${date.toLocaleString()}`));
