@@ -6,12 +6,17 @@ export function LoadError({ children }: { children: ReactNode }) {
   return <Banner kind="bad" action={<Button size="sm" onClick={() => location.reload()}>Reload</Button>}>{children}</Banner>;
 }
 
-// `failed` replaces the Reload banner (null for parts that may vanish).
-export class LoadBoundary extends Component<{ children: ReactNode; fallback: ReactNode; failed?: ReactNode }> {
+// `failed` replaces the Reload banner (null for parts that may vanish);
+// `onError` lets the owner reset the state that mounted the part.
+export class LoadBoundary extends Component<{ children: ReactNode; fallback: ReactNode; failed?: ReactNode; onError?: () => void }> {
   override state = { failed: false };
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  override componentDidCatch() {
+    this.props.onError?.();
   }
 
   override render() {

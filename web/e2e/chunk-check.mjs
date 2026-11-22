@@ -59,17 +59,27 @@ try {
       assert.equal(await tab.ev(`document.querySelector('[role="menu"]')`), null, "no menu opened");
       console.log(`${label}: missing menu chunk keeps the trigger and the page`);
 
+      // A missing palette chunk closes the palette again (shortcuts work)
+      // and offers a reload.
       await block("*.js");
       await inp.click('[data-testid="palette-open"]');
       assert.ok(await blocked(), "palette asset returned 404");
-      await shellAlive("missing palette chunk");
+      assert.ok(await tab.until(`!!document.querySelector('#root[data-ready="1"] [data-testid="sidebar"]') && !!document.querySelector('main [data-testid="row"]')`), "missing palette chunk: page survives");
+      assert.ok(await tab.until(`document.querySelector('main [role="alert"]')?.textContent.includes("Could not load part of Hobnail.") && document.querySelector('main [role="alert"] button')?.textContent === "Reload"`), "missing palette chunk offers Reload");
       assert.equal(await tab.ev(`document.querySelector('[data-testid="palette"]')`), null, "no palette opened");
-      console.log(`${label}: missing palette chunk keeps the page`);
+      assert.equal(await tab.ev(`document.querySelector('[data-testid="palette-open"]').getAttribute("aria-expanded")`), "false", "palette state closed again");
+      await tab.send("Fetch.disable");
+      await inp.key("?");
+      assert.ok(await tab.until(`!!document.querySelector('[data-testid="shortcuts"]')`), "shortcuts still work after the palette failed");
+      await inp.key("Escape");
+      assert.ok(await tab.until(`!document.querySelector('[data-testid="shortcuts"]')`), "shortcuts close");
+      console.log(`${label}: missing palette chunk resets the palette, keeps shortcuts and offers Reload`);
 
       // A fresh document loads them again.
       await tab.send("Fetch.disable");
       await tab.send("Page.reload");
       assert.ok(await tab.until(`!!document.querySelector('main [data-testid="row"]')`), "table renders after reload");
+      assert.equal(await tab.ev(`document.body.textContent.includes("Could not load")`), false, "reload clears the load error");
       await inp.click('[data-testid="palette-open"]');
       assert.ok(await tab.until(`!!document.querySelector('[data-testid="palette"] [role="combobox"]')`), "palette opens after reload");
       await inp.key("Escape");

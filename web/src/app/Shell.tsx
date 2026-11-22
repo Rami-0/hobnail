@@ -15,7 +15,7 @@ import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
-import { LoadBoundary } from "../ui/LoadBoundary.tsx";
+import { LoadBoundary, LoadError } from "../ui/LoadBoundary.tsx";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
@@ -32,11 +32,11 @@ function hasToasts() {
   return getToasts().shown.length > 0;
 }
 
-function ShellToasts() {
+function ShellToasts({ onError }: { onError: () => void }) {
   const visible = useSyncExternalStore(subscribeToasts, hasToasts, hasToasts);
   // Dialog saves can release a toast in the same commit that closes the modal.
   const dialogs = useSyncExternalStore(subscribeDialogs, openDialogs, openDialogs);
-  return <LoadBoundary fallback={null} failed={null}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</LoadBoundary>;
+  return <LoadBoundary fallback={null} failed={null} onError={onError}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</LoadBoundary>;
 }
 
 const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
@@ -138,6 +138,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const [open, setOpenState] = useState(false);
   const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
+  // A shell chunk that failed to load (palette, shortcuts, toasts): close
+  // what it was for, so keys work again, and offer a reload.
+  const [lost, setLost] = useState(false);
+  const lose = () => { setPalette(false); setKeys(false); setLost(true); };
   const sideRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const drawer = useRef({ pushed: false, popping: false, from: null as HTMLElement | null });
@@ -407,6 +411,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             <Account />
           </header>
           <main id="main" tabIndex={-1}>
+            {lost && <LoadError>Could not load part of Hobnail.</LoadError>}
             {newBuild && (
               <Banner
                 kind="info"
@@ -476,10 +481,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>More</span>
         </Button>
       </nav>
-      {palette && <LoadBoundary fallback={null} failed={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></LoadBoundary>}
-      {keys && <LoadBoundary fallback={null} failed={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></LoadBoundary>}
+      {palette && <LoadBoundary fallback={null} failed={null} onError={lose}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></LoadBoundary>}
+      {keys && <LoadBoundary fallback={null} failed={null} onError={lose}><Shortcuts open={keys} onClose={() => setKeys(false)} /></LoadBoundary>}
       <StalePill />
-      <ShellToasts />
+      <ShellToasts onError={lose} />
     </>
   );
 }
