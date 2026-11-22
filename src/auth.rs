@@ -2,9 +2,8 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
@@ -39,14 +38,17 @@ const CREDENTIAL_WAIT: Duration = Duration::from_secs(5);
 /// Sign-in responses while legacy hashes remain take at least this long
 /// after the request obtains the credential permit.
 pub(crate) const MIN_CREDENTIAL_FLOOR: Duration = Duration::from_millis(150);
-/// Upper bound of the adaptive floor: one sign-in per second at worst.
-const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_secs(1);
+/// Upper bound of the adaptive floor. It covers a current-profile verify of
+/// 250 ms (over five times the 45 ms measured in M5) and still lets two
+/// sign-ins a second through while legacy hashes remain.
+pub(crate) const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_millis(500);
+/// Verify times are kept for one to two of these windows.
+const SAMPLE_WINDOW: Duration = Duration::from_secs(150);
 
 pub(crate) struct CredentialQueue {
     active: Arc<Semaphore>,
     waiters: Semaphore,
-    /// The slowest credential operation seen so far, in microseconds.
-    slowest_us: AtomicU64,
+    samples: Mutex<VerifySamples>,
     /// The memory limit source (the cgroup in production, fixed in tests).
     pub(crate) memory_limit: fn() -> Option<u64>,
 }
@@ -56,8 +58,60 @@ impl Default for CredentialQueue {
         Self {
             active: Arc::new(Semaphore::new(1)),
             waiters: Semaphore::new(CREDENTIAL_WAITERS),
-            slowest_us: AtomicU64::new(0),
+            samples: Mutex::new(VerifySamples::new(Instant::now())),
             memory_limit: read_memory_limit,
+        }
+    }
+}
+
+/// Current-profile verify times: the maximum over the last 150 to 300
+/// seconds, falling back to the latest sample once both windows are empty.
+/// An outlier (a loaded host) therefore stops widening the floor within
+/// five minutes, and only real verifications are recorded.
+#[derive(Debug)]
+struct VerifySamples {
+    started: Instant,
+    current: Duration,
+    previous: Duration,
+    latest: Duration,
+}
+
+impl VerifySamples {
+    fn new(now: Instant) -> Self {
+        Self {
+            started: now,
+            current: Duration::ZERO,
+            previous: Duration::ZERO,
+            latest: Duration::ZERO,
+        }
+    }
+
+    fn roll(&mut self, now: Instant) {
+        let age = now.saturating_duration_since(self.started);
+        if age >= SAMPLE_WINDOW {
+            self.previous = if age >= SAMPLE_WINDOW * 2 {
+                Duration::ZERO
+            } else {
+                self.current
+            };
+            self.current = Duration::ZERO;
+            self.started = now;
+        }
+    }
+
+    fn record(&mut self, verify: Duration, now: Instant) {
+        self.roll(now);
+        self.current = self.current.max(verify);
+        self.latest = verify;
+    }
+
+    fn bound(&mut self, now: Instant) -> Duration {
+        self.roll(now);
+        let recent = self.current.max(self.previous);
+        if recent.is_zero() {
+            self.latest
+        } else {
+            recent
         }
     }
 }
@@ -99,10 +153,14 @@ fn may_verify(state: &AppState, stored: &str) -> bool {
     false
 }
 
-/// Twice the slowest observed operation, so a legacy hash (measured at about
-/// 1.5 times a current one) stays under the floor on slower hardware too.
-fn credential_floor(slowest: Duration) -> Duration {
-    (slowest * 2).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
+/// Twice the recent current-profile verify time. Legacy verifies are never
+/// measured (their time would move the floor and reveal which profile the
+/// previous holder checked); they are derived instead. By work alone a
+/// legacy verify costs 19,456 KiB x 2 / (7,168 KiB x 5) = 1.09 times a
+/// current one; M5 measured 1.55 (68.85 / 44.52 ms medians), and 2 leaves
+/// room above that.
+fn credential_floor(verify: Duration) -> Duration {
+    (verify * 2).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
 }
 
 impl CredentialQueue {
@@ -119,14 +177,20 @@ impl CredentialQueue {
 
     /// The current padding for sign-in responses (see [`credential_floor`]).
     pub(crate) fn floor(&self) -> Duration {
-        credential_floor(Duration::from_micros(
-            self.slowest_us.load(Ordering::Relaxed),
-        ))
+        self.floor_at(Instant::now())
     }
 
-    fn observe(&self, work: Duration) {
-        let us = u64::try_from(work.as_micros()).unwrap_or(u64::MAX);
-        self.slowest_us.fetch_max(us, Ordering::Relaxed);
+    fn floor_at(&self, now: Instant) -> Duration {
+        let mut samples = self.samples.lock().unwrap_or_else(|e| e.into_inner());
+        credential_floor(samples.bound(now))
+    }
+
+    /// Records one current-profile verification (never a legacy one).
+    fn observe_verify(&self, verify: Duration, now: Instant) {
+        self.samples
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(verify, now);
     }
 
     #[cfg(test)]
@@ -891,16 +955,13 @@ pub(crate) async fn credential_route(
     let deadline = tokio::time::Instant::now() + state.credential_queue.floor();
     let st = state.clone();
     let joined = tokio::task::spawn_blocking(move || {
-        let started = std::time::Instant::now();
         // Fail closed: a scan error pads like a remaining legacy hash.
         let padded = action == CredentialAction::Login
             && !st
                 .db
                 .legacy_hash_users()
                 .is_ok_and(|users| users.is_empty());
-        let outcome = authenticate(&st, ip, action, credentials);
-        st.credential_queue.observe(started.elapsed());
-        (outcome, padded, permit)
+        (authenticate(&st, ip, action, credentials), padded, permit)
     })
     .await;
     let outcome = match joined {
@@ -1013,7 +1074,16 @@ fn authenticate(
             _ => DUMMY_HASH,
         };
         let verified = (password.len() <= MAX_PASSWORD_BYTES && may_verify(state, stored))
-            .then(|| verify_password(stored, &password))
+            .then(|| {
+                let started = Instant::now();
+                let verified = verify_password(stored, &password);
+                if !is_legacy_hash(stored) {
+                    state
+                        .credential_queue
+                        .observe_verify(started.elapsed(), Instant::now());
+                }
+                verified
+            })
             .flatten();
         match (credential, verified) {
             (Some((id, stored, false)), Some(profile)) => {
@@ -1170,24 +1240,70 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[test]
-    fn credential_floor_follows_the_slowest_operation_within_bounds() {
+    fn credential_floor_follows_recent_verifies_within_bounds() {
         assert_eq!(credential_floor(Duration::ZERO), MIN_CREDENTIAL_FLOOR);
         assert_eq!(
             credential_floor(Duration::from_millis(69)),
             MIN_CREDENTIAL_FLOOR
         );
         assert_eq!(
-            credential_floor(Duration::from_millis(300)),
-            Duration::from_millis(600)
+            credential_floor(Duration::from_millis(200)),
+            Duration::from_millis(400)
         );
         assert_eq!(
             credential_floor(Duration::from_secs(9)),
             MAX_CREDENTIAL_FLOOR
         );
+
         let queue = CredentialQueue::default();
-        queue.observe(Duration::from_millis(200));
-        queue.observe(Duration::from_millis(100));
-        assert_eq!(queue.floor(), Duration::from_millis(400));
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        assert_eq!(queue.floor_at(t0), MIN_CREDENTIAL_FLOOR, "no sample yet");
+        queue.observe_verify(ms(240), t0); // an outlier under load
+        queue.observe_verify(ms(90), t0 + ms(10));
+        assert_eq!(queue.floor_at(t0 + ms(20)), ms(480));
+        // Still inside the previous window.
+        let later = t0 + SAMPLE_WINDOW + ms(30);
+        queue.observe_verify(ms(100), later);
+        assert_eq!(queue.floor_at(later), ms(480));
+        // Two windows on, only the newer samples count.
+        let much_later = later + SAMPLE_WINDOW;
+        assert_eq!(queue.floor_at(much_later), ms(200));
+        // Without any recent sample the latest one is kept.
+        let idle = much_later + SAMPLE_WINDOW * 2;
+        assert_eq!(queue.floor_at(idle), ms(200));
+    }
+
+    #[test]
+    fn only_current_profile_verifies_are_measured() {
+        let state = crate::testutil::state_with(vec![], "");
+        let legacy = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        state.db.recover_owner(None, legacy, 0).unwrap();
+        let state = with_memory_limit(state, || None);
+        // A legacy verify (or a request rejected before hashing) leaves no sample.
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "wrong horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "wrong horse"),
+            Err(Attempt::Limited(_))
+        ));
+        let samples = state.credential_queue.samples.lock().unwrap();
+        assert!(samples.latest.is_zero(), "{samples:?}");
+        drop(samples);
+        // An unknown account verifies the current-profile dummy: measured.
+        assert!(matches!(
+            login_attempt(&state, 2, "nobody", "wrong horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert!(!state
+            .credential_queue
+            .samples
+            .lock()
+            .unwrap()
+            .latest
+            .is_zero());
     }
 
     #[test]

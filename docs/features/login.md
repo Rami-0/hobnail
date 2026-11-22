@@ -128,12 +128,20 @@ unknown or disabled account, back-off refusal after queueing, and success)
 is answered no earlier than a floor after it obtained the single credential
 permit, and the permit is held until then. A queued request therefore waits
 for the previous holder's deadline rather than its hash. The floor is twice
-the slowest credential operation seen since start, at least 150 ms and at
-most one second, so it grows on slower hardware. In a loopback test of the pre-fix release, 30 failed attempts per profile
+the slowest current-profile password verification of the last two and a
+half to five minutes (or the latest one when there is none that recent),
+at least 150 ms and at most 500 ms. Only real current-profile verifications
+are measured: never a legacy one, whose time would reveal the profile, and
+never a request refused before hashing. A slow outlier stops widening the
+floor within five minutes; at the cap, two sign-ins a second still pass.
+
+In a loopback test of the pre-fix release, 30 failed attempts per profile
 had medians of 68.85 ms for legacy hashes, 44.52 ms for current hashes and
 51.44 ms for unknown accounts. Their maxima were 82.52, 67.69 and 106.20 ms,
-respectively. Normal variation under load, or a first legacy hash slower
-than 150 ms before the floor has adapted, can still exceed it.
+respectively. The factor of two covers that 1.55 legacy/current ratio. On
+hardware where a legacy verification takes longer than the floor (beyond
+500 ms, or above twice the recent current-profile time), and in normal
+variation under load, response times can still differ between profiles.
 
 Cold SQLite reads can also raise the container's reported memory usage. The
 kernel charges file-cache pages to the container that brings them into cache
