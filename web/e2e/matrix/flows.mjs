@@ -214,7 +214,7 @@ export const flows = {
   async "history charts"(h, f) {
     const { page } = h;
     await go(h, f, "/app/history", tid("history"));
-    await page.locator('[data-testid^="chart-"]').first().waitFor({ timeout: 20000 });
+    await page.locator('[data-testid^="chart-"]:visible').first().waitFor({ timeout: 20000 });
     await h.state("history");
     const chart = page.locator('[data-testid^="chart-"]').first();
     const box = await chart.boundingBox();
@@ -226,8 +226,12 @@ export const flows = {
     await go(h, f, "/app/containers/svc001?tab=metrics", tid("ctr-tabs"));
     // The history charts load when their section scrolls into view; on a
     // phone it starts below the fold, so scroll as a user would.
-    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
-    await page.locator('[data-testid^="chart-"]').first().waitFor({ timeout: 20000 });
+    // The page grows while its data arrives, so keep the placeholder in view.
+    for (let i = 0; i < 20 && !(await page.locator('[data-testid^="chart-"]:visible').count()); i++) {
+      await page.locator('[aria-label="Loading charts"]').first().scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+    }
+    await page.locator('[data-testid^="chart-"]:visible').first().waitFor({ timeout: 5000 });
     await h.state("container metrics charts");
   },
   async boards(h, f) {
