@@ -841,7 +841,7 @@ fn secure_session_cookie_requires_https() {
         status: 200,
         headers: [(
             hyper::header::SET_COOKIE,
-            "sid=fixture; Path=/; sEcUrE; HttpOnly".parse().unwrap(),
+            "sid=fixture; Path=/; sEcUrE=; HttpOnly".parse().unwrap(),
         )]
         .into_iter()
         .collect(),

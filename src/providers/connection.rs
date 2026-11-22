@@ -650,7 +650,11 @@ impl<'a> Conn<'a> {
         if pair.len() > MAX_SESSION
             || selected.next().is_some()
             || (self.origin.starts_with("http://")
-                && attributes.any(|attr| attr.eq_ignore_ascii_case("secure")))
+                && attributes.any(|attr| {
+                    attr.split_once('=')
+                        .map_or(attr, |(name, _)| name.trim_end())
+                        .eq_ignore_ascii_case("secure")
+                }))
         {
             return Err(Class::Protocol.into());
         }
