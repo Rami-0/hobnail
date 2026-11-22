@@ -813,12 +813,24 @@ pub(crate) async fn credential_route(
         return credential_busy(legacy);
     };
     let st = state.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
+    let (outcome, failure_deadline) = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        authenticate(&st, ip, action, credentials)
+        let started = tokio::time::Instant::now();
+        let legacy_hashes = action == CredentialAction::Login
+            && st
+                .db
+                .legacy_hash_users()
+                .is_ok_and(|users| !users.is_empty());
+        let outcome = authenticate(&st, ip, action, credentials);
+        let deadline = (legacy_hashes && matches!(outcome, Err(Attempt::Wrong)))
+            .then(|| started + Duration::from_millis(150));
+        (outcome, deadline)
     })
     .await
-    .unwrap_or(Err(Attempt::Failed));
+    .unwrap_or((Err(Attempt::Failed), None));
+    if let Some(deadline) = failure_deadline {
+        tokio::time::sleep_until(deadline).await;
+    }
     let token = match outcome {
         Ok(token) => token,
         Err(Attempt::Limited(secs)) => return limited(secs),
