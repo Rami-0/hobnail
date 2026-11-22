@@ -143,7 +143,9 @@ Provider catalog and installation:
   Admin details expose a map of saved field IDs to bound origins. The legacy
   Generic HTTP `secret` and `clear_secret` inputs still address its bearer
   field. `has_secret` indicates whether any field is saved.
-  `fingerprint` is 64 hexadecimal digits for an HTTPS URL.
+  `fingerprint` is 64 hexadecimal digits for an HTTPS URL. Adding or
+  changing it while credentials are saved returns 400 for each saved field
+  not re-entered in the same request; removing it keeps them.
 - Add `board=<id>` to a stream that subscribes to the `widget` topic to
   receive provider widget updates for that board. The caller must be able
   to read it. Placements with identical fetch inputs share the result. Provider widget views supply a discriminated

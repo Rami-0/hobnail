@@ -870,6 +870,76 @@ async fn stolen_admin_session_cannot_read_or_retarget_a_secret() {
 }
 
 #[tokio::test]
+async fn a_new_tls_pin_requires_saved_credentials_to_be_entered_again() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let base = "https://service.test/";
+    let (one, two) = ("a".repeat(64), "b".repeat(64));
+    let body = |pin: Option<&str>, secret: Option<&str>| {
+        let mut input = json!({"kind":"http","name":"Pinned","enabled":true,"base_url":base});
+        if let Some(pin) = pin {
+            input["fingerprint"] = json!(pin);
+        }
+        if let Some(secret) = secret {
+            input["secret"] = json!(secret);
+        }
+        input
+    };
+    let created = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            body(None, Some("token")),
+            201,
+        )
+        .await;
+    let path = format!("/api/v1/integrations/{}", created["id"].as_str().unwrap());
+    let refused = |r: &Resp, what: &str| {
+        assert_api_error(r, 400, "bad_request", what);
+        let error = serde_json::from_str::<Value>(&r.body).unwrap();
+        assert_eq!(error["error"]["field"], "secret", "{what}");
+    };
+    // Adding a pin, then changing it, keeps nothing unconfirmed.
+    refused(
+        &owner.call("PUT", &path, body(Some(&one), None)).await,
+        "added pin",
+    );
+    owner
+        .json("PUT", &path, body(Some(&one), Some("again")), 200)
+        .await;
+    owner.json("PUT", &path, body(Some(&one), None), 200).await;
+    owner
+        .json("PUT", &path, body(Some(&one.to_uppercase()), None), 200)
+        .await;
+    refused(
+        &owner.call("PUT", &path, body(Some(&two), None)).await,
+        "changed pin",
+    );
+    // Removing the pin falls back to public roots and keeps the credential.
+    let unpinned = owner.json("PUT", &path, body(None, None), 200).await;
+    assert_eq!(unpinned["has_secret"], true);
+    // Without a saved credential a pin change needs nothing.
+    let bare = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({"kind":"http","name":"Bare","enabled":true,"base_url":base}),
+            201,
+        )
+        .await;
+    let bare = format!("/api/v1/integrations/{}", bare["id"].as_str().unwrap());
+    owner
+        .json(
+            "PUT",
+            &bare,
+            json!({"kind":"http","name":"Bare","enabled":true,"base_url":base,"fingerprint":two}),
+            200,
+        )
+        .await;
+}
+
+#[tokio::test]
 async fn integration_test_reports_public_root_failure() {
     use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
     // Self-signed loopback test fixture. The private key is disposable.

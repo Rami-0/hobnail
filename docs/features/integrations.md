@@ -729,7 +729,10 @@ service. Confirm it in the dialog, test again, and save. You can also enter a
 known fingerprint manually. When pinned, the exact leaf certificate must
 match and the peer must prove possession of its private key. A new certificate
 will require a new pin. Pins are stored per integration and the editor clears
-the draft pin when the URL's origin changes. Only confirm a fingerprint you
+the draft pin when the URL's origin changes. Adding or changing the pin of an
+integration with saved credentials requires entering them again (or clearing
+them) in the same save, as for an origin change, so they never follow a new
+key unconfirmed. Removing the pin keeps them. Only confirm a fingerprint you
 can verify independently.
 
 Provider requests stop at redirects. Hobnail resolves the hostname once,

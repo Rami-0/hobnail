@@ -330,17 +330,27 @@ fn effective_credentials(
     origin: &str,
 ) -> Result<Credentials, ApiError> {
     let provider = provider(&input.kind)?;
+    let mut pin_changed = false;
     let mut saved = if let Some(id) = id {
-        if get(conn, id, true)?.kind != input.kind {
+        let view = get(conn, id, true)?;
+        if view.kind != input.kind {
             return Err(ApiError::bad_request(
                 "The provider of a saved integration is fixed.",
                 Some("kind"),
             ));
         }
+        // A new or different pin trusts a different key for the same origin
+        // (D14, D21): saved credentials must not follow it unconfirmed.
+        // Removing the pin falls back to public roots and keeps them.
+        let pin = |value: Option<&str>| value.and_then(crate::http::pin::parse);
+        let new_pin = pin(input.fingerprint.as_deref());
+        pin_changed = new_pin.is_some()
+            && new_pin != pin(view.admin.as_ref().and_then(|a| a.fingerprint.as_deref()));
         read_credentials(conn, id)?
     } else {
         Credentials::new()
     };
+    let mut entered = std::collections::HashSet::new();
     if input.secret.is_some() || input.clear_secret {
         if input.secret.is_some() && input.clear_secret || input.credentials.contains_key("secret")
         {
@@ -356,6 +366,7 @@ fn effective_credentials(
     for (field, change) in std::mem::take(&mut input.credentials) {
         credential_field(provider, &field, change.as_deref())?;
         if let Some(token) = change {
+            entered.insert(field.clone());
             saved.insert(
                 field,
                 client::BoundCredential {
@@ -376,6 +387,12 @@ fn effective_credentials(
             Some(value) if value.origin != origin => {
                 return Err(ApiError::bad_request(
                     "Enter the credential again for the new origin or clear the saved credential.",
+                    Some(field.id),
+                ))
+            }
+            Some(_) if pin_changed && !entered.contains(field.id) => {
+                return Err(ApiError::bad_request(
+                    "Enter the credential again for the new TLS pin or clear the saved credential.",
                     Some(field.id),
                 ))
             }
