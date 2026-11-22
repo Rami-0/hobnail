@@ -12,7 +12,7 @@ import type { SetupTarget } from "../../api/gen/SetupTarget.ts";
 import type { SetupUpdate } from "../../api/gen/SetupUpdate.ts";
 import { navigate } from "../../app/router.ts";
 import { applyTheme, currentTheme, isTheme } from "../../app/theme.ts";
-import { origin, payloadIdentity } from "../../boards/document.ts";
+import { freshSuggestions, origin, payloadIdentity } from "../../boards/document.ts";
 import { LinkUrl } from "../../boards/LinkUrl.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Card, CardContent } from "../../ui/Card.tsx";
@@ -422,8 +422,7 @@ function Wizard({ initial }: { initial: SetupDraft }) {
             </section>)}
             {!!discovery?.suggestions.length && <>
               <Field id="setup-search" label="Search suggestions"><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
-              <div className="suggestions">{discovery.suggestions
-                .filter(({ title, payload }) => !known.has(payloadIdentity(payload)) && title.toLowerCase().includes(query.trim().toLowerCase()))
+              <div className="suggestions">{freshSuggestions(discovery.suggestions.filter(({ title }) => title.toLowerCase().includes(query.trim().toLowerCase())), known)
                 .map(({ title, payload }) => <Checkbox key={payloadIdentity(payload)} checked={false} disabled={itemLimit} label={title}
                   onChange={(checked) => {
                     if (checked) add(newItem({ kind: "board", payload }, title,

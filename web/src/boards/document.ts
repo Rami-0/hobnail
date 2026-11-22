@@ -118,6 +118,16 @@ export function recoveryBase(draft: BoardDocument, current: BoardDocument): Boar
   return { version: draft.version, sections: current.sections.filter((s) => sectionIds.has(s.id)).map((s) => ({ id: s.id, title: s.title, position: s.position, items: s.items.filter((i) => itemIds.has(i.id)) })) };
 }
 
+/** The suggestions whose target is not taken yet, the first of each
+ * identity only, so a list keyed by identity has unique keys. */
+export function freshSuggestions<T extends { payload: BoardPayload }>(suggestions: T[], taken: Iterable<string>): T[] {
+  const seen = new Set(taken);
+  return suggestions.filter(({ payload }) => {
+    const id = payloadIdentity(payload);
+    return !seen.has(id) && !!seen.add(id);
+  });
+}
+
 export function payloadIdentity(payload: BoardPayload): string {
   switch (payload.kind) {
     case "container": return JSON.stringify(payload.target);

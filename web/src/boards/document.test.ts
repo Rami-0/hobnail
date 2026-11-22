@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { avatar, clampSpans, dirty, iconSource, needsSecret, rebase, recoveryBase, reduceDocument } from "./document.ts";
+import { avatar, clampSpans, dirty, freshSuggestions, iconSource, needsSecret, payloadIdentity, rebase, recoveryBase, reduceDocument } from "./document.ts";
 import type { BoardDocument } from "../api/gen/BoardDocument.ts";
 const base: BoardDocument = { version: 3, sections: [{ id: "s", title: "Services", position: 0, items: [{ id: "i", position: 0, spans: { mobile: 4, tablet: 4, desktop: 4, rows: 1 }, payload: { kind: "link", title: "Site", url: "https://example.com" } }] }] };
 test("add entries without IDs, preserve server IDs, never mutate the input", () => {
@@ -60,4 +60,13 @@ test("stale recovered drafts preserve server additions and strip deleted item ID
   assert.equal(merged.sections[0]?.items[0]?.id, undefined);
   assert.equal(merged.sections[0]?.items[1]?.id, "remote-item");
   assert.equal(merged.sections[1]?.id, "new-remote");
+});
+const suggestion = (title: string, url: string) => ({ title, payload: { kind: "link" as const, title, url } });
+test("fresh suggestions skip taken targets and repeat identities, keeping order", () => {
+  const list = [suggestion("A", "https://a.example/"), suggestion("A again", "HTTPS://A.EXAMPLE:443/"), suggestion("B", "https://b.example/x"), suggestion("C", "https://c.example/")];
+  const fresh = freshSuggestions(list, [payloadIdentity({ kind: "link", title: "", url: "https://c.example/" })]);
+  assert.deepEqual(fresh.map((s) => s.title), ["A", "B"]);
+  const keys = fresh.map((s) => payloadIdentity(s.payload));
+  assert.equal(new Set(keys).size, keys.length);
+  assert.deepEqual(freshSuggestions([], []), []);
 });
