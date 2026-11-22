@@ -58,7 +58,9 @@ async fn get<T: serde::de::DeserializeOwned>(
     version: u8,
     plugin: &str,
 ) -> Result<Option<T>, Fault> {
-    let path = format!("api/{version}/{plugin}");
+    let optional = matches!(plugin, "fs" | "sensors");
+    let suffix = if version == 4 && optional { "/top/5" } else { "" };
+    let path = format!("api/{version}/{plugin}{suffix}");
     let basic = optional_basic(conn)?;
     let response = conn
         .request(Step {
@@ -68,6 +70,17 @@ async fn get<T: serde::de::DeserializeOwned>(
         .await?;
     if response.status == 404 {
         return Ok(None);
+    }
+    if version == 4 && optional && response.status == 400 {
+        #[derive(Deserialize)]
+        struct Error {
+            detail: String,
+        }
+        if serde_json::from_slice::<Error>(&response.body).is_ok_and(|error| {
+            error.detail.starts_with(&format!("Unknown plugin {plugin} (available plugins:"))
+        }) {
+            return Ok(None);
+        }
     }
     parse_json(response).map(Some)
 }
@@ -161,14 +174,14 @@ mod tests {
                     body: r#"{"percent":50,"total":1073741824}"#,
                 },
                 Exchange {
-                    request: "GET /prefix/api/4/fs HTTP/1.1",
+                    request: "GET /prefix/api/4/fs/top/5 HTTP/1.1",
                     status: 200,
                     body: r#"[{"mnt_point":"/data","percent":44.5}]"#,
                 },
                 Exchange {
-                    request: "GET /prefix/api/4/sensors HTTP/1.1",
-                    status: 200,
-                    body: r#"[{"label":"CPU package","value":43,"unit":"C"}]"#,
+                    request: "GET /prefix/api/4/sensors/top/5 HTTP/1.1",
+                    status: 400,
+                    body: r#"{"detail":"Unknown plugin sensors (available plugins: ['cpu', 'mem', 'fs'])"}"#,
                 },
                 Exchange {
                     request: CPU,
@@ -198,7 +211,7 @@ mod tests {
                         ["CPU", "4.5%"],
                         ["Memory", "50.0% of 1.0 GiB"],
                         ["/data", "44.5% used"],
-                        ["CPU package", "43.0 C"],
+                        ["Sensors", "Unavailable"],
                     ])
                 );
                 assert_test_fault(conn, &GLANCES, Class::Auth).await;
