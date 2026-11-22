@@ -50,6 +50,7 @@ pub(super) const FEED: Provider = Provider {
 struct Entry {
     title: String,
     link: String,
+    link_overflow: bool,
     published: String,
     updated: String,
     summary: String,
@@ -83,7 +84,7 @@ impl Entry {
             } else {
                 title
             },
-            link: (link.len() <= LINK && navigation_link(link)).then(|| link.into()),
+            link: (!self.link_overflow && link.len() <= LINK && navigation_link(link)).then(|| link.into()),
             secondary: (!secondary.is_empty()).then_some(secondary),
             time: None,
         }
@@ -155,7 +156,9 @@ fn parse(body: &[u8], summaries: bool) -> Option<Vec<BodyItem>> {
                 }
                 if let (Some(entry), Some(field)) = (&mut entry, field) {
                     let (out, max) = FieldName::target(field, entry);
-                    xml::append(text, entities, out, max)?;
+                    if xml::append(text, entities, out, max)? && matches!(field, FieldName::Link) {
+                        entry.link_overflow = true;
+                    }
                 } else {
                     xml::append(text, entities, &mut String::new(), 0)?;
                 }
@@ -336,4 +339,16 @@ mod tests {
         );
         assert_eq!(parse(many.as_bytes(), false).unwrap().len(), MAX_ITEMS);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn omits_rss_link_when_truncated_tail_hides_after_whitespace() {
+    let feed = format!(
+        "<rss version=\"2.0\"><channel><item><title>Story</title><link>https://example.test/story{}<![CDATA[hidden]]></link></item></channel></rss>",
+        " ".repeat(LINK + 16),
+    );
+    let entries = parse(feed.as_bytes(), false).unwrap();
+    assert_eq!(entries[0].title, "Story");
+    assert!(entries[0].link.is_none());
 }

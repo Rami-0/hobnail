@@ -96,8 +96,9 @@ impl<'a> Scanner<'a> {
                     return None;
                 }
                 let mut decoded = String::new();
-                append(value, true, &mut decoded, ATTR_LIMIT)?;
-                attrs.push((key, decoded));
+                if !append(value, true, &mut decoded, ATTR_LIMIT + 3)? {
+                    attrs.push((key, decoded));
+                }
                 rest = after;
             }
         }
@@ -116,7 +117,8 @@ pub(super) fn append(
     entities: bool,
     output: &mut String,
     max: usize,
-) -> Option<()> {
+) -> Option<bool> {
+    let mut overflow = false;
     let mut push = |c: char| {
         if !character(c) {
             return None;
@@ -125,6 +127,8 @@ pub(super) fn append(
         // a multi-byte character and then admits later ASCII.
         if output.len() < max.saturating_sub(3) {
             output.push(c);
+        } else {
+            overflow = true;
         }
         Some(())
     };
@@ -159,5 +163,5 @@ pub(super) fn append(
     for c in text.chars() {
         push(c)?;
     }
-    Some(())
+    Some(overflow)
 }
