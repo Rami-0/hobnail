@@ -30,7 +30,8 @@ pub async fn config_watcher(state: Arc<AppState>) {
 /// After a config.toml reload, with the widget cache lock held: drop the
 /// file-configured widgets' output. Provider widgets keep theirs; only an
 /// `[http] allow_hosts` change affects them, and then they refetch (public
-/// providers at their floor) showing the last data as stale.
+/// providers at their floor) showing the last data as stale, and stored
+/// integration test verdicts are dropped.
 pub(crate) fn reloaded(
     state: &AppState,
     previous: &Arc<crate::config::Config>,
@@ -43,6 +44,8 @@ pub(crate) fn reloaded(
     widgets.clear();
     if previous.http.allow_hosts != current.http.allow_hosts {
         widgets.invalidate_providers("provider-fetch:");
+        // Stored test verdicts were made under the previous outbound policy.
+        state.integration_checks.lock().unwrap().clear();
     }
 }
 

@@ -160,9 +160,10 @@ initial failure has `status: "error"`, a null body and empty values.
 
 Integration reads, including board resolution, expose `enabled` and a nullable
 `check`. The check contains the latest manual verdict and the timestamp and
-latency of the last successful test if there was one. Connection changes and
-server restart clear the in-memory test evidence. The test POST still returns
-the single attempt's verdict.
+latency of the last successful test if there was one. Connection changes,
+Provider internet access or `[http] allow_hosts` changes and server restart
+clear the in-memory test evidence. The test POST still returns the single
+attempt's verdict; a `busy` or `changed` verdict is not stored.
 
 Signed-in sessions return `board_tour_pending: true` until the account dismisses
 or completes its tour. POST `/api/v1/account/board-tour` with the session and CSRF

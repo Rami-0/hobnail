@@ -1207,6 +1207,39 @@ async fn link_tests_honour_the_internet_switch_and_count_redirects_and_challenge
 }
 
 #[tokio::test]
+async fn stored_test_verdicts_are_dropped_when_the_internet_switch_changes() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let created = owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({"name":"Blocked","kind":"http","enabled":true,"base_url":"http://localhost"}),
+            201,
+        )
+        .await;
+    let path = format!("/api/v1/integrations/{}", created["id"].as_str().unwrap());
+    owner
+        .json("POST", &format!("{path}/test"), Value::Null, 200)
+        .await;
+    let tested = owner.json("GET", &path, Value::Null, 200).await;
+    assert_eq!(tested["check"]["verdict"]["class"], "blocked");
+    owner
+        .json(
+            "PATCH",
+            "/api/v1/settings",
+            json!({"provider_internet":true}),
+            200,
+        )
+        .await;
+    assert_eq!(
+        owner.json("GET", &path, Value::Null, 200).await["check"],
+        Value::Null
+    );
+}
+
+#[tokio::test]
 async fn connection_verdict_enforces_outbound_policy() {
     let st = state();
     crate::auth::set_password_for_tests(&st.db, PW);

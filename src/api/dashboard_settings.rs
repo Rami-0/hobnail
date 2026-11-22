@@ -147,6 +147,8 @@ pub(super) async fn route(
                 )?;
                 if changed {
                     super::provider_widgets::invalidate(state, None);
+                    // Stored test verdicts were made under the other setting.
+                    state.integration_checks.lock().unwrap().clear();
                 }
             }
             get(conn, user)

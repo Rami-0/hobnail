@@ -120,7 +120,13 @@ pub(crate) struct CheckSlot {
 }
 
 impl CheckSlot {
+    /// Store a test verdict. Busy (no request slot) and Changed (the policy
+    /// or connection changed mid-test) say nothing about the service, so
+    /// they are returned to the caller but not stored.
     fn record(&mut self, verdict: IntegrationVerdict, now: u64) {
+        if matches!(verdict.class, VerdictClass::Busy | VerdictClass::Changed) {
+            return;
+        }
         let previous = self.check.as_ref();
         self.check = Some(IntegrationCheck {
             last_good_at: if verdict.ok {
@@ -845,6 +851,16 @@ mod tests {
         assert_eq!(check.last_good_at, Some(2));
         assert_eq!(check.last_good_latency_ms, Some(5));
         slot.record(success, 5);
+        for class in [VerdictClass::Busy, VerdictClass::Changed] {
+            let inconclusive = IntegrationVerdict {
+                ok: false,
+                class,
+                message: class.message(),
+                latency_ms: 0,
+                fingerprint: None,
+            };
+            slot.record(inconclusive, 6);
+        }
         let check = slot.check.unwrap();
         assert!(check.verdict.ok);
         assert_eq!(check.last_good_at, Some(5));
