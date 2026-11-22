@@ -49,6 +49,35 @@ const keepSdkSelector = (selector: string) => {
   return slots.length === 0 || slots.some((slot) => sdkParts.has(slot));
 };
 
+// Drop the unused primitives from every :is()/:where() list, nested lists
+// included (a list with a :where() inside it used to be kept whole).
+function pruneSdkLists(selector: string): string {
+  let out = "";
+  let at = 0;
+  for (const list of selector.matchAll(/:(?:is|where)\(/g)) {
+    const open = (list.index ?? 0) + list[0].length;
+    if (open <= at) continue;
+    const parts: string[] = [];
+    let depth = 1;
+    let from = open;
+    let end = open;
+    for (; depth > 0; end++) {
+      const c = selector[end];
+      if (c === undefined) return selector;
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      if ((c === "," && depth === 1) || depth === 0) {
+        parts.push(selector.slice(from, end));
+        from = end + 1;
+      }
+    }
+    const live = parts.map(pruneSdkLists).filter(keepSdkSelector);
+    out += selector.slice(at, list.index) + (live.length ? list[0] + live.join(",") + ")" : ":not(*)");
+    at = end;
+  }
+  return out + selector.slice(at);
+}
+
 type PostcssPlugin = NonNullable<Exclude<CSSOptions["postcss"], string | undefined>["plugins"]>[number];
 
 const sdkStyles: PostcssPlugin = {
@@ -57,12 +86,7 @@ const sdkStyles: PostcssPlugin = {
     const file = root.source?.input.file ?? "";
     if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
     root.walkRules((rule) => {
-      const selectors = rule.selectors.filter(keepSdkSelector).map((selector) =>
-        selector.replace(/:(is|where)\(([^()]*)\)/g, (_, kind: string, choices: string) => {
-          const live = choices.split(",").filter(keepSdkSelector);
-          return live.length ? ":" + kind + "(" + live.join(",") + ")" : ":not(*)";
-        }),
-      );
+      const selectors = rule.selectors.filter(keepSdkSelector).map(pruneSdkLists);
       if (selectors.length === 0) rule.remove();
       else if (selectors.join(",") !== rule.selectors.join(",")) rule.selectors = selectors;
     });
