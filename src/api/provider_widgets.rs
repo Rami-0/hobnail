@@ -2,8 +2,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-    time::Instant,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 
 use hyper::{body::Incoming, Request, Response, StatusCode};
@@ -406,6 +409,7 @@ pub(super) fn placements_changed(state: &AppState) {
         attempts.shrink_to_fit();
         Ok(())
     });
+    state.provider_viewers.reschedule();
     state.provider_viewers.changed.send_replace(());
     state.wake.notify_one();
 }
@@ -534,6 +538,7 @@ fn fetch_prefix(integration: Option<&str>) -> String {
 /// and non-public ones refetch on the next tick.
 pub(crate) fn invalidate(state: &AppState, integration: Option<&str>) {
     state.provider_connections.invalidate(integration);
+    state.provider_viewers.reschedule();
     state
         .widgets
         .lock()
@@ -544,6 +549,7 @@ pub(crate) fn invalidate(state: &AppState, integration: Option<&str>) {
 /// The integration was deleted: drop its widgets' data.
 pub(super) fn forget(state: &AppState, integration: &str) {
     state.provider_connections.invalidate(Some(integration));
+    state.provider_viewers.reschedule();
     state
         .widgets
         .lock()
@@ -554,6 +560,19 @@ pub(super) fn forget(state: &AppState, integration: &str) {
 pub(crate) struct Viewers {
     ids: Mutex<HashMap<String, usize>>,
     changed: watch::Sender<()>,
+    /// Per viewed placement, what the last [`due`] found, so a placement
+    /// that is not yet due costs no database read on the per-second tick.
+    /// Cleared whenever placements, integrations or the policy change.
+    schedule: Mutex<HashMap<String, Scheduled>>,
+    /// Where the next tick starts in the viewed placements, so placements
+    /// late in the order are not starved when request slots run out.
+    cursor: AtomicUsize,
+}
+
+#[derive(Clone)]
+enum Scheduled {
+    Fetch { key: String, refresh: Duration },
+    InternetOff,
 }
 
 impl Default for Viewers {
@@ -561,13 +580,49 @@ impl Default for Viewers {
         Self {
             ids: Mutex::default(),
             changed: watch::channel(()).0,
+            schedule: Mutex::default(),
+            cursor: AtomicUsize::new(0),
         }
     }
 }
 
 impl Viewers {
+    /// The viewed placements in a stable order, rotated by one each call.
     fn active(&self) -> Vec<String> {
-        self.ids.lock().unwrap().keys().cloned().collect()
+        let mut ids: Vec<String> = self.ids.lock().unwrap().keys().cloned().collect();
+        ids.sort_unstable();
+        self.schedule
+            .lock()
+            .unwrap()
+            .retain(|id, _| ids.binary_search(id).is_ok());
+        if !ids.is_empty() {
+            let start = self.cursor.fetch_add(1, Ordering::Relaxed) % ids.len();
+            ids.rotate_left(start);
+        }
+        ids
+    }
+
+    fn reschedule(&self) {
+        self.schedule.lock().unwrap().clear();
+    }
+
+    fn remember(&self, id: &str, scheduled: Scheduled) {
+        self.schedule.lock().unwrap().insert(id.into(), scheduled);
+    }
+
+    /// Whether the last check of `id` says it is not due yet.
+    fn waiting(&self, state: &AppState, id: &str, now: Instant) -> bool {
+        let scheduled = self.schedule.lock().unwrap().get(id).cloned();
+        match scheduled {
+            Some(Scheduled::InternetOff) => true,
+            Some(Scheduled::Fetch { key, refresh }) => state
+                .widgets
+                .lock()
+                .unwrap()
+                .deadline(&key, refresh)
+                .is_some_and(|at| now < at),
+            None => false,
+        }
     }
 }
 
@@ -654,6 +709,7 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
                 return Ok(None);
             };
             if provider.public_internet && !target.internet_enabled {
+                state.provider_viewers.remember(id, Scheduled::InternetOff);
                 return Ok(None);
             }
             let Some(widget) = provider.widgets.iter().find(|w| w.id == widget) else {
@@ -663,11 +719,19 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
                 return Ok(None);
             };
             let key = cache_key(provider.id, &integration, widget.id, &options);
+            let refresh = widget.refresh(&options, provider.public_internet);
+            state.provider_viewers.remember(
+                id,
+                Scheduled::Fetch {
+                    key: key.clone(),
+                    refresh,
+                },
+            );
             if state
                 .widgets
                 .lock()
                 .unwrap()
-                .deadline(&key, widget.refresh(&options, provider.public_internet))
+                .deadline(&key, refresh)
                 .is_some_and(|at| now < at)
             {
                 return Ok(None);
@@ -742,6 +806,9 @@ pub(crate) fn poll(
     }
     let visible = state.provider_viewers.changed.subscribe();
     for id in state.provider_viewers.active() {
+        if state.provider_viewers.waiting(state, &id, now) {
+            continue;
+        }
         let Ok(permit) = state.provider_requests.clone().try_acquire_owned() else {
             break;
         };
@@ -815,5 +882,64 @@ pub(crate) fn poll(
                 state.wake.notify_one();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_tick_starts_one_placement_later() {
+        let viewers = Viewers::default();
+        viewers
+            .ids
+            .lock()
+            .unwrap()
+            .extend(["c", "a", "b"].map(|id| (id.to_string(), 1)));
+        let firsts: Vec<_> = (0..4).map(|_| viewers.active()[0].clone()).collect();
+        assert_eq!(firsts, ["a", "b", "c", "a"]);
+        assert_eq!(viewers.active(), ["b", "c", "a"]);
+    }
+
+    #[test]
+    fn a_placement_that_is_not_due_skips_the_database() {
+        let state = crate::testutil::state_with(vec![], "");
+        let viewers = &state.provider_viewers;
+        let now = Instant::now();
+        let key = "provider-fetch:fixture:key";
+        let refresh = Duration::from_secs(60);
+        assert!(
+            !viewers.waiting(&state, "provider:one", now),
+            "unknown: check it"
+        );
+        viewers.remember(
+            "provider:one",
+            Scheduled::Fetch {
+                key: key.into(),
+                refresh,
+            },
+        );
+        assert!(
+            !viewers.waiting(&state, "provider:one", now),
+            "never fetched"
+        );
+        state
+            .widgets
+            .lock()
+            .unwrap()
+            .begin_provider(key, now, false);
+        assert!(viewers.waiting(&state, "provider:one", now));
+        assert!(!viewers.waiting(&state, "provider:one", now + refresh));
+        viewers.remember("provider:two", Scheduled::InternetOff);
+        assert!(viewers.waiting(&state, "provider:two", now));
+        // Placement, integration or policy changes force a fresh check.
+        viewers.reschedule();
+        assert!(!viewers.waiting(&state, "provider:one", now));
+        assert!(!viewers.waiting(&state, "provider:two", now));
+        // Placements nobody views any more are forgotten.
+        viewers.remember("provider:gone", Scheduled::InternetOff);
+        viewers.active();
+        assert!(viewers.schedule.lock().unwrap().is_empty());
     }
 }
