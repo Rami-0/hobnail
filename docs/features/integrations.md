@@ -601,14 +601,17 @@ Choose one TCP, HTTP or DNS check per integration. TCP connect replaces ICMP
 ping, which requires additional privileges on some hosts. TCP shows connect
 time, HTTP checks an inclusive status range (200–299 by default), and DNS
 uses the server resolver for A/AAAA addresses with an optional expected IP.
-HTTP checks stop at the first response status. Public destinations require
-the provider internet switch.
+HTTP checks stop at the first response status. Admins can probe private
+hosts and ports reachable from Hobnail. See [http.allow_hosts](../configuration.md)
+for explicit exceptions to HTTP destination policy. Public destinations
+require the provider internet switch.
 
 Verified from: [TCP](https://www.rfc-editor.org/rfc/rfc9293.html),
 [HTTP semantics](https://www.rfc-editor.org/rfc/rfc9110.html) and
 [DNS AAAA](https://www.rfc-editor.org/rfc/rfc3596.html).
 
-UNVERIFIED: Live endpoints and system resolver configurations outside the fixtures.
+UNVERIFIED: Live endpoints and system resolver configurations. The resolver
+uses the system lookup directly and the fixture exercises a literal address.
 
 ## RSS / Atom
 
