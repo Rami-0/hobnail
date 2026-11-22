@@ -19,9 +19,10 @@ engine × profile × flow table, problem counts by kind, and the distinct
 problems), and JPEG screenshots of failing states in `shots/`. Exit status
 is 0 only when every flow passed with no problem on any state.
 
-A full run (3 engines in parallel, 26 units each: 78 units, about 300 flow
-runs and 2 600 checked page states) takes about 95 minutes on this host and
-writes about 6 MB. Each flows unit takes 5-7 minutes, each sweep 2-3.
+A full run (3 engines in parallel, 26 units each: 78 units, 330 flow runs
+and about 2 800 checked page states) takes about 70-95 minutes on this host
+and writes 1-6 MB (screenshots only of failing states). Each flows unit
+takes 5-7 minutes, each sweep 2-3.
 
 ## How it works
 
@@ -40,7 +41,8 @@ writes about 6 MB. Each flows unit takes 5-7 minutes, each sweep 2-3.
   is contacted.
 - **Units:** `flows` (fresh instance; onboarding through every step with a
   tested Pi-hole connection, then every flow below), `skip` (fresh
-  instance; onboarding skipping every step, then login and logout), and
+  instance; onboarding skipping every step, then "tour stays closed" and
+  login and logout), and
   `sweep` (owner and a board created through the API, then every route of
   `../sweep-fixture.mjs` (27 pages: overview, containers, the five container
   tabs, host, history, alerts, four logs views, a board, the 12 settings
@@ -99,7 +101,7 @@ Chromium (measured: the status stayed "live" for 20 s), hence the restart.
 | tablet-l | 1180 × 820 | 2 | yes | dark | light, dark+RM |
 | 1280 | 1280 × 800 | 1 | | | light, dark+RM |
 | 1440 | 1440 × 900 | 1 | | light | light, dark+RM |
-| 1920 | 1920 × 1080 | 1 | | | light, dark |
+| 1920 | 1920 × 1080 | 1 | | | light, dark+RM |
 | 2560 | 2560 × 1440 | 1 | | | light, dark |
 | zoom200 | 720 × 450 | 2 | | | light, dark+RM |
 
@@ -173,58 +175,65 @@ media queries and container queries see exactly what they would at 200 %.
 
 ## Results
 
-Full matrix, 2026-11-22, image built from 44d2d1c (run 4: 78 units, 311
-flow runs, 2 708 page states checked): **293 flow runs pass, 18 fail**.
-Zero console errors, zero CSP violations, zero sideways scroll, zero
-clipped controls, zero visible-focus failures, zero reduced-motion
-failures; one axe violation (heading-order on the empty board, Firefox)
-and 212 target findings. Every failure was traced to one of the four
-defects below, each fixed after that image. Verification on the final
-image (7137de6, run 5: flows at 1440, skip at 1440, sweeps at 1440 and
-200 % zoom, all three engines): 12 units, 63 flow runs, 421 states,
-**all pass, zero problems of any kind**.
-
-- 24 px row links in the containers table at 1440 px and 200 % zoom
-  (Chromium, WebKit): fixed by "Truncate long container names inside their
-  link, not the cell".
-- Keyboard shortcuts button unreachable at 200 % zoom (all engines): fixed
-  by "Let the sidebar scroll in short windows".
-- heading-order on the empty board (Firefox): fixed by "Title empty states
-  with h2".
-- WebKit 390 history charts: harness (see engine notes), run 4b passes.
-
-The first full run (run 3, image a9389bc, before the later fixes) had the
-same zero counts for console, CSP, overflow, focus and axe across 2 643
-states. The first baseline (image 544fedf, before any fix) had 1 402 axe
-violations, 7 353 target and 588 clipped findings in 20 units.
+**Final full matrix**, 2026-11-22, image built from 0c1d0f9 (the branch
+head for the app; later commits touch only this folder's docs): 78 units,
+330 flow runs (321 run, 9 n/a), 2 835 page states checked: **every flow
+passes and every check is zero**: 0 console errors, 0 CSP violations,
+0 sideways scroll, 0 clipped controls, 0 target findings, 0 visible-focus
+failures, 0 reduced-motion failures, 0 axe violations, 0 tour
+reappearances. 70 minutes, 0.9 MB of output.
 
 | flow | C 390 | C tablet-p | C tablet-l | C 1440 | F 390 | F tablet-p | F tablet-l | F 1440 | W 390 | W tablet-p | W tablet-l | W 1440 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | onboarding: every step | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| tour stays closed | pass (2) | pass | pass | pass (2) | pass (2) | pass | pass | pass (2) | pass (2) | pass | pass | pass (2) |
 | login and logout | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | overview | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
-| containers | pass | pass | pass | FAIL | pass | pass | pass | pass | pass | pass | pass | FAIL |
+| containers | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | logs | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
-| history charts | pass | pass | pass | pass | pass | pass | pass | pass | FAIL | pass | pass | pass |
+| history charts | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | boards | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | catalog to widget | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | settings | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | users and invites | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
-| command palette | pass | pass | pass | FAIL | pass | pass | pass | pass | pass | pass | pass | FAIL |
+| command palette | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | keyboard only | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | touch | pass | pass | pass | n/a | pass | pass | pass | n/a | pass | pass | pass | n/a |
-| sse reconnect | pass | pass | pass | FAIL | pass | pass | pass | pass | pass | pass | pass | FAIL |
+| sse reconnect | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
 | tablet rotation | n/a | pass | pass | n/a | n/a | pass | pass | n/a | n/a | pass | pass | n/a |
-| onboarding: skip | pass | - | - | pass | pass | - | - | FAIL | pass | - | - | pass |
+| onboarding: skip | pass | - | - | pass | pass | - | - | pass | pass | - | - | pass |
 
-| sweep | 360 | 390 | 412 | tablet-p | tablet-l | 1280 | 1440 | 1920 | 2560 | zoom200 |
+"(2)": the flows unit and the skip unit. "-": not in the plan (skip
+onboarding runs at 390 and 1440). n/a: the flow does not apply to the
+profile.
+
+| sweep (28 states each) | 360 | 390 | 412 | tablet-p | tablet-l | 1280 | 1440 | 1920 | 2560 | zoom200 |
 |---|---|---|---|---|---|---|---|---|---|---|
-| chromium light | pass | pass | pass | pass | pass | pass | FAIL (5) | pass | pass | FAIL (34) |
-| chromium dark | pass | pass | pass | pass | pass | pass | FAIL (2) | pass | pass | FAIL (34) |
-| firefox light | pass | pass | pass | pass | pass | pass | pass | pass | pass | FAIL (24) |
-| firefox dark | pass | pass | pass | pass | pass | pass | pass | pass | pass | FAIL (24) |
-| webkit light | pass | pass | pass | pass | pass | pass | FAIL (2) | pass | pass | FAIL (30) |
-| webkit dark | pass | pass | pass | pass | pass | pass | FAIL (1) | pass | pass | FAIL (30) |
+| chromium light | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| chromium dark | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass | pass RM |
+| firefox light | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| firefox dark | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass | pass RM |
+| webkit light | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass |
+| webkit dark | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass RM | pass | pass RM |
 
-"-": not in the plan (skip onboarding runs at 390 and 1440) or not reached
-(none in run 4). n/a: the flow does not apply to the profile.
+RM: under reduced motion.
+
+### History
+
+- Baseline (image 544fedf, before any fix): 1 402 axe violations, 7 353
+  target and 588 clipped findings in 20 units.
+- Run 3 (image a9389bc): zero console, CSP, overflow, focus and axe
+  problems across 2 643 states; target and layout fixes followed.
+- Run 4 (image 44d2d1c, 78 units, 311 flow runs, 2 708 states): 293 pass,
+  18 fail; one axe violation (heading-order on the empty board, Firefox)
+  and 212 target findings, traced to four defects, each fixed after it:
+  24 px row links in the containers table at 1440 px and 200 % zoom
+  ("Truncate long container names inside their link, not the cell"); the
+  keyboard shortcuts button unreachable at 200 % zoom ("Let the sidebar
+  scroll in short windows"); heading-order on the empty board ("Title
+  empty states with h2"); WebKit 390 history charts (harness, see engine
+  notes).
+- Run 5 (image 7137de6, flows, skip and sweeps at 1440 and 200 % zoom on
+  all three engines: 12 units, 63 flow runs, 421 states): all pass.
+- Final run above (image 0c1d0f9): the whole plan, all pass, after the
+  tour check was added.
