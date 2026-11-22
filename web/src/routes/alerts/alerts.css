@@ -5,6 +5,6 @@
 .incident{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:var(--fs-sm)}
 .inc-subject{font-family:var(--mono)}
 .inc-since{margin-left:auto;font-family:var(--mono);font-size:var(--fs-xs)}
-.inc-rule,.ev-rule{color:var(--text-2);font-size:var(--fs-xs);white-space:nowrap}
+.inc-rule{color:var(--text-2);font-size:var(--fs-xs);white-space:nowrap}
 .incident{flex-wrap:wrap;row-gap:2px}
 .incident .inc-since{margin-left:auto;text-align:right;white-space:nowrap}

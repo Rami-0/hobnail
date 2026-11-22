@@ -33,7 +33,7 @@
 .strip-list li{display:grid;grid-template-columns:minmax(0,170px) 40px minmax(0,1fr) 92px;align-items:center;gap:12px;min-height:20px}
 .sl-n{font:500 .9286rem var(--mono);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sl-c{font-size:.8571rem;color:var(--text-3);text-align:right}
-@media (max-width:699px){.strip-list li{grid-template-columns:minmax(0,1fr) 40px;row-gap:4px}.strip-list .hstrip{grid-column:1/-1}.sl-s{display:none}.strips{padding:12px 14px 14px}}
+@media (max-width:699px){.strip-list li{grid-template-columns:minmax(0,1fr) 40px;row-gap:4px}.strip-list .hstrip{grid-column:1/-1}.strips{padding:12px 14px 14px}}
 .since{font-size:.9286rem;color:var(--text-2);margin-top:6px}
 .overview-counts{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden}
 .hs-cell{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:var(--s-2);padding:var(--s-4);color:var(--text-2);border-right:1px solid var(--line);min-width:0}

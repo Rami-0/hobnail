@@ -13,7 +13,7 @@
 .hx-p .panel-h h2{display:flex;align-items:center;gap:6px}
 .hx-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:8px 0 12px;font-size:var(--fs-xs);color:var(--text-3)}
 .hx-cores{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 18px}
-.hx-cores li,.hx-row{display:grid;grid-template-columns:auto 1fr minmax(5.5em,auto);align-items:center;gap:8px;font-size:var(--fs-xs)}
+.hx-cores li{display:grid;grid-template-columns:auto 1fr minmax(5.5em,auto);align-items:center;gap:8px;font-size:var(--fs-xs)}
 .hx-l{color:var(--text-3);font-family:var(--mono);min-width:3.5em}
 .hx-v{font:500 var(--fs-xs) var(--mono);text-align:right;color:var(--text)}
 .hx-t th[scope=row]{font-weight:500;font-size:var(--fs-sm);color:var(--text);text-transform:none;letter-spacing:0;border-bottom:1px solid var(--line);padding:0 10px;height:32px;white-space:nowrap}
