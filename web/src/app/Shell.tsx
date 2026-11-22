@@ -358,7 +358,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
 
   return (
     <>
-      <a className="skip" href="#main">
+      {/* Focus <main> directly: after a jump to the #main fragment WebKit
+          pulls focus back to <main> on Tab while the page lays out. */}
+      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>
         Skip to content
       </a>
       <div className="app">

@@ -454,6 +454,10 @@ export const flows = {
     const seen = new Set(stops.map((r) => r.key));
     const bad = stops.filter((r) => !r.ring || !r.visible || !r.onScreen).map((r) => `${r.key} ring=${r.ring} focus-visible=${r.visible} on-screen=${r.onScreen}`);
     assert.ok(seen.size >= 8, `Tab reaches distinct controls (${seen.size})`);
+    // <main> takes focus only from the skip link; Tab never comes back to it
+    // (WebKit did after the #main fragment jump, see Shell.tsx).
+    assert.ok(!stops.some((r) => r.key.startsWith("<main")), `Tab returned to <main>: ${stops.map((r) => r.key.slice(0, 20)).join(" ")}`);
+    assert.equal(new URL(page.url()).hash, "", "the skip link moves focus without a fragment");
     assert.deepEqual(bad, [], `every Tab stop shows its focus: ${bad.join("; ").slice(0, 400)}`);
     await h.state("tab walk");
     await page.keyboard.press("Control+k");
