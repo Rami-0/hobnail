@@ -117,10 +117,9 @@ try {
     await step("Select what to include");
     await require("name and section survived reload", `${el(selected + ' input[id$="-name"]')}?.value === "Selected service" && ${el(selected + ' input[id$="-group"]')}?.value === "Home tools"`);
     await click(".setup-fields .acts button:first-child");
-    await click('.setup-fields .acts [role="combobox"]');
-    await require("endpoint-free widgets are omitted from setup", `!!${el('[role="option"][data-value="http"]')} && !document.querySelector('[data-value="clock"], [data-value="bookmarks"], [data-value="markdown"]')`);
-    await tab.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    await addProvider("http");
+    await click('button[aria-label="Add an integration"]');
+    await require("endpoint-free widgets are omitted from setup", `!!${el('[role="option"][data-value="http"]')} && !document.querySelector('[data-value="clock"], [data-value="bookmarks"], [data-value="markdown_note"]')`);
+    await click('[role="option"][data-value="http"]');
     await addProvider("pihole");
     await require("both provider choices are selected", `[...document.querySelectorAll(${q(selected)})].slice(-2).every((item, i) => item.querySelector('input[id$="-name"]').value === ["Generic HTTP", "Pi-hole"][i]) && document.querySelectorAll(${q(selected)}).length === 4`);
     await shot("selection");
