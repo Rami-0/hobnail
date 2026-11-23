@@ -3,14 +3,14 @@
 // Settings → Integrations. Connect starts the provider's connect step with
 // the proposed URL; nothing is contacted until the user tests it.
 import { useEffect, useState, type CSSProperties } from "react";
-import { PlugZapIcon, RadarIcon, XIcon } from "lucide-react";
+import { InfoIcon, PlugZapIcon, RadarIcon, XIcon } from "lucide-react";
 import type { DetectedService } from "../api/gen/DetectedService.ts";
 import type { Provider } from "../api/gen/Provider.ts";
 import { api } from "../api/session.ts";
 import { Button } from "../ui/Button.tsx";
 import { ServiceIcon } from "../ui/ServiceIcon.tsx";
 import { brandColor } from "../ui/brand.ts";
-import { detectedSummary, detectionKey, prefillFor, proposedUrl, readDismissed, viaLabel, visibleDetected, writeDismissed, type KV, type Prefill } from "./detected.ts";
+import { detectedSummary, detectionKey, onHost, PHONE_CAP, prefillFor, proposedUrl, readDismissed, viaLabel, visibleDetected, writeDismissed, type KV, type Prefill } from "./detected.ts";
 
 const storage = (): KV | null => { try { return globalThis.localStorage ?? null; } catch { return null; } };
 
@@ -46,12 +46,14 @@ export function useDetected(enabled: boolean, refresh = 0): Detection {
 export function DetectedCards({ detection, providers, onConnect, compact = false }: {
   detection: Detection; providers: readonly Provider[]; onConnect: (prefill: Prefill) => void; compact?: boolean;
 }) {
+  const [all, setAll] = useState(false);
   const shown = visibleDetected(detection.services ?? [], detection.dismissed, providers);
   if (!shown.length) return null;
-  return <section className="detected" data-compact={compact ? "" : undefined} data-testid="detected" aria-labelledby="detected-title">
+  const hidden = all ? 0 : Math.max(0, shown.length - PHONE_CAP);
+  return <section className="detected" data-compact={compact ? "" : undefined} data-collapsed={hidden ? "" : undefined} data-testid="detected" aria-labelledby="detected-title">
     <div className="detected-head"><RadarIcon aria-hidden="true" /><div>
       <h3 id="detected-title">Detected on this host</h3>
-      <p>Containers that look like services Hobnail can connect to. Nothing is contacted until you test the connection.</p>
+      <p>Services Hobnail can connect to. Nothing is contacted until you test the connection.</p>
     </div></div>
     <ul className="detected-grid">{shown.map((service) => {
       const provider = providers.find((entry) => entry.id === service.provider);
@@ -62,9 +64,10 @@ export function DetectedCards({ detection, providers, onConnect, compact = false
         <ServiceIcon tint name={provider.icon} title={provider.name} enabled={false} />
         <div className="detected-copy">
           <strong>{provider.name}</strong>
-          <span className="detected-image" title={service.image}>{detectedSummary(service)}{service.container !== service.provider && <> · {service.container}</>}</span>
+          <span className="detected-image" title={service.image || undefined}>{detectedSummary(service)}{!onHost(service) && service.container !== service.provider && <> · {service.container}</>}</span>
           {url && <code className="detected-url">{url}</code>}
           <small>{viaLabel(service)}</small>
+          {service.note && <p className="detected-note" data-testid="detected-note"><InfoIcon aria-hidden="true" />{service.note}</p>}
         </div>
         <div className="detected-actions">
           <Button size="sm" variant="default" data-testid="detected-connect" icon={<PlugZapIcon aria-hidden="true" />}
@@ -74,5 +77,6 @@ export function DetectedCards({ detection, providers, onConnect, compact = false
         </div>
       </li>;
     })}</ul>
+    {hidden > 0 && <Button size="sm" variant="ghost" className="detected-more" data-testid="detected-more" onClick={() => setAll(true)}>Show {hidden} more</Button>}
   </section>;
 }

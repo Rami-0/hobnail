@@ -45,3 +45,13 @@ test("dismissals survive a reload and bad storage", () => {
   assert.equal(readDismissed(blocked).size, 0);
   writeDismissed(blocked, new Set(["x"]));
 });
+
+test("Tailscale is found on the host, not in a container", () => {
+  const tailnet: DetectedService = {
+    provider: "tailscale", container: "tailnet", image: "", matched: "tailnet", port: 443,
+    candidates: [{ url: "https://api.tailscale.com", via: "public" }], note: "Needs an API access token.",
+  };
+  assert.equal(detectedSummary(tailnet), "This host is on a tailnet");
+  assert.equal(viaLabel(tailnet), "via the provider's public API");
+  assert.equal(proposedUrl(tailnet), "https://api.tailscale.com");
+});

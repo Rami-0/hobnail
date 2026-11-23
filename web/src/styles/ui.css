@@ -417,6 +417,10 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .detected-actions{grid-column:2;display:flex;align-items:center;gap:var(--s-2)}
 .detected-actions [data-testid="detected-dismiss"]{position:absolute;top:6px;right:6px;width:28px;height:28px;min-height:0}
 .detected-actions [data-testid="detected-dismiss"] svg{width:14px;height:14px}
+.detected-note{display:flex;gap:6px;align-items:flex-start;margin-top:4px;font-size:var(--fs-xs);line-height:1.4;color:var(--foreground);white-space:normal}
+.detected-note svg{width:13px;height:13px;flex:none;margin-top:2px;color:var(--muted-foreground)}
+.detected-more{display:none;justify-self:start}
+@media (max-width:699px){.detected[data-collapsed] .detected-card:nth-child(n+3){display:none}.detected[data-collapsed] .detected-more{display:inline-flex}}
 .detected[data-compact] .detected-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))}
 
 /* ---- integration catalog and setup (routes/settings/ProviderDialog.tsx) ---- */

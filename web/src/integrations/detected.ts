@@ -33,6 +33,10 @@ export function writeDismissed(store: KV | null, keys: Set<string>): void {
   }
 }
 
+/** On phones the cards would push the connected integrations far down:
+ * show this many until the user asks for the rest. */
+export const PHONE_CAP = 2;
+
 /** Services still worth showing: not dismissed and with a known provider. */
 export function visibleDetected(services: readonly DetectedService[], dismissed: ReadonlySet<string>, providers: readonly Provider[]): DetectedService[] {
   const known = new Set(providers.map((provider) => provider.id));
@@ -49,8 +53,12 @@ export function imageName(image: string): string {
   return [...parts, last].join("/") || image;
 }
 
-/** "linuxserver/sonarr, port 8989". */
+/** Not a container: a service the host itself is part of (Tailscale). */
+export const onHost = (service: Pick<DetectedService, "matched">): boolean => service.matched === "tailnet";
+
+/** "linuxserver/sonarr, port 8989", or "This host is on a tailnet". */
 export function detectedSummary(service: DetectedService): string {
+  if (onHost(service)) return "This host is on a tailnet";
   return `${imageName(service.image)}, port ${service.port}`;
 }
 
@@ -63,6 +71,7 @@ const VIA: Record<string, string> = {
   published: "published port",
   network: "container IP on a shared network",
   name: "container name on a shared network",
+  public: "the provider's public API",
 };
 
 /** How Hobnail would reach it, for the card's hint. */
