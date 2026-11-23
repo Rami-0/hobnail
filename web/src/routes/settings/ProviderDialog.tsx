@@ -22,25 +22,43 @@ import { WidgetPreview } from "../../ui/WidgetPreview.tsx";
 import { ArrowRightIcon, BookOpenIcon, LayoutGridIcon, ZapIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import { matchesConnectionTest, type ConnectionTest } from "./connection-test.ts";
+import { DetectedCards, useDetected } from "../../integrations/Detected.tsx";
+import type { Prefill } from "../../integrations/detected.ts";
 
 const brand = (color: string) => ({ "--brand": brandColor(color) }) as CSSProperties;
 const advanced = (field: { id: string; kind: string }) => field.kind === "bool" || field.id === "fingerprint";
 
-export default function ProviderDialog({ providers, item, preferredBoard, icons, internet, onClose, onSaved }: {
+/** The connect step for a provider with these values, as a detected
+ * service or a widget picked elsewhere starts it. */
+function startValues(entry: Provider, prefill?: Prefill): Values {
+  return { ...initial(entry.fields), ...(prefill?.url ? { base_url: prefill.url } : {}) };
+}
+
+export default function ProviderDialog({ providers, item, preferredBoard, icons, internet, onClose, onSaved, prefill, startChoosing = false, detect = false, title }: {
   providers: Provider[]; item: IntegrationView | null; preferredBoard: string;
   icons: boolean; internet: boolean; onClose: () => void; onSaved: () => void;
+  /** Open on this provider's connect step (a detected service). */
+  prefill?: Prefill;
+  /** Open an existing integration on its widget step (Add widget). */
+  startChoosing?: boolean;
+  /** Offer services detected on this host above the catalog. */
+  detect?: boolean;
+  /** Title of the catalog step. */
+  title?: string;
 }) {
-  const [provider, setProvider] = useState(providers.find((p) => p.id === item?.kind));
+  const preset = prefill ? providers.find((p) => p.id === prefill.provider) : undefined;
+  const [provider, setProvider] = useState(providers.find((p) => p.id === item?.kind) ?? preset);
+  const detection = useDetected(detect && !item);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const verdictRef = useRef<HTMLDivElement>(null);
-  const [name, setName] = useState(item?.name ?? "");
+  const [name, setName] = useState(item?.name ?? (preset && prefill ? prefill.name : ""));
   const [icon, setIcon] = useState(item?.admin?.icon ?? "");
-  const [config, setConfig] = useState<Values>({
-    ...item?.admin?.options, base_url: item?.admin?.base_url,
-    enabled: item?.enabled, fingerprint: item?.admin?.fingerprint,
-  });
+  const [config, setConfig] = useState<Values>(() => item ? {
+    ...item.admin?.options, base_url: item.admin?.base_url,
+    enabled: item.enabled, fingerprint: item.admin?.fingerprint,
+  } : preset ? startValues(preset, prefill) : {});
   const bound = item?.admin?.credentials;
   const [cleared, setCleared] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -50,15 +68,29 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
   const verdict = tested?.result;
   useEffect(() => { if (verdict) verdictRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [verdict]);
   const [busy, setBusy] = useState(false);
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useState(!!item && startChoosing);
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [board, setBoard] = useState(preferredBoard);
-  const [selected, setSelected] = useState<Record<string, Values | undefined>>({});
+  const [selected, setSelected] = useState<Record<string, Values | undefined>>(() => preset
+    ? Object.fromEntries(preset.widgets.filter((w) => w.recommended).map((w) => [w.id, initial(w.fields)])) : {});
+  // A detected service arrives with its URL: the credential is the next thing to type.
+  const [focusSecret, setFocusSecret] = useState(preset ? 1 : 0);
   const [placements, setPlacements] = useState<Record<string, { id: string; options: Values }[]>>({});
   const [loadedBoard, setLoadedBoard] = useState("");
   const loadingWidgets = !!item && loadedBoard !== board;
   const [widgetErrors, setWidgetErrors] = useState<Record<string, Record<string, string>>>({});
   const form = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (!focusSecret) return;
+    const timer = setTimeout(() => {
+      const fields = form.current?.querySelectorAll<HTMLInputElement>(".provider-settings input:not([type=checkbox])");
+      const target = form.current?.querySelector<HTMLInputElement>('.provider-settings input[type="password"]')
+        ?? [...fields ?? []].find((input) => input.required && !input.value);
+      target?.focus();
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [focusSecret]);
 
   useLayoutEffect(() => {
     if (Object.keys(choosing ? widgetErrors : errors).length) {
@@ -102,10 +134,11 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
       label: instances.length > 1 ? `${widget.name} ${index + 1}` : widget.name }));
   }) ?? [];
 
-  function choose(entry: Provider) {
+  function choose(entry: Provider, start?: Prefill) {
     setProvider(entry);
-    setConfig(initial(entry.fields));
-    setName(entry.name);
+    setConfig(startValues(entry, start));
+    setName(start?.name ?? entry.name);
+    if (start) setFocusSecret((n) => n + 1);
     revision.current++;
     setTested(undefined);
     setErrors({});
@@ -195,7 +228,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
     change(key, "");
     setCleared({ ...cleared, [key]: !cleared[key] });
   } : undefined };
-  return <Dialog open wide className="integration-dialog" title={choosing ? "Add to a board" : item ? "Edit integration" : provider ? `Connect ${provider.name}` : "Add integration"}
+  return <Dialog open wide className="integration-dialog" title={choosing ? "Add to a board" : item ? "Edit integration" : provider ? `Connect ${provider.name}` : title ?? "Add integration"}
     onClose={() => { if (!busy) onClose(); }} testId="integration-form" footer={<>
       <Button onClick={() => choosing ? setChoosing(false) : provider && !item ? setProvider(undefined) : onClose()} disabled={busy}>
         {choosing || provider && !item ? "Back" : "Cancel"}
@@ -208,6 +241,10 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
     {!item && <Steps steps={["Choose a service", "Connect", "Add to board"]} current={step} />}
     <form ref={form} id="integration-form" noValidate onSubmit={(e) => { e.preventDefault(); void submit(false); }}>
       {!provider ? <div className="catalog">
+        <DetectedCards detection={detection} providers={providers} onConnect={(start) => {
+          const entry = providers.find((p) => p.id === start.provider);
+          if (entry) choose(entry, start);
+        }} />
         <Field label="Search integrations" id="provider-search"><TextInput type="search" value={query} placeholder="Pi-hole, Jellyfin, Uptime Kuma…" onChange={(e) => setQuery(e.target.value)} /></Field>
         <div className="catalog-filters" role="group" aria-label="Category">
           {["", ...categories].map((entry) => <Button key={entry || "all"} size="sm" aria-pressed={category === entry} onClick={() => setCategory(entry)}>{entry || "All"}</Button>)}

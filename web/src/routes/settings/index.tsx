@@ -1,11 +1,16 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
-import { BellIcon, BookmarkIcon, BoxIcon, HistoryIcon, LayoutGridIcon, LockIcon, PlugIcon, SlidersHorizontalIcon, SunIcon, TerminalIcon, UsersIcon, ZapIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { BellIcon, BookmarkIcon, BoxIcon, HistoryIcon, LayoutGridIcon, LockIcon, PlugIcon, PlusIcon, SlidersHorizontalIcon, SunIcon, TerminalIcon, UsersIcon, ZapIcon } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from "react";
 import { api } from "../../api/session.ts";
 import type { BoardSummary } from "../../api/gen/BoardSummary.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
 import { IntegrationStatus } from "../../ui/IntegrationStatus.tsx";
+import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
+import { StatusPill, type StatusTone } from "../../ui/StatusPill.tsx";
+import { brandColor } from "../../ui/brand.ts";
+import { DetectedCards, useDetected } from "../../integrations/Detected.tsx";
+import type { Prefill } from "../../integrations/detected.ts";
 import { local, rememberSettingsTab } from "../../app/prefs.ts";
 import { settingsTabs, type SettingsTab } from "../../app/settings-tabs.ts";
 import { useRoute } from "../../app/router.ts";
@@ -135,16 +140,26 @@ function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
     }}>Delete board</Button></>}><p>Delete “{deleting?.name}” and its layout? Services and integrations remain available.</p></Dialog>
   </section>;
 }
+type Editing = { item: IntegrationView | null; prefill?: Prefill; choose?: boolean };
+
+const checkTone = (item: IntegrationView): { tone: StatusTone; label: string } =>
+  !item.enabled ? { tone: "off", label: "Disabled" }
+    : !item.check ? { tone: "off", label: "Not tested" }
+      : item.check.verdict.ok ? { tone: "ok", label: "Connected" }
+        : item.check.last_good_at !== null ? { tone: "warn", label: "Stale" } : { tone: "bad", label: "Failing" };
+
 function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [items, setItems] = useState<IntegrationView[]>([]);
-  const [editing, setEditing] = useState<IntegrationView | "new" | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<IntegrationView | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState("");
   const [providers, setProviders] = useState<Provider[]>([]);
   const [internet, setInternet] = useState(false);
   const boot = useBootstrap();
   const board = useRoute().search.get("board") ?? "";
+  const [scan, setScan] = useState(0);
+  const detection = useDetected(manage && !boot?.scoped, scan);
   const load = useCallback(async () => {
     const [result, catalog, settings] = await Promise.all([
       api.get<IntegrationView[]>("/api/v1/integrations"), api.get<Provider[]>("/api/v1/providers"),
@@ -157,18 +172,38 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
   // eslint-disable-next-line react/set-state-in-effect
   useEffect(() => { void load(); return onConfigChange(() => { void load(); }); }, [load]);
   const close = () => setEditing(null);
-  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">Connect an HTTP service. Connection tests run from Hobnail.</p></div>{manage && <Button variant="default" data-testid="integration-create" disabled={!providers.length} onClick={() => setEditing("new")}>Add integration</Button>}</header>
+  const icons = !!boot?.remote_icons;
+  return <section className="settings-section" data-testid="settings-integrations"><header className="board-heading"><div><h2>Integrations</h2><p className="muted">API connections to the services you run: a URL and credentials, tested from Hobnail. Containers show their status without one.</p></div>{manage && <Button variant="default" data-testid="integration-create" icon={<PlugIcon aria-hidden="true" />} disabled={!providers.length} onClick={() => setEditing({ item: null })}>Add integration</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
-    {!items.length && <EmptyState level={3} icon={<span>↗</span>} title="No integrations yet">Add a connection to a service you use.</EmptyState>}
-    <div className="settings-list">{items.map((item) => <div key={item.id} className="settings-row" data-testid="integration-row"><div><h3>{item.name}</h3><p className="muted">{item.admin?.base_url ?? item.origin}</p><IntegrationStatus integration={item} /></div>
-      {admin && <div className="settings-actions"><Button variant="ghost" disabled={!providers.length} onClick={() => setEditing(item)}>Edit</Button><Button busy={busy} disabled={!item.enabled} data-testid="integration-test" onClick={async () => {
-        setBusy(true); const result = await api.post(`/api/v1/integrations/${item.id}/test`);
-        if (result.kind === "ok") await load(); else setError(result.message); setBusy(false);
-      }}>Test connection</Button>{manage && <Button variant="ghost" onClick={() => setDeleting(item)}>Delete</Button>}</div>}
-    </div>)}</div>
+    {manage && <DetectedCards detection={detection} providers={providers} onConnect={(prefill) => setEditing({ item: null, prefill })} />}
+    {!items.length && <EmptyState level={3} icon={<PlugIcon aria-hidden="true" />} title="No integrations yet">Connect a service such as Pi-hole, Sonarr or Jellyfin to show live widgets on your boards.</EmptyState>}
+    <div className="integration-grid">{items.map((item) => {
+      const provider = providers.find((entry) => entry.id === item.kind);
+      const status = checkTone(item);
+      const widgets = item.admin?.widgets;
+      return <article key={item.id} className="integration-card" data-testid="integration-row" style={{ "--brand": brandColor(provider?.color) } as CSSProperties}>
+        <header>
+          <ServiceIcon tint name={item.admin?.icon || provider?.icon} title={item.name} enabled={icons} />
+          <div><h3>{item.name}</h3><small>{provider?.name ?? item.kind}</small></div>
+          <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        </header>
+        {(item.admin?.base_url ?? item.origin) && <code className="integration-url">{item.admin?.base_url ?? item.origin}</code>}
+        <div className="integration-meta"><IntegrationStatus integration={item} />
+          {widgets !== undefined && <span className="integration-widgets"><LayoutGridIcon aria-hidden="true" />{widgets === 1 ? "1 widget" : `${widgets} widgets`} on boards</span>}</div>
+        {admin && <footer className="settings-actions">
+          <Button size="sm" variant="ghost" disabled={!providers.length} onClick={() => setEditing({ item })}>Edit</Button>
+          <Button size="sm" busy={busy === item.id} disabled={!item.enabled} data-testid="integration-test" icon={<ZapIcon aria-hidden="true" />} onClick={async () => {
+            setBusy(item.id); const result = await api.post(`/api/v1/integrations/${item.id}/test`);
+            if (result.kind === "ok") await load(); else setError(result.message); setBusy("");
+          }}>Test</Button>
+          {provider && provider.widgets.length > 0 && <Button size="sm" data-testid="integration-add-widget" icon={<PlusIcon aria-hidden="true" />} disabled={!providers.length} onClick={() => setEditing({ item, choose: true })}>Add widget</Button>}
+          {manage && <Button size="sm" variant="ghost" onClick={() => setDeleting(item)}>Remove</Button>}
+        </footer>}
+      </article>;
+    })}</div>
     {editing && <Suspense fallback={<p>Opening integration catalog…</p>}>
-      <ProviderDialog providers={providers} item={editing === "new" ? null : editing} preferredBoard={board}
-        icons={!!boot?.remote_icons} internet={internet} onClose={close} onSaved={() => { close(); void load(); }} />
+      <ProviderDialog providers={providers} item={editing.item} preferredBoard={board} prefill={editing.prefill} startChoosing={editing.choose} detect
+        icons={icons} internet={internet} onClose={close} onSaved={() => { close(); setScan((n) => n + 1); void load(); }} />
     </Suspense>}
     {manage && <div className="settings-section">
       <h3>Provider internet access</h3>
@@ -179,9 +214,9 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
       }} />
       {providers.map((provider) => <p key={provider.id}><strong>{provider.name}</strong> · {provider.contacts}</p>)}
     </div>}
-    <Dialog open={!!deleting} title="Delete integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy} onClick={async () => {
-      if (!deleting) return; setBusy(true); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);
-      if (result.kind === "ok") { setDeleting(null); await load(); } else setError(result.message); setBusy(false);
-    }}>Delete integration</Button></>}><p>Delete “{deleting?.name}” and its saved credential? Board items will show a missing target.</p></Dialog>
+    <Dialog open={!!deleting} title="Remove integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy === "delete"} onClick={async () => {
+      if (!deleting) return; setBusy("delete"); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);
+      if (result.kind === "ok") { setDeleting(null); setScan((n) => n + 1); await load(); } else setError(result.message); setBusy("");
+    }}>Remove integration</Button></>}><p>Remove “{deleting?.name}” and its saved credential? Board items will show a missing target.</p></Dialog>
   </section>;
 }
