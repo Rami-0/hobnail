@@ -14,6 +14,7 @@ import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { HealthStrip, Meter } from "../../ui/Sparkline.tsx";
 import { StatusPill, type StatusTone } from "../../ui/StatusPill.tsx";
 import { WidgetContent, widgetStatus } from "../../ui/WidgetContent.tsx";
+import { HobnailWidget } from "../../boards/HobnailWidget.tsx";
 
 const containerTone = (dot: string): StatusTone => dot === "ok" ? "ok" : dot === "warn" ? "warn" : dot === "bad" ? "bad" : "off";
 const capitalize = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
@@ -99,7 +100,8 @@ export function Tile({ item, resolved, inert }: { item: BoardItem; resolved?: Re
     if (widget) {
       const status = widgetStatus(widget.status);
       pill = <StatusPill tone={status.tone} title={widget.error ?? undefined}>{status.label}</StatusPill>;
-      body = <WidgetContent widget={widget} remoteIcons={b?.remote_icons} />;
+      const native = widget.structured?.kind === "hobnail" ? widget.structured : null;
+      body = native ? <HobnailWidget view={native.view} options={native.options} /> : <WidgetContent widget={widget} remoteIcons={b?.remote_icons} />;
     } else {
       pill = <StatusPill tone="off">Waiting</StatusPill>;
       body = <p className="tile-note">Waiting for widget data…</p>;

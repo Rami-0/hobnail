@@ -302,3 +302,15 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
   .tile-tools .btn,.drag-handle.btn{width:var(--hit);height:var(--hit);min-width:var(--hit);min-height:var(--hit)}
 }
 .board-tile[data-accent="brand"]::before{height:2px;opacity:.75;background:linear-gradient(90deg,var(--tile-accent),transparent 70%)}
+
+/* Hobnail widgets (boards/HobnailWidget.tsx) */
+.hobnail-widget{min-height:0}
+.hw-stack{display:grid;gap:var(--s-3)}
+.hw-caption{font-size:var(--fs-xs);color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-logs{display:grid;gap:var(--s-1);min-height:0}
+.hw-log{margin:0;padding:var(--s-2);border-radius:var(--r);background:var(--muted);font:var(--fs-xs)/1.45 var(--font-mono,ui-monospace,monospace);white-space:pre-wrap;word-break:break-word;max-height:100%;overflow:auto}
+.hw-history{display:grid;grid-template-rows:auto 1fr;gap:var(--s-2);min-height:0;height:100%}
+.hw-history-head{display:flex;align-items:baseline;gap:var(--s-2);min-width:0}
+.hw-history-head strong{font-size:var(--fs-lg,1.25rem);font-variant-numeric:tabular-nums}
+.hw-history-head .hw-caption:first-child{flex:1}
+.hw-chart{width:100%;height:100%;min-height:56px}

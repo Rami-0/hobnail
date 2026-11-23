@@ -116,6 +116,9 @@ export function StructuredWidget({ body, renderIcon }: {
       return h("dl", { className: "sw-tiles" }, body.tiles.map(tile));
     case "rows":
       return h("ul", { className: "sw-rich" }, body.rows.map(richRow));
+    case "hobnail":
+      // Drawn live on boards (boards/HobnailWidget.tsx); elsewhere a note.
+      return h("p", { className: "muted" }, "Live Hobnail widget: open it on its board.");
     case "agenda":
       return h("div", { className: "sw-agenda" }, agendaDays(body.entries, Date.now()).map((day) =>
         h("section", { key: day.key }, h("h4", null, day.heading),
