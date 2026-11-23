@@ -65,6 +65,29 @@ boards or integrations. Scoped containers are the union of container targets
 on granted boards; host-wide pages are unavailable. Suggestions require Admin
 and obey visibility. See [login.md](login.md) and [api.md](../api.md).
 
+## Hobnail widgets
+
+The board **Add** picker opens on **Hobnail widgets**: live widgets drawn
+in the browser from data Hobnail already collects, so they need no
+service, credential or extra server memory. They belong to the built-in
+`hobnail` integration, created the first time one is added.
+
+| Widget | Shows | Data |
+|---|---|---|
+| Host overview (4x4) | CPU, memory and network tiles with live trends, load, uptime, the fullest disks as meters | the `system` stream |
+| Top containers (4x4) | the busiest running containers by CPU or memory (3–12) | the `containers` and `stats` streams |
+| Stack health (4x3) | each compose stack, running of total | the container list |
+| Recent events (4x3) | starts, stops, crashes and health changes of the last 24 h | `/api/v1/history?metric=none` |
+| Log tail (6x4) | the last 5–30 lines of one container, every 20 s (empty: the busiest running container) | `/api/logs/download?tail=` |
+| History chart (6x3) | one series (CPU, memory, disk, load, network in/out, temperature, swap) over 1, 6 or 24 h | `/api/v1/history?metric=` |
+
+The server only validates the options and names the view
+(`{"kind":"hobnail","view":…,"options":…}`). Viewers see what their
+role and scopes allow on the pages these widgets draw from.
+
+The clock, Markdown note, bookmarks, weather and RSS widgets sit on the
+same tab. Third-party integrations come after them.
+
 ## First board and tour
 
 [Guided setup](login.md#guided-setup) creates Home from the owner's selection

@@ -66,6 +66,7 @@ fn files() -> Vec<(String, String)> {
         render::<crate::widgets::RichKind>(),
         render::<crate::widgets::Health>(),
         render::<crate::widgets::MeterRow>(),
+        render::<crate::widgets::HobnailOptions>(),
         render::<crate::widgets::Glyph>(),
         render::<crate::widgets::StatTile>(),
         render::<crate::widgets::BodyRow>(),

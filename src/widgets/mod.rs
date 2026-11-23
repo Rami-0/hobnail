@@ -260,6 +260,40 @@ pub enum StructuredBody {
     Agenda {
         entries: Vec<AgendaEntry>,
     },
+    /// One of Hobnail's own widgets (`view`: `host`, `containers`,
+    /// `stacks`, `events`, `logs`, `history`), drawn by the client from the
+    /// host, container, history and log data it already reads.
+    Hobnail {
+        view: String,
+        #[serde(default)]
+        options: HobnailOptions,
+    },
+}
+
+/// A Hobnail widget's validated options.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct HobnailOptions {
+    /// `cpu` or `memory` (top containers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub sort: Option<String>,
+    /// Containers listed or log lines shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub count: Option<u8>,
+    /// The log tail's container; none means the busiest running one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub container: Option<String>,
+    /// A `/api/v1/history` series key, e.g. `cpu`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub metric: Option<String>,
+    /// `1h`, `6h` or `24h`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub range: Option<String>,
 }
 
 /// A labelled bar. `detail` says what the percentage is of, e.g. "4.1 of 16 GiB".
@@ -488,6 +522,13 @@ impl StructuredBody {
                                 + r.bars.capacity() * size_of::<Health>()
                         })
                         .sum::<usize>()
+            }
+            Self::Hobnail { view, options } => {
+                view.capacity()
+                    + opt(&options.sort)
+                    + opt(&options.container)
+                    + opt(&options.metric)
+                    + opt(&options.range)
             }
             Self::Agenda { entries } => {
                 entries.capacity() * size_of::<AgendaEntry>()

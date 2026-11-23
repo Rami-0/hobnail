@@ -46,6 +46,7 @@ mod generic;
 mod gitea;
 mod github;
 mod glances;
+mod hobnail;
 mod home_assistant;
 mod immich;
 mod jellyfin;
@@ -86,6 +87,7 @@ pub use connection::{success, Auth, Body, Conn, Input, Session, Step, Verb};
 pub(crate) use connection::{success_status, Connections, Credentials, Revision, Target};
 
 pub const REGISTRY: &[Provider] = &[
+    hobnail::HOBNAIL,
     generic::HTTP,
     pihole::PI_HOLE,
     uptime_kuma::UPTIME_KUMA,
@@ -748,6 +750,11 @@ impl OutputRedactor {
                 for (zone, label) in zones {
                     self.redact(zone);
                     self.redact(label);
+                }
+            }
+            Hobnail { options, .. } => {
+                if let Some(container) = &mut options.container {
+                    self.redact(container);
                 }
             }
             Meter { label, percent } => {

@@ -27,6 +27,11 @@ nodejs, odoo, paperless-ngx, pi-hole, plex, postgres, prometheus, prowlarr,
 proxmox, qbittorrent, radarr, redis, sabnzbd, sonarr, syncthing, tailscale,
 technitium, traefik, transmission, truenas, uptime-kuma, wireguard.
 
+## Hobnail
+
+`hobnail` is Hobnail's own mark (`docs/brand/mark-glyph.svg`), for the
+built-in widgets.
+
 ## Generic glyphs
 
 `bookmark`, `clock`, `http`, `markdown`, `network`, `open-meteo`, `rss` and

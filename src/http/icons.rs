@@ -63,6 +63,7 @@ pub const BRANDS: &[Brand] = &[
     brand!("glances", "#4cb860"),
     brand!("grafana", "#f05a28"),
     brand!("home-assistant", "#18a8e0"),
+    brand!("hobnail", "#f77848"),
     brand!("http", "#64748b"),
     brand!("immich", "#4250af"),
     brand!("jellyfin", "#9b5bd0"),
