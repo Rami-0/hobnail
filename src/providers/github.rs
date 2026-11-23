@@ -18,6 +18,7 @@ pub const GITHUB: Provider = Provider {
     name: "GitHub",
     category: "Development",
     icon: "github",
+    color: "#6e7681",
     description: "Show repository activity and watch releases for apps you run.",
     docs: "https://docs.github.com/en/rest",
     public_internet: true,
@@ -48,6 +49,9 @@ pub const GITHUB: Provider = Provider {
             name: "Repository activity",
             description: "Stars, issue and PR counts, and the latest repository workflow run.",
             recommended: true,
+            default_size: size(4, 2),
+            min_size: size(3, 2),
+            sample: r#"{"kind":"stat_grid","rows":[["Stars","1,204"],["Open issues","23"],["Open pull requests","5"],["Forks","88"]]}"#,
             fields: &[
                 REPOSITORIES,
                 Field {

@@ -243,9 +243,129 @@ pub enum StructuredBody {
     Unavailable {
         message: String,
     },
+    /// Labelled bars, such as CPU, memory and disk use.
+    Meters {
+        rows: Vec<MeterRow>,
+    },
+    /// Stat tiles: a value with a glyph, an optional delta and trend.
+    Tiles {
+        tiles: Vec<StatTile>,
+    },
+    /// Rows with a status dot, progress, secondary text, a trailing value
+    /// and recent status bars.
+    Rows {
+        rows: Vec<BodyRow>,
+    },
+    /// Dated entries; the client groups them by its local day.
+    Agenda {
+        entries: Vec<AgendaEntry>,
+    },
+}
+
+/// A labelled bar. `detail` says what the percentage is of, e.g. "4.1 of 16 GiB".
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct MeterRow {
+    pub label: String,
+    pub percent: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub detail: Option<String>,
+}
+
+/// A generic glyph for a stat tile. The client maps each to one icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum Glyph {
+    Activity,
+    Alert,
+    Calendar,
+    Check,
+    Clock,
+    Cpu,
+    Database,
+    Disk,
+    Download,
+    Film,
+    Globe,
+    Image,
+    Memory,
+    Music,
+    Play,
+    Server,
+    Shield,
+    Tv,
+    Upload,
+    Users,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct StatTile {
+    pub label: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub glyph: Option<Glyph>,
+    /// A short change, e.g. "+12%" or "3 new".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub delta: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub tone: Option<Health>,
+    /// Oldest first, at most [`MAX_SERIES`] points, for a sparkline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(test, ts(as = "Option<Vec<f32>>", optional))]
+    pub series: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BodyRow {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub secondary: Option<String>,
+    /// Right-aligned text, e.g. a speed or a count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub status: Option<Health>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub progress: Option<u8>,
+    /// Recent checks, oldest first, at most [`MAX_SERIES`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(test, ts(as = "Option<Vec<Health>>", optional))]
+    pub bars: Vec<Health>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AgendaEntry {
+    /// Unix seconds.
+    pub time: u64,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
+    pub all_day: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub status: Option<Health>,
+}
+
+/// The most points a series or status-bar strip keeps.
+pub const MAX_SERIES: usize = 48;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[cfg_attr(test, ts(rename_all = "snake_case"))]
@@ -268,7 +388,36 @@ pub struct BodyItem {
 }
 
 impl StructuredBody {
+    /// Keep percentages in range and the newest [`MAX_SERIES`] points.
+    pub(crate) fn limit(&mut self) {
+        fn newest<T>(items: &mut Vec<T>) {
+            if items.len() > MAX_SERIES {
+                items.drain(..items.len() - MAX_SERIES);
+            }
+        }
+        match self {
+            Self::Meter { percent, .. } => *percent = (*percent).min(100),
+            Self::Meters { rows } => rows.iter_mut().for_each(|r| r.percent = r.percent.min(100)),
+            Self::Tiles { tiles } => {
+                for tile in tiles {
+                    tile.series.retain(|n| n.is_finite());
+                    newest(&mut tile.series);
+                }
+            }
+            Self::Rows { rows } => {
+                for row in rows {
+                    row.progress = row.progress.map(|n| n.min(100));
+                    newest(&mut row.bars);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn retained_bytes(&self) -> usize {
+        fn opt(text: &Option<String>) -> usize {
+            text.as_ref().map_or(0, String::capacity)
+        }
         fn strings(items: &Vec<String>) -> usize {
             items.capacity() * size_of::<String>()
                 + items.iter().map(String::capacity).sum::<usize>()
@@ -308,6 +457,44 @@ impl StructuredBody {
                 strings(headings)
                     + rows.capacity() * size_of::<Vec<String>>()
                     + rows.iter().map(strings).sum::<usize>()
+            }
+            Self::Meters { rows } => {
+                rows.capacity() * size_of::<MeterRow>()
+                    + rows
+                        .iter()
+                        .map(|r| r.label.capacity() + opt(&r.detail))
+                        .sum::<usize>()
+            }
+            Self::Tiles { tiles } => {
+                tiles.capacity() * size_of::<StatTile>()
+                    + tiles
+                        .iter()
+                        .map(|t| {
+                            t.label.capacity()
+                                + t.value.capacity()
+                                + opt(&t.delta)
+                                + t.series.capacity() * size_of::<f32>()
+                        })
+                        .sum::<usize>()
+            }
+            Self::Rows { rows } => {
+                rows.capacity() * size_of::<BodyRow>()
+                    + rows
+                        .iter()
+                        .map(|r| {
+                            r.title.capacity()
+                                + opt(&r.secondary)
+                                + opt(&r.value)
+                                + r.bars.capacity() * size_of::<Health>()
+                        })
+                        .sum::<usize>()
+            }
+            Self::Agenda { entries } => {
+                entries.capacity() * size_of::<AgendaEntry>()
+                    + entries
+                        .iter()
+                        .map(|e| e.title.capacity() + opt(&e.secondary))
+                        .sum::<usize>()
             }
         }
     }

@@ -17,6 +17,8 @@ pub struct Bootstrap {
     pub boards: Vec<BoardNavigation>,
     pub default_board: Option<String>,
     pub remote_icons: bool,
+    /// Icons built into the server, available whatever `remote_icons` says.
+    pub brand_icons: Vec<BrandIcon>,
     /// `[page] title`, else the host name.
     pub title: String,
     pub hostname: String,
@@ -33,6 +35,16 @@ pub struct Bootstrap {
     pub alerts_firing: u32,
     pub refresh: Refresh,
     pub now: i64,
+}
+
+/// A vendored icon: its name, brand colour and whether it is one dark colour
+/// (inverted on dark themes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BrandIcon {
+    pub name: &'static str,
+    pub color: &'static str,
+    pub mono: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -87,6 +99,14 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
         boards,
         default_board: settings.default_board,
         remote_icons: cfg.icons.remote,
+        brand_icons: crate::http::icons::BRANDS
+            .iter()
+            .map(|brand| BrandIcon {
+                name: brand.name,
+                color: brand.color,
+                mono: brand.mono,
+            })
+            .collect(),
         title: cfg
             .page
             .title

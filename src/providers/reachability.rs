@@ -7,6 +7,7 @@ pub(super) const REACHABILITY: Provider = Provider {
     name: "Reachability",
     category: "Network",
     icon: "network",
+    color: "#0ea5e9",
     description: "Check an endpoint with TCP, HTTP or DNS. TCP connect replaces ICMP ping.",
     docs: "https://www.rfc-editor.org/rfc/rfc9293.html",
     public_internet: false,
@@ -30,6 +31,9 @@ pub(super) const REACHABILITY: Provider = Provider {
         name: "Reachability status",
         description: "Reports TCP connect time, HTTP status, or DNS addresses. TCP connect replaces ICMP ping.",
         recommended: true,
+        default_size: size(3, 2),
+        min_size: size(2, 2),
+        sample: r#"{"kind":"status_list","rows":[["example.com:443","up"]]}"#,
         fields: &[
             Field { min: Some(100), max: Some(599), default: Some("200"), ..Field::new("status_min", "Lowest expected HTTP status", Kind::Number, "Used for HTTP checks.") },
             Field { min: Some(100), max: Some(599), default: Some("299"), ..Field::new("status_max", "Highest expected HTTP status", Kind::Number, "Used for HTTP checks.") },

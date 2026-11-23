@@ -11,6 +11,7 @@ pub const PROXMOX: Provider = Provider {
     name: "Proxmox VE",
     category: "Infrastructure",
     icon: "proxmox",
+    color: "#e57000",
     description:
         "Show cluster nodes, running virtual machines and containers, and node CPU and memory.",
     docs: "https://pve.proxmox.com/pve-docs/api-viewer/index.html",
@@ -46,6 +47,9 @@ pub const PROXMOX: Provider = Provider {
         name: "Cluster overview",
         description: "Online nodes, running guests and CPU and RAM for up to ten nodes.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Nodes online","3 / 3"],["CPU","21%"],["Memory","58%"],["Guests running","14"]]}"#,
         fields: &[REFRESH],
         fetch: overview,
         validate: no_widget_options,

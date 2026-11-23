@@ -14,6 +14,7 @@ pub(super) const CLOCK: Provider = Provider {
     name: "Clock and calendar",
     category: "Utilities",
     icon: "clock",
+    color: "#6366f1",
     description: "Show local times for multiple zones and an optional month calendar.",
     docs: "https://www.iana.org/time-zones",
     public_internet: false,
@@ -25,6 +26,9 @@ pub(super) const CLOCK: Provider = Provider {
         name: "World clock",
         description: "Up to eight zones. The optional calendar follows the first valid zone.",
         recommended: true,
+        default_size: size(3, 2),
+        min_size: size(2, 2),
+        sample: r#"{"kind":"clock","zones":[["UTC","UTC"]],"hour12":false,"calendar":false}"#,
         fields: &[
             ZONES,
             Field {

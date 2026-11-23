@@ -6,6 +6,7 @@ pub(super) const SSL_EXPIRY: Provider = Provider {
     name: "SSL certificate expiry",
     category: "Network",
     icon: "ssl",
+    color: "#16a34a",
     description: "Inspect the certificate presented by a TLS server, including expired and untrusted certificates.",
     docs: "https://www.rfc-editor.org/rfc/rfc9525.html",
     public_internet: false,
@@ -24,6 +25,9 @@ pub(super) const SSL_EXPIRY: Provider = Provider {
         name: "Certificate expiry",
         description: "Days until expiry, issuer, subject, hostname match and trust verdict.",
         recommended: true,
+        default_size: size(3, 2),
+        min_size: size(2, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Expires in","54 days"],["Issuer","Example CA"],["Verified","Yes"]]}"#,
         fields: &[
             Field {
                 default: Some("900"),

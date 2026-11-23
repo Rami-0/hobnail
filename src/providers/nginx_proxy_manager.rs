@@ -9,6 +9,7 @@ pub const NGINX_PROXY_MANAGER: Provider = Provider {
     name: "Nginx Proxy Manager",
     category: "Network",
     icon: "nginx-proxy-manager",
+    color: "#f15933",
     description: "Show the number of visible proxy hosts and certificate expiration dates.",
     docs:
         "https://github.com/NginxProxyManager/nginx-proxy-manager/tree/v2.12.3/backend/schema/paths",
@@ -39,6 +40,9 @@ pub const NGINX_PROXY_MANAGER: Provider = Provider {
         name: "Proxy hosts and certificates",
         description: "Proxy host total and expiration dates for up to ten visible certificates.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Proxy hosts","14"],["Enabled","13"],["Certificates","9"],["Expiring soon","1"]]}"#,
         fields: &[REFRESH],
         fetch: overview,
         validate: no_widget_options,

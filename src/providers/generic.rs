@@ -6,6 +6,7 @@ pub const HTTP: Provider = Provider {
     name: "Generic HTTP",
     category: "Utilities",
     icon: "http",
+    color: "#64748b",
     description: "Display values from a JSON endpoint you configure.",
     docs: "https://github.com/Rami-0/hobnail/blob/main/docs/features/integrations.md",
     public_internet: false,
@@ -41,6 +42,9 @@ pub const HTTP: Provider = Provider {
         name: "JSON values",
         description: "Show selected fields from the response.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(2, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Status","healthy"],["Version","2.4.1"],["Uptime","6 days"]]}"#,
         fields: &[
             Field {
                 max_length: Some(160),
@@ -60,6 +64,9 @@ pub const HTTP: Provider = Provider {
         name: "HTTP status",
         description: "Show whether the service returns a successful HTTP status.",
         recommended: false,
+        default_size: size(3, 2),
+        min_size: size(2, 2),
+        sample: r#"{"kind":"stat","value":"200 OK"}"#,
         fields: &[REFRESH],
         validate: |_| Ok(()),
         fetch: status,

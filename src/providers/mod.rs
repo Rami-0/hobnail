@@ -138,6 +138,8 @@ pub struct Provider {
     pub name: &'static str,
     pub category: &'static str,
     pub icon: &'static str,
+    /// Brand colour (`#rrggbb`) for subtle accents: icon tint, widget header.
+    pub color: &'static str,
     pub description: &'static str,
     pub docs: &'static str,
     pub public_internet: bool,
@@ -167,6 +169,14 @@ pub struct Widget {
     pub name: &'static str,
     pub description: &'static str,
     pub recommended: bool,
+    /// Board grid units (12 columns, rows of about 80 px).
+    pub default_size: Option<GridSize>,
+    pub min_size: Option<GridSize>,
+    /// Example output for the widget gallery, as `StructuredBody` JSON.
+    /// Static and fictional: never upstream data.
+    #[serde(serialize_with = "sample_json")]
+    #[cfg_attr(test, ts(as = "widgets::StructuredBody"))]
+    pub sample: &'static str,
     pub fields: &'static [Field],
     #[serde(skip)]
     #[cfg_attr(test, ts(skip))]
@@ -174,6 +184,25 @@ pub struct Widget {
     #[serde(skip)]
     #[cfg_attr(test, ts(skip))]
     pub validate: fn(&Values) -> Result<(), &'static str>,
+}
+
+/// A widget's size in board grid units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct GridSize {
+    pub w: u8,
+    pub h: u8,
+}
+
+pub const fn size(w: u8, h: u8) -> Option<GridSize> {
+    Some(GridSize { w, h })
+}
+
+fn sample_json<S: serde::Serializer>(sample: &&'static str, out: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::Error;
+    serde_json::from_str::<widgets::StructuredBody>(sample)
+        .map_err(S::Error::custom)?
+        .serialize(out)
 }
 
 impl Widget {
@@ -201,6 +230,18 @@ pub struct Field {
     pub max: Option<u32>,
     pub choices: &'static [&'static str],
     pub default: Option<&'static str>,
+    /// Show the field only while another field has this value, e.g. a v5
+    /// token only for the v5 API.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub when: Option<Condition>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct Condition {
+    pub field: &'static str,
+    pub equals: &'static str,
 }
 
 impl Field {
@@ -221,6 +262,7 @@ impl Field {
             max: None,
             choices: &[],
             default: None,
+            when: None,
         }
     }
 
@@ -684,6 +726,46 @@ impl OutputRedactor {
                     self.redact(text);
                 }
             }
+            Meters { rows } => {
+                rows.retain_mut(|row| {
+                    self.redact(&mut row.label);
+                    self.redact_option(&mut row.detail);
+                    !self.matches(&row.percent.to_string())
+                });
+            }
+            Tiles { tiles } => {
+                for tile in tiles {
+                    self.redact(&mut tile.label);
+                    self.redact(&mut tile.value);
+                    self.redact_option(&mut tile.delta);
+                    if tile.series.iter().any(|n| self.matches(&n.to_string())) {
+                        tile.series.clear();
+                    }
+                }
+            }
+            Rows { rows } => {
+                for row in rows {
+                    self.redact(&mut row.title);
+                    self.redact_option(&mut row.secondary);
+                    self.redact_option(&mut row.value);
+                    if row.progress.is_some_and(|n| self.matches(&n.to_string())) {
+                        row.progress = None;
+                    }
+                }
+            }
+            Agenda { entries } => {
+                entries.retain_mut(|entry| {
+                    self.redact(&mut entry.title);
+                    self.redact_option(&mut entry.secondary);
+                    !self.matches(&entry.time.to_string())
+                });
+            }
+        }
+    }
+
+    fn redact_option(&self, text: &mut Option<String>) {
+        if let Some(text) = text {
+            self.redact(text);
         }
     }
 }
@@ -695,6 +777,7 @@ pub(crate) async fn fetch(
 ) -> Result<widgets::StructuredBody, Fault> {
     conn.run(async {
         let mut body = (widget.fetch)(conn, options).await?;
+        body.limit();
         conn.output_redactor().body(&mut body);
         Ok(body)
     })
@@ -746,10 +829,37 @@ mod tests {
                 .iter()
                 .filter(|field| field.id == "secret")
                 .all(|field| field.kind == Kind::Secret));
+            let color = provider.color.strip_prefix('#').unwrap_or_default();
+            assert!(color.len() == 6 && color.bytes().all(|b| b.is_ascii_hexdigit()));
+            assert!(
+                provider.widgets.iter().filter(|w| w.recommended).count() == 1,
+                "{} marks one widget recommended",
+                provider.id
+            );
             let mut widgets = HashSet::new();
             for widget in provider.widgets {
                 assert!(widgets.insert(widget.id));
                 assert!(widget.fields.iter().all(|field| field.kind != Kind::Secret));
+                assert!(!widget.description.is_empty());
+                let (Some(size), Some(min)) = (widget.default_size, widget.min_size) else {
+                    panic!("{}.{} declares its sizes", provider.id, widget.id);
+                };
+                assert!((1..=12).contains(&size.w) && (1..=8).contains(&size.h));
+                assert!(min.w >= 1 && min.h >= 1 && min.w <= size.w && min.h <= size.h);
+                // Samples are gallery data: valid shapes, and small.
+                let sample: widgets::StructuredBody = serde_json::from_str(widget.sample)
+                    .unwrap_or_else(|e| panic!("{}.{} sample: {e}", provider.id, widget.id));
+                assert!(widget.sample.len() <= 2048);
+                assert!(!matches!(
+                    sample,
+                    widgets::StructuredBody::Unavailable { .. }
+                ));
+            }
+            for field in provider.fields {
+                if let Some(when) = field.when {
+                    let target = provider.fields.iter().find(|f| f.id == when.field);
+                    assert!(target.is_some_and(|f| f.choices.contains(&when.equals)));
+                }
             }
             for fields in std::iter::once(provider.fields)
                 .chain(provider.widgets.iter().map(|widget| widget.fields))

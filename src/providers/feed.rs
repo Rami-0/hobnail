@@ -14,6 +14,7 @@ pub(super) const FEED: Provider = Provider {
     name: "RSS / Atom",
     category: "Utilities",
     icon: "rss",
+    color: "#f97316",
     description: "Read titles, links, dates and optional summaries from a feed.",
     docs: "https://www.rssboard.org/rss-specification",
     public_internet: false,
@@ -31,6 +32,9 @@ pub(super) const FEED: Provider = Provider {
         name: "Feed items",
         description: "Up to 20 entries in feed order.",
         recommended: true,
+        default_size: size(4, 4),
+        min_size: size(3, 3),
+        sample: r#"{"kind":"item_list","items":[{"title":"An example headline","secondary":"Example News · 1 h ago","link":null,"time":null},{"title":"Another story","secondary":"Example News · 3 h ago","link":null,"time":null}]}"#,
         fields: &[
             Field {
                 default: Some("true"),

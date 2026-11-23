@@ -2,4 +2,8 @@
 import type { Field } from "./Field.ts";
 import type { Widget } from "./Widget.ts";
 
-export type Provider = { id: string, name: string, category: string, icon: string, description: string, docs: string, public_internet: boolean, contacts: string, fields: Array<Field>, widgets: Array<Widget>, };
+export type Provider = { id: string, name: string, category: string, icon: string,
+/**
+ * Brand colour (`#rrggbb`) for subtle accents: icon tint, widget header.
+ */
+color: string, description: string, docs: string, public_internet: boolean, contacts: string, fields: Array<Field>, widgets: Array<Widget>, };

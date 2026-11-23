@@ -8,6 +8,7 @@ pub const PI_HOLE: Provider = Provider {
     name: "Pi-hole",
     category: "Network",
     icon: "pi-hole",
+    color: "#e0382b",
     description: "Show DNS query counts, blocking status, and top domains and clients.",
     docs: "https://docs.pi-hole.net/api/auth/",
     public_internet: false,
@@ -26,11 +27,13 @@ pub const PI_HOLE: Provider = Provider {
         },
         Field {
             max_length: Some(4096),
+            when: Some(Condition { field: "version", equals: "v6" }),
             ..Field::new(PASSWORD, "v6 password", Kind::Secret,
                 "Use an application password or the web password. Leave blank if authentication is disabled.")
         },
         Field {
             max_length: Some(4096),
+            when: Some(Condition { field: "version", equals: "v5" }),
             ..Field::new(TOKEN, "v5 API token", Kind::Secret,
                 "Used only with v5. Leave blank if authentication is disabled.")
         },
@@ -46,6 +49,9 @@ pub const PI_HOLE: Provider = Provider {
             name: "DNS activity",
             description: "Show queries, blocked queries, percentage blocked, and blocking status.",
             recommended: true,
+            default_size: size(4, 2),
+            min_size: size(3, 2),
+            sample: r#"{"kind":"stat_grid","rows":[["Queries","48,213"],["Blocked","9,874"],["Blocked %","20.5%"],["Blocking","Enabled"]]}"#,
             fields: &[REFRESH],
             validate: |_| Ok(()),
             fetch,
@@ -55,6 +61,9 @@ pub const PI_HOLE: Provider = Provider {
             name: "Top domains",
             description: "The ten most queried domains, or the ten most blocked.",
             recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"table","headings":["Domain","Queries"],"rows":[["api.example.com","4210"],["cdn.example.net","2984"],["time.example.org","1502"]]}"#,
             fields: &[
                 Field {
                     default: Some("false"),
@@ -70,6 +79,9 @@ pub const PI_HOLE: Provider = Provider {
             name: "Top clients",
             description: "The ten clients that sent the most queries.",
             recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"table","headings":["Client","Queries"],"rows":[["laptop (192.0.2.10)","12840"],["tv (192.0.2.21)","8211"],["phone (192.0.2.33)","4002"]]}"#,
             fields: &[REFRESH],
             validate: |_| Ok(()),
             fetch: top_clients,

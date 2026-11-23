@@ -14,6 +14,7 @@ pub const TRUENAS: Provider = Provider {
     name: "TrueNAS SCALE",
     category: "Storage",
     icon: "truenas",
+    color: "#0095d5",
     description: "Show pool status, active alerts and recent disk self-test results (REST v2.0).",
     docs: "https://www.truenas.com/docs/scale/24.10/api/",
     public_internet: false,
@@ -39,6 +40,9 @@ pub const TRUENAS: Provider = Provider {
         description:
             "Pool status and free space, active alerts and recent SMART self-test results.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["tank","ONLINE · 62% used"],["backup","ONLINE · 31% used"],["Alerts","0"]]}"#,
         fields: &[Field {
             min: Some(60),
             default: Some("300"),

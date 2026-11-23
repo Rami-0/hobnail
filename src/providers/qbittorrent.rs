@@ -12,6 +12,7 @@ pub const QBITTORRENT: Provider = Provider {
     name: "qBittorrent",
     category: "Downloads",
     icon: "qbittorrent",
+    color: "#3a72c4",
     description: "Show transfer speeds, torrent counts and free disk space.",
     docs: "https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0)",
     public_internet: false,
@@ -47,6 +48,9 @@ pub const QBITTORRENT: Provider = Provider {
         description:
             "Download and upload speeds, active, seeding and queued torrents, and free space.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Download","12.4 MB/s"],["Upload","1.1 MB/s"],["Active","3"],["Paused","12"]]}"#,
         fields: &[REFRESH],
         fetch: transfers,
         validate: no_widget_options,

@@ -10,6 +10,7 @@ pub const TRANSMISSION: Provider = Provider {
     name: "Transmission",
     category: "Downloads",
     icon: "transmission",
+    color: "#c0392b",
     description: "Show transfer speeds, the active torrent count and recent active torrents.",
     docs: "https://github.com/transmission/transmission/blob/4.0.6/docs/rpc-spec.md",
     public_internet: false,
@@ -27,6 +28,9 @@ pub const TRANSMISSION: Provider = Provider {
         description:
             "Download and upload speeds, active torrent count and recently active torrent names.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Download","5.2 MB/s"],["Upload","640 kB/s"],["Active","2"],["Paused","4"]]}"#,
         fields: &[REFRESH],
         fetch: overview,
         validate: no_widget_options,

@@ -110,7 +110,10 @@ pub(crate) async fn route(
         }
         Handler::DashboardIcon => {
             let name = m.param("name").unwrap_or_default();
-            if !state.config.current().icons.remote || validate_icon(Some(name)).is_err() {
+            let vendored = crate::http::icons::brand(name).is_some();
+            if !(vendored || state.config.current().icons.remote)
+                || validate_icon(Some(name)).is_err()
+            {
                 return ApiError::not_found().response();
             }
             crate::http::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
