@@ -15,8 +15,17 @@ API key header; **M** = several endpoints or a login/token flow; **L** = session
 unusual protocol, or a large API surface.
 
 **Memory note:** providers are polled only while someone has a board open, with bounded
-timeouts and caches, so each adds little RAM. The full benchmark in Phase 11 still has to
-confirm that for the ticked set.
+timeouts and caches, so each adds little RAM. Measured (finish-hobnail M5 and M7): the
+memory benchmark polls 13 providers against fake servers, 12 of the 27 service and 8
+no-service providers plus Generic HTTP (Pi-hole, Uptime Kuma,
+Jellyfin, qBittorrent, Sonarr, Radarr, Transmission, Home Assistant, Proxmox VE, Generic
+HTTP, RSS / Atom, SSL expiry, reachability; 18 widgets on a board) with 25 open dashboards
+and full history, and the whole container peaked at 12.45 MiB without a limit and 12.24 MiB
+under a 20 MiB limit, with no errors (details and the M7 re-run:
+[measurements.md](../measurements.md)). The other 23 providers share the same connection
+context and caps (4 requests at once, 128 KiB per buffered response, a 5 s deadline) but
+were not in the benchmark. All ticked lines are built; none is verified against a real
+service instance.
 
 ---
 
