@@ -222,7 +222,7 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .picker-count{opacity:.7;font-size:var(--fs-xs)}
 .suggestions{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--s-2);max-height:min(320px,40dvh);overflow:auto;padding:2px}
 .suggestion{display:flex;align-items:center;gap:var(--s-3);min-width:0;width:100%;min-height:56px;padding:var(--s-2) var(--s-3);border:1px solid var(--border);border-radius:var(--r);background:var(--card);color:inherit;font:inherit;text-align:start;cursor:pointer;transition:border-color var(--dur-2) var(--ease),background-color var(--dur-2) var(--ease)}
-.suggestion:hover{border-color:var(--ring);background:var(--muted)}
+.suggestion:hover{border-color:var(--ring);background:color-mix(in srgb,var(--foreground) 4%,var(--card))}
 .suggestion .board-avatar{width:32px;height:32px;font-size:var(--fs-xs)}
 .suggestion-copy{display:grid;min-width:0;flex:1}
 .suggestion-copy strong{font-weight:600;font-size:var(--fs-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
