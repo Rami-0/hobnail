@@ -213,7 +213,9 @@ media queries and container queries see exactly what they would at 200 %.
     The same holds when the cut aborts the navigation itself (`page.goto:
     net::ERR_NETWORK_CHANGED`, seen in the run of image 928f0fc on the
     Chromium 360 sweep), set aside as "navigation cut by a host network
-    change".
+    change", and when the cut chunks leave the page without the element
+    the sweep waits for (run of image dfeaa1c, Chromium 1440 sweep:
+    Settings never showed its tabs).
 - **Transient overlays.** Toasts are measured as a scope of their own; the
   board tour, an open dialog, menu or listbox limits the target check and
   the focus check to its own controls; the focused skip link covers the
