@@ -1,5 +1,5 @@
 // Integrations as API connections, with local container detection: the
-// board Add picker (Integrations and Containers tabs, logos, "Detected on
+// board Add picker (Apps, Integrations and Containers tabs, logos, "Detected on
 // this host" cards), Connect opening the provider's connect step with the
 // URL filled in and the credential focused, and the Settings integration
 // cards. At 1440 dark and light and 390 dark, against a throwaway fake
@@ -109,7 +109,18 @@ try {
       await inp.click('[data-testid="board-edit"]');
       await wait('!!document.querySelector(\'[data-testid="board-editor"]\')', "editor");
       await inp.click('[data-testid="board-add-tile"]');
-      await wait(`!!document.querySelector('[data-testid="picker-tab-integrations"][aria-pressed="true"]')`, "picker opens on Integrations");
+      // It opens on Apps: web UIs running on this host as branded links on
+      // their published address; databases and Hobnail itself are not apps.
+      await wait(`!!document.querySelector('[data-testid="picker-tab-apps"][aria-pressed="true"]')`, "picker opens on Apps");
+      await wait(`document.querySelectorAll('[data-testid="board-suggestion"][data-kind="link"]').length >= 4`, "detected app links");
+      await logosLoaded('[data-testid="board-picker"] [data-testid="picker-list"]', 4);
+      const appText = await tab.ev(`[...document.querySelectorAll('[data-testid="board-suggestion"][data-kind="link"]')].map((b) => b.textContent).join(" | ")`);
+      assert.match(appText, /Sonarr.*192\.168\.1\.50:8989/, `${label}: Sonarr app on its published address (${appText})`);
+      assert.ok(!/postgres|redis|hobnail/i.test(appText), `${label}: no database or Hobnail among apps (${appText})`);
+      assert.match(await tab.ev(`document.querySelector('[data-testid="board-picker"] :is(h1,h2)')?.textContent ?? ""`), /^Add to Homelab$/, `${label}: the dialog names the board`);
+      await wait(`!!document.querySelector('[data-testid="picker-add-all"]')`, "Add all");
+      await shot("picker-apps");
+      await inp.click('[data-testid="picker-tab-integrations"]');
       await wait(`document.querySelectorAll('[data-testid="detected-service"]').length >= 4`, "detected cards");
       await logosLoaded('[data-testid="board-picker"] [data-testid="detected"]', 4);
       if (installs.length) await logosLoaded('[data-testid="board-picker"] [data-testid="picker-list"]', 1);
@@ -159,6 +170,15 @@ try {
       // Settings → Integrations: detected cards and a branded card per integration.
       await go("/app/settings/integrations", '!!document.querySelector(\'[data-testid="integration-create"]\')');
       await wait(`document.querySelectorAll('[data-testid="detected-service"]').length >= 4`, "settings detected cards");
+      // Phones show two detected cards until asked for the rest.
+      const visibleCards = `[...document.querySelectorAll('[data-testid="settings-integrations"] [data-testid="detected-service"]')].filter((c) => c.offsetParent).length`;
+      if (width < 700) {
+        assert.equal(await tab.ev(visibleCards), 2, `${label}: two detected cards on a phone`);
+        await full("integrations-list-capped");
+        await inp.click('[data-testid="settings-integrations"] [data-testid="detected-more"]');
+        await wait(`${visibleCards} >= 4`, "Show more reveals the rest");
+      } else assert.ok((await tab.ev(visibleCards)) >= 4, `${label}: all detected cards on a desktop`);
+      assert.ok(await tab.ev(`!document.querySelector('[data-testid="provider-contacts"]')?.open`), `${label}: provider destinations are collapsed`);
       if (installs.length) {
         await wait(`document.querySelectorAll('[data-testid="integration-row"]').length >= ${installs.length}`, "integration cards");
         await logosLoaded('[data-testid="settings-integrations"] .integration-grid', installs.length);
