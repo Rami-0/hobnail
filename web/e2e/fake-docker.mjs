@@ -16,6 +16,13 @@
 //   --hostile        add 4 containers with long / hostile names, titles, URLs
 //                    and images (HTML, quotes, RTL override, javascript: links)
 //   --m2-fixtures    serve a controllable HTTP reading on port 8081
+//   --services       add a homelab of real-looking images for integration
+//                    detection (linuxserver/sonarr, pihole/pihole,
+//                    jellyfin/jellyfin, home-assistant, a renamed radarr,
+//                    uptime-kuma, plain postgres and redis) plus a "hobnail"
+//                    container standing for Hobnail itself (its id starts with
+//                    this host name, which a Hobnail sharing this network
+//                    namespace also has), so shared-network URLs are proposed
 //   --quiet          no request log
 // Names: svc001..svcNNN, service = name, project stackMM (round robin).
 // About 1 in 7 is stopped (exit codes 0 / 1 / 137 / 143 / 2), a few are
@@ -34,6 +41,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -50,6 +58,7 @@ const LOOSE = Number(opt("loose", 0));
 const SYS = opt("sys", null);
 const CHURN = Number(opt("churn", 0));
 const HOSTILE = flag("hostile");
+const SERVICES = flag("services");
 const LOG_FIXTURES = flag("log-fixtures");
 const QUIET = flag("quiet");
 
@@ -117,6 +126,27 @@ if (HOSTILE) {
     containers.push(c);
   });
 }
+if (SERVICES) {
+  // [name, image, ports, networks {name: ip}, labels]
+  const lan = "192.168.1.50";
+  const s = [
+    ["hobnail", "ghcr.io/example/hobnail:latest", [], { homelab_default: "172.30.0.2" }],
+    ["sonarr", "lscr.io/linuxserver/sonarr:latest", [[lan, 8989, 8989, "tcp"]], { homelab_default: "172.30.0.3" }],
+    ["pihole", "pihole/pihole:2024.07.0", [[lan, 8053, 80, "tcp"], ["0.0.0.0", 53, 53, "udp"]], { bridge: "172.17.0.4" }],
+    ["jellyfin", "jellyfin/jellyfin:10.10.3", [], { homelab_default: "172.30.0.5" }],
+    ["homeassistant", "ghcr.io/home-assistant/home-assistant:stable", [[lan, 8123, 8123, "tcp"]], { bridge: "172.17.0.6" }],
+    ["my-radarr", "registry.example.com/media/movies:1", [["127.0.0.1", 7878, 7878, "tcp"]], { bridge: "172.17.0.7" }],
+    ["uptime-kuma", "louislam/uptime-kuma:1", [["0.0.0.0", 3001, 3001, "tcp"]], { homelab_default: "172.30.0.8" }],
+    ["postgres", "postgres:16-alpine", [["", 5432, undefined, "tcp"]], { homelab_default: "172.30.0.9" }],
+    ["redis", "redis:7.4", [], { homelab_default: "172.30.0.10" }],
+  ];
+  s.forEach(([name, image, ports, networks], k) => {
+    const c = make(N + 10 + k);
+    Object.assign(c, { name, image, ports, networks, project: null, labels: {}, state: "running", health: k % 2 ? "healthy" : null, exit: null });
+    c.id = name === "hobnail" ? (os.hostname() + hex("self")).slice(0, 64) : hex("fake-container-" + name);
+    containers.push(c);
+  });
+}
 const byRef = (ref) => {
   ref = decodeURIComponent(ref);
   return containers.find((c) => c.id === ref || c.name === ref || c.name === ref.replace(/^\//, "") || (ref.length >= 4 && /^[0-9a-f]+$/.test(ref) && c.id.startsWith(ref)));
@@ -148,7 +178,7 @@ function listItem(c) {
     Ports: running(c) ? c.ports.map(([ip, pp, pub, t]) => (pub === undefined ? { PrivatePort: pp, Type: t } : { IP: ip, PrivatePort: pp, PublicPort: pub, Type: t })) : [],
     ...(c.health ? { Health: { Status: c.health, FailingStreak: c.health === "unhealthy" ? 4 : 0 } } : {}),
     HostConfig: { NetworkMode: c.project ? `${c.project}_default` : "bridge" },
-    NetworkSettings: { Networks: {} }, Mounts: [],
+    NetworkSettings: { Networks: Object.fromEntries(Object.entries(c.networks ?? {}).map(([n, ip]) => [n, { IPAddress: ip }])) }, Mounts: [],
   };
 }
 function healthLog(c) {
