@@ -339,8 +339,8 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
         <Button variant="ghost" size="icon" aria-label="Undo" title="Undo (Ctrl+Z)" data-testid="board-undo" disabled={!history.past.length || busy} onClick={undo}><Undo2Icon aria-hidden="true" /></Button>
         <Button variant="ghost" size="icon" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" data-testid="board-redo" disabled={!history.future.length || busy} onClick={redo}><Redo2Icon aria-hidden="true" /></Button>
         <span className="editor-bar-sep" aria-hidden="true" />
-        <Button variant="ghost" data-testid="board-style" aria-pressed={panel?.kind === "board"} icon={<PaletteIcon aria-hidden="true" />} onClick={() => setPanel(panel?.kind === "board" ? null : { kind: "board" })}>Style</Button>
-        <Button variant="ghost" data-testid="board-add-tile" icon={<PlusIcon aria-hidden="true" />} disabled={busy || itemCount(doc) >= 512} onClick={addFromBar}>Add</Button>
+        <Button variant="ghost" data-testid="board-style" aria-pressed={panel?.kind === "board"} icon={<PaletteIcon aria-hidden="true" />} aria-label="Board style" title="Board style" onClick={() => setPanel(panel?.kind === "board" ? null : { kind: "board" })}><span className="bar-label">Style</span></Button>
+        <Button variant="ghost" data-testid="board-add-tile" icon={<PlusIcon aria-hidden="true" />} disabled={busy || itemCount(doc) >= 512} aria-label="Add a tile" title="Add a tile" onClick={addFromBar}><span className="bar-label">Add</span></Button>
       </div>
       <div className="page-actions"><Button variant="outline" busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button>
         <Button variant="default" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></div>

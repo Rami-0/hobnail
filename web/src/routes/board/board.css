@@ -266,6 +266,8 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
   .editor-bar{padding:var(--s-2) var(--s-2) var(--s-2) var(--s-3)}
   .editor-bar-copy{flex-basis:100%}
   .editor-bar-tools{flex:1}
+  .editor-bar-tools .bar-label{display:none}
+  .editor-bar-tools .btn:has(.bar-label){padding-inline:var(--s-2)}
   .editor-section{padding:var(--s-2) var(--s-3) var(--s-3)}
   .editor-section-head .section-title-input{flex:1 1 0}
   .editor-section-tools{flex-basis:100%;justify-content:flex-end;margin-top:calc(-1 * var(--s-1))}
