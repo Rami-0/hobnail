@@ -50,3 +50,17 @@ test("rich text escapes HTML and permits only HTTP(S) and mailto navigation", ()
   assert.match(markup, /<ol start="4"><li><em>Item<\/em><\/li><\/ol>/);
   assert.ok(!/<img|javascript:| onclick=/.test(markup));
 });
+
+test("rich shapes render meters, tiles, rows and an agenda as text with accessible values", () => {
+  const meters = render({ kind: "meters", rows: [{ label: "Memory", percent: 91, detail: "14.6 of 16 GiB" }, { label: "CPU", percent: 12 }] });
+  assert.match(meters, /Memory.*14\.6 of 16 GiB.*91%.*class="sw-bar bad" role="meter" aria-label="Memory".*aria-valuenow="91"/);
+  assert.match(meters, /class="sw-bar" role="meter" aria-label="CPU"/);
+  const tiles = render({ kind: "tiles", tiles: [{ label: "Queries", value: "<48k>", glyph: "globe", delta: "+3%", tone: "up", series: [1, 4, 2] }] });
+  assert.match(tiles, /<dl class="sw-tiles"><div class="sw-tile" data-tone="ok"><dt><span class="sw-glyph" aria-hidden="true"><svg/);
+  assert.match(tiles, /&lt;48k&gt;.*\+3%.*aria-label="Queries trend"/);
+  const rows = render({ kind: "rows", rows: [{ title: "example.iso", secondary: "Downloading", value: "4 MB/s", status: "up", progress: 95, bars: ["up", "down"] }] });
+  assert.match(rows, /aria-label="up".*example\.iso.*Downloading.*4 MB\/s.*class="sw-bar sw-bar-thin" role="meter" aria-label="example.iso progress"/);
+  assert.match(rows, /aria-label="example.iso: 1 of 2 recent checks up"><span class="ok"><\/span><span class="bad"><\/span>/);
+  const agenda = render({ kind: "agenda", entries: [{ time: 86_400 * 2, title: "Pilot", secondary: "Example Show" }] });
+  assert.match(agenda, /<h4>[^<]+<\/h4><ul><li><time dateTime="1970-01-03T00:00:00.000Z">.*Pilot.*Example Show/);
+});
