@@ -205,6 +205,11 @@ media queries and container queries see exactly what they would at 200 %.
     to load resource: net::ERR_NETWORK_CHANGED", in Chromium, when one of
     those events falls from 3 s before to 1 s after it (the matching
     events are kept in the record).
+    When such a cut hits a sweep page's own load (seen in the run of
+    image 27ff1ee: the Chromium 412 sweep lost `/app/history`'s
+    stylesheet, so every check measured an unstyled page), the sweep sets
+    aside every event of that load ("load cut by a host network change,
+    page loaded again") and loads the page once more before its checks.
 - **Transient overlays.** Toasts are measured as a scope of their own; the
   board tour, an open dialog, menu or listbox limits the target check and
   the focus check to its own controls; the focused skip link covers the

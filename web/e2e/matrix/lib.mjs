@@ -215,6 +215,21 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
         await page.waitForTimeout(150);
       } finally { ctx.shooting = false; }
     },
+    /** Whether a host network change (Chromium's ERR_NETWORK_CHANGED,
+     * matched to a container or network event on the host) cut a load since
+     * `t0`. If so, every event since `t0` is set aside with that reason and
+     * true is returned, so the caller loads the page again: a stylesheet
+     * the host cut leaves an unstyled page whose checks say nothing about
+     * Hobnail. */
+    async setAsideCutLoad(t0) {
+      await page.waitForTimeout(300);
+      await Promise.allSettled([...pending]);
+      const fresh = events.slice(seen).filter((e) => e.at >= t0);
+      if (!fresh.some((e) => netChange(engine, e))) return false;
+      for (const e of fresh) results.excluded.push({ reason: "load cut by a host network change, page loaded again (Chromium)", flow: e.flow, text: e.text.slice(0, 200) });
+      events.splice(seen, events.length - seen, ...events.slice(seen).filter((e) => e.at < t0));
+      return true;
+    },
     /** Problems recorded after the flow's last state (run.mjs adds them to the flow). */
     flush() { return take(); },
     /** Run every check on the current page state. */

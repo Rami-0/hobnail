@@ -611,7 +611,10 @@ export const flows = {
 // The page sweep: every route of the shared fixture, at any viewport.
 export async function sweep(h, f, routes) {
   for (const [route, ready] of routes) {
+    const t0 = Date.now();
     await go(h, f, route, ready);
+    // Once: a load the host's network change cut is loaded again.
+    if (await h.setAsideCutLoad(t0)) await go(h, f, route, ready);
     await h.state(route);
   }
 }
