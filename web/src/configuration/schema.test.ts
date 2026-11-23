@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Field } from "../api/gen/Field.ts";
-import { connectionValues, initial, schemaValues, secretHint } from "./schema.ts";
+import { connectionValues, initial, schemaValues, secretHint, visibleFields } from "./schema.ts";
 
 const field = (id: string, kind: Field["kind"], options: Partial<Field> = {}): Field => ({
   id, kind, label: id, required: false, max_length: null, min: null, max: null, choices: [], default: null, help: "", ...options,
+});
+
+test("conditional fields follow the chosen value, or the default before a choice", () => {
+  const schema = [
+    field("version", "select", { choices: ["v6", "v5"], default: "v6" }),
+    field("password", "secret", { when: { field: "version", equals: "v6" } }),
+    field("api_token", "secret", { when: { field: "version", equals: "v5" } }),
+    field("base_url", "url"),
+  ];
+  const ids = (values: Record<string, unknown>) => visibleFields(schema, values).map((f) => f.id);
+  assert.deepEqual(ids({}), ["version", "password", "base_url"]);
+  assert.deepEqual(ids({ version: "v5" }), ["version", "api_token", "base_url"]);
 });
 
 test("validates URL, credential, interval and list beside their fields", () => {
