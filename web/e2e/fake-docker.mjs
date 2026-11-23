@@ -127,12 +127,12 @@ if (HOSTILE) {
   });
 }
 if (SERVICES) {
-  // [name, image, ports, networks {name: ip}, labels]
+  // [name, image, ports ([IP, PrivatePort, PublicPort, Type] as above), networks {name: ip}]
   const lan = "192.168.1.50";
   const s = [
     ["hobnail", "ghcr.io/example/hobnail:latest", [], { homelab_default: "172.30.0.2" }],
     ["sonarr", "lscr.io/linuxserver/sonarr:latest", [[lan, 8989, 8989, "tcp"]], { homelab_default: "172.30.0.3" }],
-    ["pihole", "pihole/pihole:2024.07.0", [[lan, 8053, 80, "tcp"], ["0.0.0.0", 53, 53, "udp"]], { bridge: "172.17.0.4" }],
+    ["pihole", "pihole/pihole:2024.07.0", [[lan, 80, 8053, "tcp"], ["0.0.0.0", 53, 53, "udp"]], { bridge: "172.17.0.4" }],
     ["jellyfin", "jellyfin/jellyfin:10.10.3", [], { homelab_default: "172.30.0.5" }],
     ["homeassistant", "ghcr.io/home-assistant/home-assistant:stable", [[lan, 8123, 8123, "tcp"]], { bridge: "172.17.0.6" }],
     ["my-radarr", "registry.example.com/media/movies:1", [["127.0.0.1", 7878, 7878, "tcp"]], { bridge: "172.17.0.7" }],
