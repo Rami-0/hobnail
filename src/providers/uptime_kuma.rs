@@ -1,6 +1,7 @@
 use super::json_scan::{Path, Scalar, Scanner, Visit};
+use super::pihole::grouped;
 use super::*;
-use widgets::{Health, StructuredBody};
+use widgets::{BodyRow, Glyph, Health, StatTile, StructuredBody};
 
 pub const UPTIME_KUMA: Provider = Provider {
     id: "uptime-kuma",
@@ -27,18 +28,32 @@ pub const UPTIME_KUMA: Provider = Provider {
         ENABLED,
     ],
     test,
-    widgets: &[Widget {
-        id: "monitors",
-        name: "Monitor status",
-        description: "Current state, 24-hour uptime and the active pinned incident.",
-        recommended: true,
-        default_size: size(4, 4),
-        min_size: size(3, 3),
-        sample: r#"{"kind":"status_list","rows":[["Website","up"],["Mail server","up"],["Backup NAS","warn"],["VPN gateway","down"]]}"#,
-        fields: &[REFRESH],
-        fetch: monitors,
-        validate: no_widget_options,
-    }],
+    widgets: &[
+        Widget {
+            id: "monitors",
+            name: "Monitor status",
+            description: "Each monitor's state, latest response time, 24-hour uptime and recent heartbeats, with the active pinned incident.",
+            recommended: true,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"rows","rows":[{"title":"Website","secondary":"Up · 84 ms","value":"99.9%","status":"up","bars":["up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up"]},{"title":"Mail server","secondary":"Up · 31 ms","value":"99.2%","status":"up","bars":["up","up","up","up","down","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up"]},{"title":"Backup NAS","secondary":"Pending","value":"97.5%","status":"warn","bars":["up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","warn","warn"]},{"title":"VPN gateway","secondary":"Down","value":"88.0%","status":"down","bars":["up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","up","down","down","down","down"]}]}"#,
+            fields: &[REFRESH],
+            fetch: monitors,
+            validate: no_widget_options,
+        },
+        Widget {
+            id: "summary",
+            name: "Status summary",
+            description: "How many monitors are up, down or pending, and their average 24-hour uptime.",
+            recommended: false,
+            default_size: size(4, 2),
+            min_size: size(3, 2),
+            sample: r#"{"kind":"tiles","tiles":[{"label":"Up","value":"11","glyph":"check","tone":"up"},{"label":"Down","value":"1","glyph":"alert","tone":"down"},{"label":"Pending","value":"0","glyph":"clock"},{"label":"Uptime (24 h)","value":"99.1%","glyph":"activity"}]}"#,
+            fields: &[REFRESH],
+            fetch: summary,
+            validate: no_widget_options,
+        },
+    ],
 };
 
 #[derive(Deserialize)]
@@ -79,10 +94,25 @@ struct Heartbeats {
     not_object: bool,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct Beat {
     latest: Option<u64>,
     uptime: Option<f64>,
+    /// Milliseconds of the latest beat that reported a ping.
+    ping: Option<f64>,
+    /// The newest [`BARS`] beats, oldest first.
+    bars: Vec<Health>,
+}
+
+/// Heartbeats shown as bars per monitor.
+const BARS: usize = 30;
+
+fn health(status: Option<u64>) -> Health {
+    match status {
+        Some(1) => Health::Up,
+        Some(0) => Health::Down,
+        _ => Health::Warn,
+    }
 }
 
 impl Heartbeats {
@@ -129,6 +159,22 @@ impl Visit for Heartbeats {
                 };
                 if let Some(beat) = self.monitor(path.key(2)) {
                     beat.latest = status.or(Some(u64::MAX));
+                    if beat.bars.len() == BARS {
+                        beat.bars.remove(0);
+                    }
+                    beat.bars.push(health(status));
+                }
+            }
+            (4, Some("heartbeatList")) if path.key(4) == Some("ping") => {
+                if let Scalar::Number {
+                    text,
+                    complete: true,
+                } = value
+                {
+                    let ping = text.parse().ok().filter(|ms: &f64| ms.is_finite());
+                    if let (Some(beat), Some(ping)) = (self.monitor(path.key(2)), ping) {
+                        beat.ping = Some(ping);
+                    }
                 }
             }
             (2, Some("uptimeList")) => {
@@ -187,23 +233,51 @@ fn test<'a>(conn: &'a Conn<'_>) -> Job<'a, ()> {
     Box::pin(async move { page(conn, slug(conn)?).await.map(|_| ()) })
 }
 
+/// The page's incident, its first monitors with their heartbeats (None when
+/// the heartbeat response is too large) and how many monitors were left out.
+struct Board {
+    incident: Option<Incident>,
+    shown: Vec<Monitor>,
+    data: Option<Heartbeats>,
+    remaining: usize,
+}
+
+async fn board(conn: &Conn<'_>) -> Result<Board, Fault> {
+    let slug = slug(conn)?;
+    let page = page(conn, slug).await?;
+    let mut monitors = page
+        .public_group_list
+        .into_iter()
+        .flat_map(|group| group.monitor_list);
+    let shown: Vec<Monitor> = monitors.by_ref().take(MAX_MONITORS).collect();
+    let data = within_response_limit(
+        heartbeats(conn, slug, shown.iter().map(|monitor| monitor.id)).await,
+    )?;
+    Ok(Board {
+        incident: page.incident,
+        shown,
+        data,
+        remaining: monitors.count(),
+    })
+}
+
 fn monitors<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let slug = slug(conn)?;
-        let page = page(conn, slug).await?;
-        let mut monitors = page
-            .public_group_list
-            .into_iter()
-            .flat_map(|group| group.monitor_list);
-        let shown: Vec<Monitor> = monitors.by_ref().take(MAX_MONITORS).collect();
-        let data = within_response_limit(
-            heartbeats(conn, slug, shown.iter().map(|monitor| monitor.id)).await,
-        )?;
+        let Board {
+            incident,
+            shown,
+            data,
+            remaining,
+        } = board(conn).await?;
         let mut rows = Vec::new();
-        if let Some(incident) = page.incident {
+        if let Some(incident) = incident {
             let title = display_text(conn, incident.title);
-            let content = display_text(conn, incident.content);
-            rows.push((format!("Incident: {title} — {content}"), Health::Warn));
+            rows.push(BodyRow {
+                title: format!("Incident: {title}"),
+                secondary: Some(display_text(conn, incident.content)),
+                status: Some(Health::Warn),
+                ..Default::default()
+            });
         }
         for monitor in shown {
             let beat = data.as_ref().and_then(|data| data.get(monitor.id));
@@ -220,26 +294,99 @@ fn monitors<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 .and_then(|beat| beat.uptime)
                 .filter(|uptime| (0.0..=1.0).contains(uptime));
             let uptime = match uptime {
-                Some(0.0) if latest.is_none() => "No 24h uptime data".into(),
-                Some(uptime) => format!("{:.1}% over 24h", uptime * 100.0),
-                None => "24h uptime unavailable".into(),
+                Some(0.0) if latest.is_none() => None,
+                Some(uptime) => Some(format!("{:.1}%", uptime * 100.0)),
+                None => None,
             };
-            let name = display_text(conn, monitor.name);
-            rows.push((format!("{name} — {label}, {uptime}"), health));
+            let secondary = match beat.and_then(|beat| beat.ping) {
+                Some(ms) if latest == Some(1) => format!("{label} · {} ms", ms.round() as u64),
+                _ => label.into(),
+            };
+            rows.push(BodyRow {
+                title: display_text(conn, monitor.name),
+                secondary: Some(secondary),
+                value: uptime,
+                status: Some(health),
+                bars: beat.map(|beat| beat.bars.clone()).unwrap_or_default(),
+                ..Default::default()
+            });
         }
-        let remaining = monitors.count();
         if remaining > 0 {
-            rows.push((
-                format!("{remaining} more monitors on the status page"),
-                Health::Warn,
-            ));
+            rows.push(BodyRow {
+                title: format!("{remaining} more monitors on the status page"),
+                ..Default::default()
+            });
         }
         if rows.is_empty() {
             return Ok(StructuredBody::Unavailable {
                 message: "No monitors on this status page.".into(),
             });
         }
-        Ok(StructuredBody::StatusList { rows })
+        Ok(StructuredBody::Rows { rows })
+    })
+}
+
+fn summary<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
+    Box::pin(async move {
+        let Board { shown, data, .. } = board(conn).await?;
+        if shown.is_empty() {
+            return Ok(StructuredBody::Unavailable {
+                message: "No monitors on this status page.".into(),
+            });
+        }
+        let Some(data) = data else {
+            return Ok(StructuredBody::Unavailable {
+                message: "Heartbeat response too large to summarise.".into(),
+            });
+        };
+        let (mut up, mut down, mut other, mut sum, mut counted) = (0u64, 0u64, 0u64, 0.0, 0u32);
+        for monitor in &shown {
+            let beat = data.get(monitor.id);
+            match beat.and_then(|beat| beat.latest) {
+                Some(1) => up += 1,
+                Some(0) => down += 1,
+                _ => other += 1,
+            }
+            if let Some(uptime) = beat
+                .and_then(|beat| beat.uptime)
+                .filter(|uptime| (0.0..=1.0).contains(uptime))
+            {
+                sum += uptime;
+                counted += 1;
+            }
+        }
+        let tile = |label: &str, value: String, glyph, tone| StatTile {
+            label: label.into(),
+            value,
+            glyph: Some(glyph),
+            delta: None,
+            tone,
+            series: Vec::new(),
+        };
+        let mut tiles = vec![
+            tile("Up", grouped(up), Glyph::Check, Some(Health::Up)),
+            tile(
+                "Down",
+                grouped(down),
+                Glyph::Alert,
+                (down > 0).then_some(Health::Down),
+            ),
+            tile(
+                "Pending",
+                grouped(other),
+                Glyph::Clock,
+                (other > 0).then_some(Health::Warn),
+            ),
+        ];
+        if counted > 0 {
+            tiles.push(tile(
+                "Uptime (24 h)",
+                format!("{:.1}%", sum / f64::from(counted) * 100.0),
+                Glyph::Activity,
+                None,
+            ));
+        }
+        Ok(StructuredBody::Tiles { tiles })
     })
 }
 
@@ -251,6 +398,7 @@ mod tests {
     #[tokio::test]
     async fn public_page_and_heartbeat_map_status_and_incident() {
         const PAGE: &str = "GET /prefix/api/status-page/home HTTP/1.1";
+        const SMALL: &str = r#"{"heartbeatList":{"1":[{"status":0,"ping":null},{"status":1,"ping":12.4}],"2":[{"status":0}],"3":[{"status":2}],"4":[{"status":3}],"5":[]},"uptimeList":{"1_24":0.995,"2_24":0,"3_24":null,"4_24":1,"5_24":0}}"#;
         const PAGE_BODY: &str = r#"{"config":{"slug":"home"},"incident":{"title":"Service outage","content":"Investigating"},"publicGroupList":[{"monitorList":[{"id":1,"name":"Web"},{"id":2,"name":"DNS"},{"id":3,"name":"Mail"},{"id":4,"name":"Storage"},{"id":5,"name":"New monitor"}]}]}"#;
         // 30 monitors with Kuma's 100 beats each, about 200 KiB. Monitor 3
         // went down on its last beat; monitor 5 has no heartbeat list.
@@ -284,12 +432,16 @@ mod tests {
                 Exchange {
                     request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1",
                     status: 200,
-                    body: r#"{"heartbeatList":{"1":[{"status":0},{"status":1}],"2":[{"status":0}],"3":[{"status":2}],"4":[{"status":3}],"5":[]},"uptimeList":{"1_24":0.995,"2_24":0,"3_24":null,"4_24":1,"5_24":0}}"#,
+                    body: SMALL,
                 },
                 Exchange { request: PAGE, status: 200, body: PAGE_BODY },
                 Exchange { request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1", status: 200, body: &large },
                 Exchange { request: PAGE, status: 200, body: PAGE_BODY },
                 Exchange { request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1", status: 200, body: r#"{"heartbeatList":{"1":[{"status":1}"# },
+                Exchange { request: PAGE, status: 200, body: PAGE_BODY },
+                Exchange { request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1", status: 200, body: SMALL },
+                Exchange { request: PAGE, status: 200, body: PAGE_BODY },
+                Exchange { request: "GET /prefix/api/status-page/heartbeat/home HTTP/1.1", status: 200, body: &large },
                 Exchange { request: PAGE, status: 403, body: "" },
                 Exchange { request: PAGE, status: 200, body: "{}" },
             ],
@@ -301,25 +453,40 @@ mod tests {
             async |conn| {
                 conn.run((UPTIME_KUMA.test)(conn)).await.unwrap();
                 let body = super::super::fetch(conn, &UPTIME_KUMA.widgets[0], &Values::new()).await.unwrap();
-                assert_eq!(serde_json::to_value(body).unwrap()["rows"], serde_json::json!([
-                    ["Incident: Service outage — Investigating", "warn"],
-                    ["Web — Up, 99.5% over 24h", "up"],
-                    ["DNS — Down, 0.0% over 24h", "down"],
-                    ["Mail — Pending, 24h uptime unavailable", "warn"],
-                    ["Storage — Maintenance, 100.0% over 24h", "warn"],
-                    ["New monitor — Unknown, No 24h uptime data", "warn"]
-                ]));
+                assert_eq!(serde_json::to_value(body).unwrap(), serde_json::json!({"kind":"rows","rows":[
+                    {"title":"Incident: Service outage","secondary":"Investigating","status":"warn"},
+                    {"title":"Web","secondary":"Up · 12 ms","value":"99.5%","status":"up","bars":["down","up"]},
+                    {"title":"DNS","secondary":"Down","value":"0.0%","status":"down","bars":["down"]},
+                    {"title":"Mail","secondary":"Pending","status":"warn","bars":["warn"]},
+                    {"title":"Storage","secondary":"Maintenance","value":"100.0%","status":"warn","bars":["warn"]},
+                    {"title":"New monitor","secondary":"Unknown","status":"warn"}
+                ]}));
                 let large = super::super::fetch(conn, &UPTIME_KUMA.widgets[0], &Values::new()).await.unwrap();
-                assert_eq!(serde_json::to_value(large).unwrap()["rows"], serde_json::json!([
-                    ["Incident: Service outage — Investigating", "warn"],
-                    ["Web — Up, 98.0% over 24h", "up"],
-                    ["DNS — Up, 98.0% over 24h", "up"],
-                    ["Mail — Down, 98.0% over 24h", "down"],
-                    ["Storage — Up, 98.0% over 24h", "up"],
-                    ["New monitor — Unknown, 98.0% over 24h", "warn"]
-                ]));
+                let large = serde_json::to_value(large).unwrap();
+                assert_eq!(large["rows"][1]["secondary"], "Up · 23 ms");
+                assert_eq!(large["rows"][1]["value"], "98.0%");
+                assert_eq!(large["rows"][1]["bars"].as_array().unwrap().len(), BARS);
+                assert_eq!(large["rows"][3]["status"], "down");
+                assert_eq!(large["rows"][3]["bars"][BARS - 1], "down");
+                assert_eq!(large["rows"][3]["bars"][BARS - 2], "up");
+                assert_eq!(large["rows"][5]["status"], "warn");
+                assert!(large["rows"][5].get("bars").is_none());
                 let truncated = super::super::fetch(conn, &UPTIME_KUMA.widgets[0], &Values::new()).await.unwrap_err();
                 assert!(matches!(truncated.class, Class::Protocol));
+                let summary = super::super::fetch(conn, &UPTIME_KUMA.widgets[1], &Values::new()).await.unwrap();
+                assert_eq!(serde_json::to_value(summary).unwrap(), serde_json::json!({"kind":"tiles","tiles":[
+                    {"label":"Up","value":"1","glyph":"check","tone":"up"},
+                    {"label":"Down","value":"1","glyph":"alert","tone":"down"},
+                    {"label":"Pending","value":"3","glyph":"clock","tone":"warn"},
+                    {"label":"Uptime (24 h)","value":"49.9%","glyph":"activity"}
+                ]}));
+                let summary = super::super::fetch(conn, &UPTIME_KUMA.widgets[1], &Values::new()).await.unwrap();
+                assert_eq!(serde_json::to_value(summary).unwrap()["tiles"], serde_json::json!([
+                    {"label":"Up","value":"3","glyph":"check","tone":"up"},
+                    {"label":"Down","value":"1","glyph":"alert","tone":"down"},
+                    {"label":"Pending","value":"1","glyph":"clock","tone":"warn"},
+                    {"label":"Uptime (24 h)","value":"98.0%","glyph":"activity"}
+                ]));
                 for class in [Class::Auth, Class::Protocol] {
                     let fault = conn.run((UPTIME_KUMA.test)(conn)).await.unwrap_err();
                     assert_eq!(fault.class.message(), class.message());
