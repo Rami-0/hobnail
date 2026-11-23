@@ -2,7 +2,8 @@
 // live host sample, the container list and stats, the history API and the
 // log download. Builders are in hobnail.ts; drawing is the shared renderer.
 import { useEffect, useState } from "react";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, ScrollTextIcon } from "lucide-react";
+import { logsHref } from "../app/paths.ts";
 import type { OverviewView } from "../api/gen/OverviewView.ts";
 import { RelativeTime } from "../ui/RelativeTime.tsx";
 import type { HobnailOptions } from "../api/gen/HobnailOptions.ts";
@@ -153,9 +154,11 @@ function Attention() {
         <span className={`dot ${item.severity}`} aria-hidden="true" />
         <a className="hw-attn-name" href={item.href}>{item.title}</a>
         <span className="hw-attn-why">{item.detail}{item.probe && ` · ${item.probe}`}</span>
-        {item.since !== null && <span className="hw-attn-when"><RelativeTime at={item.since} /></span>}
+        <span className="hw-attn-when">{item.since !== null && <RelativeTime at={item.since} />}</span>
+        {item.container ? <a className="hw-attn-logs" href={logsHref(item.name, item.since)} aria-label={`Logs of ${item.title}`} title="Logs"><ScrollTextIcon aria-hidden="true" /></a> : <span />}
       </li>)}
-    </ul> : <p className="hw-ok"><CheckIcon aria-hidden="true" />{total ? <>All clear <span>· {plural(total, "container", "containers")}, nothing needs you</span></> : "No containers yet"}</p>}
+    </ul> : !data.known ? waiting("Container state unknown: Docker cannot be read right now.")
+      : <p className="hw-ok"><CheckIcon aria-hidden="true" />{total ? <>All clear <span>· {plural(total, "container", "containers")}, nothing needs you</span></> : "No containers yet"}</p>}
     <p className="hw-attn-foot">
       {extra > 0 && <a href="/app/containers?state=problem">{plural(extra, "more problem", "more problems")}</a>}
       {counts.cleanStops > 0 && <a href="/app/containers?state=stopped">{plural(counts.cleanStops, "stopped cleanly", "stopped cleanly")}</a>}

@@ -323,10 +323,12 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .hw-count[data-hot]{background:var(--danger-bg)}
 .hw-count[data-hot] strong{color:var(--bad-fg)}
 .hw-attn-list{list-style:none;margin:0;padding:0;display:grid;align-content:start;gap:var(--s-2);min-height:0;overflow:auto}
-.hw-attn-list li{display:grid;grid-template-columns:auto minmax(0,auto) minmax(0,1fr) auto;align-items:baseline;gap:var(--s-2);font-size:var(--fs-sm)}
+.hw-attn-list li{display:grid;grid-template-columns:auto minmax(0,auto) minmax(0,1fr) auto 16px;align-items:baseline;gap:var(--s-2);font-size:var(--fs-sm)}
 .hw-attn-list .dot{align-self:center}
 .hw-attn-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:14ch}
 .hw-attn-why,.hw-attn-when{color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-xs)}
+.hw-attn-logs{display:inline-flex;color:var(--muted-foreground);align-self:center}
+.hw-attn-logs svg{width:14px;height:14px}
 .hw-ok{display:flex;align-items:center;gap:var(--s-2);margin:0;align-self:center;font-size:var(--fs-sm)}
 .hw-ok svg{width:16px;height:16px;color:var(--ok)}
 .hw-ok span{color:var(--muted-foreground)}
