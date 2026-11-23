@@ -174,6 +174,7 @@ pub(crate) async fn serve_limited(
         let _ = stream.set_nodelay(true);
         super::conn::bound_buffers(&stream, limits.send_buffer, limits.receive_buffer);
         let st = state.clone();
+        let slots = permits.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let _peer_slot = peer_slot;
@@ -194,9 +195,22 @@ pub(crate) async fn serve_limited(
                 req.extensions_mut().insert(super::conn::BodyDeadline(
                     tokio::time::Instant::now() + limits.body_timeout,
                 ));
+                let slots = slots.clone();
                 async move {
-                    let response = respond(st, req).await;
-                    rule.set(super::conn::Stall::of(&response));
+                    let mut response = respond(st, req).await;
+                    let stall = super::conn::Stall::of(&response);
+                    rule.set(stall);
+                    // Near the cap, end keep-alive after this response so an
+                    // idle socket between a client's requests never holds a
+                    // slot that a new client is waiting for. The client knows
+                    // to reconnect, so nothing races with its next request.
+                    if stall != super::conn::Stall::Exempt
+                        && near_cap(slots.available_permits(), limits.connections)
+                    {
+                        response
+                            .headers_mut()
+                            .insert(hyper::header::CONNECTION, HeaderValue::from_static("close"));
+                    }
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -209,6 +223,12 @@ pub(crate) async fn serve_limited(
                 .await;
         });
     }
+}
+
+/// Fewer than an eighth of the connection slots (at least two) are free.
+/// The accept loop holds one free slot while it waits for a connection.
+fn near_cap(free: usize, connections: usize) -> bool {
+    free < (connections / 8).max(2)
 }
 
 /// Whether `ip` is in `RH_TRUSTED_PROXIES`. On a dual-stack IPv6 listener an
@@ -864,6 +884,52 @@ mod tests {
                 held.push(TcpStream::connect(addr).await.unwrap());
             }
             held
+        }
+
+        #[test]
+        fn keep_alive_ends_when_fewer_than_an_eighth_of_the_slots_are_free() {
+            assert!(!near_cap(6, 48));
+            assert!(near_cap(5, 48));
+            assert!(!near_cap(2, 8));
+            assert!(near_cap(1, 8));
+        }
+
+        /// One keep-alive request on `s`; the response head, lowercased.
+        async fn head_of(s: &mut TcpStream) -> String {
+            s.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .unwrap();
+            let mut buf = vec![0; 4096];
+            let n = timeout(Duration::from_secs(3), s.read(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase()
+        }
+
+        #[tokio::test]
+        async fn near_the_cap_responses_end_keep_alive() {
+            let limits = Limits {
+                connections: 8,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut first = TcpStream::connect(addr).await.unwrap();
+            let head = head_of(&mut first).await;
+            assert!(head.starts_with("http/1.1 200"), "{head}");
+            assert!(!head.contains("connection: close"), "{head}");
+            // 6 of 8 slots open (one more is held by the accept loop): one free.
+            let mut held = futures_join(addr, 5).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let head = head_of(&mut first).await;
+            assert!(head.contains("connection: close"), "{head}");
+            assert!(drain(&mut first, Duration::from_secs(3)).await.is_some());
+            // Once the others leave, keep-alive is offered again.
+            held.clear();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut again = TcpStream::connect(addr).await.unwrap();
+            let head = head_of(&mut again).await;
+            assert!(!head.contains("connection: close"), "{head}");
         }
 
         #[tokio::test]
