@@ -24,7 +24,7 @@ pub const NEXTCLOUD: Provider = Provider {
         },
         Field {
             label: "App password",
-            help: "Create an app password in the account’s security settings.",
+            help: "In Nextcloud open Personal settings → Security → Devices & sessions and create an app password.",
             required: true,
             ..OPTIONAL_BASIC_PASSWORD
         },

@@ -238,7 +238,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
         <div className="provider-head" style={brand(provider.color)}><ServiceIcon tint name={provider.icon} title={provider.name} enabled={icons} />
           <div><small>{provider.category}</small><strong>{provider.name}</strong><p>{provider.description}</p></div>
           <a href={provider.docs} target="_blank" rel="noreferrer"><BookOpenIcon aria-hidden="true" />Setup guide<span className="sr"> (opens in a new tab)</span></a></div>
-        <div className="provider-connect"><div className="provider-settings">
+        <div className="provider-connect" data-aside={item ? undefined : ""}><div className="provider-settings">
         <Field label="Name" id="integration-name" error={errors.name} hint="How it is labelled on boards."><TextInput name="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
         <SchemaForm id="integration" schema={schema.filter((field) => !advanced(field))} {...formProps} />

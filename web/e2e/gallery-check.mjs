@@ -36,6 +36,7 @@ const login = await call(boot.owner_exists ? "/api/login" : "/api/v1/onboarding/
 const owner = { cookie: login.cookie, csrf: ok(login, "sign in").csrf };
 
 const board = ok(await call("/api/v1/boards", "POST", { name: "Homelab" }, owner), "create board");
+ok(await call("/api/v1/account/board-tour", "POST", undefined, owner), "dismiss the board tour");
 for (const spec of installs) {
   ok(await call("/api/v1/providers/install", "POST", {
     integration: { kind: spec.kind, name: spec.name, base_url: spec.base_url, enabled: true, options: spec.options ?? {}, credentials: spec.credentials ?? {} },
@@ -80,6 +81,7 @@ try {
       await frame();
     };
     const footer = async (caption) => {
+      await wait(`[...document.querySelectorAll(${q(`${dialog} .dlg-ft button`)})].some((b) => b.textContent.trim() === ${q(caption)})`, `${caption} button`);
       await tab.ev(`[...document.querySelectorAll(${q(`${dialog} .dlg-ft button`)})].find((b) => b.textContent.trim() === ${q(caption)}).click()`);
       await frame();
     };
@@ -134,7 +136,7 @@ try {
       }
 
       if (installs.length) {
-        await go(`/app/board/${board.id}`, '!!document.querySelector(\'[data-testid="board"]\')');
+        await go(`/app/boards/${board.id}`, '!!document.querySelector(\'[data-testid="board"]\')');
         await wait(`document.querySelectorAll('[data-testid="board-tile"] .widget-content [class^="sw-"]').length >= ${Math.min(6, installs.length)}`, "provider widgets render", 30000);
         await sleep(1500);
         await full("board");

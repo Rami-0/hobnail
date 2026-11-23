@@ -37,7 +37,7 @@ pub const GITHUB: Provider = Provider {
                 TOKEN,
                 "Fine-grained access token",
                 Kind::Secret,
-                "Optional for public repositories, which share an anonymous rate limit.",
+                "Create it in GitHub → Settings → Developer settings → Fine-grained tokens, with read-only access to the repositories. Optional for public repositories, which share an anonymous rate limit.",
             )
         },
         ENABLED,

@@ -30,7 +30,7 @@ pub const NGINX_PROXY_MANAGER: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(SECRET, "Account password", Kind::Secret, "")
+            ..Field::new(SECRET, "Account password", Kind::Secret, "The password this account signs in to Nginx Proxy Manager with. Add a dedicated user under Users if you prefer.")
         },
         ENABLED,
     ],

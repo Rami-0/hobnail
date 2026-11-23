@@ -19,7 +19,7 @@ pub const GITEA: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(TOKEN, "Access token", Kind::Secret, "Use a personal access token with read:user and read:repository scopes and access to the selected repositories.")
+            ..Field::new(TOKEN, "Access token", Kind::Secret, "Create it in Settings → Applications → Generate new token, with read:user and read:repository scopes and access to the selected repositories.")
         },
         ENABLED,
     ],

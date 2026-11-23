@@ -18,7 +18,7 @@ pub const PAPERLESS: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(TOKEN, "API token", Kind::Secret, "Create a token for the Paperless-ngx account that can view the documents and inbox tags.")
+            ..Field::new(TOKEN, "API token", Kind::Secret, "In Paperless-ngx open My profile (top right) and generate the API auth token, for an account that can view documents and inbox tags.")
         },
         ENABLED,
     ],
