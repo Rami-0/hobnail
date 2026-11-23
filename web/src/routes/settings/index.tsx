@@ -212,7 +212,10 @@ function Integrations({ admin, manage }: { admin: boolean; manage: boolean }) {
         const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { provider_internet } });
         if (result.kind === "ok") setInternet(result.data.provider_internet); else setError(result.message);
       }} />
-      {providers.map((provider) => <p key={provider.id}><strong>{provider.name}</strong> · {provider.contacts}</p>)}
+      <details className="contacts-disclosure" data-testid="provider-contacts">
+        <summary>What each provider contacts <span className="muted">({providers.filter((provider) => provider.public_internet).length} use a public API)</span></summary>
+        <ul className="contacts-list">{providers.map((provider) => <li key={provider.id}><strong>{provider.name}</strong>{provider.public_internet && <span className="contacts-public">public API</span>}<span>{provider.contacts}</span></li>)}</ul>
+      </details>
     </div>}
     <Dialog open={!!deleting} title="Remove integration?" onClose={() => setDeleting(null)} footer={<><Button onClick={() => setDeleting(null)}>Keep integration</Button><Button variant="destructive" busy={busy === "delete"} onClick={async () => {
       if (!deleting) return; setBusy("delete"); const result = await api.request("DELETE", `/api/v1/integrations/${deleting.id}`);

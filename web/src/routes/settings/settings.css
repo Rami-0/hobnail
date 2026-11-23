@@ -38,3 +38,13 @@
 .integration-widgets{display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
 .integration-widgets svg{width:12px;height:12px;color:color-mix(in oklab,var(--brand-c) 70%,var(--muted-foreground))}
 .integration-card>footer{display:flex;flex-wrap:wrap;gap:var(--s-1);padding-top:var(--s-2);border-top:1px solid var(--border)}
+
+/* Provider internet access: the per-provider destinations, collapsed */
+.contacts-disclosure{margin-top:var(--s-2);border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
+.contacts-disclosure>summary{cursor:pointer;padding:var(--s-2) var(--s-3);font-size:var(--fs-sm);font-weight:500}
+.contacts-disclosure>summary .muted{color:var(--muted-foreground);font-weight:400}
+.contacts-list{list-style:none;margin:0;padding:0 var(--s-3) var(--s-3);display:grid;gap:6px;max-height:360px;overflow:auto}
+.contacts-list li{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;font-size:var(--fs-xs);color:var(--muted-foreground)}
+.contacts-list strong{color:var(--foreground);font-weight:600}
+.contacts-public{padding:0 6px;border-radius:999px;background:var(--warning-bg);color:var(--warning)}
+.contacts-list li>span:last-child{flex-basis:100%}
