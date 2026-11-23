@@ -1,5 +1,5 @@
 // Integrations as API connections, with local container detection: the
-// board Add picker (Apps, Integrations and Containers tabs, logos, "Detected on
+// board Add picker (Hobnail widgets, Apps, Integrations and Containers tabs, logos, "Detected on
 // this host" cards), Connect opening the provider's connect step with the
 // URL filled in and the credential focused, and the Settings integration
 // cards. At 1440 dark and light and 390 dark, against a throwaway fake
@@ -109,9 +109,22 @@ try {
       await inp.click('[data-testid="board-edit"]');
       await wait('!!document.querySelector(\'[data-testid="board-editor"]\')', "editor");
       await inp.click('[data-testid="board-add-tile"]');
-      // It opens on Apps: web UIs running on this host as branded links on
-      // their published address; databases and Hobnail itself are not apps.
-      await wait(`!!document.querySelector('[data-testid="picker-tab-apps"][aria-pressed="true"]')`, "picker opens on Apps");
+      // It opens on Hobnail widgets: live widgets from Hobnail's own data,
+      // shown as gallery previews with Add.
+      await wait(`!!document.querySelector('[data-testid="picker-tab-widgets"][aria-pressed="true"]')`, "picker opens on Hobnail widgets");
+      await wait(`document.querySelectorAll('[data-testid="hobnail-widgets"] [data-testid="hobnail-add"]').length === 6`, "six Hobnail widgets");
+      await shot("picker-hobnail");
+      if (scheme === "dark" && width === 1440) {
+        // Adding one installs the built-in integration and lands it live in the edit.
+        await inp.click('[data-testid="hobnail-add"][data-widget="host"]');
+        await wait(`!document.querySelector('[data-testid="board-picker"][data-open]')`, "picker closes after Add");
+        await wait(`!!document.querySelector('.hobnail-widget[data-view="host"] .sw-tiles')`, "host overview draws live tiles", 20000);
+        await inp.click('[data-testid="board-add-tile"]');
+        await wait(`!!document.querySelector('[data-testid="board-picker"][data-open]')`, "picker reopens");
+      }
+      // Apps: web UIs running on this host as branded links on their
+      // published address; databases and Hobnail itself are not apps.
+      await inp.click('[data-testid="picker-tab-apps"]');
       await wait(`document.querySelectorAll('[data-testid="board-suggestion"][data-kind="link"]').length >= 4`, "detected app links");
       await logosLoaded('[data-testid="board-picker"] [data-testid="picker-list"]', 4);
       const appText = await tab.ev(`[...document.querySelectorAll('[data-testid="board-suggestion"][data-kind="link"]')].map((b) => b.textContent).join(" | ")`);
