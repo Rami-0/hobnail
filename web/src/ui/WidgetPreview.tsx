@@ -29,7 +29,7 @@ export function WidgetPreview({ widget, icon, color, title, children, compact = 
     </div>
     <div className="widget-preview-meta">
       <div className="widget-preview-title">
-        <h4>{widget.name}</h4>
+        <strong className="widget-preview-name">{widget.name}</strong>
         {widget.recommended && <Badge variant="secondary">Recommended</Badge>}
         {size && <span className="widget-preview-size" title="Default size on a board (columns × rows)">{size}</span>}
       </div>
