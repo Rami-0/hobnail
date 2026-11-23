@@ -80,10 +80,13 @@ required. Keep a pre-upgrade database copy; migrations only move forward.
 Existing 19 MiB Argon2id hashes keep their original work factor until a
 successful sign-in rehashes each password at 7 MiB. Even an unsuccessful
 attempt against an old hash uses the original work factor. In M5 the first
-successful sign-in peaked at about 20.5 MiB.
+successful sign-in peaked at about 20.5 MiB. This is an **accepted budget
+exception, pending owner sign-off**: it happens once per legacy account, it
+is the only path above the 20 MiB budget, and it is refused under a memory
+limit below 36 MiB (next paragraph), so a capped container never runs it.
 
-If the server's cgroup v2 memory limit (`/sys/fs/cgroup/memory.max`) is below
-36 MiB, Hobnail does not verify legacy hashes at all. Sign-in to such an
+If the server's memory limit (cgroup v2 `/sys/fs/cgroup/memory.max`, or the
+cgroup v1 `memory.limit_in_bytes`) is below 36 MiB, Hobnail does not verify legacy hashes at all. Sign-in to such an
 account fails exactly like a wrong password, with the same response delay,
 and the server logs a one-line warning naming `hobnail reset-password`
 (without the username or password). The 36 MiB threshold is the 12.45 MiB
