@@ -61,6 +61,18 @@ let browser;
 const failures = [];
 try {
   await api("/api/settings/config", { base_hash: initial.hash, text: fixture });
+  // The Home board (the old Overview) was seeded before this config: put
+  // the bookmark and the config widget on it, as a person would.
+  const homeBoard = (await api("/api/v1/bootstrap")).home_board;
+  assert.ok(homeBoard, "the instance has a Home board");
+  const homePath = `/app/boards/${homeBoard}`;
+  const { document: homeDoc } = await api(`/api/v1/boards/${homeBoard}`);
+  homeDoc.sections.push({ title: "Browser check", position: homeDoc.sections.length, collapsed: false, items: [
+    { x: 0, y: 0, w: 3, h: 1, payload: { kind: "link", title: "Browser check bookmark", url: "https://example.com" } },
+    { x: 3, y: 0, w: 4, h: 2, payload: { kind: "widget", widget_id: "pages-health" } },
+  ] });
+  const put = await fetch(new URL(`/api/v1/boards/${homeBoard}`, base), { method: "PUT", headers, body: JSON.stringify(homeDoc) });
+  assert.ok(put.ok, `PUT Home board HTTP ${put.status}: ${await put.text()}`);
   browser = await launch();
   const sizes = (process.env.WIDTHS || "1440x900 390x844").split(/\s+/);
   const schemes = (process.env.SCHEMES || "dark light").split(/\s+/);
@@ -89,17 +101,15 @@ try {
       await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: 5 });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
 
-      await load("/app/overview", ".overview-map rect");
-      await wait('document.querySelector("[data-testid=overview]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
-      await wait('document.querySelector("#w-pages-health")?.textContent.includes("Health check: ok")', "widget renders a structured body");
-      await tab.shot(path.join(out, `${label}-overview.png`));
+      await load(homePath, '[data-testid=board] [data-testid="hobnail-attention"] .hw-count');
+      await wait(exists('.hobnail-widget[data-view="host"] .sw-tiles'), "Home draws the host after the first sample", 30000);
+      await wait(exists('.hobnail-widget[data-view="containers"] .sw-rich-row'), "Home lists the busiest containers", 30000);
+      await wait('document.querySelector("[data-testid=board]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
+      await wait('[...document.querySelectorAll("[data-testid=board-tile]")].some((t) => t.textContent.includes("Health check: ok"))', "widget renders a structured body");
+      await tab.shot(path.join(out, `${label}-home.png`));
 
       if (size === sizes[0] && scheme === schemes[0]) {
         const alarmConfig = await api("/api/settings/config");
-        const containers = await api("/api/v1/containers");
-        const names = containers.groups.flatMap(g => g.containers)
-          .filter(c => ["unhealthy", "restarting", "dead"].includes(c.label)).map(c => c.name);
-        assert.ok(names.length > 0, "fixture has problem containers to hide");
         await wait('document.title.startsWith("(")', "visible title has a problem count");
         // Keep the real ten-second stream pause, accelerate only the minute poll.
         await tab.ev(`(() => {
@@ -108,18 +118,29 @@ try {
           Object.defineProperty(document, "hidden", { configurable: true, value: true });
           document.dispatchEvent(new Event("visibilitychange"));
         })()`);
-        await sleep(11000);
-        await api("/api/settings/containers/override", { base_hash: alarmConfig.hash, names, set: { hide: true } });
-        assert.equal((await api("/api/v1/alarm")).problems, 0);
-        await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm");
-        await wait('!document.title.startsWith("(")', "hidden tab title updates to the filtered alarm count");
-        await tab.ev(`(() => {
-          window.setInterval = window.alarmInterval;
-          delete document.hidden;
-          document.dispatchEvent(new Event("visibilitychange"));
-        })()`);
-        const hiddenConfig = await api("/api/settings/config");
-        await api("/api/settings/config", { base_hash: hiddenConfig.hash, text: alarmConfig.text });
+        try {
+          await sleep(11000);
+          // Churn continues while the tab is hidden. Hide the problems
+          // in the snapshot we actually apply the override to.
+          const containers = await api("/api/v1/containers");
+          const names = containers.groups.flatMap(g => g.containers)
+            .filter(c => ["unhealthy", "restarting", "dead"].includes(c.label)).map(c => c.name);
+          assert.ok(names.length > 0, "fixture has problem containers to hide");
+          await api("/api/settings/containers/override", { base_hash: alarmConfig.hash, names, set: { hide: true } });
+          await wait('performance.getEntriesByType("resource").some(e => new URL(e.name).pathname === "/api/v1/alarm")', "hidden tab polls v1 alarm");
+          await wait('!document.title.startsWith("(")', "hidden tab title updates to the filtered alarm count");
+          assert.equal((await api("/api/v1/alarm")).problems, 0);
+        } finally {
+          await tab.ev(`(() => {
+            window.setInterval = window.alarmInterval;
+            delete document.hidden;
+            document.dispatchEvent(new Event("visibilitychange"));
+          })()`);
+          const hiddenConfig = await api("/api/settings/config");
+          if (hiddenConfig.hash !== alarmConfig.hash) {
+            await api("/api/settings/config", { base_hash: hiddenConfig.hash, text: alarmConfig.text });
+          }
+        }
       }
 
       const palette = '[data-testid="palette"] [role="combobox"]';
@@ -150,7 +171,7 @@ try {
         await wait(`!!document.querySelector(${q(palette)})?.getAttribute('aria-activedescendant')`, `palette ${key} selects a result`);
       }
       await inp.key("Escape");
-      for (const [key,route] of [["o","overview"],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
+      for (const [key,route] of [["o",homePath.slice(5)],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
         await tab.ev('document.activeElement?.blur()');
         await inp.key('g'); await inp.key(key);
         await wait(key === 's' ? `location.pathname === '/app/settings' || location.pathname === '/app/settings/general'` : `location.pathname === ${q('/app/'+route)}`, `g ${key} opens ${route}`);
@@ -161,7 +182,6 @@ try {
       await inp.key("g");
       await inp.key("a");
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
-      await wait('Number(localStorage.getItem("rh-seen")) > 0', "leaving Overview remembers the visit");
 
       await load("/app/containers", '[data-testid="row"]');
       await inp.key('/'); await wait(`document.activeElement?.matches('[data-testid="filter"]')`, "slash focuses the table filter");
@@ -219,6 +239,7 @@ try {
       await load("/app/history?range=1h&level=all", '[data-testid="chart-cpu"] .ch-canvas');
       await wait(exists('[data-testid="chart-net_tx"]'), "History chart group mounts");
       await tab.shot(path.join(out, `${label}-history.png`));
+      await wait(exists('[data-testid="chart-cpu"] .ch-canvas svg'), "CPU plot is drawn before dragging");
       const plot = await inp.box('[data-testid="chart-cpu"] .ch-canvas');
       assert.ok(plot, "CPU chart has a plot");
       const from = plot.left + plot.width * .28;
@@ -238,7 +259,10 @@ try {
       await tab.shot(path.join(out, `${label}-host.png`));
 
       const root = "/app/containers/svc043";
-      await load(root + "?range=24h&tab=metrics", '[data-testid="chart-pids"]', "metrics");
+      await load(root + "?range=24h&tab=metrics", "main .charts.two");
+      await tab.ev('document.querySelector("main .charts.two").scrollIntoView({ block: "start" })');
+      await wait(exists('[data-testid="chart-pids"]'), "Metrics chart grid mounts when revealed");
+      await tab.shot(path.join(out, `${label}-metrics.png`));
       assert.ok(await tab.ev(exists('[data-testid="why"]')), "Metrics keeps the Why banner");
       await inp.click('[data-testid="ctr-tabs"] a[href*="tab=inspect"]');
       await wait(exists('[data-testid="container-inspect"]'), "opens Inspect");

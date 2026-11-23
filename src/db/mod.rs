@@ -169,6 +169,28 @@ pub struct Event {
     pub detail: String,
 }
 
+pub(crate) struct EventRef<'row> {
+    pub id: i64,
+    pub ts: i64,
+    pub kind: &'row str,
+    pub level: &'row str,
+    pub subject: &'row str,
+    pub detail: &'row str,
+}
+
+impl EventRef<'_> {
+    pub(crate) fn into_owned(self) -> Event {
+        Event {
+            id: self.id,
+            ts: self.ts,
+            kind: self.kind.into(),
+            level: self.level.into(),
+            subject: self.subject.into(),
+            detail: self.detail.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EventFilter {
     pub subject: Option<String>,
@@ -219,6 +241,7 @@ pub struct DbStats {
 // ---------------------------------------------------------------------------
 // Implementation
 
+mod board_layout;
 pub mod maintain;
 mod schema;
 mod series;
@@ -227,7 +250,10 @@ mod tests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
@@ -310,11 +336,21 @@ fn clip(s: &str, max: usize) -> &str {
 
 /// The history database handle.
 pub struct Db {
+    provider_scope: AtomicU64,
     inner: Option<Mutex<Inner>>,
     path: Option<PathBuf>,
 }
 
 impl Db {
+    pub(crate) fn provider_scope_generation(&self) -> u64 {
+        self.provider_scope.load(Ordering::SeqCst)
+    }
+
+    /// Rotate under the database lock before committing a visibility change.
+    pub(crate) fn invalidate_provider_scope(&self) {
+        self.provider_scope.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub(crate) fn dashboard<T, E>(
         &self,
         operation: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T, E>,
@@ -439,6 +475,7 @@ impl Db {
     /// A handle that records nothing and returns empty results.
     pub fn disabled() -> Self {
         Self {
+            provider_scope: AtomicU64::new(0),
             inner: None,
             path: None,
         }
@@ -507,6 +544,7 @@ impl Db {
         };
         let (w60, w600) = (get("hist.w60"), get("hist.w600"));
         Ok(Self {
+            provider_scope: AtomicU64::new(0),
             inner: Some(Mutex::new(Inner {
                 conn,
                 names: HashMap::new(),
@@ -752,7 +790,10 @@ impl Db {
             0 => 50,
             n => n.min(500),
         };
-        self.events_ordered(f, limit, "id DESC")
+        self.events_ordered(f, limit, "id DESC", |out: &mut Vec<_>, event| {
+            out.push(event.into_owned());
+        })
+        .0
     }
 
     /// Every event of `f` inside its `since..=until` window, newest first,
@@ -761,12 +802,31 @@ impl Db {
     /// however much of the table the window holds. Ids and timestamps both
     /// grow, so this is the order of `events` up to events of one second.
     pub fn window_events(&self, f: &EventFilter, cap: usize) -> Vec<Event> {
-        self.events_ordered(f, cap.clamp(1, 10_000), "ts DESC, id DESC")
+        self.scan_window_events(f, cap, |out: &mut Vec<_>, event| {
+            out.push(event.into_owned());
+        })
+        .0
     }
 
-    fn events_ordered(&self, f: &EventFilter, limit: usize, order: &str) -> Vec<Event> {
-        let limit = limit as i64;
-        self.with(Vec::new(), |i| {
+    /// Visit borrowed rows in window order and return the last scanned ID
+    /// when the scan reaches its limit. Callers can retain only visible rows.
+    pub(crate) fn scan_window_events<T: Default>(
+        &self,
+        f: &EventFilter,
+        cap: usize,
+        visit: impl FnMut(&mut T, EventRef<'_>),
+    ) -> (T, Option<i64>) {
+        self.events_ordered(f, cap.clamp(1, 10_000), "ts DESC, id DESC", visit)
+    }
+
+    fn events_ordered<T: Default>(
+        &self,
+        f: &EventFilter,
+        limit: usize,
+        order: &str,
+        mut visit: impl FnMut(&mut T, EventRef<'_>),
+    ) -> (T, Option<i64>) {
+        self.with(Default::default(), |i| {
             let mut sql =
                 String::from("SELECT id, ts, kind, level, subject, detail FROM events WHERE 1 = 1");
             let mut args: Vec<rusqlite::types::Value> = Vec::new();
@@ -801,20 +861,28 @@ impl Db {
                 args.push(t.into());
                 sql.push_str(&format!(" AND ts <= ?{}", args.len()));
             }
-            args.push(limit.into());
+            args.push((limit as i64).into());
             sql.push_str(&format!(" ORDER BY {order} LIMIT ?{}", args.len()));
             let mut st = i.conn.prepare(&sql)?;
-            let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
-                Ok(Event {
+            let mut rows = st.query(rusqlite::params_from_iter(args))?;
+            let mut out = T::default();
+            let mut cutoff = None;
+            for n in 1..=limit {
+                let Some(r) = rows.next()? else { break };
+                let event = EventRef {
                     id: r.get(0)?,
                     ts: r.get(1)?,
-                    kind: r.get(2)?,
-                    level: r.get(3)?,
-                    subject: r.get(4)?,
-                    detail: r.get(5)?,
-                })
-            })?;
-            rows.collect()
+                    kind: r.get_ref(2)?.as_str()?,
+                    level: r.get_ref(3)?.as_str()?,
+                    subject: r.get_ref(4)?.as_str()?,
+                    detail: r.get_ref(5)?.as_str()?,
+                };
+                if n == limit {
+                    cutoff = Some(event.id);
+                }
+                visit(&mut out, event);
+            }
+            Ok((out, cutoff))
         })
     }
 

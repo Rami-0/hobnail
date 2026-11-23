@@ -1,13 +1,15 @@
 import { useEffect } from "react";
 import { useBootstrapState } from "../live/index.ts";
 import { navigate } from "../app/router.ts";
+import { homeHref, landingHref } from "../app/home.ts";
 
-export function Home() {
+/** `/app` (the default board) and `/app/overview` (the Home board) only redirect. */
+export function Home({ home = false }: { home?: boolean }) {
   const { data, error } = useBootstrapState();
   useEffect(() => {
     if (!data) return;
-    const board = data.default_board ?? (data.scoped ? data.boards[0]?.id : undefined);
-    navigate(board ? `/app/boards/${board}` : data.scoped ? "/app/containers" : "/app/overview", { replace: true });
-  }, [data]);
+    const href = home ? homeHref(data) : "/app";
+    navigate(href === "/app" ? landingHref(data) : href, { replace: true });
+  }, [data, home]);
   return <p className="page" role="status">{error ?? "Loading home…"}</p>;
 }

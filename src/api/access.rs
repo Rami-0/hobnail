@@ -64,7 +64,7 @@ impl Principal {
         conn: &rusqlite::Connection,
     ) -> Result<Option<HashSet<String>>, ApiError> {
         self.scoped_targets(conn, "widget", |item| match item {
-            super::boards::BoardPayload::Widget { widget_id } => Some(widget_id),
+            super::boards::BoardPayload::Widget { widget_id, .. } => Some(widget_id),
             _ => None,
         })
     }
@@ -201,6 +201,14 @@ pub(crate) fn check_scope(
                     | Handler::IntegrationSetSecret
                     | Handler::IntegrationClearSecret
                     | Handler::IntegrationTest => principal.can_see_integration(id),
+                    // These handlers check the integration and board IDs from
+                    // the request body or query before using either resource.
+                    Handler::ProviderTest
+                    | Handler::ProviderInstall
+                    | Handler::ProviderWidgetOptions => principal
+                        .scopes
+                        .as_ref()
+                        .is_some_and(|scope| !scope.integrations.is_empty()),
                     _ => false,
                 };
                 if !granted {
@@ -266,6 +274,10 @@ pub enum Handler {
     IntegrationSetSecret,
     IntegrationClearSecret,
     IntegrationTest,
+    ProviderCatalog,
+    ProviderTest,
+    ProviderInstall,
+    ProviderWidgetOptions,
     Boards,
     BoardCreate,
     Board,
@@ -273,12 +285,15 @@ pub enum Handler {
     BoardUpdate,
     BoardDelete,
     BoardSuggestions,
+    BoardLinkTest,
+    ProviderDetected,
     BoardDraft,
     BoardDraftSave,
     BoardDraftDelete,
     DashboardSettings,
     DashboardIcon,
     Session,
+    BoardTourDismiss,
     Bootstrap,
     LogsPicker,
     Containers,
@@ -298,6 +313,11 @@ pub enum Handler {
     Strips,
     Stream,
     Onboard,
+    SetupDraft,
+    SetupSave,
+    SetupDiscover,
+    SetupTest,
+    SetupCommit,
     InviteAccept,
     InviteValidate,
     Invites,
@@ -364,6 +384,12 @@ pub const ROUTES: &[Route] = &[
         handler: Handler::BoardCreate,
     },
     Route {
+        method: "POST",
+        pattern: "/api/v1/boards/test-link",
+        access: Access::Admin,
+        handler: Handler::BoardLinkTest,
+    },
+    Route {
         method: "GET",
         pattern: "/api/v1/boards/<id>",
         access: Access::Viewer,
@@ -422,6 +448,36 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/integrations",
         access: Access::Admin,
         handler: Handler::IntegrationCreate,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/providers",
+        access: Access::Viewer,
+        handler: Handler::ProviderCatalog,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/providers/test",
+        access: Access::Admin,
+        handler: Handler::ProviderTest,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/providers/detected",
+        access: Access::Admin,
+        handler: Handler::ProviderDetected,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/providers/widgets",
+        access: Access::Admin,
+        handler: Handler::ProviderWidgetOptions,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/providers/install",
+        access: Access::Admin,
+        handler: Handler::ProviderInstall,
     },
     Route {
         method: "GET",
@@ -574,6 +630,36 @@ pub const ROUTES: &[Route] = &[
         handler: Handler::Stream,
     },
     Route {
+        method: "GET",
+        pattern: "/api/v1/onboarding/draft",
+        access: Access::Owner,
+        handler: Handler::SetupDraft,
+    },
+    Route {
+        method: "PUT",
+        pattern: "/api/v1/onboarding/draft",
+        access: Access::Owner,
+        handler: Handler::SetupSave,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/onboarding/discovery",
+        access: Access::Owner,
+        handler: Handler::SetupDiscover,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/onboarding/test",
+        access: Access::Owner,
+        handler: Handler::SetupTest,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/onboarding/commit",
+        access: Access::Owner,
+        handler: Handler::SetupCommit,
+    },
+    Route {
         method: "POST",
         pattern: "/api/v1/onboarding/owner",
         access: Access::Public,
@@ -644,6 +730,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/users/<id>",
         access: Access::Owner,
         handler: Handler::UserDelete,
+    },
+    Route {
+        method: "POST",
+        pattern: "/api/v1/account/board-tour",
+        access: Access::Viewer,
+        handler: Handler::BoardTourDismiss,
     },
     Route {
         method: "POST",
@@ -849,7 +941,12 @@ mod tests {
                 (
                     route.method.to_string(),
                     route.pattern.to_string(),
-                    format!("{:?}", route.access),
+                    match route.handler {
+                        Handler::BoardLinkTest | Handler::ProviderDetected => {
+                            "Unscoped Admin or Owner".to_owned()
+                        }
+                        _ => format!("{:?}", route.access),
+                    },
                 )
             })
             .collect();

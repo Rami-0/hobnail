@@ -49,9 +49,13 @@ All **[exp]**. Image display size is the `docker images` figure; content is
 | main (`680a339`, retained phase 0–1 baseline) | 6,633,904 | 11.6 MB / 3,910,610 |
 | phase 1 | 7,780,784 | 13.3 MB / 4,448,685 |
 | M5 (`b93b92e`) | **7,694,768** | **13.3 MB / 4,578,941** |
+| Finish Hobnail M1 | 7,723,440 | 13.4 MB / 4,579,996 |
 
-The **≤ 13 MB after-removal image budget is missed**, despite removing the old
-UI. The binary is smaller than phase 1 but larger than main. Evidence:
+M5 exceeded the original **13 MB** budget. The owner accepted the roughly
+13.3 MB image on 2026-11-20. M1 enforces the signed-off **13,500,000 B** limit
+using the exact Docker image-list size in `scripts/check-image-size.py`,
+called before deployment. The local x86-64 M1 release image used
+**13,359,582 B**, leaving 140,418 B of headroom. Historical M5 evidence:
 [startup and size output](react-port-raw/m5/startup.log).
 
 ## Bundle
@@ -102,6 +106,312 @@ by the existing Vite PostCSS pass; no package attribution is inferred from a
 chunk's name alone. [Full file inventory](react-port-raw/m5/web-size.log).
 
 ## Memory and CPU
+
+### Finish-hobnail M5 server memory
+
+2026-11-22, x86-64 Core i5-7200U, four logical CPUs, 7.15 GiB host RAM, Linux
+7.0.0-38-generic, Docker 29.5.2, cgroup v2. The release image was built from
+runtime commit `e2cd77b` using the repository Dockerfile. Image
+`hobnail-m5:history`, content hash
+`eb31290f2ad731569cf3fef4343fa0399a12371b2021705c86419dd5f8ae5149`. One
+application container on a throwaway loopback port, with Docker's healthcheck,
+read-only root, no capabilities and separate data. The fake Docker daemon, fake
+upstreams, HTTP drivers, Chromium, build tools and host services were outside the
+application cgroup.
+
+The unlimited run starts with an owner-free database. A separate process preloaded
+the full 6 h raw, 7 d one-minute and 90 d ten-minute history windows before the
+run, plus 100,000 events. The fixture has 150 live Docker entries, with
+long-retention series for 40 containers and the host. It includes host, container,
+container-extras and log-count tables. The database was 175.30 MB on disk. Startup
+was observed for 10 seconds, idle and cleanup for 60 seconds each. The run
+includes fresh owner creation, sign-in, guided board setup and installs, followed
+by 60 seconds each of 1, 10 and 25 live clients. Each client keeps a board-scoped
+SSE stream open, reads its board and the 150-container collection every two
+seconds, reads system chart data every five seconds, bootstraps every 30 seconds
+and fetches the shell and production asset set initially and every 20 seconds. All
+18 installed widgets reached `ready` and refresh against fakes for Pi-hole, Uptime
+Kuma, Jellyfin, qBittorrent, Sonarr, Radarr, Transmission, Home Assistant, Proxmox
+VE, Generic HTTP, RSS, TLS certificate expiry and reachability.
+
+After the clients disconnected, the workload read 24-hour comparisons and 30-day
+history, 24-hour host history, and 30-day container history ten times each. It
+then issued four concurrent 5,000-line log reads in each of three rounds, and ten
+rounds of board saves, settings writes, integration edits and connection tests.
+The populated system charts returned 360 buckets per metric at 24 h and 392 at 30
+d. Startup sampling begins after Docker makes the cgroup accessible. Nominal
+sample intervals were 500 ms and 20 ms for owner creation/sign-in. Bytes in the
+tables are converted using MiB = 1,048,576 B. Memory columns report median /
+maximum, except kernel `memory.peak`, which is cumulative through each phase.
+`Kernel` and `sock` come from `memory.stat`. The working set subtracts
+`inactive_file` from `memory.current`. Stream headers count as HTTP requests.
+Named events, including log completion, count separately as SSE events. Latencies
+include response reads.
+
+| Phase | n | Current | Working set | Kernel peak | Anon | File | Kernel | Sock | One-core CPU % | Requests / errors / SSE events | p50 / p99 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| startup | 20 | 1.82 / 4.37 | 1.52 / 4.34 | 4.61 | 1.20 / 3.26 | 0.30 / 0.30 | 0.31 / 0.32 | 0.00 / 0.00 | 0.93 | 0 / 0 / 0 | – / – |
+| owner+login | 9 | 5.01 / 9.26 | 4.71 / 8.96 | 9.26 | 3.67 / 8.33 | 0.34 / 0.37 | 0.31 / 0.31 | 0.00 / 0.00 | 53.10 | 2 / 0 / 0 | 57.1 / 75.4 |
+| guided-setup | 2 | 2.53 / 2.55 | 2.13 / 2.14 | 9.26 | 1.33 / 1.35 | 0.40 / 0.43 | 0.30 / 0.30 | 0.00 / 0.00 | 15.29 | 10 / 0 / 0 | 1.2 / 3.2 |
+| providers | 1 | 3.31 / 3.31 | 2.23 / 2.23 | 9.26 | 1.36 / 1.36 | 1.08 / 1.08 | 0.32 / 0.32 | 0.00 / 0.00 | – | 14 / 0 / 0 | 1.9 / 2.7 |
+| poll-warmup | 7 | 5.13 / 5.49 | 4.05 / 4.41 | 9.26 | 3.48 / 3.49 | 1.08 / 1.08 | 0.36 / 0.37 | 0.00 / 0.00 | 1.93 | 6 / 0 / 41 | 4.6 / 15.5 |
+| idle | 119 | 3.95 / 5.82 | 1.97 / 4.68 | 9.26 | 1.49 / 3.48 | 2.01 / 2.47 | 0.47 / 0.60 | 0.00 / 0.00 | 0.79 | 0 / 0 / 0 | – / – |
+| clients-1 | 118 | 5.20 / 5.86 | 2.72 / 3.38 | 9.26 | 1.81 / 2.02 | 2.48 / 2.48 | 0.54 / 0.55 | 0.00 / 0.02 | 2.39 | 301 / 0 / 125 | 0.7 / 21.9 |
+| clients-10 | 120 | 6.10 / 6.55 | 3.60 / 4.06 | 9.26 | 2.41 / 2.70 | 2.50 / 2.50 | 0.62 / 0.63 | 0.00 / 0.07 | 14.20 | 3001 / 0 / 1250 | 1.1 / 24.2 |
+| clients-25 | 115 | 7.16 / 7.75 | 4.66 / 5.23 | 9.50 | 3.41 / 3.69 | 2.52 / 2.52 | 0.73 / 0.74 | 0.00 / 0.08 | 27.73 | 7502 / 0 / 3125 | 1.6 / 59.2 |
+| full-history | 28 | 7.92 / 12.24 | 5.40 / 9.72 | 12.45 | 4.37 / 8.46 | 2.52 / 2.52 | 0.55 / 0.56 | 0.00 / 0.00 | 55.87 | 40 / 0 / 0 | 218.5 / 562.5 |
+| log-buffers | 5 | 7.25 / 8.62 | 4.73 / 6.11 | 12.45 | 4.18 / 5.11 | 2.52 / 2.52 | 0.55 / 0.57 | 0.00 / 0.00 | 18.70 | 12 / 0 / 96 | 118.7 / 222.9 |
+| config-writes | 69 | 5.21 / 5.88 | 2.68 / 3.35 | 12.45 | 2.14 / 2.19 | 2.52 / 2.53 | 0.49 / 0.55 | 0.00 / 0.00 | 0.97 | 50 / 0 / 0 | 3.8 / 21.0 |
+| cleanup | 117 | 5.12 / 5.70 | 2.58 / 3.16 | 12.45 | 2.08 / 2.20 | 2.54 / 2.54 | 0.48 / 0.56 | 0.00 / 0.00 | 0.31 | 0 / 0 / 0 | – / – |
+
+The uncapped lifetime peak was **13,049,856 B (12.45 MiB)**. Every phase median
+was under 10 MiB. Full history crossed the preferred 10 MiB ceiling, and the
+lifetime peak stayed below 20 MiB including owner creation and login. The run
+recorded 10,938 successful HTTP requests and 4,637 SSE events, with zero errors.
+
+The same workload at `--memory 20m --memory-swap 20m` recorded **12,836,864 B
+(12.24 MiB)** lifetime peak, 10,938 successful HTTP requests, 4,637 SSE events,
+zero errors and zero OOM kills. Cgroup `memory.events` recorded `max=0`, `oom=0`
+and `oom_kill=0`. Sampled anon/file/kernel/sock maxima were 8.02 / 2.54 / 0.84 /
+0.22 MiB. Three additional capped runs initialized SQLite from empty data and
+completed owner creation, login and guided setup. The hard limit was active before
+app startup in these runs and in the full validation. The sub-500 ms owner/login
+phase fell between sampler wakeups in the hard-limit run. Its two requests are
+present and its memory is included in the kernel lifetime peak. The per-phase
+hard-limit summary is stored with its raw samples.
+
+**Cache attribution and other peaks.** File pages are charged to the cgroup that
+first brings them into cache. A warm image shared across containers and a database
+seeded from the host can therefore produce lower charges than the same workload
+reading cold pages. The uncapped baseline with the same large fixture recorded
+**75,165,696 B (71.68 MiB)** at minute-one maintenance. The largest sample was
+71.20 MiB, including 3.66 MiB anonymous, 66.89 MiB file, 0.52 MiB kernel and less
+than 0.01 MiB socket memory. Another warm run of the baseline stayed at 6.15 MiB
+sampled through idle, with maxima of 2.96 MiB anonymous and 2.34 MiB file. Its
+SQLite trace recorded roughly 174 MiB of reads from the database around the first
+maintenance, while the WAL stayed small. These runs show the effect of cache
+attribution during history reads and maintenance. The warm results depend on cache
+residency.
+
+The same release was also probed after evicting the 175.30 MB SQLite file from the
+host page cache with `POSIX_FADV_DONTNEED`. The uncapped probe had already peaked
+at **42.56 MiB** by guided setup. The lifetime peak was **187,559,936 B (178.87
+MiB)** after minute-one maintenance and history reads. Its highest sample had
+178.46 MiB current, 8.87 MiB working set and 7.70 / 169.59 / 0.88 / 0.00 MiB
+anon/file/kernel/sock. The uncapped 20 MiB target therefore remains unmet for a
+cold, populated database. The capped cold probe reached 20,971,520 B (20.00 MiB),
+with 7.84 / 11.24 / 0.45 / 0.00 MiB anon/file/kernel/sock at its highest sample.
+Startup, authentication and 40 full-history reads completed. The capped cgroup
+recorded `max=1458`, `oom=0` and `oom_kill=0`. Both short probes omitted the live
+dashboard phases. Each returned twelve HTTP 400 responses for standalone log
+requests. Both ran alongside the warm workload, whose fake Docker daemon
+occupied port 8081 on the shared host network. A follow-up reproduced the
+collision and all twelve 400s. The second fake daemon opened its Unix socket
+and then exited on `EADDRINUSE`. The probe treated the leftover socket path
+as readiness, so Hobnail had no container list and could resolve none of the
+requested log targets. The fix runs the fake Docker container with
+`--network none`, checks `GET /_ping` on its Unix socket, and requires the
+four target names in `GET /api/v1/logs/picker` before reading streams. Only the
+application and its fake upstream services need the host network. With the
+same release image, the corrected capped cold replay saw all 150 fixture
+containers and completed all twelve log streams.
+
+The interval may miss short-lived maxima in the sampled breakdown. The lifetime
+peak records those maxima without identifying the underlying memory class. The
+current image uses musl and SQLite releases its page cache after sampler ticks.
+The History API now retains only the requested page and 200 markers while scanning
+up to 10,000 borrowed rows from SQLite. In an event-scan comparison with 100,000
+health events and 20 ms sampling, 40 history requests per build passed. Sampled
+anonymous maximum fell from 5.07 to 4.18 MiB and total sampled maximum from 7.03
+to 6.33 MiB. File maximum was 1.04 / 1.20 MiB, kernel 0.36 / 0.37 MiB and socket
+0.00 / 0.38 MiB. History p50/p99 was 74.2/108.8 ms before and 63.8/125.2 ms after.
+The main workload uses restart events and retained a higher History peak. After
+disconnect, anonymous median was 2.08 MiB, down from 3.41 MiB with 25 viewers and
+above the initial 1.49 MiB idle median.
+
+**Authentication.** Three fresh release-container trials per profile, each with
+one owner creation and seven logins. Samples targeted 5 ms during credentials.
+Argon2id v19 and one lane in all cases. The host also ran builds during some
+trials. [Equivalent OWASP
+profiles](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id)
+
+| Memory / passes | Kernel peak | Anon / file / kernel / sock maxima (MiB) | Login median / max (ms) |
+|---|---:|---:|---:|
+| 19,456 KiB / 2, baseline | 22,487,040 B (21.45 MiB) | 19.80 / 0.53 / 0.37 / <0.01 | 56.2 / 120.3 |
+| 9,216 KiB / 4 | 17,268,736 B (16.47 MiB) | 9.81 / 5.66 / 0.34 / <0.01 | 105.4 / 147.7 |
+| 7,168 KiB / 5, selected | 9,551,872 B (9.11 MiB) | 7.80 / 0.53 / 0.34 / <0.01 | 73.6 / 183.4 |
+
+The 9 MiB trial with the highest charge had 5.66 MiB of file cache. The anonymous
+measurements show the effect of each work factor. A first 7 MiB series peaked at
+9.30 MiB (7.81 MiB anon, 0.54 MiB file) before a scratch quota interruption. Login
+verifies a legacy hash with its original parameters and writes the new salted hash
+after creating the session. An uncapped first legacy login peaked at 21,524,480 B
+(20.53 MiB), with maxima of 19.70 MiB anon, 0.25 MiB file, 0.35 MiB kernel and
+less than 0.01 MiB socket. An existing legacy account's first sign-in under the
+hard limit reached 20,971,520 B and was OOM-killed. That remains a migration risk.
+
+**Guided setup storage investigation.** The old 19 MiB build disconnected during
+fresh owner creation in all three capped attempts. Docker reported OOM kills after
+those failures. One surviving cgroup sample recorded 1 `oom_kill` and a peak of
+20,971,520 B. The old phone screenshot showed `dashboard storage unavailable` at
+board commit. Three uncapped replays on the baseline and three replays with the
+new hash profile under the hard cap completed the same 39 phone checks. The capped
+phone peaks were 9,965,568 B, 9,973,760 B and 9,445,376 B. The highest sample
+components across those replays were 8.39 MiB anon, 0.54 MiB file, 0.49 MiB kernel
+and 0.01 MiB socket.
+
+Filling a disposable SQLite data mount reproduced the exact HTTP 500 text. The
+application's `pwrite64` returned `ENOSPC` (`SQLITE_FULL` in the bundled VFS). The
+cgroup lifetime peak was 9,711,616 B (9.26 MiB), and at injection it held 0.80 MiB
+anon, 0.41 MiB file, 0.30 MiB kernel and less than 0.01 MiB socket. Cgroup memory
+events remained zero. The regression check verified that no board was published,
+the draft survived, and retry created a complete 128-item board after space was
+freed. The original M4 run used the host's quota-limited tmpfs for app data. That
+tmpfs returned `EDQUOT` for scratch writes during M5, making storage exhaustion
+plausible. The original phone incident has no recorded SQLite code, so its exact
+cause remains unverified.
+
+**Artifact sizes.** Production web assets are 1,349,132 B raw / 438,069 B gzip
+(decimal bundle units). The three chart-named files total 104,762 B gzip. The
+executable is 8,964,656 B, embedded assets included. Docker's unpacked size is
+15,147,903 B (15.15 decimal MB) and its content size is 5,127,236 B (5.13 decimal
+MB). The unpacked image also missed the 13.5 MB gate on the baseline, at
+15,135,612 B. These are artifact bytes and are reported separately from cgroup
+RAM.
+
+**Checks.** The web check, 152 web tests, production build and bundle size check
+passed. Rust formatting, all-target Clippy with warnings denied, and 500 Rust
+tests passed. The repository Dockerfile also completed the release build. The
+separate unpacked image size gate reported the miss above.
+
+**Raw evidence.** The run directories named below were in session scratch
+storage, which is not retained. Small samples were copied to
+[react-port-raw/finish-m5-mem/](react-port-raw/finish-m5-mem/): the summaries,
+metadata and samples of `final-unlimited`, `final-hard`, `final-hard-fresh`
+and `final-cold-db`, and the history A/B summary. Everything else named here
+(the request logs, `bench.py` as used in M5, the auth, baseline, browser and
+maintenance runs) is not retained; the M7 copy of `bench.py` is in
+[react-port-raw/finish-m7/](react-port-raw/finish-m7/). The original layout was:
+`disk/` points to disk-backed scratch after the tmpfs quota interruption. The
+release runs are `disk/final-unlimited/` and `disk/final-hard/`, with
+`samples.jsonl`, `meta.jsonl`, `requests.jsonl`, `sse.jsonl` and `fixture.jsonl`.
+The same directory holds the workload driver `bench.py`, `summarize.py`, the
+`disk-fault.py` regression and its JSONL output, capped phone checks
+(`browser-hard-replay/`), and the legacy-login runs. The alternative hashes and
+the production profile are in `auth-baseline/`, `auth-9m/` and
+`disk/auth-7m-repeat/`. Baseline large-history runs and maintenance tracing are in
+`baseline-complete/`, `maintenance-raw/` and `maintenance-io.jsonl`. The isolated
+event scans are in `disk/history-before/` and `disk/history-after/`. The fresh
+hard-limit setup runs are in `disk/final-hard-fresh/` and the old failure replays
+are in `disk/baseline-hard-confirm/`. The cold database probes are in
+`disk/final-cold-db/` and `disk/final-cold-db-hard/`.
+
+From the repository root, use `python3 "$scratch/disk/bench.py" hobnail-m5:history
+<new-output-name> --mode full --port 3396`, where `scratch` is the directory
+above. Add `--hard` to apply the cap.
+
+### Finish-hobnail M5 release image follow-up
+
+The x86-64 release uses `scratch` with one filesystem layer. Before the
+follow-up, `hobnail-m5:history` contained the 8,964,656 B stripped executable
+and a 1,038,696 B static BusyBox, plus a `/bin/sh` symlink and directories.
+The OCI layer was 10,007,552 B as tar and 5,124,361 B compressed. Docker's
+image-list metric, used by the 13,500,000 B gate, was 15,147,903 B. The
+rebuild of `d2c5fd8` produced the same executable length and a 15,147,846 B
+image-list reading.
+
+The executable included 75 raw web files (1,349,132 B) and the 75 gzip
+copies (438,069 B). The distribution contained no source maps or
+byte-identical raw files, and every gzip copy was smaller than its
+corresponding raw file. The four embedded PWA icons contributed another
+13,320 B. The remainder of the executable was 7,164,135 B. There was
+no separately copied frontend, CA bundle or debug file. Relative
+relocations, code and read-only data accounted for 219,216 B, 5,566,136 B
+and 2,406,124 B of ELF sections respectively, including the asset bytes
+in read-only data. In an unstripped z-profile diagnostic build,
+`nm -S --size-sort -C` showed a 151,552 B Ring P-256 table,
+a 93,793 B settings dispatcher, a 33,096 B rustls handshake parser and a
+26,493 B SQLite virtual-machine executor among the largest symbols.
+
+| Rebuilt milestone | Stripped executable (B) | Raw web (B) | Gzip web (B) | Image gate metric (B) |
+|---|---:|---:|---:|---:|
+| `e8d6b62` | 8,141,360 | 1,344,761 | 436,679 | 13,969,622 |
+| `4aac6f1` | 8,530,480 | 1,344,761 | 436,679 | 14,521,392 |
+| `1edc993` | 8,759,856 | 1,344,761 | 436,679 | 14,846,578 |
+| `98678e3` | 8,882,736 | 1,349,071 | 438,103 | 15,027,044 |
+| `822075a` | 8,956,464 | 1,349,132 | 438,069 | 15,135,961 |
+| `d2c5fd8` | 8,964,656 | 1,349,132 | 438,069 | 15,147,846 |
+
+The executable grew by 823,296 B from the end of M3 to the original M5
+head, including 5,761 B from the web assets. BusyBox was 1,038,696 B in
+each rebuild.
+
+| Cumulative release trial | Stripped executable (B) | Image gate metric (B) | Image savings from previous row (B) |
+|---|---:|---:|---:|
+| Original release profile at `d2c5fd8` | 8,964,656 | 15,147,846 | — |
+| Size optimization `z` | 8,337,968 | 14,198,016 | 949,830 |
+| Pack static PIE relative relocations | 8,112,760 | 13,932,606 | 265,410 |
+| Share the TOML parser with the editor | 8,092,280 | 13,895,080 | 37,526 |
+| Omit unused bundled SQLite extensions | 7,779,480 | 13,400,510 | 494,570 |
+| Share the provider request future | 7,775,384 | 13,394,792 | 5,718 |
+
+The SQLite change omits full-text and spatial indexes, the `dbstat` virtual
+table and the dynamic extension loader. Hobnail's schema and queries use
+none of those. JSON and STAT4 remain enabled. The default `serde_json`
+feature set includes `std`, which the bounded JSON writer uses. The image
+still embeds both raw and gzip assets. Provider TLS keeps TLS 1.2 support,
+the compiled public roots and Ring.
+
+The bundled `rust-lld` identical-code-folding trial failed to link Ring's
+zlib-compressed debug sections. It produced no comparable image.
+Throughput overrides for Argon2 and Blake2 kept the executable at
+7,775,384 B and added 4,817 B to the image-list metric. Two alternating
+seven-login trials gave medians of 70.0 and 78.3 ms for the normal z build
+and 70.1 and 137.3 ms for the override. The overrides were discarded.
+
+The stock Dockerfile built `hobnail-m5-image:final` from the runtime
+sources at `5881a44` (content hash
+`bf2f4e098f4f4214dca887fa8af46d114b27a5445eb5d3776f815dbb8a093fec`).
+`scripts/check-image-size.py` passed at **13,394,739 B** against the
+13,500,000 B gate, with **105,261 B** of headroom. The executable is
+7,775,384 B and BusyBox is 1,038,696 B. The single OCI filesystem layer
+is 8,818,176 B as tar and 4,559,021 B compressed. The image-list metric
+decreased by 1,753,164 B from the original M5 image.
+
+The final short workload ran twice per image, in baseline/final and
+final/baseline order, with no builds running. Both images used the 20 MiB
+memory and swap settings, warmed executable pages, the 175 MB seeded
+database with 100,000 events, and the isolated fake Docker fixture.
+The driver analyzed the fixture before starting the measured container
+to keep maintenance out of the timed History interval. It ran 25 live
+clients for 12 seconds, followed by 40 History reads and twelve log
+streams. All requests completed and all four cgroups reported
+`max=0`, `oom=0` and `oom_kill=0`.
+
+| Metric across the two runs | Original M5 | Final |
+|---|---:|---:|
+| Startup kernel peak (MiB) | 4.14–4.15 | 4.15–4.43 |
+| Owner creation and login kernel peak (MiB) | 9.04–9.35 | 9.41–9.52 |
+| Owner creation and login sampled anonymous maximum (MiB) | 8.22 | 8.21–8.22 |
+| 25 clients sampled current maximum (MiB) | 6.77–7.07 | 6.82–6.86 |
+| Full-history sampled current maximum (MiB) | 11.42–11.45 | 11.41–11.71 |
+| Lifetime kernel peak (MiB) | 11.66–11.84 | 11.71–11.78 |
+| Login request (ms) | 38.8–45.9 | 39.4–39.6 |
+| 25-client request p50 / p99 (ms) | 0.5 / 22.3–27.6 | 0.5 / 25.7–26.1 |
+| Full-history request p50 / p99 (ms) | 85.2–126.2 / 310.6–380.3 | 105.0–109.2 / 303.0–304.3 |
+| Bulk log request p50 / p99 (ms) | 92.5–104.7 / 136.1–138.0 | 106.2–124.1 / 155.7–183.4 |
+
+The client and History latencies were comparable across the two pairs.
+Bulk log p99 was higher in both final runs, based on twelve requests per
+run. The final image was measured on x86-64. The raw requests and cgroup
+samples are in the `quiescent-*` directories of the
+`hobnail-m5-image-scratch` Docker volume.
+
+Web check, test, build and bundle budgets passed. Rust formatting,
+all-target Clippy with warnings denied, and all 500 tests passed. The
+release Dockerfile also passed its build-time checks and self-version test.
+
+### Earlier React port measurements
 
 **[exp]** `PORT=3395 scripts/bench-mem.sh hobnail-rp:m5 <fresh-output-dir>`;
 no config argument, a new empty data directory/database, real Docker socket
@@ -235,14 +545,72 @@ No container-membership change occurred during this capture, so it does not
 measure a `containers` event. A 40-widget/container board and a mature history
 can be larger. [Raw responses/event sizes](react-port-raw/m5/json-sizes.log).
 
-**D9 recommendation [assume].** Add negotiated compression for larger JSON
-responses after a separate reviewed implementation: the measured containers,
-strips and board responses have substantial savings (63,725→6,596 B,
-33,170→611 B, 12,547→1,757 B). Keep a minimum-size threshold to avoid gzip overhead
-on tiny responses (the hello event grows 123→124 B). Do not apply this experiment's
-per-event gzip figures directly to SSE: streaming needs bounded buffers and
-flush-latency/CPU/memory measurements. Keep SSE uncompressed until that evidence
-exists. No compression was implemented in M5.
+**D9 built in M1.** Buffered API JSON from 1,025 through 262,144 B uses
+level-1 gzip when accepted and carries `Vary: Accept-Encoding` for either
+representation. An explicit `gzip;q=0` selects identity. Both SSE endpoints,
+the log download and static assets bypass runtime gzip. Responses with an
+existing encoding keep it.
+
+The 256 KiB ceiling keeps the raw compression input at 1.25% of the
+20 MiB container budget and bounds compression work on the sole async
+thread. It covers the measured dashboard responses below and sends
+larger payloads as identity. The gzip output starts with a capacity of
+one quarter of the input plus the 18-byte wrapper. The deflater appends
+blocks to that vector, so wrapping them does not allocate a second
+compressed body.
+
+**[exp]** Ran the static musl x86-64 M1 release binary on loopback port 3300
+on an Intel i5-7200U, with a fresh scratch database and an authenticated
+Owner. A fake Docker Unix socket served 150 containers across 13 stacks.
+SQLite held 241 synthetic system samples at 15-second intervals for a
+fixed one-hour history window. The legacy config contained 40 synthetic
+bookmarks. A keep-alive client alternated identity and gzip using the same
+binary and data to isolate the encoding cost. Each cell reports the median
+of five 2,000-request blocks per encoding. CPU is server user plus system
+time from `/proc/<pid>/stat` (100 Hz), divided by the request count. Body
+sizes exclude HTTP headers. All 80,000 timed requests succeeded.
+
+| Response | Identity B | Gzip request B | Identity CPU µs/request | Gzip request CPU µs/request |
+|---|---:|---:|---:|---:|
+| `/api/v1/containers` | 61,203 | 4,291 | 2,990 | 3,345 |
+| `/api/v1/history`, one hour | 40,593 | 12,741 | 2,940 | 3,565 |
+| `/api/v1/settings`, default settings | 22 | 22 | 165 | 165 |
+| `/api/settings/config`, 40 bookmarks | 3,372 | 434 | 570 | 690 |
+
+The client decoded gzip and checked it against identity. It also verified
+that `gzip;q=0` suppressed compression even with a wildcard and that eligible
+responses varied in both cases. The 22 B settings response stayed below the
+threshold. These figures cover local request handling and depend on the
+payload and host. They exclude client decoding and LAN transfer time.
+
+**M1 review follow-up.** On the same i5-7200U, a Python standard library
+client compared the previous and updated static musl x86-64 release binaries
+over loopback. Two boards in a scratch database each had 200 links with
+seeded random alphanumeric URL suffixes of 980 or 1,300 characters. Four
+keep-alive clients repeatedly fetched one board at a time. The client
+verified wire lengths, gzip decoding, and that the updated server sent the
+oversized board as identity even when offered gzip.
+
+Each row used a fresh server process with a fake Docker Unix socket and a
+session created beforehand. After the readers completed their first GETs,
+the client made 120 metadata PATCHes to a separate board, with a 25 ms
+pause between probes. Latency runs from sending each PATCH to reading the
+matching `boards` event on an open SSE connection, including the PATCH and
+loopback delivery. Peak RSS is Linux `VmHWM` from `/proc/<pid>/status` at the
+end of the run. These are process peaks during dashboard use. Container
+memory and overlapping Argon2 work were outside this measurement.
+
+| Build and response mode | Identity / wire B | GETs | Peak RSS (KiB) | SSE p50 / p95 / max (ms) |
+|---|---:|---:|---:|---:|
+| Updated, idle SSE baseline | — | 0 | 5,120 | 1.31 / 2.90 / 4.78 |
+| Updated, near ceiling, identity | 259,664 / 259,664 | 1,907 | 6,348 | 23.58 / 26.94 / 36.20 |
+| Previous, near ceiling, gzip | 259,664 / 163,074 | 1,447 | 6,244 | 51.38 / 57.74 / 79.34 |
+| Updated, near ceiling, gzip | 259,664 / 163,146 | 1,452 | 6,248 | 50.03 / 58.85 / 64.45 |
+| Previous, above ceiling, gzip | 323,665 / 211,429 | 1,436 | 6,560 | 65.32 / 71.51 / 76.05 |
+| Updated, above ceiling, identity | 323,665 / 323,665 | 1,804 | 6,372 | 27.38 / 34.69 / 41.24 |
+
+Near the ceiling, gzip saved 37% of wire bytes and p95 SSE latency was
+about 32 ms higher than identity during this run.
 
 ## Browser performance
 
@@ -289,6 +657,300 @@ to **261.3 / 110.3 ms**. Phone table load was **301.4 / 160.5 ms** by tracing
 (observer **224 / 164 ms**). Table live updates exceeded 50 ms in both runs.
 INP missed once at **240 ms** (chart phone, run 1); CLS stayed ≤0.1 in these
 runs. Route-change latency (≤200/500 ms) was not separately timed.
+
+### Finish-hobnail M5 browser budgets
+
+Measured the client at `8a7bd3c`, the startup and chart change at `6a7ae87`,
+the live and log trial, and the final client at `e20187e`. The Rust release profile and
+backend source were the same. Each browser sweep ran twice against a
+throwaway 150-container instance on loopback port 3396 with `--log-fixtures`.
+The CDP runner used cold browser caches, 1440×900 desktop at 1× CPU and
+390×844 touch phone at 4×. Each visit measured one navigation, three live
+update windows and the scripted interaction. Logs used a separate fresh
+instance and one `logs-check.mjs` sweep per measured state, with both themes
+at both widths and 4× CPU on phone. The runner verified delivery of the
+1,500-line burst and kept the original observation windows.
+
+The Overview interaction now clicks a visible health count. The old
+disclosure selector discarded both Overview rows in the first baseline sweep.
+Overview and Host readiness now use their visible content because a chart
+below the viewport can wait until scroll. The comparable baseline and
+startup rows use the replays with this probe. The replays include the Board
+target to keep its fixture setup. They visit fewer preceding routes, so the
+fixture history can be younger. Readiness selectors for the other routes,
+throttling, update counts and thresholds were preserved.
+
+The `perf.md` tables and `logs/results.json` of the `baseline`, `startup`,
+`batches` and `final` builds, and the report sources, are in
+[react-port-raw/finish-m5b/](react-port-raw/finish-m5b/). The `perf.json`
+files, host pressure samples, build logs and replays were in session scratch
+storage and are not retained.
+The directories `baseline`, `startup`, `batches` and `final` identify the
+builds. `ready-replay*` supplies the corrected Overview and Host runs.
+The later baseline timings and the baseline log sweep overlapped compilation.
+At the end of the second baseline browser sweep, host CPU pressure averaged
+13.48% over 60 seconds. Phone log-route LCP was 1,832 ms in the first
+baseline and 3,880 ms in the overlapping run. The candidate sweeps ran
+sequentially after compilation and tests. Improvements against the
+overlapping samples include host variance.
+
+Each table cell shows **baseline median/worst → final median/worst**.
+Times are milliseconds except CLS. Live values summarize the maximum of
+the three update windows in each run. Load tracing and the long-task
+observer measure different windows. An observer reading of zero means
+no observed task of at least 50 ms. The first plot value is the trace
+task containing the first Recharts mount. The Chart and Logs routes
+below are the `svc002` detail and log views. The board fixture has 40 tiles.
+
+| Route | Profile | LCP | Load trace | Load observer | Live | INP | CLS | First plot |
+|---|---|---|---|---|---|---|---|---|
+| `/app/containers` | phone | 1808/2392 → 2108/2636 | 243.6/319 → 237.85/311.8 | 254.5/318 → 287.5/370 | 31.8/32 → 35.05/37.4 | 120/120 → 116/120 | 0.0087/0.0087 → 0.0087/0.0087 | — → — |
+| `/app/containers` | desktop | 468/480 → 636/660 | 113.85/139.5 → 62/63.9 | 98/108 → 61.5/64 | 70.3/77 → 62.45/70.1 | 208/288 → 128/136 | 0.0429/0.0429 → 0.01775/0.0178 | — → — |
+| `/app/containers/svc002` | phone | 1714/1904 → 1388/1408 | 369.9/396.6 → 297.55/316.3 | 381/396 → 297/316 | 24.7/34.2 → 15.4/15.6 | 156/160 → 48/48 | 0.002/0.002 → 0.002/0.002 | 369.9/396.6 → 297.55/316.3 |
+| `/app/containers/svc002` | desktop | 550/568 → 660/684 | 103.45/104.1 → 67.5/70.6 | 103/104 → 67/70 | 14.9/16.1 → 11.15/15.1 | 32/40 → 16/16 | 0.01565/0.0294 → 0.00255/0.0026 | 103.45/104.1 → 67.5/70.6 |
+| `/app/overview` | phone | 1566/1604 → 1484/1508 | 140.4/161 → 124.2/128.6 | 180/180 → 188/192 | 46.45/53 → 26.35/30.6 | 136/136 → 144/152 | 0.0088/0.0088 → 0.0088/0.0088 | — → — |
+| `/app/overview` | desktop | 658/716 → 714/744 | 64.6/86.7 → 37.95/46.3 | 68.5/86 → 82.5/100 | 23.55/30.8 → 16.15/20.9 | 100/120 → 76/80 | 0.04655/0.0653 → 0.0028/0.0028 | 86.7/86.7 → — |
+| `/app/history` | phone | 1142/1352 → 1152/1224 | 433.25/525.5 → 289.05/304.4 | 433/526 → 288.5/304 | 154.2/192.4 → 107.7/118.2 | 316/376 → 204/240 | 0.0077/0.0077 → 0.0059/0.0059 | 433.25/525.5 → 289.05/304.4 |
+| `/app/history` | desktop | 462/528 → 594/608 | 89.75/101.5 → 56.65/57 | 89.5/101 → 56.5/57 | 66.35/66.9 → 51.35/54.5 | 36/40 → 28/32 | 0.0351/0.0351 → 0.0044/0.0044 | 89.75/101.5 → 56.65/57 |
+| `/app/host` | phone | 1294/1328 → 1322/1324 | 152.85/181.7 → 135.8/136.5 | 195.5/210 → 171.5/184 | 23/24.9 → 19.4/20.8 | 64/64 → 68/72 | 0.00205/0.0021 → 0.002/0.002 | — → — |
+| `/app/host` | desktop | 622/740 → 672/696 | 43.35/53.4 → 40.65/46.5 | 60/70 → 29.5/59 | 17.3/17.8 → 16.65/17.8 | 48/56 → 52/56 | 0.0001/0.0001 → 0.0132/0.0237 | — → — |
+| `/app/boards/<id>` | phone | 1920/2092 → 1570/1600 | 119/134.1 → 98.25/107.6 | 281.5/292 → 187/200 | 45.5/45.5 → 35.05/43.5 | 108/144 → 64/64 | 0.0565/0.0575 → 0.0575/0.0575 | — → — |
+| `/app/boards/<id>` | desktop | 778/944 → 734/784 | 46.6/58.7 → 52.95/63 | 79/93 → 76.5/79 | 24.65/32.6 → 14.9/15.9 | 124/160 → 76/80 | 0.028/0.028 → 0.0025/0.0025 | — → — |
+| `/app/containers/svc002/logs` | phone | 2856/3880 → 1750/1756 | 268.5/473.3 → 135/150.8 | 349.5/470 → 192.5/194 | 74.1/114.1 → 31.05/33.2 | 216/312 → 116/120 | 0.0075/0.0118 → 0.0323/0.0366 | — → — |
+| `/app/containers/svc002/logs` | desktop | 958/1232 → 754/760 | 65.85/72.1 → 41.9/48.8 | 83.5/113 → 0/0 | 31.6/37.7 → 34.8/36.4 | 112/136 → 92/96 | 0.0387/0.0387 → 0.0124/0.0124 | — → — |
+| `/app/settings/general` | phone | 1984/2600 → 1352/1360 | 127.9/139.5 → 95.1/100.7 | 346/462 → 218/228 | 39.55/41.8 → 32.95/33.3 | 76/80 → 64/64 | 0.0057/0.0057 → 0.002/0.002 | — → — |
+| `/app/settings/general` | desktop | 570/604 → 694/780 | 48.95/57.1 → 28.85/34.1 | 63/71 → 62/63 | 19.1/25.1 → 15.9/16.5 | 52/56 → 40/48 | 0.1032/0.1032 → 0.00255/0.0026 | — → — |
+
+The final LCP worst case exceeded its cap for every route/profile pair.
+Phone History met the cap in one run at 1,080 ms and missed in the other
+at 1,224 ms. Desktop and phone table LCP worsened in the final comparison.
+In the slowest phone table load, the session response finished at 195 ms,
+the bootstrap request started at 1,166 ms and FCP was 1,508 ms. The
+session and bootstrap transfers took 11 ms and 12 ms respectively. The
+timing gap leaves startup and rendering on the critical path even with
+early network reads.
+
+The phone table load cap still fails at 311.8 ms by tracing and 370 ms by
+the observer. The intermediate startup sweep passed at 172.5 ms and
+190 ms respectively. The final phone container and History first mounts
+reached 316.3 ms and 304.4 ms. The Settings phone observer peaked at
+228 ms. The desktop table and both History live profiles still exceed
+50 ms. The final peaks were 70.1 ms for the desktop table, 118.2 ms for
+phone History and 54.5 ms for desktop History. Overview now passes in
+both profiles. Both container chart profiles passed scripted INP. The
+phone History click reached 240 ms with 143.2 ms of input delay and
+42.1 ms of event processing. The final worst CLS was 0.0575.
+
+The retained startup change avoids suspending on an already resolved
+route and removes the font-warming render. The chart grid reserves space
+before importing Recharts, and plot mounting stays viewport-driven. The
+drag overlay updates independently of the chart and tooltips reuse
+formatters. The intermediate phone chart INP was 40/40 ms and its first
+mount was 320.4/327.2 ms. The intermediate desktop table LCP was
+650/664 ms against 468/480 ms at baseline.
+
+The retained live change reuses structurally shared container rows and
+snapshots and confines Overview stats renders to the resource panels.
+The desktop table live median/worst was 62.85/66.2 ms after the startup
+change, 57.65/59.4 ms in the batch trial and 62.45/70.1 ms in the final
+sweep. The generic transition on successful refetches was reversed.
+With it, phone History live work moved only from 110.65/116.2 ms to
+110.5/112.1 ms while INP rose from 136/192 ms to 192/208 ms.
+The final phone History INP still exceeds the cap.
+
+The retained log change skips a full-ring sort for ordered batches,
+combines filtering and counting and avoids fitting the pane on
+content-only resizes. The 128-line frame cap and the DOM window
+continue to bound the burst. The batch trial observed no task of
+50 ms or longer across the four profiles.
+
+| Bundle gate | Baseline B | Final B | Final headroom B |
+|---|---:|---:|---:|
+| Whole dist raw (1,350,000) | 1,349,132 | 1,346,772 | 3,228 |
+| Whole dist gzip (450,000) | 438,069 | 437,641 | 12,359 |
+| First route gzip (180,000) | 144,646 | 144,667 | 35,333 |
+| Largest capped lazy chunk gzip (60,000) | 54,813 | 54,814 | 5,186 |
+
+The final web check, 152 web tests, build, size check, Rust fmt, clippy
+and 500 Rust tests passed.
+
+Each log profile has one observation per build, so its median and worst
+are the same. The final log sweep completed all four profiles with zero
+console errors or CSP violations.
+
+| Log profile | Single pane max ms | Four panes max ms | ≤100 ms |
+|---|---:|---:|---|
+| 1440-dark | 0 → 0 | 0 → 0 | Pass |
+| 1440-light | 0 → 0 | 0 → 0 | Pass |
+| 390-dark | 54 → 0 | 60 → 0 | Pass |
+| 390-light | 0 → 0 | 117 → 53 | Pass |
+
+Browser regressions used fresh fixtures on port 3397. Boards passed 107
+checks, including 1440 light and 390 dark. The read-page sweep passed at
+1440 light and 390 dark, checking the History SVG and drag-to-zoom and
+revealing the container Metrics grid. The initial read-page replay
+stopped at an obsolete SVG-treemap selector in both profiles. The
+corrected check uses the linked treemap tiles and restores the hidden
+tab fixture before continuing. Guided setup passed 35 checks per
+requested profile. The final log sweep above also served as the Logs
+regression check. The Board and History captures were inspected at both
+requested profiles.
+
+#### Second browser budget pass
+
+The final build ran two sweeps on port 3396 with the same release profile,
+150-container fixture, route order, cold browser caches, 1440×900 desktop at
+1× CPU and 390×844 touch phone at 4×. The readiness selectors, three live
+windows and input scripts stayed the same. All 32 visits reached readiness.
+One fresh four-profile Logs sweep followed. Compilation and automated tests
+finished before measuring. Host CPU pressure averaged 9.56% over the minute
+before sweep one and 3.05% before sweep two, so some run-to-run variance
+remains. The `perf.md` tables of the `entry`,
+`routes-safe` and `final` sweeps, the final log results and the pass report
+are in [react-port-raw/finish-m5b2/](react-port-raw/finish-m5b2/); the raw
+`perf.json` files, build sizes and host pressure were not retained.
+The directories `entry`, `routes-safe` and `final` contain the timed sweeps.
+
+LCP across routes is the median and worst of each sweep's slowest route.
+Live values use the largest task in the three windows of each sweep.
+Pass/fail uses the worse sample. Times are in milliseconds.
+
+| Budget | Cap | Pass 1 median/worst | Pass 2 median/worst | Result |
+|---|---:|---:|---:|---|
+| Desktop LCP across routes | 400 | 782/784 | 668/696 | Fail |
+| Phone LCP across routes | 1,200 | 2,190/2,636 | 1,756/1,772 | Fail |
+| Phone table LCP | 1,200 | 2,108/2,636 | 1,084/1,188 | Pass |
+| Phone table load trace | 200 | 237.85/311.8 | 147/155.7 | Pass |
+| Phone table load observer | 200 | 287.5/370 | 217/233 | Fail |
+| Phone first container plot | 200 | 297.55/316.3 | 285.5/295.8 | Fail |
+| Phone first History plot | 200 | 289.05/304.4 | 251.45/255.8 | Fail |
+| Phone Settings load observer | 200 | 218/228 | 219/230 | Fail |
+| Desktop table live | 50 | 62.45/70.1 | 56.45/58.4 | Fail |
+| Phone History live | 50 | 107.7/118.2 | 51.35/54.5 | Fail |
+| Desktop History live | 50 | 51.35/54.5 | 25.2/29.2 | Pass |
+| Phone History INP | 200 | 204/240 | 72/112 | Pass |
+| CLS across routes | 0.1 | 0.0575/0.0575 | 0.0575/0.0575 | Pass |
+
+The early-read entry alone moved the phone table bootstrap start to
+607–647 ms, from up to 1,166 ms in pass 1. Its phone table LCP was
+1,502/1,512 ms and its load trace was 160/161.1 ms. The all-route desktop
+LCP was 792/816 ms. The final build adds same-origin `Link` preloads for
+authenticated dashboard requests, with the existing API authorization
+and D5 session/CSRF flow. The phone table bootstrap started at 53–74 ms,
+before the session at 70–104 ms. Bootstrap completed at 64–88 ms and the
+phone table reached LCP at 980–1,188 ms. Dashboard responses with these hints
+vary by cookie and retain the document CSP.
+
+The active page starts early and the direct-entry placeholder is replaced
+when its module resolves. Link hover and focus prime subsequent routes.
+Sign-in and route styles load separately from the shell. The first route
+split hit the 30 s readiness timeout on the phone table and container
+chart because a grouped chunk pulled React into the entry's initialization
+cycle. The one completed desktop table visit in that run was 408 ms LCP.
+Removing the runtime grouping fixed that cycle. With automatic icon
+splitting, all four Settings visits still timed out at 30 s with React
+error 130. Among the other completed visits, desktop LCP was 660/680 ms,
+phone LCP was 1,904/2,100 ms and phone History INP was 192/200 ms. The
+icon split was reversed. Both final Settings profiles reached readiness
+on both sweeps. The source module breakdown from the trial put React DOM
+first in the entry chunk, followed by SDK utilities and the shell.
+
+Plots now prepare tick labels before mount and defer tooltips and event
+decorations to a later frame. The existing pixel-width downsampling stays
+in place. History applies refreshes after active input settles and feeds
+updated plots one per frame. The worst History input delay fell from
+143.2 ms to 96.6 ms. The table reuses completed section renders, shares one
+resource subscription per visible row, skips live sort snapshots for static
+sorts, compares stable row fields directly and formats each resource value
+with one decimal conversion. Desktop table cold-load tracing increased
+from 62/63.9 to 108.4/108.7 ms, while its live maximum fell by 11.7 ms. The
+final sweeps tested the preload, chart and table changes together, so their
+overall gains cannot be assigned to a single change.
+
+A larger combined build was rejected by the size gate at 1,350,691 B raw
+and 446,421 B gzip. The retained build fits the existing limits.
+
+| Bundle gate | Pass 1 B | Pass 2 B | Pass 2 headroom B |
+|---|---:|---:|---:|
+| Whole dist raw (1,350,000) | 1,346,772 | 1,349,605 | 395 |
+| Whole dist gzip (450,000) | 437,641 | 444,293 | 5,707 |
+| First route gzip (180,000) | 144,667 | 136,716 | 43,284 |
+| Largest capped lazy chunk gzip (60,000) | 54,814 | 54,812 | 5,188 |
+
+The slowest LCP route in both sweeps was container Logs on both profiles.
+In the slower phone visit, the log picker was downloaded by 68 ms and
+the shell painted at 716 ms. The log heading painted at 1,424 ms and the
+visible summary was the final LCP at 1,772 ms. On desktop the picker
+finished by 78 ms, FCP was 296 ms and a visible log line was LCP at 696 ms.
+Further LCP reductions need to shorten the first render of the shell,
+route and log pane. The data transfers alone are too short to close either
+LCP gap. The same client could do less work before those elements paint.
+Server-rendering them would change the binding architecture.
+
+A supplemental visit recorded named renderer events with extra CDP
+categories. Its timings diagnose the remaining work. The budget table
+uses the two standard sweeps. The phone Logs profile attributed 149.5 ms
+to a shell-bundle callback and 126.2 ms to a later task that included a
+log-pane frame callback, layout and paint.
+
+- The phone table and Settings observer peaks are startup tasks. The
+  supplemental observer saw 217 ms starting at 350 ms for the table
+  and 215 ms starting at 271 ms for Settings. Bootstrap and the first
+  data reads had finished by 82 ms and 59 ms respectively. For the phone
+  table the longest traced load work included 52.7 ms in layout, 30.4 ms
+  in style updates and 18.3 ms in paint. The longest Settings trace task
+  spent 95.2 of 127.4 ms in one app-script call. The observer and trace
+  record different task boundaries. Hitting both limits calls for smaller
+  table layout batches and less synchronous Settings startup work.
+- First CPU plot mounts coincided with the largest phone trace tasks.
+  In the supplemental visit, an app-script call accounted for 359.4 of
+  360.1 ms on the container plot and 338.2 of 340.6 ms on History. Named
+  style work inside those calls was at most 15.5 ms. The next plotted
+  charts took 112.4 and 106.2 ms. Splitting work inside the first React
+  and Recharts commit is a better candidate than further thinning the
+  plotted points at the tested width.
+- The named parts of a 61.9 ms desktop table live task included 9.8 ms
+  of paint, 5 ms of layout, 3.2 ms of style work and an 8 ms animation
+  frame callback. The trace leaves part of that task unattributed. The
+  listed frame costs point to work in the browser after the row comparison.
+  Less cell redraw and layout work is needed to take the remaining time
+  out of the update window.
+- The phone History live profiler saw 52.8 ms in a frame callback inside
+  its longest 70.1 ms task, including calls in the app and chart vendor
+  dependencies. The remaining miss needs a smaller per-plot update, even
+  with plots already staged across frames.
+
+The traces identify client work that can still be shortened within the
+current architecture. They give no evidence that larger caps or reduced
+features are required.
+
+The largest recorded INP across routes was 152/168 ms. The desktop
+container chart returned no eligible event timing in either sweep, so
+there is no desktop chart INP conclusion. The separate drag-to-zoom
+regression checks the interaction itself.
+
+The web check, 152 web tests, build, size check, Rust fmt, clippy and
+501 Rust tests passed.
+
+The Logs functional and burst checks passed in all four profiles. The
+single/four-pane maximum tasks were 0/0 ms at 1440 dark and 1440 light,
+61/0 ms at 390 dark, and 53/0 ms at 390 light. The previous four profiles
+were 0/0, 0/0, 0/0, and 0/53 ms in the same order. Zero means the observer
+recorded no task of at least 50 ms. There were no console errors or CSP
+violations.
+
+The board check passed 107 assertions. The read-page checks, including
+History SVG and drag-to-zoom, passed at 1440 light and 390 dark. Guided
+setup passed 35 checks at each width and theme. Representative Board and
+History screenshots were inspected at both sizes.
+
+The initial CSP sweep completed seven route visits before timing out
+on below-viewport chart placeholders on desktop Host and phone Overview.
+The runner now reveals a pending chart grid before waiting for it and
+sets 1440 light and 390 dark explicitly. The first corrected attempt
+terminated during desktop after 39 visits. The fresh retry completed all
+80 visits with zero failed profiles and zero CSP violations. The timed
+performance probe kept its original viewport and interaction behavior.
 
 ## Browser checks and logs
 
@@ -391,34 +1053,51 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    (`a5c0de5`, `ef54589`); accepted by the owner on 2026-11-20. Original caps
    are missed. Chart chunks are split and individually capped at 60 KB; their
    aggregate named payload is 115,235 B gzip, above a combined 110 KB allowance.
-2. Image **13.3 MB >13 MB** after old UI removal. Lower idle memory does not
-   cancel the image miss. Lifetime peaks including login exceed **20 MiB**.
-3. Browser LCP, load-task/live-task, one INP and log-burst budgets are missed,
-   as recorded above; they are not rounded into passes. Full chart first mount
-   remains a long task. CLS passes these two runs.
+2. The **13.3 MB** M5 image exceeded the original 13 MB after-removal
+   budget. The owner accepted it and set a 13.5 MB gate. Since M5 only the
+   first sign-in of an account with a legacy 19 MiB hash exceeds **20 MiB**
+   (about 20.5 MiB); new hashes use 7 MiB, and legacy verification is refused
+   under a memory limit below 36 MiB.
+3. The final M5 browser runs still miss LCP, phone load tasks, desktop table
+   and History live tasks, and phone History INP. Recharts loads near the
+   viewport, and the phone first plot is still a long task. Container chart
+   INP, log bursts and CLS pass. See the finish-hobnail browser results above.
 4. `/` returns **404 with a link to `/app`**, following the owner's no-redirect
    rule. No old-URL compatibility or RH_UI=classic exists; `rust-only` retains
    the old UI. This differs from the earlier plan's redirect/fallback wording.
 5. Board widget tiles render **structured widget bodies**, not server HTML;
-   existing widget IDs and generic HTTP integration tiles are supported, not
-   an unbuilt provider/widget catalog (`98707d5`, board/API code).
+   existing widget IDs and generic HTTP integration tiles were supported at
+   this point (`98707d5`, board/API code). Status: the provider catalog and
+   provider widgets were built in finish-hobnail M3 and M4.
 6. The scoped accounts model permits container visibility only through granted
    boards; host-wide pages are refused. Scoped Admins edit granted boards and
    integrations but cannot create/delete entities or alter global Settings.
 7. Databases with a legacy shared password set an **upgrade lock**; their old
    hash/sessions are discarded and host `set-password [username]` recovery is
    required (`b6686f8`). Fresh installs use browser owner setup, not that CLI.
-8. Session cookies have **no Secure flag** with the plain-HTTP default. One
-   shared argon2 lock bounds allocations and returns **429** under concurrent
-   credential operations. Peer-IP limits can group users behind one proxy.
+8. M1 adds **Secure** to session cookies when a configured trusted proxy
+   reports HTTPS. Plain HTTP keeps working. For the per-IP login limit, the
+   same trust list enables rightmost-untrusted `X-Forwarded-For` handling.
+   A single Argon2id permit bounds the hashing workspace to one at a time
+   (7 MiB for current hashes since M5; 19 MiB only for a legacy hash). Up to eight
+   requests wait asynchronously for up to five seconds, enough to absorb
+   short bursts while bounding retained credential data and request latency.
+   The active operation runs on a blocking worker. Queue overflow and
+   timeouts return 429 with `Retry-After: 1`; the IP and global back-offs
+   are checked again when a queued login reaches the worker.
 9. Credentials are bound to **origin, not path**. The database stores plaintext
    tokens with their binding; no token is returned. Tests stop at **any redirect**
-   rather than following even same-origin redirects. Public roots only: no
-   self-signed certificates or fingerprint pinning (D21 step b not built).
-10. **No providers** were selected or implemented (D19); guided onboarding beyond
-    owner password/account creation (appearance/discover/configure/review) is
-    not built. Boards/drafts and generic connection entities are not acceptance
-    of those product outcomes. Integration icons remain opt-in dashboard-icons.
+   rather than following even same-origin redirects. Public roots only at
+   this point. Status: D21 step (b), a pinned leaf fingerprint per
+   integration confirmed on first use, was built in finish-hobnail M3.
+10. M2 adds the five-step owner setup wizard, resumable SQLite drafts, and
+    an idempotent commit that opens a first board containing the owner's
+    selections. Empty boards offer Add and Discover. The first-board tour is
+    skippable, saved per account, and replayable. Service-specific providers
+    and the provider catalog were deferred (D19) at that point; status: D19 is
+    decided and all 37 ticked lines of `integrations-candidates.md` were built
+    in finish-hobnail M3 and M4. Integration icons remain opt-in
+    dashboard-icons.
 11. UI SDK is installed under the owner's explicit D2 age exception, but its
     project-local skill was **not installed**: skills CLI 1.9.0, published
     2026-11-16, was younger than seven days (`web/AGENTS.md`). Other npm packages
@@ -428,22 +1107,50 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 13. M5 added the requested API reference drift test and its Docker context input.
     The memory asset graph required two isolated script fixes; the original
     run and the stopped intermediate run are not passed off as full workloads.
-14. Legacy TOML collection arrows still save one revision per click. Board edit
-    mode uses explicit Save/Cancel and private drafts; it does not remove every
-    instance of SET-42. Widgets have no separate last-good result on error.
+14. M2 closes SET-42 for legacy TOML collection arrows with staged moves
+    and explicit Save order and Cancel. One Save writes the complete order
+    in one revision. Widget tiles and manual HTTP integration retests now
+    show retained results with an aged stale badge and the latest error. An
+    initial failure displays only the error, and recovery clears the badge.
 
 ## Budgets still missed
 
-- Image ≤13 MB after removal: 13.3 MB.
-- Original whole-dist ≤1.3 MB raw /400 KB gzip: 1,344,189 /449,533 B.
-- Combined chart payload interpreted as ≤110 KB: 115,235 B; per-chunk gates pass.
-- Container lifetime peak ≤20 MiB, including sign-in; see exact final run bytes
-  above. Separate sign-in burst also exceeds 20 MiB.
-- LCP ≤400/1,200 ms on the failing route/profile rows; phone table load ≤200 ms
-  in run 1; first chart/History mounts also exceed that diagnostic threshold.
-- Live-update ≤50 ms on table and several other routes; INP ≤200 ms on chart
-  phone run 1 (240 ms).
-- Log burst ≤100 ms on phone dark (107 ms).
+Final numbers after the finish-hobnail M7 gate (2026-11-23; details in
+[measurements.md](../measurements.md#finish-hobnail-final-gate-m7-2026-11-23)).
+This list replaces the earlier pass-2 figures, which are kept in the sections
+above as history. The M5 gate's two browser runs (`544fedf`), the previous
+reference, are in
+[react-port-raw/finish-m5-gate-browser/](react-port-raw/finish-m5-gate-browser/);
+the M7 runs are in [react-port-raw/finish-m7/](react-port-raw/finish-m7/).
+
+- **Docker image gate 13.5 MB.** The final image is 13,548,510 B, 48,510 B
+  over (it already failed at `2257256`, before M7). Not fixed: it needs a
+  size reduction in code, not a cap change.
+- Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The final
+  build is 1,349,701 B raw and 444,720 B gzip; the accepted 1.35 MB / 450 KB
+  caps pass with 299 B raw headroom.
+- Preferred lifetime memory under 10 MiB. The full workload peaks at
+  12.4 MiB (12.44 MiB without a limit, 12.39 MiB under 20 MiB), set by the
+  full-history reads; 25 dashboards stay at or under 8.15 MiB. The 20 MiB
+  budget holds, including 15.9 MiB under a connection attack at the
+  48-connection cap.
+- Lifetime memory over 20 MiB: only the first sign-in of a legacy 19 MiB
+  hash (about 20.5 MiB, M5), and it is refused under a memory limit below
+  36 MiB. Fresh-hash workloads stay under 20 MiB.
+- Uncapped cold SQLite database peak under 20 MiB. The M5 cold probe reached
+  187,559,936 B (178.87 MiB), primarily reclaimable file cache (not
+  re-measured).
+- LCP ≤400 ms desktop: 492/496 ms on the containers table and 584/448 ms on
+  History. LCP ≤1,200 ms phone: the table reached 1,456 ms in one of two
+  runs (1,196 ms in the other); phone History passed (980/968 ms). The
+  all-route phone LCP (1,772 ms, container Logs) was not re-measured.
+- Phone load ≤200 ms: History 253.3/343.3 ms by tracing; the table passed by
+  tracing (194/159.5 ms) but its long-task observer read 229/207 ms. Phone
+  Settings (230 ms in pass 2) was not re-measured.
+- Live update ≤50 ms: desktop table 58.6/58.3 ms and phone History
+  62.4/54.2 ms. Phone table and desktop History pass.
+- INP and CLS pass everywhere measured (INP at most 200 ms, CLS at most
+  0.0177).
 
 Passing checks at raised caps do not constitute the owner's acceptance of
 these deviations. [QA outcomes](../qa/QA.md#react-port-outcomes-of-the-deferred-findings)
@@ -451,11 +1158,17 @@ state what actually changed for the fourteen deferred findings.
 
 ## Not verified
 
-Firefox/Safari, aarch64, cold-cache application memory, real screen readers,
-a full visual review of every screenshot, real mobile devices, a 400 kbit/s
-first visit, independently timed in-app route-change budgets, 30/90-day mature
-history sizes, real service providers, certificate pinning, native systemd
-packaging and concurrent-login throughput behind a real reverse proxy.
+Status after finish-hobnail M7: Firefox and WebKit are now covered by the
+emulated three-engine matrix (M6, M7); aarch64 is cross-built and was smoke
+tested under QEMU (M6), but there is no native arm64 production build and no
+run on arm64 hardware; certificate pinning is built and tested against fake
+TLS servers (M3). Still not verified: cold-cache application memory, real
+screen readers, a full visual review of every screenshot, real mobile devices
+(iPhone Safari, Android), a 400 kbit/s first visit, independently timed
+in-app route-change budgets, 30/90-day mature history sizes, real service
+providers (none of the 35 was checked against a real instance), native
+systemd packaging and concurrent-login throughput behind a real reverse
+proxy.
 The measurements use short-lived/fake-container data for browser/JSON tests;
 they are not long-running production guarantees. All throwaway containers and
 fresh data directories created here were removed after completion.

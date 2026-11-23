@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UnixStream;
 
 use crate::http::client::{read_body, request_on_io};
-use crate::model::{Container, ContainerStats, PortMapping, Snapshot, StatsMap};
+use crate::model::{Container, ContainerStats, NetworkAddr, PortMapping, Snapshot, StatsMap};
 use crate::state::AppState;
 
 /// Largest container list we accept (35 containers is ~100 KiB).
@@ -103,6 +103,20 @@ struct RawContainer {
     /// Present on API >= 1.52 (`{"Status":"healthy"|"none",..}`).
     #[serde(default)]
     health: Option<RawHealth>,
+    #[serde(default)]
+    network_settings: Option<RawNetworkSettings>,
+}
+
+#[derive(Deserialize)]
+struct RawNetworkSettings {
+    #[serde(rename = "Networks", default)]
+    networks: Option<BTreeMap<String, RawEndpoint>>,
+}
+
+#[derive(Deserialize)]
+struct RawEndpoint {
+    #[serde(rename = "IPAddress", default)]
+    ip: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +174,17 @@ fn convert(r: RawContainer) -> Container {
         labels,
         created: r.created,
         die_times: Vec::new(),
+        networks: r
+            .network_settings
+            .and_then(|n| n.networks)
+            .unwrap_or_default()
+            .into_iter()
+            .take(16)
+            .map(|(name, endpoint)| NetworkAddr {
+                name,
+                ip: endpoint.ip.unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
@@ -1078,6 +1103,28 @@ mod tests {
         assert_eq!(h.ports.len(), 1);
         assert_eq!(h.ports[0].host_ip, "0.0.0.0");
         assert_eq!(h.project, None);
+    }
+
+    #[test]
+    fn parses_network_addresses() {
+        let body = br#"[{"Id":"x","Names":["/sonarr"],"State":"running","Status":"Up",
+          "NetworkSettings":{"Networks":{"media":{"IPAddress":"172.20.0.5"},"host":{"IPAddress":""}}}}]"#;
+        let cs = parse_containers(body).unwrap();
+        assert_eq!(
+            cs[0].networks,
+            [
+                NetworkAddr {
+                    name: "host".into(),
+                    ip: String::new()
+                },
+                NetworkAddr {
+                    name: "media".into(),
+                    ip: "172.20.0.5".into()
+                }
+            ]
+        );
+        let cs = parse_containers(SAMPLE.as_bytes()).unwrap();
+        assert!(by_name(&cs, "homepage").networks.is_empty());
     }
 
     #[test]

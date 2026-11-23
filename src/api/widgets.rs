@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use hyper::{Response, StatusCode};
 use serde::Serialize;
 
 use crate::http::server::Body;
 use crate::state::AppState;
-use crate::widgets::{shorten, WidgetBody, WidgetConfig};
+use crate::widgets::{shorten, StructuredBody, WidgetBody, WidgetConfig};
 use serde_json::Value;
 
 #[derive(Serialize)]
@@ -15,11 +17,45 @@ pub(super) struct WidgetView {
     link: Option<String>,
     status: &'static str,
     fetched_at: Option<u64>,
+    last_good_at: Option<u64>,
     duration_ms: Option<u64>,
     body: Option<WidgetBody>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    structured: Option<Arc<StructuredBody>>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     values: std::collections::BTreeMap<String, serde_json::Value>,
     error: Option<String>,
+    /// The smallest board tile the widget reads well at (provider widgets
+    /// that declare one); the canvas editor will not resize below it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    min_size: Option<crate::providers::GridSize>,
+}
+
+impl WidgetView {
+    pub(super) fn fit_board_budget(&mut self, remaining: &mut usize) {
+        if self.body.is_none() && self.structured.is_none() && self.values.is_empty() {
+            return;
+        }
+        let mut size = super::boards::JsonSize::default();
+        if serde_json::to_writer(&mut size, &self).is_ok() && size.0 <= *remaining {
+            *remaining -= size.0;
+        } else {
+            self.omit_board_body();
+        }
+    }
+
+    pub(super) fn omit_board_body(&mut self) {
+        if self.body.is_none() && self.structured.is_none() && self.values.is_empty() {
+            return;
+        }
+        self.body = None;
+        self.structured = None;
+        self.values.clear();
+        self.status = "error";
+        self.error = Some("Widget data unavailable within the board response limit.".into());
+    }
 }
 
 pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
@@ -27,9 +63,11 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
     let enabled = config.is_enabled();
     let output = cache.get(&config.id).filter(|_| enabled);
     let error = output.and_then(|o| o.error.as_deref());
+    let last_good_at = output.and_then(|o| o.stale_since);
     let status = match (enabled, output) {
         (false, _) => "disabled",
         (_, None) => "waiting",
+        (_, Some(_)) if last_good_at.is_some() => "stale",
         (_, Some(_)) if error.is_some() => "error",
         (_, Some(o)) => match o.values.get("_ok").and_then(serde_json::Value::as_bool) {
             Some(true) => "ok",
@@ -44,11 +82,14 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
         link: config.link.clone().filter(|l| crate::widgets::safe_link(l)),
         status,
         fetched_at: output.map(|o| o.fetched_at),
+        last_good_at,
         duration_ms: output.map(|o| o.duration_ms),
         body: output
-            .filter(|_| error.is_none())
+            .filter(|_| error.is_none() || last_good_at.is_some())
             .map(|o| o.display.clone()),
+        structured: None,
         values: output
+            .filter(|_| error.is_none() || last_good_at.is_some())
             .into_iter()
             .flat_map(|o| {
                 config.fields.keys().filter_map(|key| {
@@ -59,6 +100,56 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
             })
             .collect(),
         error: error.map(crate::widgets::plain_error),
+        min_size: None,
+    }
+}
+
+/// The `error` of a provider widget kept stale while it refetches after its
+/// integration's inputs changed.
+pub(crate) const REFRESHING: &str = "Refreshing";
+
+pub(super) fn provider_view(
+    state: &AppState,
+    id: &str,
+    cache_key: &str,
+    title: String,
+    icon: Option<String>,
+    enabled: bool,
+    min_size: Option<crate::providers::GridSize>,
+) -> WidgetView {
+    let cache = state.widgets.lock().unwrap();
+    let output = cache.get(cache_key).filter(|_| enabled);
+    let last_good_at = output.and_then(|out| out.stale_since);
+    // Stale with no error: the inputs changed and the refetch is pending.
+    // The client shows `error` beside the stale badge; nothing failed.
+    let error = output
+        .and_then(|out| out.error.clone())
+        .or_else(|| last_good_at.map(|_| REFRESHING.to_owned()));
+    let status = if !enabled {
+        "disabled"
+    } else if last_good_at.is_some() {
+        "stale"
+    } else if error.is_some() {
+        "error"
+    } else if output.is_some() {
+        "ready"
+    } else {
+        "waiting"
+    };
+    WidgetView {
+        id: id.into(),
+        title,
+        icon,
+        link: None,
+        status,
+        last_good_at,
+        fetched_at: output.map(|out| out.fetched_at),
+        duration_ms: output.map(|out| out.duration_ms),
+        structured: output.and_then(|out| out.structured.clone()),
+        body: None,
+        values: Default::default(),
+        error,
+        min_size,
     }
 }
 
@@ -94,5 +185,44 @@ mod tests {
             let bounded = bounded_value(&value);
             assert!(bounded.as_str().unwrap().chars().count() <= 300);
         }
+    }
+
+    #[test]
+    fn a_rebound_provider_widget_says_refreshing_then_shows_only_the_new_result() {
+        let state = crate::testutil::state_with(vec![], "");
+        let key = "provider-fetch:lan:key";
+        let view = || provider_view(&state, "w", key, "W".into(), None, true, None);
+        let now = std::time::Instant::now();
+        let record = |output: crate::widgets::WidgetOutput| {
+            let mut cache = state.widgets.lock().unwrap();
+            let attempt = cache.begin_provider(key, now, false);
+            assert!(cache.record(key, attempt, now, output));
+        };
+        record(crate::widgets::WidgetOutput {
+            fetched_at: 1_000,
+            structured: Some(std::sync::Arc::new(crate::widgets::StructuredBody::Stat {
+                value: "old origin".into(),
+            })),
+            ..Default::default()
+        });
+        state
+            .widgets
+            .lock()
+            .unwrap()
+            .invalidate_providers("provider-fetch:lan:");
+        let pending = view();
+        assert_eq!(pending.status, "stale");
+        assert_eq!(pending.error.as_deref(), Some(REFRESHING), "not a failure");
+        assert!(pending.structured.is_some());
+        record(crate::widgets::WidgetOutput {
+            fetched_at: 1_001,
+            error: Some("HTTP 503".into()),
+            ..Default::default()
+        });
+        let failed = view();
+        assert_eq!(failed.status, "error");
+        assert_eq!(failed.error.as_deref(), Some("HTTP 503"));
+        assert!(failed.structured.is_none(), "the old origin's data is gone");
+        assert_eq!(failed.last_good_at, None);
     }
 }

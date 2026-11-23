@@ -266,22 +266,17 @@ export function select(groups: readonly GroupRow[], v: View, now: number, stat?:
 export function keepOrder(next: Section[], prev: readonly string[]): Section[] {
   if (prev.length === 0) return next;
   const pos = new Map(prev.map((k, i) => [k, i]));
-  const at = (k: string, i: number) => pos.get(k) ?? prev.length + i;
-  const sections = next.map((s, i) => ({
-    s: {
-      group: s.group,
-      rows: s.rows
-        .map((r, j) => ({ r, k: at(`r:${r.name}`, j) }))
-        .toSorted((a, b) => a.k - b.k)
-        .map((x) => x.r),
-    },
-    k: at(`g:${s.group?.name ?? ""}`, i),
+  const at = (key: string) => pos.get(key) ?? prev.length;
+  const groupAt = (section: Section) => at(`g:${section.group?.name ?? ""}`);
+  return next.toSorted((a, b) => groupAt(a) - groupAt(b)).map(({ group, rows }) => ({
+    group,
+    rows: rows.toSorted((a, b) => at(`r:${a.name}`) - at(`r:${b.name}`)),
   }));
-  return sections.toSorted((a, b) => a.k - b.k).map((x) => x.s);
 }
 
-/** The order keys of `sections`, for `keepOrder`. */
-export function orderOf(sections: readonly Section[]): string[] {
+/** Pin the last rendered order unless the reader changed the view. */
+export function orderForPin(key: string, fresh: Section[], committed: { key: string; sections: Section[] } | null): string[] {
+  const sections = committed?.key === key ? committed.sections : fresh;
   const out: string[] = [];
   for (const s of sections) {
     out.push(`g:${s.group?.name ?? ""}`);

@@ -180,6 +180,11 @@ pub fn split_timestamp(line: &[u8]) -> (Option<i64>, &[u8]) {
 
 /// `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)` to unix nanoseconds.
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
+    let (secs, frac) = parse_rfc3339_parts(s)?;
+    secs.checked_mul(1_000_000_000)?.checked_add(frac)
+}
+
+pub(crate) fn parse_rfc3339_parts(s: &str) -> Option<(i64, i64)> {
     let b = s.as_bytes();
     if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') {
         return None;
@@ -231,7 +236,7 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     };
     let days = days_from_civil(y, mo, d);
     let secs = days * 86_400 + h * 3600 + mi * 60 + sec - off;
-    secs.checked_mul(1_000_000_000)?.checked_add(frac)
+    Some((secs, frac))
 }
 
 /// Days since 1970-01-01 (proleptic Gregorian), H. Hinnant's algorithm.

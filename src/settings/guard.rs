@@ -48,7 +48,7 @@ pub const COMMAND_RULE: &str =
     "command widgets can only be added, changed or enabled in the config file on the host";
 
 fn parse_table(text: &str) -> Option<toml::Table> {
-    toml::from_str::<toml::Table>(text).ok()
+    toml_edit::de::from_str::<toml::Table>(text).ok()
 }
 
 fn widgets(t: &toml::Table) -> Vec<&toml::Table> {

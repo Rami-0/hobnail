@@ -6,6 +6,30 @@ import { CSP_LISTENER, input, launch, q, recorder, sleep } from './cdp.mjs';
 import { assertSweepTarget, sweepFixture } from './sweep-fixture.mjs';
 const EXPECTED_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const base = new URL(process.argv[2] || 'http://127.0.0.1:3396');
+const charts = {
+  '/app/containers/svc001?tab=overview': { key: 'cpu', api: '/api/v1/containers/svc001?range=6h' },
+  '/app/containers/svc001?tab=metrics': { key: 'cpu', api: '/api/v1/containers/svc001?range=6h' },
+  '/app/host': { key: 'cpu.user', api: '/api/v1/host/history?range=1h', metrics: 'metrics' },
+  '/app/history': { key: 'cpu', api: '/api/v1/history?range=24h&level=incidents', metrics: 'metrics' },
+};
+
+function hasMarker(event) {
+  return event.kind === 'container.oom' || event.kind.startsWith('alert.fired')
+    || (event.kind === 'container.die' && event.level !== 'info')
+    || (event.kind === 'container.health' && /\bunhealthy\b/.test(event.message));
+}
+
+async function chartFixture(fixture, chart) {
+  const deadline = Date.now() + 35000;
+  do {
+    const result = await fixture.api(chart.api);
+    const points = chart.metrics ? result[chart.metrics].find(metric => metric.key === chart.key)?.points : result.series.cpu;
+    if (points?.length) return (result.series ?? result).markers.some(hasMarker);
+    await sleep(500);
+  } while (Date.now() < deadline);
+  assert.fail(`No samples for ${chart.key} from ${chart.api}`);
+}
+
 if (process.env.ONBOARDING_ONLY === '1') {
   assertSweepTarget(base);
   assert.equal((await fetch(new URL('/api/v1/session',base)).then(r=>r.json())).owner_exists,false,'onboarding sweep needs a fresh instance');
@@ -40,15 +64,29 @@ try {
     await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: CSP_LISTENER });
     await fixture.installCookie(tab);
     await tab.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: inp.touch });
+    const theme = width === 390 ? 'dark' : 'light';
+    await tab.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
     const visit = async (route, selector) => {
       const response = await fetch(new URL(route, base), { headers: { Cookie: fixture.cookie } });
       const csp = response.headers.get('content-security-policy') || '';
       assert.equal(csp,EXPECTED_CSP,'complete document CSP');
+      const chart = charts[route];
+      const markers = chart && await chartFixture(fixture, chart);
       await tab.send('Page.navigate', { url: new URL(route, base).href });
       assert.ok(await tab.until(`!!document.querySelector(${q(selector)})`,15000), route);
+      if (chart) {
+        const figure = `[data-testid="chart-${chart.key}"]`;
+        const placeholder = '.charts:has(.ch-wait)';
+        assert.ok(await tab.until(`!!document.querySelector(${q(figure + ',' + placeholder)})`,15000), `chart grid on ${route}`);
+        await tab.ev(`(document.querySelector(${q(figure)}) ??
+          document.querySelector(${q(placeholder)})).scrollIntoView({block:"start"})`);
+        assert.ok(await tab.until(`!!document.querySelector(${q(figure)})`,15000), `chart on ${route}`);
+        await tab.ev(`document.querySelector(${q(figure)}).scrollIntoView({block:"center"})`);
+        assert.ok(await tab.until(`!!document.querySelector(${q(figure + ' .ch-canvas svg.recharts-surface')})`,20000), `SVG plot on ${route}`);
+        if (markers) assert.ok(await tab.until(`!!document.querySelector(${q(figure + ' .ch-marks button[aria-label]')})`), `marker control on ${route}`);
+      }
       await sleep(500);
-      assert.ok(await tab.until(`!document.querySelector('.ch-wait')`,20000), `all charts finish staging on ${route}`);
-      console.log(`ok ${width} ${route}`); results.push({ width, route, csp });
+      console.log(`ok ${width} ${route}`); results.push({ width, route, csp, plot: chart?.key, markers });
     };
     const open = async (selector, ready) => {
       if (!await inp.box(selector)) return false;

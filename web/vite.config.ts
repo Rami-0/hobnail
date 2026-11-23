@@ -10,7 +10,7 @@
 // `changeOrigin: false` keeps `Host: localhost:5173` and the browser's
 // `Origin`, so the server's Host guard and same-origin write check pass
 // without any dev-only allowance (plan 4.4).
-import { defineConfig, type CSSOptions } from "vite";
+import { defineConfig, type CSSOptions, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 
@@ -49,6 +49,35 @@ const keepSdkSelector = (selector: string) => {
   return slots.length === 0 || slots.some((slot) => sdkParts.has(slot));
 };
 
+// Drop the unused primitives from every :is()/:where() list, nested lists
+// included (a list with a :where() inside it used to be kept whole).
+function pruneSdkLists(selector: string): string {
+  let out = "";
+  let at = 0;
+  for (const list of selector.matchAll(/:(?:is|where)\(/g)) {
+    const open = (list.index ?? 0) + list[0].length;
+    if (open <= at) continue;
+    const parts: string[] = [];
+    let depth = 1;
+    let from = open;
+    let end = open;
+    for (; depth > 0; end++) {
+      const c = selector[end];
+      if (c === undefined) return selector;
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      if ((c === "," && depth === 1) || depth === 0) {
+        parts.push(selector.slice(from, end));
+        from = end + 1;
+      }
+    }
+    const live = parts.map(pruneSdkLists).filter(keepSdkSelector);
+    out += selector.slice(at, list.index) + (live.length ? list[0] + live.join(",") + ")" : ":not(*)");
+    at = end;
+  }
+  return out + selector.slice(at);
+}
+
 type PostcssPlugin = NonNullable<Exclude<CSSOptions["postcss"], string | undefined>["plugins"]>[number];
 
 const sdkStyles: PostcssPlugin = {
@@ -57,12 +86,7 @@ const sdkStyles: PostcssPlugin = {
     const file = root.source?.input.file ?? "";
     if (!file.endsWith("/@ui-sdk/core/dist/web.css")) return;
     root.walkRules((rule) => {
-      const selectors = rule.selectors.filter(keepSdkSelector).map((selector) =>
-        selector.replace(/:(is|where)\(([^()]*)\)/g, (_, kind: string, choices: string) => {
-          const live = choices.split(",").filter(keepSdkSelector);
-          return live.length ? ":" + kind + "(" + live.join(",") + ")" : ":not(*)";
-        }),
-      );
+      const selectors = rule.selectors.filter(keepSdkSelector).map(pruneSdkLists);
       if (selectors.length === 0) rule.remove();
       else if (selectors.join(",") !== rule.selectors.join(",")) rule.selectors = selectors;
     });
@@ -73,6 +97,24 @@ const sdkStyles: PostcssPlugin = {
     root.walkDecls(/^--ui-icon-/, (decl) => {
       if (decl.value.startsWith("url(") && !usedIcons.has(decl.prop)) decl.remove();
     });
+  },
+};
+
+// Vite combines module scripts in the HTML entry. Give early reads an
+// independent graph so they can run as soon as their own imports arrive.
+const entryReads = "src/api/entry-reads.ts";
+const earlyReads: Plugin = {
+  name: "hobnail-entry-reads",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler(_, { bundle }) {
+      const entry = Object.values(bundle ?? {}).find(
+        (file) => file.type === "chunk" && file.isEntry && file.facadeModuleId?.endsWith("/" + entryReads),
+      );
+      if (!entry) throw new Error("Missing entry reads chunk");
+      return [{ tag: "script", attrs: { type: "module", async: true, src: "/" + entry.fileName }, injectTo: "head-prepend" }];
+    },
   },
 };
 
@@ -91,27 +133,25 @@ export default defineConfig(({ command }) => {
   }
   return {
     base: "/",
-    plugins: [react()],
+    plugins: [react(), earlyReads],
     css: { postcss: { plugins: [sdkStyles] } },
     build: {
       outDir: "dist",
       target: "esnext",
-      cssCodeSplit: false,
       modulePreload: { polyfill: false },
       assetsDir: "assets",
       emptyOutDir: true,
       sourcemap: false,
-      // Split the chart implementation itself; its former single lazy chunk
-      // exceeded M2b's 60 KB gzip cap. React and SDK imports keep their normal
-      // interaction boundaries instead of joining a global vendor bundle.
-      rolldownOptions: { output: {
-        strictExecutionOrder: true,
-        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
+      // Keep Recharts' mutually dependent selectors in one lazy chunk.
+      // Keep its dependencies in a separate lazy chunk so a chart vendor
+      // never has to import an initializer from the chart route itself.
+      rolldownOptions: { input: ["index.html", entryReads], output: {
+        chunkFileNames: ({ name }) => /^(?:charts-vendor|RechartsUsage|GuidedSetup|ProviderDialog|SchemaForm)/.test(name) ? "assets/[name]-[hash].js" : "assets/[hash].js",
         codeSplitting: { groups: [
-        { name: "app-runtime", test: /\/src\/app\/(?:settings-tabs|router|paths|prefs|keys|glyphs|theme|fmt)\.tsx?$/, includeDependenciesRecursively: false },
-        { name: "settings-pages", test: /\/src\/routes\/settings\/[^/]+\.tsx$/, includeDependenciesRecursively: false },
+        { name: "settings-pages", test: /\/src\/routes\/settings\/(?!ProviderDialog\.tsx$)[^/]+\.tsx$/, includeDependenciesRecursively: false },
         { name: "icons", test: /node_modules\/lucide-react\/dist\/[^/]+\/icons\//, includeDependenciesRecursively: false },
-        { name: "charts-vendor", test: /node_modules\/recharts\//, maxSize: 450_000, includeDependenciesRecursively: false },
+        { name: "charts-vendor-deps", test: /node_modules\/(?:d3-[^/]+|internmap|clsx|eventemitter3|reselect|redux(?:-thunk)?|react-redux|immer|use-sync-external-store|es-toolkit|decimal\.js-light|victory-vendor|@reduxjs\/toolkit|@standard-schema\/[^/]+)\//, includeDependenciesRecursively: false },
+        { name: "charts-vendor", test: /node_modules\/recharts\//, includeDependenciesRecursively: false },
       ] } } },
       // Inline nothing as data: URLs; every asset is a hashed file the
       // server caches for a year.

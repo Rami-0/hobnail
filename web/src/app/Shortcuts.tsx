@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 
 import { useBootstrap } from "../live/index.ts";
+import { tourHref } from "../boards/tour.ts";
 import { Dialog } from "../ui/Dialog.tsx";
 import { pageFilter } from "./page-filter.ts";
 import { LOG_KEYS, modName } from "./keys.ts";
@@ -24,12 +25,13 @@ function Row({ k, children }: { k: string[]; children: ReactNode }) {
 export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => void }) {
   const boot = useBootstrap();
   const scoped = boot?.scoped;
+  const tour = tourHref(boot);
   const mod = modName(navigator.platform || navigator.userAgent);
   const f = open ? pageFilter() : null;
   return (
     <Dialog open={open} title="Keyboard shortcuts" onClose={onClose} testId="shortcuts" className="keys">
       <dl className="keys-l">
-        {!scoped && <Row k={["g", "o"]}>Overview</Row>}
+        {!scoped && <Row k={["g", "o"]}>Home</Row>}
         <Row k={["g", "c"]}>Containers</Row>
         <Row k={["g", "l"]}>Logs</Row>
         {!scoped && <>
@@ -62,6 +64,7 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
         <Row k={["?"]}>This list</Row>
         <Row k={["Esc"]}>Close</Row>
       </dl>
+      {tour && <a className="btn btn-outline" href={tour} onClick={onClose}>Replay board tour</a>}
     </Dialog>
   );
 }

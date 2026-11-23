@@ -10,6 +10,8 @@
 
 /* ---- sidebar ---- */
 .side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;min-width:0;background:var(--bg-side);border-right:1px solid var(--line);z-index:var(--z-side);will-change:transform}
+/* short windows (200 % zoom): the sidebar scrolls so its foot stays reachable */
+@media (max-height:520px){.side{overflow-y:auto}}
 /* (will-change: the sidebar is its own layer, so a live number elsewhere does not repaint the 150-item tree) */
 .side-head{display:flex;align-items:center;gap:8px;height:var(--top-h);padding:0 var(--s-3) 0 var(--s-4);border-bottom:1px solid var(--line);flex:none}
 .brand{display:flex;align-items:center;gap:10px;min-width:0;flex:1;color:var(--text);font-weight:650;font-size:calc(15rem/14)}
@@ -38,16 +40,15 @@
 .tree-note{padding:6px 10px;font-size:calc(12rem/14);color:var(--text-3);display:flex;gap:6px;align-items:center}
 .tree-note svg{width:14px;height:14px;flex:none}
 .tree-note.bad{color:var(--bad-fg)}
-.stack>summary{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px 0 4px;border-radius:var(--r-sm);cursor:pointer;list-style:none;color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600;user-select:none}
-.stack>summary::-webkit-details-marker{display:none}
-.stack>summary:hover{background:var(--surface-2);color:var(--text)}
-.stack>summary .chev{width:12px;height:12px;color:var(--text-3);transition:transform var(--dur-2) var(--ease-io)}
-.stack[open]>summary .chev{transform:rotate(90deg)}
+.sh{display:flex;align-items:center;gap:6px;height:28px;padding-right:8px;border-radius:var(--r-sm);color:var(--text-2);font-size:calc(12.5rem/14);font-weight:600}
+.sh>.tg{flex:none;width:var(--hit);height:var(--hit);min-width:0;padding:0;margin-right:-6px;color:var(--text-3)}
+.tg .chev{width:12px;height:12px;transition:transform var(--dur-2) var(--ease-io)}
+.tg[aria-expanded=true] .chev{transform:rotate(90deg)}
 .stack-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:underline}
 .stack .cnt{font:calc(11rem/14) var(--mono);color:var(--text-3)}
 .stack .cnt:not(.all-up){color:var(--text-2)}
-.stack>summary .hstrip{flex:none;width:44px;height:6px;opacity:.9}
+.sh .hstrip{flex:none;width:44px;height:6px;opacity:.9}
 .stack ul{list-style:none;margin:0 0 4px;padding:0}
 .ctr{display:flex;align-items:center;gap:2px}
 .ctr>a:first-child{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:26px;padding:0 8px 0 24px;border-radius:var(--r-sm);color:var(--text-2);font:calc(12.5rem/14) var(--mono)}
@@ -58,7 +59,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 /* the logs action of a tree item and of a stack: visible at rest (NAV-07) */
 .tree .ia.logs{width:26px;height:26px}
 .tree .ia.logs svg{width:14px;height:14px}
-.stack summary .ia.logs{width:24px;height:24px;margin:0 -2px}
+.sh .ia.logs{width:24px;height:24px;margin:0 -2px}
 .side-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;border-top:1px solid var(--line);font-size:calc(11rem/14);color:var(--text-3);flex:none}
 .side-foot code{font-size:calc(11rem/14);color:var(--text-3)}
 .live{display:flex;align-items:center;gap:6px}
@@ -134,7 +135,7 @@ a.stack-name{color:inherit}a.stack-name:hover{color:var(--text);text-decoration:
 .top .cmd:hover{border-color:var(--text-3);color:var(--text-2)}
 .top .cmd>svg{width:16px;height:16px}
 .cmd-t{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cmd-k{flex:none}
+.cmd-k{flex:none}.cmd-k::before{content:"⌘ K"}
 @media (max-width:1000px){.top .cmd{width:var(--ctl-h);padding:0;justify-content:center;border-color:transparent;background:none}.cmd-t,.cmd-k{display:none}}
 .vitals{display:flex;gap:4px;contain:layout paint}
 .chip{display:grid;grid-template-columns:auto auto;grid-template-rows:auto 3px;align-items:baseline;column-gap:6px;height:32px;padding:4px 8px 3px;border-radius:var(--r-sm);color:var(--text-2);min-width:76px;transition:background-color var(--dur-1) var(--ease-out)}
@@ -179,17 +180,17 @@ main>.banner{max-width:var(--page-max);margin:0 auto 16px}
 .live-off .dot{flex:none;background:var(--warn)}
 
 /* ---- motion ---- */
-.nav-item,.ctr>a:first-child,.icon-btn,.chip,.bb-i,.stack>summary,.menu-item{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.nav-item,.ctr>a:first-child,.icon-btn,.chip,.bb-i,.menu-item{transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
 
 /* ---- 44 px targets on touch and phones (A11Y-18) ---- */
 @media (pointer:coarse),(max-width:699px){
- .tree .ia.logs,.stack summary .ia.logs{width:44px;height:44px;margin:0}
- .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px}
- .nav-item,.tree-filter input{height:44px}
+ .tree .ia.logs,.sh .ia.logs{width:44px;height:44px;margin:0}
+ .brand,.stack-name{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+ .nav-item,.chip,.tree-filter input{height:44px}
  .tree-filter input{font-size:var(--fs-input)}
- .ctr>a:first-child,.stack>summary{height:44px}
+ .ctr>a:first-child,.sh{height:44px}
 }
 /* Compact text actions retain a keyboard and pointer target. */
 a.stack-name,.side-foot .keys-btn{display:inline-flex;align-items:center;min-height:var(--hit);min-width:var(--hit)}
 
-.btn.keys-btn{width:var(--ia);height:var(--ia);min-width:0;padding:0}
+.btn.keys-btn{flex:none;width:var(--ia);height:var(--ia);min-width:0;padding:0}

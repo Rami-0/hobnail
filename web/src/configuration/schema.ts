@@ -1,0 +1,86 @@
+import { origin } from "../boards/document.ts";
+import type { Field } from "../api/gen/Field.ts";
+
+export type Values = Record<string, unknown>;
+
+export const hasEndpoint = (fields: Field[]) => fields.some((field) => field.id === "base_url");
+
+/** The fields to show for these values: a field with `when` only while the
+ * field it names (or that field's default) has the given value. */
+export function visibleFields(fields: Field[], values: Values): Field[] {
+  return fields.filter(({ when }) => {
+    if (!when) return true;
+    const value = values[when.field] ?? fields.find((field) => field.id === when.field)?.default;
+    return String(value ?? "") === when.equals;
+  });
+}
+
+export function initial(fields: Field[]): Values {
+  return Object.fromEntries(fields.flatMap((f) => f.default === null ? [] : [[
+    f.id, ["bool", "list"].includes(f.kind) ? JSON.parse(f.default) : f.default,
+  ]]));
+}
+
+export function secretHint(bound: string | null | undefined, url: string, cleared = false) {
+  if (cleared) return "Saved credential will be cleared.";
+  if (!bound) return "";
+  return origin(url) === bound
+    ? `Saved for ${bound}. Enter a replacement to change it.`
+    : "Origin changed. Enter a replacement or clear the saved credential.";
+}
+
+export function schemaValues(fields: Field[], input: Values, bound?: Record<string, string>) {
+  const values: Values = {};
+  const errors: Record<string, string> = {};
+  for (const field of fields) {
+    const { id, kind, max_length: max } = field;
+    const value = input[id];
+    if (value === undefined || value === "" || value === null) {
+      if (field.required && !bound?.[id]) errors[id] = "This field is required.";
+      continue;
+    }
+    if (kind === "list") {
+      const list = (Array.isArray(value) ? value.map(String) : String(value).split("\n")).map((s) => s.trim()).filter(Boolean);
+      if ((field.required && !list.length) || list.length > 16 || list.some((s) => max !== null && s.length > max)) {
+        errors[id] = "Enter up to 16 valid lines.";
+      }
+      if (list.length) values[id] = list;
+    } else if (kind === "number") {
+      const n = Number(value);
+      if (!Number.isSafeInteger(n) || n < (field.min ?? 0) || n > (field.max ?? Infinity)) {
+        errors[id] = `Enter a whole number from ${field.min ?? 0}${field.max === null ? " or higher" : ` to ${field.max}`}.`;
+      }
+      values[id] = n;
+    } else {
+      const s = String(value);
+      if (kind === "url" && !origin(s)) errors[id] = "Enter an HTTP or HTTPS URL without credentials, query, or fragment.";
+      if (kind === "secret" && Array.from(s).some((ch) => {
+        const n = ch.charCodeAt(0);
+        return n < 32 || (n >= 127 && n < 160);
+      })) errors[id] = "Remove control characters.";
+      if (kind === "select" && !field.choices.includes(s)) errors[id] = "Choose a listed value.";
+      if (max !== null && s.length > max) errors[id] = `Use at most ${max} characters.`;
+      values[id] = value;
+    }
+  }
+  return { values, errors };
+}
+
+export function connectionValues(fields: Field[], input: Values, bound?: Record<string, string>, cleared?: Record<string, boolean>) {
+  const { values, errors } = schemaValues(fields, input, bound);
+  const { base_url, enabled, ...options } = values;
+  const credentials: Record<string, string | null> = {};
+  for (const { id, kind, required } of fields) {
+    if (kind !== "secret") continue;
+    const value = options[id];
+    delete options[id];
+    if (typeof value === "string") credentials[id] = value;
+    else if (cleared?.[id]) {
+      credentials[id] = null;
+      if (required) errors[id] = "This field is required.";
+    } else if (bound?.[id] && bound[id] !== origin(String(base_url))) {
+      errors[id] = "Enter the credential again for the new origin, or clear it.";
+    }
+  }
+  return { base_url: String(base_url ?? ""), enabled: enabled === true, options, credentials, errors };
+}

@@ -1,0 +1,13 @@
+app 172.17.0.5 pid 3644142 asset /assets/index-82zXNFp6.js
+== pipe401-8ip
+| phase | memory.current median / max MiB | app fds median / max | client requests / errors / events | latency p50 / p95 / p99 ms | attackers |
+|---|---|---|---|---|---|
+| idle | 1.65 / 2.20 | 14 / 15 | - | - | - |
+| pipe401-8ip | 5.49 / 7.02 | 34 / 54 | 4103 / 93 / 508 | 1.1 / 9.9 / 12.9 | pipe401x8: 968 conns, 842 closed by server (0 503, 0 408), held median [0.0, 0.2, 6.4, 10.4, 10.2, 10.4, 10.4, 10.4] s |
+  - pipe401-8ip: stream 503
+  - pipe401-8ip: stream 503
+  - pipe401-8ip: stream 503
+  - pipe401-8ip: /app 503
+  - pipe401-8ip: /assets/-xEd4o8R.js 503
+| pipe401-8ip-after | 3.58 / 4.18 | 14 / 15 | - | - | - |
+memory.peak 16777216 (16.00 MiB)

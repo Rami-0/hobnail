@@ -9,7 +9,7 @@ import { api, refreshSession, useSession } from "../api/session.ts";
 import { safeNext, useRoute } from "../app/router.ts";
 import { Button } from "../ui/Button.tsx";
 
-export function Login({ token }: { token?: string }) {
+export default function Login({ token }: { token?: string }) {
   const { session } = useSession();
   const loc = useRoute();
   const next = safeNext(loc.search.get("next"));
@@ -65,7 +65,7 @@ function Credentials({ mode, token, next }: {
     setError("");
     const r = await api.post(path, { username, password, token });
     if (r.kind === "ok") {
-      window.location.replace(mode === "invite" ? "/app" : next);
+      window.location.replace(mode === "onboarding" ? "/app/setup" : mode === "invite" ? "/app" : next);
       return;
     }
     setBusy(false);

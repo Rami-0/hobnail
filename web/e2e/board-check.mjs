@@ -38,6 +38,7 @@ tab.on("Network.loadingFinished", ({ requestId }) => { if (integrationResponses.
 const edit = async () => { await inp.click('[data-testid="board-edit"]'); await wait(visible("board-editor"), "edit mode opens"); };
 const addLink = async (title) => {
   await inp.click('[data-testid="board-add-item"]'); await wait(visible("board-picker"));
+  await inp.click('[data-testid="picker-tab-links"]'); await wait(visible("board-link-form"));
   await fill('[data-testid="board-link-form"] input[name="title"]', title); await fill('[data-testid="board-link-form"] input[name="url"]', "https://example.com/" + title);
   await inp.click('[data-testid="board-link-form"] button[type="submit"]'); await wait(`!${visible("board-picker")}`, "link picker closes");
 };
@@ -46,26 +47,52 @@ try {
   const onboarding = await tab.ev(visible("onboarding")); const form = onboarding ? "onboarding" : "login";
   await fill(`form[data-testid="${form}"] input[name="username"]`, "admin"); await fill(`form[data-testid="${form}"] input[name="password"]`, PW);
   if (onboarding) await fill('form[data-testid="onboarding"] input[name="confirm"]', PW);
-  await inp.click(`form[data-testid="${form}"] button[type="submit"]`); await wait(visible("user"), "onboard or sign in through the browser"); owner = await login();
+  await inp.click(`form[data-testid="${form}"] button[type="submit"]`);
+  await wait(`${visible("user")} || ${visible("setup-step")}`, "onboard or sign in through the browser");
+  if (await tab.ev(visible("setup-step"))) {
+    for (const title of ["Discover services", "Select what to include", "Configure connections", "Review dashboard"]) {
+      const skip = '[data-testid="setup-skip"]';
+      await wait(`document.querySelector('${skip}')?.matches("button:not(:disabled)")`, "setup step can be skipped");
+      await inp.click(skip);
+      await wait(`document.querySelector('[data-testid="setup-step"]')?.textContent === ${q(title)}`, `guided setup reaches ${title}`);
+    }
+    await inp.click('[data-testid="setup-create"]');
+    await wait(visible("board"), "guided setup creates Home");
+  }
+  owner = await login();
   await go("/app/settings/boards", visible("board-create")); await inp.click('[data-testid="board-create"]'); await wait(visible("board-form"));
   await fill('#board-form input[name="name"]', "M2 browser board"); await inp.click('button[form="board-form"][type="submit"]'); await wait(`!${visible("board-form")}`, "create board closes form");
   boardId = (await api("GET", "/boards")).data.find((board) => board.name === "M2 browser board").id;
   await go(`/app/boards/${boardId}`, visible("board-empty")); check((await api("GET", `/boards/${boardId}`)).data.document.sections.length === 0, "a new board is empty");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await addLink("discarded");
-  await inp.click('[data-section="0"][data-item="0"] .editor-tools button:last-child');
+  await inp.click('[data-section="0"][data-item="0"] .tile-tools button[aria-label^="Remove"]');
   await wait(`document.activeElement === document.querySelector('[data-testid="board-add-item"]')`, "removing the last item restores focus to Add item");
   await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-empty"), "Cancel discards layout changes");
   check((await api("GET", `/boards/${boardId}/draft`)).data === null, "Cancel deletes server draft");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await addLink("first"); await addLink("second");
-  await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`); await inp.key("ArrowDown", { modifiers: 1 });
-  await wait(`document.querySelector('[data-section="0"][data-item="0"] h3')?.textContent === "second" && document.activeElement === document.querySelector('[data-section="0"][data-item="1"] .drag-handle')`, "Alt+Down moves an item and restores focus");
+  const cell = (i) => `document.querySelector('[data-section="0"][data-item="${i}"]')`;
+  const at = (i, key) => `${cell(i)}?.style.getPropertyValue("--${key}")`;
+  check(await tab.ev(`${at(0, "x")} === "0" && ${at(1, "x")} === "3" && ${at(1, "y")} === "0"`), "new links fill the first free slots of the top row");
+  await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`); await inp.key("ArrowRight");
+  await wait(`${at(0, "x")} === "1" && document.activeElement === document.querySelector('[data-section="0"][data-item="0"] .drag-handle') && document.querySelector("output.sr")?.textContent.includes("column 2")`, "Right arrow moves the focused tile one column, keeps focus and announces it");
   await inp.key("ArrowRight", { modifiers: 8 });
-  await wait(`document.querySelector('[data-section="0"][data-item="1"] input[id$="desktop"]')?.value === "5"`, "Shift+Right resizes the moved item");
-  await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(".suggestions button")', "suggestions include discovered containers"); await inp.click('.suggestions button'); await wait(`!${visible("board-picker")}`);
-  const handle = await inp.box('[data-section="0"][data-item="1"] .drag-handle');
-  const destination = await inp.box('section[data-section="0"] .editor-section-head', false);
-  await inp.drag(handle.x, handle.y, destination.x, destination.y);
-  await wait(`document.querySelector('[data-section="0"][data-item="2"] h3')?.textContent === "first" && document.activeElement === document.querySelector('[data-section="0"][data-item="2"] .drag-handle')`, "pointer drop at section end preserves order and focus");
+  await wait(`${at(0, "w")} === "4" && document.querySelector("output.sr")?.textContent.includes("4 by 1")`, "Shift+Right widens the tile and announces its size");
+  check(await tab.ev(`${at(1, "y")} === "1"`), "the moved tile pushes its neighbour down instead of overlapping it");
+  await inp.key("z", { modifiers: 2 }); await wait(`${at(0, "w")} === "3"`, "Ctrl+Z undoes the resize");
+  await inp.key("y", { modifiers: 2 }); await wait(`${at(0, "w")} === "4"`, "Ctrl+Y redoes it");
+  await inp.click('[data-testid="board-add-item"]'); await wait(visible("board-picker")); await inp.click('[data-testid="picker-tab-containers"]'); await wait('!!document.querySelector(\'.suggestions button[data-kind="container"]\')', "suggestions include discovered containers"); await inp.click('.suggestions button[data-kind="container"]'); await wait(`!${visible("board-picker")}`);
+  await wait(`!!${cell(2)} && document.activeElement === document.querySelector('[data-section="0"][data-item="2"] .drag-handle')`, "an added tile lands in a free slot and takes focus");
+  const tile = await inp.box('[data-section="0"][data-item="2"]');
+  const canvas = await inp.box('[data-canvas="0"]');
+  await inp.drag(tile.x, tile.y, canvas.left + tile.width / 2 + 4, canvas.top + tile.height / 2 + 4, 12);
+  await wait(`${at(2, "x")} === "0" && ${at(2, "y")} === "0"`, "pointer drag drops the tile at the top-left cell");
+  check(await tab.ev(`(() => { const r = [...document.querySelectorAll('[data-section="0"] .canvas-item')].map((c) => ["x", "y", "w", "h"].map((k) => Number(c.style.getPropertyValue("--" + k))));
+    return r.every((a, i) => r.every((b, j) => i === j || a[0] + a[2] <= b[0] || b[0] + b[2] <= a[0] || a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1])); })()`), "tiles never overlap after a drop");
+  await sleep(500); // the dropped tile animates to its cell
+  const handle = await inp.box('[data-section="0"][data-item="2"] .resize-handle', false);
+  const before3 = await tab.ev(at(2, "w"));
+  await inp.drag(handle.x - 2, handle.y - 2, handle.x + canvas.width / 6, handle.y + 4, 10);
+  await wait(`Number(${at(2, "w")}) === Number(${q(String(before3))}) + 2`, "dragging the corner resizes by whole columns");
   const before = boardPuts; await inp.click('[data-testid="board-save"]'); await wait(`!${visible("board-editor")}`, "Save exits edit mode"); check(boardPuts - before === 1, "Save sends exactly one board PUT");
   await tab.send("Page.reload"); await wait('document.querySelectorAll("[data-testid=board-tile]").length === 3', "reload preserves saved items");
   await edit(); await inp.click('[data-testid="board-add-section"]'); await wait(`document.querySelector('[data-testid="draft-status"]')?.textContent.includes("Draft saved")`, "draft saved to server");
@@ -96,24 +123,26 @@ try {
     if (width === 390) check(await tab.ev(`(() => { const heading = document.querySelector(".board-section h2"); const title = heading.textContent; heading.textContent = "W".repeat(80); const ok = document.documentElement.scrollWidth <= innerWidth; heading.textContent = title; return ok; })()`), `${theme}: an 80-character section title wraps on mobile`); await tab.shot(path.join(OUT, `board-${width}-${theme}.png`));
     await edit(); await sleep(250);
     if (width === 390) {
-      await tab.ev(`document.querySelector('[data-section="0"][data-item="0"] .drag-handle').focus()`);
-      for (let n = 0; n < 3; n++) await inp.key("ArrowLeft", { modifiers: 8 });
-      await wait(`document.querySelector('[data-section="0"][data-item="0"] input[id$="mobile"]')?.value === "1"`, "minimum mobile span is editable");
+      const first = await tab.ev(`document.querySelector('[data-section="0"] .canvas-item h3')?.textContent`);
+      await inp.click('[data-section="0"] .canvas-item .tile-tools button[aria-label$="later"]');
+      await wait(`document.querySelector('[data-section="0"] .canvas-item h3')?.textContent !== ${q(first)}`, `${theme}: phones reorder tiles with Move later`);
       check(await tab.ev(`(() => {
-        const cell = document.querySelector('[data-section="0"][data-item="0"]');
+        const cell = document.querySelector('[data-section="0"] .canvas-item');
         const box = cell.getBoundingClientRect();
-        const controls = cell.querySelectorAll(".editor-tools button, .editor-spans input, .editor-custom input, .sel button");
+        const controls = cell.querySelectorAll(".tile-tools button, .drag-handle");
         return [...controls].every((control) => {
           const rect = control.getBoundingClientRect();
           return !rect.width || (rect.left >= box.left && rect.right <= box.right);
         }) && document.documentElement.scrollWidth <= innerWidth;
       })()`), `${theme}: one-column editor controls fit without sideways scroll`);
-      for (let n = 0; n < 3; n++) await inp.key("ArrowRight", { modifiers: 8 });
     }
     check(await tab.ev("document.documentElement.scrollWidth <= innerWidth"), `${width} ${theme}: editor has no sideways scroll`); await tab.shot(path.join(OUT, `editor-${width}-${theme}.png`)); await inp.click('[data-testid="board-cancel"]'); await wait(visible("board-edit"));
   }
   await tab.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await go("/app/settings/integrations", visible("integration-create")); await inp.click('[data-testid="integration-create"]'); await wait(visible("integration-form"));
+  await fill('#provider-search', "Generic HTTP"); await wait('document.querySelectorAll("[data-testid=integration-form] .catalog-card").length === 1', "the catalog search narrows to Generic HTTP");
+  await inp.click('[data-testid="integration-form"] .catalog-card');
+  await wait('!!document.querySelector("#integration-form input[name=name]")');
   await fill('#integration-form input[name="name"]', "M2 HTTP connection"); await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:1"); await fill('#integration-form input[name="secret"]', SECRET);
   await wait('document.querySelector("#integration-form")?.textContent.includes("sends the credential unencrypted")', "HTTP credential warning is shown before save");
   await inp.click('button[form="integration-form"][type="submit"]'); await wait(`!${visible("integration-form")}`, "integration saves");
@@ -123,7 +152,7 @@ try {
   await inp.click('[data-testid="integration-row"] button'); await wait(visible("integration-form")); check(await tab.ev('document.querySelector("input[name=secret]").value === ""'), "edit credential is never prefilled");
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:2"); await inp.click('button[form="integration-form"][type="submit"]'); await wait('document.querySelector("#integration-secret-err")?.textContent.includes("again")', "origin change requires entering credential again");
   const denied = await api("PUT", `/integrations/${integrationId}`, { name: "M2 HTTP connection", kind: "http", base_url: "http://127.0.0.1:2", enabled: true }); check(denied.status === 400 && denied.data.error.field === "secret", "server enforces origin binding on secret field");
-  await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays verdict class and message");
+  await inp.click('[data-testid="integration-form"] .dlg-ft button'); await inp.click('[data-testid="integration-test"]'); await wait(visible("integration-verdict"), "connection test displays the verdict message");
   await inp.click('[data-testid="integration-row"] button'); await wait(visible("integration-form"));
   await fill('#integration-form input[name="base_url"]', "http://127.0.0.1:1/updated");
   await inp.click('button[form="integration-form"][type="submit"]'); await wait(`!${visible("integration-form")}`, "same-origin integration update saves without reentering the credential");

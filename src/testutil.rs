@@ -25,8 +25,16 @@ pub fn state_with(containers: Vec<Container>, toml: &str) -> Arc<AppState> {
         host_sys: "/nonexistent".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
+        max_connections: 64,
+        max_connections_per_peer: 16,
     };
-    let st = AppState::new(env);
+    let mut st = AppState::new(env);
+    // Tests never depend on the cgroup they happen to run in.
+    Arc::get_mut(&mut st)
+        .expect("a fresh state")
+        .credential_queue
+        .memory_limit = || None;
     st.containers.send_replace(Arc::new(Snapshot {
         containers,
         fetched_at: 1,
@@ -71,4 +79,52 @@ pub fn sample() -> Vec<Container> {
         ctr("db", Some("shop"), "exited"),
         ctr("<script>alert(1)</script>", None, "running"),
     ]
+}
+
+// Count requested Rust allocation bytes on the measuring test thread only.
+struct MeasuringAllocator;
+
+#[global_allocator]
+static ALLOCATOR: MeasuringAllocator = MeasuringAllocator;
+
+thread_local! {
+    static HEAP: std::cell::Cell<Option<(isize, isize)>> = const { std::cell::Cell::new(None) };
+}
+
+fn change_heap(delta: isize) {
+    let _ = HEAP.try_with(|heap| {
+        if let Some((live, peak)) = heap.get() {
+            let live = live + delta;
+            heap.set(Some((live, peak.max(live))));
+        }
+    });
+}
+
+unsafe impl std::alloc::GlobalAlloc for MeasuringAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let ptr = unsafe { std::alloc::System.alloc(layout) };
+        if !ptr.is_null() {
+            change_heap(layout.size() as isize);
+        }
+        ptr
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        change_heap(-(layout.size() as isize));
+        unsafe { std::alloc::System.dealloc(ptr, layout) };
+    }
+}
+
+pub fn measure_allocations<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            HEAP.set(None);
+        }
+    }
+
+    assert!(HEAP.replace(Some((0, 0))).is_none());
+    let _reset = Reset;
+    let result = f();
+    (result, HEAP.get().unwrap().1 as usize)
 }

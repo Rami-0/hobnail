@@ -15,7 +15,7 @@ import { Dialog } from "../ui/Dialog.tsx";
 import "./palette.css";
 
 const page = (name: string, path: string, kind: PaletteKind = "Page"): PaletteItem => ({ name, href: `/app/${path}`, kind });
-const PAGES = [["Overview", "overview"], ["Host", "host"], ["History", "history"], ["Alerts", "alerts"], ["Logs", "logs"]];
+const PAGES = [["Home", "overview"], ["Host", "host"], ["History", "history"], ["Alerts", "alerts"], ["Logs", "logs"]];
 const ADD = [["Add bookmark", "bookmarks?add=bookmark"], ["Add widget", "widgets?add=widget"],
   ["Add channel", "notifications?add=channel"], ["Add alert rule", "notifications?add=rule"]];
 
@@ -46,7 +46,7 @@ export default function Palette({ onClose, onHelp }: { onClose: () => void; onHe
   useEffect(() => {
     if (scoped) return;
     const c = new AbortController();
-    void import("../routes/overview/bookmarks.ts").then(({ loadBookmarks }) => loadBookmarks(c.signal)).then((items) => {
+    void import("../api/bookmarks.ts").then(({ loadBookmarks }) => loadBookmarks(c.signal)).then((items) => {
       if (!c.signal.aborted) setBookmarks(items.map((b) => ({ kind: "Bookmark", name: b.name, href: b.url, detail: b.description ?? undefined })));
     });
     return () => c.abort();

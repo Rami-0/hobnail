@@ -31,6 +31,16 @@ pub struct Container {
     pub created: i64,
     /// Unix seconds of recent `die` events seen on the events stream (last hour).
     pub die_times: Vec<u64>,
+    /// Docker networks it is attached to, with its address on each.
+    pub networks: Vec<NetworkAddr>,
+}
+
+/// A container's address on one Docker network.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct NetworkAddr {
+    pub name: String,
+    /// IPv4 address; empty when Docker reports none (host or none mode).
+    pub ip: String,
 }
 
 impl Container {

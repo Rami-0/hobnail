@@ -40,6 +40,14 @@ function sameStart(a: number | null, b: number | null, now: number): boolean {
   return Math.abs(a - b) <= Math.max(120, Math.abs(now - a) / 10);
 }
 
+function samePorts(a: ContainerRow["ports"], b: ContainerRow["ports"]): boolean {
+  return a.length === b.length && a.every((port, i) => {
+    const next = b[i];
+    return next && port.host_ip === next.host_ip && port.host_port === next.host_port
+      && port.container_port === next.container_port && port.proto === next.proto;
+  });
+}
+
 function sameRow(a: ContainerRow, b: ContainerRow, now: number): boolean {
   return (
     a.name === b.name &&
@@ -56,8 +64,9 @@ function sameRow(a: ContainerRow, b: ContainerRow, now: number): boolean {
     a.restarts === b.restarts &&
     a.created === b.created &&
     sameStart(a.started_at, b.started_at, now) &&
-    JSON.stringify(a.ports) === JSON.stringify(b.ports) &&
-    JSON.stringify(a.attention) === JSON.stringify(b.attention)
+    samePorts(a.ports, b.ports) &&
+    a.attention?.severity === b.attention?.severity &&
+    a.attention?.reason === b.attention?.reason
   );
 }
 

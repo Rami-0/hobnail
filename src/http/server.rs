@@ -5,28 +5,153 @@ use http_body_util::{combinators::UnsyncBoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header::{HeaderValue, CACHE_CONTROL, CONTENT_TYPE};
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 
 use crate::state::AppState;
 
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("bind {addr}: {e}"))?;
+    let listener = listen(addr).map_err(|e| format!("bind {addr}: {e}"))?;
     crate::info!("listening", addr = addr);
     serve_listener(state, listener).await
 }
 
+/// The listening socket. Its buffer sizes are set before `listen`, so
+/// connections waiting in the kernel's accept queue (the server is at its
+/// connection cap) inherit them too, and the queue is short: queued
+/// connections already receive data, which the container is charged for.
+/// Measured with 8 addresses pipelining past a 48-connection cap, the
+/// default 128 KiB receive buffers of queued connections added 2 MiB.
+pub(crate) fn listen(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    socket.set_reuseaddr(true)?;
+    socket.set_send_buffer_size(LIMITS.send_buffer as u32)?;
+    socket.set_recv_buffer_size(LIMITS.receive_buffer as u32)?;
+    socket.bind(addr)?;
+    socket.listen(LIMITS.backlog)
+}
+
+/// Per-connection limits for the accept loop.
+///
+/// Without them, 40 connections each sending an unterminated 400 KiB header
+/// (under hyper's default buffer cap) pinned 18.9 MiB and 100 pinned
+/// 43.8 MiB, against a 20 MiB container budget.
+/// - `max_buf` caps hyper's per-connection read buffer, so a request head
+///   (request line plus headers, cookies included) may be at most 16 KiB,
+///   Node's default and twice nginx's 8 KiB per header line. Hobnail's own
+///   cookies are under 100 bytes. Larger heads get 431 and are closed.
+/// - `header_timeout` closes a connection that has not sent a complete head
+///   within 10 s, including an idle keep-alive connection waiting for its
+///   next request. A response being streamed (the event stream) is not
+///   affected.
+/// - `connections` caps open connections, event streams included
+///   (`RH_MAX_CONNECTIONS`). At the cap the server stops accepting; new
+///   connections wait in the kernel backlog until one closes. The default
+///   of 48 is what keeps the container under 20 MiB when every slot is held
+///   by a client that pipelines requests and never reads (each pins up to
+///   about 130 KiB of socket memory) while a sign-in runs Argon2 (7 MiB):
+///   measured `memory.peak` 15.4 to 16.0 MiB with 4 or 8 attacking
+///   addresses and 25 clients, against 18.1 to 18.9 MiB at 64. 25 clients
+///   with an event stream each, from 5 or from 25 addresses, saw no errors
+///   and the same latency as at 128.
+/// - `body_timeout` is the whole-body deadline, from the request head, for
+///   every handler that reads a body; past it the request gets 408. Bodies a
+///   handler does not read are not waited for (hyper closes the read side).
+/// - `write_timeout` fails a connection whose response write makes no
+///   progress for that long (a client that stopped reading). Only a signed-in
+///   event stream, log stream or log download (a 200 its handler marked) is
+///   exempt: it streams for as long as the client stays and has its own
+///   keepalive and send deadline.
+/// - `backlog` bounds the kernel's queue of connections waiting for a slot
+///   (see [`listen`]); past it a client's connection attempt is retried by
+///   its TCP stack (after 1 s, then 3 s).
+/// - `refusal_write_timeout` is the stall limit for responses with status
+///   400 and up. They are a few hundred bytes, which a reading client takes
+///   at once, and pipelined refusals to a client that never reads are what
+///   could fill every slot; 5 s instead of 15 s frees such a slot three
+///   times sooner.
+/// - `per_peer` caps one peer's connections below `connections`, so a single
+///   host cannot take every slot (default 12: a browser with two tabs
+///   needs two event streams and up to six parallel requests). IPv6 peers count by /64. Peers listed in
+///   `RH_TRUSTED_PROXIES` are exempt, since every client arrives through
+///   them. A peer over its limit gets 503 and the connection closes.
+///   `RH_MAX_CONNECTIONS_PER_PEER` sets it (0 turns it off) for clients
+///   that share an address without being a declared proxy. Over the limit
+///   the connection is refused, not queued: a queued connection would hold
+///   a global slot (one peer could then fill the cap by waiting) or, held
+///   outside the cap, an unbounded number of sockets.
+/// - `send_buffer` and `receive_buffer` fix each connection's kernel
+///   socket buffers (Linux doubles them: 64 KiB and 16 KiB), which the
+///   container's memory is charged for; [`listen`] sets them on the
+///   listener, so queued connections have them too. Autotuned, 128
+///   connections that pipelined requests and stopped reading peaked at
+///   46 MiB; a socket may still queue one 64 KiB segment past its limit,
+///   so halving the send buffer saved only 3 MiB more. 64 KiB in flight
+///   still sends the 450 KB client in a few round trips; requests are
+///   small, so the receive buffer only paces large uploads.
+#[derive(Clone, Copy)]
+pub(crate) struct Limits {
+    pub connections: usize,
+    pub header_timeout: Duration,
+    pub max_buf: usize,
+    pub body_timeout: Duration,
+    pub write_timeout: Duration,
+    pub refusal_write_timeout: Duration,
+    pub per_peer: usize,
+    pub send_buffer: usize,
+    pub receive_buffer: usize,
+    pub backlog: u32,
+}
+
+pub(crate) const LIMITS: Limits = Limits {
+    connections: 48,
+    header_timeout: Duration::from_secs(10),
+    max_buf: 16 * 1024,
+    body_timeout: Duration::from_secs(15),
+    write_timeout: Duration::from_secs(15),
+    refusal_write_timeout: Duration::from_secs(5),
+    per_peer: 12,
+    send_buffer: 32 * 1024,
+    receive_buffer: 8 * 1024,
+    backlog: 64,
+};
+
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
 pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Result<(), String> {
+    let limits = Limits {
+        connections: state.env.max_connections,
+        per_peer: state.env.max_connections_per_peer,
+        ..LIMITS
+    };
+    serve_limited(state, listener, limits).await
+}
+
+pub(crate) async fn serve_limited(
+    state: Arc<AppState>,
+    listener: TcpListener,
+    limits: Limits,
+) -> Result<(), String> {
+    let permits = Arc::new(Semaphore::new(limits.connections));
+    let peers = super::conn::PeerSlots::new(limits.per_peer);
     loop {
+        // Wait for a free slot before accepting, so excess connections queue
+        // in the kernel backlog instead of holding buffers here.
+        let permit = permits
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|e| e.to_string())?;
         let (stream, peer) = match listener.accept().await {
             Ok(x) => x,
             Err(e) => {
@@ -35,20 +160,82 @@ pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Resu
                 continue;
             }
         };
+        let peer_slot = if limits.per_peer == 0 || is_trusted_proxy(&state.env, peer.ip()) {
+            None
+        } else {
+            match peers.take(peer.ip()) {
+                Some(slot) => Some(slot),
+                None => {
+                    let _ = stream.try_write(super::conn::PEER_BUSY);
+                    continue;
+                }
+            }
+        };
         let _ = stream.set_nodelay(true);
+        super::conn::bound_buffers(&stream, limits.send_buffer, limits.receive_buffer);
         let st = state.clone();
+        let slots = permits.clone();
         tokio::spawn(async move {
+            let _permit = permit;
+            let _peer_slot = peer_slot;
+            let rule = Arc::new(super::conn::StallRule::default());
+            let io = super::conn::Timed::new(
+                stream,
+                limits.write_timeout,
+                limits.refusal_write_timeout,
+                rule.clone(),
+            );
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
+                let rule = rule.clone();
+                // Decided by the response, not the path: a refused request
+                // to a streaming path keeps the (short) stall timer.
+                rule.set(super::conn::Stall::Normal);
                 req.extensions_mut().insert(Peer(peer));
-                async move { Ok::<_, Infallible>(route(st, req).await) }
+                req.extensions_mut().insert(super::conn::BodyDeadline(
+                    tokio::time::Instant::now() + limits.body_timeout,
+                ));
+                let slots = slots.clone();
+                async move {
+                    let mut response = respond(st, req).await;
+                    let stall = super::conn::Stall::of(&response);
+                    rule.set(stall);
+                    // Near the cap, end keep-alive after this response so an
+                    // idle socket between a client's requests never holds a
+                    // slot that a new client is waiting for. The client knows
+                    // to reconnect, so nothing races with its next request.
+                    if stall != super::conn::Stall::Exempt
+                        && near_cap(slots.available_permits(), limits.connections)
+                    {
+                        response
+                            .headers_mut()
+                            .insert(hyper::header::CONNECTION, HeaderValue::from_static("close"));
+                    }
+                    Ok::<_, Infallible>(response)
+                }
             });
             let _ = hyper::server::conn::http1::Builder::new()
+                .timer(TokioTimer::new())
+                .header_read_timeout(limits.header_timeout)
+                .max_buf_size(limits.max_buf)
                 .keep_alive(true)
-                .serve_connection(TokioIo::new(stream), svc)
+                .serve_connection(TokioIo::new(io), svc)
                 .await;
         });
     }
+}
+
+/// Fewer than an eighth of the connection slots (at least two) are free.
+/// The accept loop holds one free slot while it waits for a connection.
+fn near_cap(free: usize, connections: usize) -> bool {
+    free < (connections / 8).max(2)
+}
+
+/// Whether `ip` is in `RH_TRUSTED_PROXIES`. On a dual-stack IPv6 listener an
+/// IPv4 proxy arrives as `::ffff:a.b.c.d`; the list holds canonical
+/// addresses, as the forwarding-header checks in `proxy.rs` compare.
+fn is_trusted_proxy(env: &crate::state::Env, ip: std::net::IpAddr) -> bool {
+    env.trusted_proxies.contains(&ip.to_canonical())
 }
 
 /// Host part of the request's Host header (no port), for the allowlist.
@@ -91,6 +278,18 @@ pub fn host_allowed(host: &str, env: &crate::state::Env) -> bool {
 /// The peer address of the connection, stored in request extensions.
 #[derive(Debug, Clone, Copy)]
 pub struct Peer(pub SocketAddr);
+
+fn negotiates_json(path: &str) -> bool {
+    path.starts_with("/api/") && !super::conn::streams(path)
+}
+
+async fn respond(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
+    if !negotiates_json(req.uri().path()) {
+        return route(state, req).await;
+    }
+    let accepts_gzip = super::assets::request_accepts_gzip(req.headers());
+    super::compression::negotiate(route(state, req).await, accepts_gzip).await
+}
 
 async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     let host = request_host(&req);
@@ -183,11 +382,22 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     }
     let dashboard_icon = matches!(&lookup, Some(Lookup::Found(m))
         if m.route.handler == access::Handler::DashboardIcon);
+    let secure = session.is_some() && super::proxy::is_https(&req, &state.env);
     let mut response = dispatch(&state, req, &path, read, lookup, session.as_ref()).await;
     if let Some(session) = session {
-        crate::auth::refresh_cookie(&state, &session, &mut response);
+        crate::auth::refresh_cookie(&state, &session, secure, &mut response);
         if dashboard_icon && response.status().is_success() {
-            set(&mut response, CACHE_CONTROL, "private, max-age=86400");
+            // A vendored icon changes only with a release; cached ones may be replaced.
+            let vendored = response
+                .headers()
+                .get(CACHE_CONTROL)
+                .is_some_and(|value| value == crate::http::icons::BRAND_CACHE);
+            let cache = if vendored {
+                "private, max-age=2592000"
+            } else {
+                "private, max-age=86400"
+            };
+            set(&mut response, CACHE_CONTROL, cache);
             set(&mut response, hyper::header::VARY, "Cookie");
         } else {
             set(&mut response, CACHE_CONTROL, "no-store");
@@ -247,7 +457,7 @@ async fn dispatch(
         // The React client (docs/plans/react-port.md): its JSON API, the
         // embedded build under /assets/ and the app document under /app.
         p if p.starts_with("/assets/") || p == "/app" || p.starts_with("/app/") => {
-            crate::http::assets::route(&req)
+            crate::http::assets::route(state, &req)
         }
         p => super::pwa::route(state, p).unwrap_or_else(|| not_found(p)),
     }
@@ -330,7 +540,22 @@ mod tests {
             host_sys: "/sys".into(),
             hostname: "homelab".into(),
             allowed_hosts: vec!["*.tail1234.ts.net".into()],
+            trusted_proxies: vec![],
+            max_connections: 64,
+            max_connections_per_peer: 16,
         }
+    }
+
+    #[test]
+    fn a_mapped_ipv4_proxy_is_trusted_like_its_ipv4_address() {
+        let mut e = env();
+        e.trusted_proxies = vec!["192.0.2.7".parse().unwrap()];
+        assert!(is_trusted_proxy(&e, "192.0.2.7".parse().unwrap()));
+        assert!(is_trusted_proxy(&e, "::ffff:192.0.2.7".parse().unwrap()));
+        assert!(!is_trusted_proxy(&e, "::ffff:192.0.2.8".parse().unwrap()));
+        e.trusted_proxies = vec!["2001:db8::7".parse().unwrap()];
+        assert!(is_trusted_proxy(&e, "2001:db8::7".parse().unwrap()));
+        assert!(!is_trusted_proxy(&e, "2001:db8::8".parse().unwrap()));
     }
 
     #[test]
@@ -343,6 +568,402 @@ mod tests {
         assert!(host_allowed("homelab.tail1234.ts.net", &e));
         assert!(!host_allowed("evil.example.com", &e));
         assert!(!host_allowed("homelab.evil.com", &e));
+    }
+
+    #[test]
+    fn runtime_gzip_is_limited_to_buffered_api_routes() {
+        for path in ["/api/v1/boards/large", "/api/history/system"] {
+            assert!(negotiates_json(path), "{path}");
+        }
+        for path in [
+            "/assets/data.json",
+            "/assets/app.js.map",
+            "/app/api/v1/boards/large",
+            "/manifest.webmanifest",
+            "/api/v1/stream",
+            "/api/logs/stream",
+            "/api/logs/download",
+        ] {
+            assert!(!negotiates_json(path), "{path}");
+        }
+    }
+
+    mod limits {
+        use super::super::*;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpStream;
+        use tokio::time::timeout;
+
+        async fn start(limits: Limits) -> SocketAddr {
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = l.local_addr().unwrap();
+            let st = crate::testutil::state_with(vec![], "");
+            tokio::spawn(serve_limited(st, l, limits));
+            addr
+        }
+
+        /// Reads until the server closes; returns what it sent.
+        async fn drain(s: &mut TcpStream, within: Duration) -> Option<Vec<u8>> {
+            let mut out = Vec::new();
+            timeout(within, s.read_to_end(&mut out)).await.ok()?.ok()?;
+            Some(out)
+        }
+
+        #[tokio::test]
+        async fn production_limits_fit_large_cookies_and_refuse_bigger_heads() {
+            let addr = start(LIMITS).await;
+            // A 12 KiB cookie header still gets an answer.
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let cookie = "a".repeat(12 * 1024);
+            s.write_all(
+                format!("GET /healthz HTTP/1.1\r\nHost: localhost\r\nCookie: x={cookie}\r\nConnection: close\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+            let out = drain(&mut s, Duration::from_secs(5)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 200"),
+                "{:?}",
+                String::from_utf8_lossy(&out[..out.len().min(40)])
+            );
+            // A head past 32 KiB is refused and the connection closed, without
+            // waiting for the rest of it.
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let pad = "a".repeat(LIMITS.max_buf + 1024);
+            s.write_all(
+                format!("GET /healthz HTTP/1.1\r\nHost: localhost\r\nX-Pad: {pad}").as_bytes(),
+            )
+            .await
+            .unwrap();
+            let out = drain(&mut s, Duration::from_secs(5)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 431"),
+                "{:?}",
+                String::from_utf8_lossy(&out[..out.len().min(40)])
+            );
+        }
+
+        #[tokio::test]
+        async fn a_slow_or_idle_head_is_closed_but_prompt_keep_alive_requests_are_served() {
+            let limits = Limits {
+                header_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut slow = TcpStream::connect(addr).await.unwrap();
+            slow.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nX-Pad: a")
+                .await
+                .unwrap();
+            let mut idle = TcpStream::connect(addr).await.unwrap();
+            assert!(drain(&mut slow, Duration::from_secs(3)).await.is_some());
+            assert!(drain(&mut idle, Duration::from_secs(3)).await.is_some());
+            // Each wait between keep-alive requests restarts the timer.
+            let mut kept = TcpStream::connect(addr).await.unwrap();
+            for _ in 0..3 {
+                kept.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                    .await
+                    .unwrap();
+                let mut buf = [0u8; 256];
+                let n = timeout(Duration::from_secs(3), kept.read(&mut buf))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+        }
+
+        #[tokio::test]
+        async fn a_dripped_login_body_gets_408_at_the_deadline() {
+            let limits = Limits {
+                body_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            s.write_all(
+                format!("POST /api/login HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://{addr}\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{{")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+            let started = tokio::time::Instant::now();
+            let mut buf = [0u8; 64];
+            let n = timeout(Duration::from_secs(3), s.read(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                buf[..n].starts_with(b"HTTP/1.1 408"),
+                "{:?}",
+                String::from_utf8_lossy(&buf[..n])
+            );
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+
+        #[tokio::test]
+        async fn one_peer_gets_at_most_its_share_unless_it_is_a_trusted_proxy() {
+            let limits = Limits {
+                per_peer: 2,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let _a = TcpStream::connect(addr).await.unwrap();
+            let _b = TcpStream::connect(addr).await.unwrap();
+            let mut c = TcpStream::connect(addr).await.unwrap();
+            let out = drain(&mut c, Duration::from_secs(3)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 503"),
+                "{:?}",
+                String::from_utf8_lossy(&out)
+            );
+            drop(_a);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let mut d = TcpStream::connect(addr).await.unwrap();
+            d.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut d, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .starts_with(b"HTTP/1.1 200"));
+
+            // Behind a trusted proxy every client shares its address.
+            let mut env = crate::testutil::state_with(vec![], "").env.clone();
+            env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxied = l.local_addr().unwrap();
+            tokio::spawn(serve_limited(crate::state::AppState::new(env), l, limits));
+            let _held: Vec<_> = futures_join(proxied, 3).await;
+            let mut e = TcpStream::connect(proxied).await.unwrap();
+            e.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut e, Duration::from_secs(3))
+                .await
+                .unwrap()
+                .starts_with(b"HTTP/1.1 200"));
+        }
+
+        /// Polls with fresh connections until one gets `200` for /healthz.
+        async fn served_within(addr: SocketAddr, within: Duration) -> bool {
+            let until = tokio::time::Instant::now() + within;
+            while tokio::time::Instant::now() < until {
+                let mut s = TcpStream::connect(addr).await.unwrap();
+                let _ = s
+                    .write_all(
+                        b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+                if drain(&mut s, Duration::from_secs(2))
+                    .await
+                    .is_some_and(|out| out.starts_with(b"HTTP/1.1 200"))
+                {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            false
+        }
+
+        #[tokio::test]
+        async fn refused_stream_requests_that_are_never_read_free_their_slot() {
+            // The attack: pipeline requests to streaming paths with no
+            // session and never read. The 401/405 answers do not stream, so
+            // the stall timer must close the connection.
+            let limits = Limits {
+                per_peer: 1,
+                write_timeout: Duration::from_secs(60),
+                refusal_write_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            for path in ["/api/v1/stream", "/api/logs/stream", "/api/logs/download"] {
+                let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                socket.set_recv_buffer_size(4096).unwrap();
+                let (_unread, mut write) = socket.connect(addr).await.unwrap().into_split();
+                let flood = tokio::spawn(async move {
+                    let reqs =
+                        format!("POST {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").repeat(64);
+                    while write.write_all(reqs.as_bytes()).await.is_ok() {}
+                });
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let mut probe = TcpStream::connect(addr).await.unwrap();
+                let out = drain(&mut probe, Duration::from_secs(3)).await.unwrap();
+                assert!(
+                    out.starts_with(b"HTTP/1.1 503"),
+                    "{path}: the attacker holds the slot"
+                );
+                assert!(
+                    served_within(addr, Duration::from_secs(10)).await,
+                    "{path}: the stalled connection is closed and its slot freed"
+                );
+                flood.abort();
+            }
+        }
+
+        #[tokio::test]
+        async fn a_trusted_ipv4_proxy_is_exempt_on_a_dual_stack_listener() {
+            // An IPv4 peer on an IPv6 dual-stack socket is ::ffff:127.0.0.1.
+            let Ok(l) = TcpListener::bind("[::]:0").await else {
+                return; // no IPv6 in this sandbox
+            };
+            let port = l.local_addr().unwrap().port();
+            let mut env = crate::testutil::state_with(vec![], "").env.clone();
+            env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+            let limits = Limits {
+                per_peer: 1,
+                ..LIMITS
+            };
+            tokio::spawn(serve_limited(crate::state::AppState::new(env), l, limits));
+            let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+            let Ok(_held) = TcpStream::connect(addr).await else {
+                return; // the socket is IPv6-only here
+            };
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            s.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            let out = drain(&mut s, Duration::from_secs(3)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 200"),
+                "{:?}",
+                String::from_utf8_lossy(&out)
+            );
+        }
+
+        #[tokio::test]
+        async fn queued_connections_inherit_the_listener_buffers() {
+            use std::os::fd::AsRawFd;
+            let l = listen("127.0.0.1:0".parse().unwrap()).unwrap();
+            let _client = TcpStream::connect(l.local_addr().unwrap()).await.unwrap();
+            let (accepted, _) = l.accept().await.unwrap();
+            for (option, want) in [(libc::SO_SNDBUF, 64 * 1024), (libc::SO_RCVBUF, 16 * 1024)] {
+                let mut value: libc::c_int = 0;
+                let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                // SAFETY: a valid socket and an out pointer of the given size.
+                let rc = unsafe {
+                    libc::getsockopt(
+                        accepted.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        option,
+                        (&mut value as *mut libc::c_int).cast(),
+                        &mut len,
+                    )
+                };
+                assert_eq!((rc, value), (0, want), "option {option}");
+            }
+        }
+
+        #[tokio::test]
+        async fn the_per_peer_setting_applies_and_0_turns_the_limit_off() {
+            for (setting, refused) in [(1, true), (0, false)] {
+                let mut env = crate::testutil::state_with(vec![], "").env.clone();
+                env.max_connections_per_peer = setting;
+                let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = l.local_addr().unwrap();
+                tokio::spawn(serve_listener(crate::state::AppState::new(env), l));
+                let _held = futures_join(addr, 3).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let mut s = TcpStream::connect(addr).await.unwrap();
+                if !refused {
+                    s.write_all(
+                        b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                }
+                let out = drain(&mut s, Duration::from_secs(3)).await.unwrap();
+                let status = if refused {
+                    "HTTP/1.1 503"
+                } else {
+                    "HTTP/1.1 200"
+                };
+                assert!(
+                    out.starts_with(status.as_bytes()),
+                    "{setting}: {:?}",
+                    String::from_utf8_lossy(&out)
+                );
+            }
+        }
+
+        async fn futures_join(addr: SocketAddr, n: usize) -> Vec<TcpStream> {
+            let mut held = Vec::new();
+            for _ in 0..n {
+                held.push(TcpStream::connect(addr).await.unwrap());
+            }
+            held
+        }
+
+        #[test]
+        fn keep_alive_ends_when_fewer_than_an_eighth_of_the_slots_are_free() {
+            assert!(!near_cap(6, 48));
+            assert!(near_cap(5, 48));
+            assert!(!near_cap(2, 8));
+            assert!(near_cap(1, 8));
+        }
+
+        /// One keep-alive request on `s`; the response head, lowercased.
+        async fn head_of(s: &mut TcpStream) -> String {
+            s.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .unwrap();
+            let mut buf = vec![0; 4096];
+            let n = timeout(Duration::from_secs(3), s.read(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase()
+        }
+
+        #[tokio::test]
+        async fn near_the_cap_responses_end_keep_alive() {
+            let limits = Limits {
+                connections: 8,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let mut first = TcpStream::connect(addr).await.unwrap();
+            let head = head_of(&mut first).await;
+            assert!(head.starts_with("http/1.1 200"), "{head}");
+            assert!(!head.contains("connection: close"), "{head}");
+            // 6 of 8 slots open (one more is held by the accept loop): one free.
+            let mut held = futures_join(addr, 5).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let head = head_of(&mut first).await;
+            assert!(head.contains("connection: close"), "{head}");
+            assert!(drain(&mut first, Duration::from_secs(3)).await.is_some());
+            // Once the others leave, keep-alive is offered again.
+            held.clear();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut again = TcpStream::connect(addr).await.unwrap();
+            let head = head_of(&mut again).await;
+            assert!(!head.contains("connection: close"), "{head}");
+        }
+
+        #[tokio::test]
+        async fn connections_past_the_cap_wait_for_a_free_slot() {
+            let limits = Limits {
+                connections: 2,
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            let first = TcpStream::connect(addr).await.unwrap();
+            let _second = TcpStream::connect(addr).await.unwrap();
+            // The kernel completes the handshake; the server does not accept.
+            let mut third = TcpStream::connect(addr).await.unwrap();
+            third
+                .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            assert!(drain(&mut third, Duration::from_millis(500))
+                .await
+                .is_none());
+            drop(first);
+            let out = drain(&mut third, Duration::from_secs(5)).await.unwrap();
+            assert!(out.starts_with(b"HTTP/1.1 200"));
+        }
     }
 
     #[test]

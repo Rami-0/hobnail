@@ -27,7 +27,7 @@ export async function sweepFixture(base) {
   document.sections = [{ title: 'Links', position: 0, items: [{ position: 0, spans: { mobile: 1, tablet: 3, desktop: 3, rows: 1 }, payload: { kind: 'link', title: 'Example', url: 'https://example.com/' } }] }];
   await api(`/api/v1/boards/${board.id}`, 'PUT', document);
   const routes = [
-    ['/app/overview', '[data-testid="overview"] .overview-counts'],
+    ['/app/overview', '[data-testid="board"] [data-testid="hobnail-attention"] .hw-count'],
     ['/app/containers', '[data-testid="row"]'],
     ...['overview', 'metrics', 'inspect', 'events', 'processes'].map(tab => [`/app/containers/svc001?tab=${tab}`, tab === 'inspect' ? '[data-testid="container-inspect"]' : '[data-testid="ctr-tabs"]']),
     ['/app/host', '[data-testid="host-sample"]'], ['/app/history', '[data-testid="history"]'], ['/app/alerts', '[data-testid="alerts"]'],

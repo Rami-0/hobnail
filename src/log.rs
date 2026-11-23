@@ -21,6 +21,12 @@ pub fn emit(level: &str, msg: &str, fields: &[(&str, &dyn Display)]) {
         line.push_str(&json_str(&v.to_string()));
     }
     line.push_str("}\n");
+    #[cfg(test)]
+    CAPTURE.with_borrow_mut(|lines| {
+        if let Some(lines) = lines {
+            lines.push(line.clone());
+        }
+    });
     let _ = std::io::stderr().lock().write_all(line.as_bytes());
 }
 
@@ -47,4 +53,19 @@ macro_rules! error {
     ($msg:expr $(, $k:ident = $v:expr)* $(,)?) => {
         $crate::log::emit("error", &$msg, &[$((stringify!($k), &$v as &dyn std::fmt::Display)),*])
     };
+}
+
+#[cfg(test)]
+thread_local! {
+    static CAPTURE: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn capture_test_logs() {
+    CAPTURE.with_borrow_mut(|lines| *lines = Some(Vec::new()));
+}
+
+#[cfg(test)]
+pub(crate) fn take_test_logs() -> Vec<String> {
+    CAPTURE.with_borrow_mut(|lines| lines.take().unwrap_or_default())
 }

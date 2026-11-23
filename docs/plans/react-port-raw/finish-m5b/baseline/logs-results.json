@@ -1,0 +1,79 @@
+{
+  "results": [
+    {
+      "label": "1440-dark",
+      "burstObserveStartedAt": 1795317087202,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795317094207,
+      "wireLines": 6504,
+      "mountedRows": 21,
+      "search5000Ms": 414,
+      "searchMatchMs": 2.5,
+      "reconnectMs": 2023,
+      "fourBurstObserveStartedAt": 1795317126414,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795317133619,
+      "leaveAt": 1795317134914,
+      "streamCountZeroAfterMs": 2838,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "1440-light",
+      "burstObserveStartedAt": 1795317151292,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795317158295,
+      "wireLines": 6504,
+      "mountedRows": 21,
+      "search5000Ms": 291.30000019073486,
+      "searchMatchMs": 5.4,
+      "reconnectMs": 2018,
+      "fourBurstObserveStartedAt": 1795317184873,
+      "fourBurstMaxTaskMs": 0,
+      "fourBurstObserveEndedAt": 1795317192077,
+      "leaveAt": 1795317192984,
+      "streamCountZeroAfterMs": 2730,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-dark",
+      "burstObserveStartedAt": 1795317213211,
+      "burstMaxTaskMs": 54,
+      "burstObserveEndedAt": 1795317220217,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 720.8000001907349,
+      "searchMatchMs": 7.4,
+      "reconnectMs": 2041,
+      "fourBurstObserveStartedAt": 1795317276552,
+      "fourBurstMaxTaskMs": 60,
+      "fourBurstObserveEndedAt": 1795317283783,
+      "leaveAt": 1795317286149,
+      "streamCountZeroAfterMs": 3599,
+      "consoleErrors": [],
+      "cspViolations": []
+    },
+    {
+      "label": "390-light",
+      "burstObserveStartedAt": 1795317311182,
+      "burstMaxTaskMs": 0,
+      "burstObserveEndedAt": 1795317318190,
+      "wireLines": 6505,
+      "mountedRows": 13,
+      "search5000Ms": 624,
+      "searchMatchMs": 5.8,
+      "reconnectMs": 2047,
+      "fourBurstObserveStartedAt": 1795317377861,
+      "fourBurstMaxTaskMs": 117,
+      "fourBurstObserveEndedAt": 1795317385203,
+      "leaveAt": 1795317390568,
+      "streamCountZeroAfterMs": 5482,
+      "consoleErrors": [],
+      "cspViolations": []
+    }
+  ],
+  "failures": [
+    "390-light: AssertionError [ERR_ASSERTION]: four-pane burst maximum 117 ms exceeds 100 ms\n    at file:///repo/web/e2e/logs-check.mjs:266:14"
+  ]
+}

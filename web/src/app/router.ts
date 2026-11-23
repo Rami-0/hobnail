@@ -1,3 +1,4 @@
+import { prefetchPage } from "./route-pages.ts";
 // A tiny History-API router (no router dependency). The pure parts (route
 // matching, the /app basename, link-click rules, `next` validation) are in
 // paths.ts; this file holds the browser state: the current location as an
@@ -132,8 +133,20 @@ function onLinkClick(e: MouseEvent): void {
   navigate(path);
 }
 
+function onLinkIntent(e: Event): void {
+  const link = e.target instanceof Element ? e.target.closest("a[href]") : null;
+  if (link instanceof HTMLAnchorElement && link.origin === window.location.origin
+      && link.pathname !== window.location.pathname) prefetchPage(link.pathname);
+}
+
 /** Left clicks on same-origin /app links navigate in place; everything else is the browser's. */
 export function interceptLinks(doc: Document = document): () => void {
   doc.addEventListener("click", onLinkClick);
-  return () => doc.removeEventListener("click", onLinkClick);
+  doc.addEventListener("pointerover", onLinkIntent);
+  doc.addEventListener("focusin", onLinkIntent);
+  return () => {
+    doc.removeEventListener("click", onLinkClick);
+    doc.removeEventListener("pointerover", onLinkIntent);
+    doc.removeEventListener("focusin", onLinkIntent);
+  };
 }

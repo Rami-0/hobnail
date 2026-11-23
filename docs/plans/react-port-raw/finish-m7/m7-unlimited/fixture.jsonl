@@ -1,0 +1,33 @@
+{"history": {"sys_samples": 1441, "sys_roll": 23038, "ctr_samples": 216000, "ctr_roll": 921520, "hostx_samples": 51869, "hostx_roll": 829368, "ctrx_samples": 57600, "ctrx_roll": 921520, "log_counts": 921520, "events": 100001}, "db_bytes": 175304704}
+{"providers": ["pihole", "uptime-kuma", "jellyfin", "qbittorrent", "sonarr", "radarr", "transmission", "home-assistant", "proxmox-ve", "http", "feed", "ssl_expiry", "reachability"], "expected_widgets": 18}
+{"widgets_good": 18, "upstream": {"generic": 3, "jelly/Sessions": 1, "qb/api/v2/auth/login": 1, "pi/api/stats/summary": 1, "qb/api/v2/transfer/info": 1, "pi/api/dns/blocking": 1, "qb/api/v2/torrents/info": 2, "qb/api/v2/sync/maindata": 1, "tx/transmission/rpc": 3, "rss": 1, "sonarr/api/v3/calendar": 1, "kuma/api/status-page/home": 1, "sonarr/api/v3/queue/status": 1, "reach": 1, "radarr/api/v3/calendar": 1, "kuma/api/status-page/heartbeat/home": 1, "sonarr/api/v3/wanted/missing": 1, "sonarr/api/v3/health": 1, "radarr/api/v3/queue/status": 1, "jelly/Items": 1, "pve/api2/json/cluster/resources": 2, "radarr/api/v3/wanted/missing": 1, "radarr/api/v3/health": 1, "ssl_expiry/handshake": 1, "ha/api/states/light.hall": 1, "jelly/Items/Counts": 1, "ha/api/states/sensor.temp": 1}}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}
+{"history_path": "/api/v1/history?range=24h&cmp=1&events=all", "points": [360, 360, 360, 360, 360, 359, 360, 360]}
+{"history_path": "/api/v1/history?range=30d&events=all", "points": [393, 393, 393, 393, 393, 392, 393, 393]}
+{"history_path": "/api/v1/host/history?range=24h", "points": [359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359, 360, 360, 359, 360, 359, 360, 360, 360, 360, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 359]}

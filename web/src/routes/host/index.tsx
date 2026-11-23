@@ -1,6 +1,7 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { ActivityIcon, CpuIcon, MemoryStickIcon, ThermometerIcon } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { NearCharts } from "../container/NearCharts.tsx";
 import type { HostValue } from "../../api/gen/HostValue.ts";
 import type { HostView } from "../../api/gen/HostView.ts";
 import type { HostHistory } from "../../api/gen/HostHistory.ts";
@@ -17,7 +18,6 @@ import { historyHref } from "../container/events.ts";
 import "../history/history.css";
 import "./host.css";
 
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
 const HISTORY = [["cpu", "CPU"], ["psi", "Pressure"], ["mem swap", "Memory"], ["disk mount", "Disks"], ["net", "Network"], ["temp", "Temperatures"]];
 
 function format(value: number | null, unit: string): string {
@@ -89,7 +89,9 @@ export default function Host() {
       </section>
       {host.processes && boot?.role !== "viewer" && <details className="panel hx-p hx-wide" open>
         <summary>Top processes</summary>
-        {host.processes.length ? <div className="host-table"><table className="tbl"><thead><tr>
+        {/* It scrolls sideways on phones; keyboard users need to reach it (axe scrollable-region-focusable), and a tab stop needs a name. */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+        {host.processes.length ? <div className="host-table" role="region" aria-label="Top processes" tabIndex={0}><table className="tbl"><thead><tr>
           <th scope="col">PID</th><th scope="col">Command</th><th scope="col">Container</th>
           <th scope="col" className="num">UID</th><th scope="col" className="num">CPU</th><th scope="col" className="num">RSS</th><th scope="col" className="num">Threads</th>
         </tr></thead><tbody>{host.processes.map((p) => <tr key={p.pid}>
@@ -127,7 +129,7 @@ function Pressure({ values }: { values: HostValue[] | undefined }) {
   if (!values?.length) return <p className="muted">Pressure information is unavailable.</p>;
   const byLabel = new Map(values.map((entry) => [entry.label, entry.value]));
   return <>
-    <table className="tbl hx-t"><thead><tr><th scope="col" aria-label="Resource" />
+    <table className="tbl hx-t"><thead><tr><th scope="col"><span className="sr">Resource</span></th>
       {["Now", "10 s", "1 min", "5 min", "Full 10 s"].map((label) => <th scope="col" className="num" key={label}>{label}</th>)}
     </tr></thead><tbody>{[["cpu", "CPU"], ["memory", "Memory"], ["io", "I/O"]].map(([key, label]) => <tr key={key}>
       <th scope="row">{label}</th>
@@ -162,12 +164,12 @@ function History({ recording }: { recording: boolean }) {
     </div>
     {error && <p role="alert">{error}</p>}
     {!metrics.length && <p>{data ? "No samples for this group." : "Loading host history…"}</p>}
-    {data && !!metrics.length && <Suspense fallback={null}><Charts
+    {data && !!metrics.length && <NearCharts
       series={{ from: data.from, to: data.to, range, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
       metrics={metrics}
       recording={recording}
       onZoom={(from, to) => setSearch({ from: String(from), to: String(to) })}
       onMarker={(id, at) => navigate(historyHref(id, at, data.markers.find((e) => e.id === id)?.level ?? "warn"))}
-    /></Suspense>}
+    />}
   </section>;
 }

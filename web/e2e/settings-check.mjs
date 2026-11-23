@@ -6,6 +6,8 @@ import { CSP_LISTENER, input, launch, q, recorder, sleep } from "./cdp.mjs";
 const base = new URL(process.argv[2] ?? "http://127.0.0.1:3396");
 assert.match(base.hostname, /^(127\.0\.0\.1|localhost)$/);
 assert.ok(/^339[5-9]$/.test(base.port) || (base.hostname === "127.0.0.1" && base.port === "3300"));
+const only = process.argv[3];
+assert.ok(!only || /^(390|1440)-(dark|light)$/.test(only), "Optional profile must be WIDTH-THEME");
 const password = process.env.HB_PASSWORD;
 const out = process.env.OUT;
 assert.ok(password && out, "set HB_PASSWORD and OUT");
@@ -60,6 +62,7 @@ const createdUsers = [];
 try {
   for (const width of [1440, 390]) for (const scheme of ["dark", "light"]) {
     const label = `${width}-${scheme}`;
+    if (only && only !== label) continue;
     const tab = await browser.tab();
     const inp = input(tab);
     inp.touch = width < 700;
@@ -179,10 +182,32 @@ try {
       const marks = ok(await call("/api/settings/bookmarks", "GET", undefined, owner), "read bookmarks for ordering");
       ok(await call("/api/settings/bookmarks", "POST", { base_hash: marks.hash, action: "add", item: { name: `Order target ${label}`, url: "https://example.com/order" } }, owner), "seed reorder target");
       await go("/app/settings/bookmarks", text(".settings-row", `Order target ${label}`));
-      const beforeOrder = await tab.ev(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].map(e=>e.textContent)`);
-      await inp.click(`button[aria-label=${q("Move " + name + " down")}]`);
-      await wait(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].findIndex(e=>e.textContent===${q(name)}) === ${beforeOrder.indexOf(name)+1}`, "bookmark moves down");
-      await go("/app/overview?add=widget", present(editor));
+      const order = () => tab.ev(`[...document.querySelectorAll('[data-testid="settings-bookmark-list"] .settings-row h3')].map(e=>e.textContent)`);
+      const revisions = async () => ok(await call("/api/settings/revisions", "GET", undefined, owner), "read reorder revision history").revisions;
+      const beforeOrder = await order();
+      const beforeRevision = (await revisions())[0].id;
+      const moves = async () => {
+        for (const direction of ["down", "up", "down"]) {
+          await inp.click(`button[aria-label=${q("Move " + name + " " + direction)}]`);
+        }
+        const staged = await order();
+        assert.equal(staged.indexOf(name), beforeOrder.indexOf(name) + 1, "all arrow clicks stage a single final order");
+        assert.equal((await revisions())[0].id, beforeRevision, "moving entries creates no revisions");
+        return staged;
+      };
+      await moves();
+      await inp.click('[data-testid="collection-order-cancel"]');
+      assert.deepEqual(await order(), beforeOrder, "Cancel restores the original order");
+      assert.equal((await revisions())[0].id, beforeRevision, "Cancel creates no revisions");
+      const staged = await moves();
+      await inp.click('[data-testid="collection-order-save"]');
+      await wait(`!${present('[data-testid="collection-order-save"]')}`, "reorder save ends the editing session");
+      assert.deepEqual(await order(), staged, "Save keeps the staged order");
+      const after = await revisions();
+      assert.equal(after[0].note, "bookmarks: reordered");
+      assert.equal(after[1].id, beforeRevision, "one Save creates exactly one revision");
+      console.log(`ok ${label}: three arrow clicks and Cancel save no revisions, Save order creates one`);
+      await go("/app/settings/widgets?add=widget", present(editor));
       await inp.key("Escape");
       await go("/app/alerts?add=channel", present(editor));
       await wait(text(dialog, "Secret source"), "Alerts shares the channel editor");
@@ -286,7 +311,12 @@ try {
         await go("/app/settings/widgets", text('.settings-row', `browser-order-${width}`));
         await inp.click(`button[aria-label=${q(`Move browser-order-${width} up`)}]`);
         await wait(`[...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(`browser-order-${width}`)}) < [...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(widget)})`, "widget order is saved");
-        await go("/app/overview", text(`#w-${widget}`, "Owner exists: true"));
+        // Config widgets show on boards (the Home board replaced Overview).
+        const home = ok(await call("/api/v1/bootstrap", "GET", undefined, owner), "read bootstrap").home_board;
+        const { document: homeDoc } = ok(await call(`/api/v1/boards/${home}`, "GET", undefined, owner), "read the Home board");
+        homeDoc.sections.push({ title: `Settings check ${width}`, position: homeDoc.sections.length, collapsed: false, items: [{ x: 0, y: 0, w: 4, h: 2, payload: { kind: "widget", widget_id: widget } }] });
+        ok(await call(`/api/v1/boards/${home}`, "PUT", homeDoc, owner), "place the widget on Home");
+        await go(`/app/boards/${home}`, text('[data-testid="board-tile"]', "Owner exists: true"));
         const notifications = ok(await call("/api/settings/notifications", "GET", undefined, owner), "read notification fixtures");
         const channel = `browser-refused-${width}`;
         const addedChannel = ok(await call("/api/settings/channels", "POST", { base_hash: notifications.hash, action: "add", item: { name: channel, type: "webhook", url: "http://127.0.0.1:1/refused", timeout: "1s" } }, owner), "seed refused channel");

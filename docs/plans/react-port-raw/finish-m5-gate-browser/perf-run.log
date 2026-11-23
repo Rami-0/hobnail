@@ -1,0 +1,9 @@
+fake-docker: 150 containers (130 running, 20 not), 13 stacks, on /fake/docker.sock, cgroup files under /fake/sys
+hobnail hobnail-m5-fix:final on http://127.0.0.1:3396 (fake docker hobnail-p0-h-fd-3396, files in /tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5-fix/hobnail-fake.vJDJdI)
+some avg10=4.05 avg60=4.17 avg300=3.77 total=159316929027
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+perf 1 exit 1
+some avg10=3.37 avg60=3.73 avg300=3.77 total=159320065326
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+perf 2 exit 1
+stopped hobnail-p0-h-3396, hobnail-p0-h-fd-3396

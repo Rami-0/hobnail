@@ -18,7 +18,7 @@ import {
   FunnelIcon,
   HistoryIcon,
   KeyboardIcon,
-  LayoutGridIcon,
+  HouseIcon,
   PanelLeftIcon,
   ScrollTextIcon,
   ServerIcon,
@@ -28,6 +28,7 @@ import {
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { useSession } from "../api/session.ts";
+import { homeHref } from "./home.ts";
 import { useBootstrap, useContainers, useStrips } from "../live/index.ts";
 import { ServiceIcon } from "../ui/ServiceIcon.tsx";
 import { HealthStrip } from "../ui/Sparkline.tsx";
@@ -147,18 +148,14 @@ const StackItem = memo(function StackItem({
   const hasActive = active !== null && ctrs.some((c) => c.name === active);
   const open = filtering || hasActive || !folded;
   return (
-    <details
-      className="stack"
-      data-testid="tree-stack"
-      data-stack={stack.name}
-      open={open}
-      onToggle={(e) => {
-        const now = e.currentTarget.open;
-        if (now !== open && !filtering) onFold(stack.name, !now);
-      }}
-    >
-      <summary className={hasActive ? "cur" : undefined}>
-        {CHEVRON_RIGHT_ICON}
+    // Not <details>: its <summary> may not hold the stack's links (nested
+    // controls). The chevron folds the stack; the name links to its
+    // containers. Each shows its own hover.
+    <div className="stack" data-testid="tree-stack" data-stack={stack.name}>
+      <div className={hasActive ? "sh cur" : "sh"}>
+        {/* A filter or the open container's stack keeps the stack open:
+            the toggle has nothing to do then. */}
+        <Button variant="ghost" className="tg" aria-expanded={open} aria-label={`${open ? "Fold" : "Show"} ${stack.title}`} disabled={filtering || hasActive} onClick={() => onFold(stack.name, open)}>{CHEVRON_RIGHT_ICON}</Button>
         <a className="stack-name" href={`${appHref("/containers")}?stack=${encodeURIComponent(stack.name)}`} title={stack.title}>
           {stack.title}
         </a>
@@ -176,7 +173,7 @@ const StackItem = memo(function StackItem({
           </a>
         )}
         {strip && strip.length > 0 && <HealthStrip codes={strip} label={stack.title} />}
-      </summary>
+      </div>
       {/* A folded stack's items are drawn when it opens (fewer nodes at load). */}
       {open && (
       <ul>
@@ -194,7 +191,7 @@ const StackItem = memo(function StackItem({
         ))}
       </ul>
       )}
-    </details>
+    </div>
   );
 }, sameStack);
 
@@ -365,6 +362,8 @@ export function Sidebar({
 }: SidebarProps) {
   const b = useBootstrap();
   const s = useSession();
+  // Home has its own entry; the list holds the other boards.
+  const boards = b?.boards.filter((board) => board.id !== b.home_board);
   const active = r.name === "container" || r.name === "container_logs" ? r.ctr : null;
   const firing = useAlertCount();
   const build = s.session?.build;
@@ -394,7 +393,7 @@ export function Sidebar({
         </Button>
       </div>
       <nav className="nav" aria-label="Main" data-testid="sidebar">
-        {b && !b.scoped && <NavLink href="/app/overview" label="Overview" current={r.name === "overview" || (r.name === "home" && !b.default_board)} icon={<LayoutGridIcon aria-hidden="true" />} />}
+        {b && (!b.scoped || b.home_board) && <NavLink href={homeHref(b)} label="Home" current={r.name === "overview" || (r.name === "board" && r.id === b.home_board)} icon={<HouseIcon aria-hidden="true" />} />}
         <NavLink
           href={appHref("/containers")}
           label="Containers"
@@ -421,9 +420,9 @@ export function Sidebar({
         />
         </>}
         {b && b.role !== "viewer" && <NavLink href={`/app${settingsHref(local(), b.role === "owner", b.scoped)}`} label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
-        {!!b?.boards.length && <span className="nav-sep label">Boards</span>}
-        {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
-          icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
+        {!!boards?.length && <span className="nav-sep label">Boards</span>}
+        {boards?.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
+          icon={<ServiceIcon name={board.icon} title={board.name} enabled={!!b?.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
         <Button variant="ghost" type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
           <FunnelIcon aria-hidden="true" />
           <span className="nav-label">Stacks and containers</span>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Ring, ansi, jsonFold, matcher, filterRows, names, permalink, searchState, nextMatch, chipName, matchRanges, streamParams, paneHref } from "./model.ts";
+import { Ring, ansi, fgProperty, jsonFold, matcher, filterRows, names, permalink, searchState, nextMatch, chipName, matchRanges, streamParams, paneHref } from "./model.ts";
 test("ring caps newest lines and older history cannot evict current text", () => {
   const r = new Ring(3);
   r.append([1, 2, 3, 4].map((t) => ({ c: "a", t, m: String(t) })));
@@ -14,6 +14,15 @@ test("ANSI strips controls, preserves hostile text and emits SGR spans", () => {
   assert.equal(s[0]?.classes, "log-bold"); assert.ok(s[0]?.fg);
   assert.equal(ansi("\x1b[38;2;1;2;3mRGB")[0]?.fg, "rgb(1,2,3)");
   assert.equal(ansi("\x1b[48;5;232mBG")[0]?.bg, "rgb(8,8,8)");
+});
+test("an ANSI foreground is clamped for the pane only when the segment has no background of its own", () => {
+  // Black on green and bright white on red keep their pairing; plain red
+  // text gets the per-theme lightness clamp (logs.css --fg).
+  const [onGreen] = ansi("\x1b[30;42mok"), [onRed] = ansi("\x1b[97;41mfail"), [plain] = ansi("\x1b[31merror");
+  assert.deepEqual([onGreen?.fg, onGreen?.bg, onGreen && fgProperty(onGreen)], ["#121212", "#6bb576", "color"]);
+  assert.deepEqual([onRed?.fg, onRed?.bg, onRed && fgProperty(onRed)], ["#ffffff", "#d65c5c", "color"]);
+  assert.equal(plain && fgProperty(plain), "--fg");
+  assert.equal(fgProperty({ text: "x", classes: "", fg: "#d65c5c", bg: undefined }), "--fg");
 });
 test("JSON folds objects, message plus six scalars, never arrays or malformed JSON", () => {
   assert.equal(jsonFold('[1,2]'), null); assert.equal(jsonFold('{bad}'), null);

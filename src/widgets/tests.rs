@@ -666,3 +666,336 @@ fn widget_links_reject_network_path_references() {
     assert!(!safe_link("//evil.example"));
     assert!(!safe_link(r"/\evil.example"));
 }
+
+#[test]
+fn refresh_errors_keep_only_the_previous_success_until_recovery() {
+    let failed = |fetched_at| WidgetOutput {
+        fetched_at,
+        error: Some("timed out".into()),
+        ..Default::default()
+    };
+    let success = |fetched_at| WidgetOutput {
+        fetched_at,
+        display: WidgetBody {
+            headline: Some(fetched_at.to_string()),
+            ..Default::default()
+        },
+        values: BTreeMap::from([("number".into(), fetched_at.into())]),
+        ..Default::default()
+    };
+    let mut current = failed(1);
+    current.record(failed(2));
+    assert!(current.stale_since.is_none());
+    assert!(current.display.headline.is_none());
+    current.record(success(3));
+    current.record(failed(4));
+    current.record(failed(5));
+    assert_eq!(current.fetched_at, 5);
+    assert_eq!(current.stale_since, Some(3));
+    assert_eq!(current.display.headline.as_deref(), Some("3"));
+    assert_eq!(current.values["number"], 3);
+    assert_eq!(current.error.as_deref(), Some("timed out"));
+    current.record(success(6));
+    assert_eq!(current.display.headline.as_deref(), Some("6"));
+    assert!(current.stale_since.is_none());
+    assert!(current.error.is_none());
+}
+
+#[test]
+fn widget_refresh_uses_elapsed_time_and_orders_overlapping_attempts() {
+    let mut cache = WidgetCache::default();
+    let tick = Instant::now();
+    let refresh = Duration::from_secs(30);
+    let success = cache.begin("widget");
+    let failure = cache.begin("widget");
+    assert!(cache.record(
+        "widget",
+        success,
+        tick,
+        WidgetOutput {
+            fetched_at: 1000,
+            display: WidgetBody {
+                headline: Some("last good".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    ));
+    let completed = tick + Duration::from_secs(1);
+    assert!(cache.record(
+        "widget",
+        failure,
+        completed,
+        WidgetOutput {
+            fetched_at: 900,
+            error: Some("timed out".into()),
+            ..Default::default()
+        }
+    ));
+    assert!(!cache.record(
+        "widget",
+        success,
+        completed,
+        WidgetOutput {
+            fetched_at: 1001,
+            ..Default::default()
+        }
+    ));
+    let out = cache.get("widget").unwrap();
+    assert_eq!(out.fetched_at, 900);
+    assert_eq!(out.stale_since, Some(1000));
+    assert_eq!(out.error.as_deref(), Some("timed out"));
+    assert_eq!(out.display.headline.as_deref(), Some("last good"));
+    assert_eq!(cache.deadline("widget", refresh), Some(completed + refresh));
+}
+
+#[test]
+fn retained_widget_output_enforces_byte_budgets_for_values_and_last_good_data() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let id = "bounded-widget";
+    let good = cache.begin(id);
+    assert!(cache.record(
+        id,
+        good,
+        now,
+        WidgetOutput {
+            fetched_at: 1,
+            display: WidgetBody {
+                headline: Some("😀".repeat(6500)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    ));
+    for oversized in [
+        WidgetOutput {
+            display: WidgetBody {
+                text: Some("😀".repeat(9000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        WidgetOutput {
+            values: BTreeMap::from([(
+                "nested".into(),
+                serde_json::json!([{"value": "x".repeat(40000)}]),
+            )]),
+            ..Default::default()
+        },
+        WidgetOutput {
+            error: Some("é".repeat(2000)),
+            ..Default::default()
+        },
+    ] {
+        let attempt = cache.begin(id);
+        assert!(cache.record(id, attempt, now, oversized));
+        let output = cache.get(id).unwrap();
+        assert!(output.error.as_ref().unwrap().len() <= WIDGET_ERROR_BYTES);
+        assert_eq!(output.stale_since, Some(1));
+        assert_eq!(output.display.headline.as_ref().unwrap().len(), 26000);
+        assert!(output.retained_bytes() <= WIDGET_OUTPUT_BYTES);
+    }
+}
+
+#[test]
+fn widget_cache_evicts_output_within_the_aggregate_budget_but_keeps_its_deadline() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let count = 20;
+    for i in 0..count {
+        let id = format!("widget-{i}");
+        let attempt = cache.begin(&id);
+        let output = WidgetOutput {
+            display: WidgetBody {
+                headline: Some("a".repeat(28000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(cache.record(&id, attempt, now + Duration::from_secs(i), output));
+        assert!(cache.retained_bytes <= WIDGET_CACHE_BYTES);
+    }
+    assert!(cache.get("widget-0").is_none());
+    assert_eq!(
+        cache.deadline("widget-0", Duration::from_secs(1)),
+        Some(now + Duration::from_secs(1))
+    );
+    assert!(cache.get("widget-19").is_some());
+    cache.clear();
+    assert_eq!(cache.retained_bytes, 0);
+}
+
+#[test]
+fn provider_refresh_floors_survive_eviction_at_128_slots() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let fixtures = [
+        ("weather", "forecast", 900),
+        ("github", "repositories", 600),
+        ("github", "releases", 3600),
+    ];
+    for (provider, widget, _) in fixtures {
+        let id = format!("provider-fetch:{provider}:{widget}");
+        let attempt = cache.begin_provider(&id, now, false);
+        assert!(cache.record(&id, attempt, now, WidgetOutput::default()));
+    }
+    for n in 1..=128 {
+        let id = format!("provider-fetch:fixture:{n}");
+        let completed = now + Duration::from_secs(n);
+        let attempt = cache.begin_provider(&id, completed, false);
+        assert!(cache.record(&id, attempt, completed, WidgetOutput::default()));
+    }
+    for (provider, widget, seconds) in fixtures {
+        let id = format!("provider-fetch:{provider}:{widget}");
+        let provider = crate::providers::get(provider).unwrap();
+        let spec = provider
+            .widgets
+            .iter()
+            .find(|spec| spec.id == widget)
+            .unwrap();
+        let refresh = spec.refresh(
+            &serde_json::from_str(r#"{"refresh":1}"#).unwrap(),
+            provider.public_internet,
+        );
+        assert_eq!(refresh.as_secs(), seconds);
+        assert!(cache.get(&id).is_none());
+        assert_eq!(cache.deadline(&id, refresh), Some(now + refresh));
+    }
+}
+
+#[test]
+fn a_config_reload_keeps_provider_output() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let provider = "provider-fetch:fixture:key";
+    let attempt = cache.begin_provider(provider, now, false);
+    assert!(cache.record(provider, attempt, now, WidgetOutput::default()));
+    let attempt = cache.begin("file-widget");
+    assert!(cache.record("file-widget", attempt, now, WidgetOutput::default()));
+    cache.clear();
+    assert!(cache.get("file-widget").is_none());
+    assert!(cache.get(provider).is_some());
+    assert_eq!(
+        cache.deadline(provider, Duration::from_secs(60)),
+        Some(now + Duration::from_secs(60))
+    );
+}
+
+#[test]
+fn invalidating_an_integration_keeps_stale_data_and_refetches_unless_public() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let refresh = Duration::from_secs(300);
+    let local = "provider-fetch:lan:key";
+    let public = "provider-fetch:cloud:key";
+    let other = "provider-fetch:other:key";
+    for (id, is_public) in [(local, false), (public, true), (other, false)] {
+        let attempt = cache.begin_provider(id, now, is_public);
+        let output = WidgetOutput {
+            fetched_at: 1_000,
+            ..Default::default()
+        };
+        assert!(cache.record(id, attempt, now, output));
+    }
+    // A fetch started before the change must not record after it.
+    let in_flight = cache.begin_provider(local, now, false);
+    cache.invalidate_providers("provider-fetch:lan:");
+    cache.invalidate_providers("provider-fetch:cloud:");
+    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    assert_eq!(cache.deadline(local, refresh), None, "due at once");
+    assert_eq!(cache.get(public).unwrap().stale_since, Some(1_000));
+    assert_eq!(cache.deadline(public, refresh), Some(now + refresh));
+    assert_eq!(cache.get(other).unwrap().stale_since, None);
+    assert_eq!(cache.deadline(other, refresh), Some(now + refresh));
+    assert!(!cache.record(local, in_flight, now, WidgetOutput::default()));
+    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    // The first fetch for the new inputs replaces the old data even when it
+    // fails: the old origin's rows are not last good for the new one.
+    let later = now + Duration::from_secs(1);
+    let attempt = cache.begin_provider(local, later, false);
+    let failed = WidgetOutput {
+        error: Some("down".into()),
+        fetched_at: 1_001,
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, failed));
+    let after = cache.get(local).unwrap();
+    assert_eq!(after.stale_since, None, "nothing retained");
+    assert_eq!(after.error.as_deref(), Some("down"));
+    // A success, then a failure on the same inputs, keeps the good data.
+    let attempt = cache.begin_provider(local, later, false);
+    let fresh = WidgetOutput {
+        fetched_at: 1_002,
+        display: WidgetBody {
+            headline: Some("new".into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, fresh));
+    assert_eq!(cache.get(local).unwrap().stale_since, None);
+    let attempt = cache.begin_provider(local, later, false);
+    let failed = WidgetOutput {
+        error: Some("down".into()),
+        fetched_at: 1_003,
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, failed));
+    let kept = cache.get(local).unwrap();
+    assert_eq!(kept.stale_since, Some(1_002));
+    assert_eq!(kept.display.headline.as_deref(), Some("new"));
+    // A successful first fetch replaces the old data too.
+    let attempt = cache.begin_provider(other, later, false);
+    cache.invalidate_providers("provider-fetch:other:");
+    let attempt_after = cache.begin_provider(other, later, false);
+    assert!(!cache.record(other, attempt, later, WidgetOutput::default()));
+    assert!(cache.record(
+        other,
+        attempt_after,
+        later,
+        WidgetOutput {
+            fetched_at: 1_004,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(cache.get(other).unwrap().stale_since, None);
+    assert_eq!(cache.get(other).unwrap().fetched_at, 1_004);
+    // Deleting the integration drops its data and deadline.
+    cache.remove_providers("provider-fetch:lan:");
+    assert!(cache.get(local).is_none());
+    assert_eq!(cache.deadline(local, refresh), None);
+}
+
+#[test]
+fn a_fetch_that_reached_a_public_host_gets_the_public_floor() {
+    let mut cache = WidgetCache::default();
+    let now = Instant::now();
+    let key = "provider-fetch:feed:one:items";
+    let feed = crate::providers::get("feed").unwrap();
+    assert!(!feed.public_internet);
+    let spec = &feed.widgets[0];
+    let options = serde_json::from_str(r#"{"refresh":15}"#).unwrap();
+    let attempt = cache.begin_provider(key, now, feed.public_internet);
+    assert!(cache.record(key, attempt, now, WidgetOutput::default()));
+    assert!(!cache.attempt_public(key));
+    assert_eq!(
+        spec.refresh(&options, cache.attempt_public(key)).as_secs(),
+        15
+    );
+    cache.mark_public(key);
+    let refresh = spec.refresh(&options, cache.attempt_public(key));
+    assert_eq!(
+        refresh.as_secs(),
+        u64::from(crate::providers::MIN_PUBLIC_REFRESH)
+    );
+    assert_eq!(cache.deadline(key, refresh), Some(now + refresh));
+    // Invalidation keeps a public key's deadline, as for public providers.
+    cache.invalidate_providers("provider-fetch:feed:one:");
+    assert_eq!(cache.deadline(key, refresh), Some(now + refresh));
+    // Each fetch starts from the declared flag, so a URL moved to the LAN
+    // drops the floor after its next fetch stays local.
+    let later = now + refresh;
+    cache.begin_provider(key, later, feed.public_internet);
+    assert!(!cache.attempt_public(key));
+}

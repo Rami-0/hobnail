@@ -15,8 +15,13 @@ pub struct Bootstrap {
     pub role: Role,
     pub scoped: bool,
     pub boards: Vec<BoardNavigation>,
+    /// The board `/app` opens.
     pub default_board: Option<String>,
+    /// The board the Home page (the sidebar's first entry) shows.
+    pub home_board: Option<String>,
     pub remote_icons: bool,
+    /// Icons built into the server, available whatever `remote_icons` says.
+    pub brand_icons: Vec<BrandIcon>,
     /// `[page] title`, else the host name.
     pub title: String,
     pub hostname: String,
@@ -33,6 +38,16 @@ pub struct Bootstrap {
     pub alerts_firing: u32,
     pub refresh: Refresh,
     pub now: i64,
+}
+
+/// A vendored icon: its name, brand colour and whether it is one dark colour
+/// (inverted on dark themes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BrandIcon {
+    pub name: &'static str,
+    pub color: &'static str,
+    pub mono: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,7 +82,7 @@ pub struct Refresh {
 
 fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, ApiError> {
     let role = user.role;
-    let (boards, default_board) = state.db.dashboard(|c| -> Result<_, ApiError> {
+    let (boards, settings) = state.db.dashboard(|c| -> Result<_, ApiError> {
         let boards = super::boards::list(c, user)?
             .into_iter()
             .map(|b| BoardNavigation {
@@ -76,31 +91,35 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
                 icon: b.icon,
             })
             .collect();
-        Ok((
-            boards,
-            super::dashboard_settings::get(c, user)?.default_board,
-        ))
+        Ok((boards, super::dashboard_settings::get(c, user)?))
     })?;
     let loaded = state.config.snapshot();
     let cfg = &loaded.config;
-    let theme = match cfg.page.theme.as_str() {
-        t @ ("dark" | "light" | "ember" | "contrast") => t,
-        _ => "auto",
-    };
     let snap = state.snapshot();
     Ok(Bootstrap {
         role,
         scoped: user.is_scoped(),
         boards,
-        default_board,
+        default_board: settings.default_board,
+        home_board: settings.home_board,
         remote_icons: cfg.icons.remote,
+        brand_icons: crate::http::icons::BRANDS
+            .iter()
+            .map(|brand| BrandIcon {
+                name: brand.name,
+                color: brand.color,
+                mono: brand.mono,
+            })
+            .collect(),
         title: cfg
             .page
             .title
             .clone()
             .unwrap_or_else(|| state.env.hostname.clone()),
         hostname: state.env.hostname.clone(),
-        theme_default: theme.into(),
+        theme_default: settings
+            .default_theme
+            .unwrap_or_else(|| super::dashboard_settings::config_theme(cfg).into()),
         search_url: Some(cfg.page.search_url.clone()).filter(|s| !s.trim().is_empty()),
         features: Features {
             stats: cfg.page.show_stats,

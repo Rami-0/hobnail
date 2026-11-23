@@ -11,19 +11,12 @@ import type { PortBinding } from "../api/gen/PortBinding.ts";
  * `format!("{v:.d$}")` does (`(1.25).toFixed(1)` is "1.3"; Rust says "1.2").
  */
 export function fixed(v: number, d: number): string {
-  if (!Number.isFinite(v)) return String(v);
-  const s = Math.abs(v).toFixed(Math.min(100, d + 60));
-  const dot = s.indexOf(".");
-  const tail = s.slice(dot + 1 + d);
-  if (tail[0] === "5" && /^50*$/.test(tail)) {
-    // Exactly half way: keep the even neighbour.
-    const kept = d === 0 ? s.slice(0, dot) : s.slice(0, dot + 1 + d);
-    const last = Number(kept[kept.length - 1]);
-    const down = (v < 0 ? "-" : "") + kept;
-    if (last % 2 === 0) return down;
-    return v.toFixed(d);
-  }
-  return v.toFixed(d);
+  const text = v.toFixed(d);
+  // An exact binary tie has an odd numerator over 2^(d+1). Multiplying
+  // that numerator by 5^d preserves its residue mod 4. Residue 1 means
+  // the even neighbor is toward zero, one last-place digit below toFixed.
+  const numerator = Math.abs(v) * 2 ** (d + 1);
+  return numerator % 4 === 1 ? text.slice(0, -1) + (Number(text.at(-1)) - 1) : text;
 }
 
 const UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;

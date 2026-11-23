@@ -71,6 +71,18 @@ pub async fn start(addr: SocketAddr, print: bool) -> Result<(SocketAddr, Arc<Moc
             };
             let m = m.clone();
             tokio::spawn(async move {
+                // The main server's socket type, exempt from its write-stall
+                // limit (the mock never times out a client): one copy of
+                // hyper's connection code serves both, which keeps the
+                // release binary smaller.
+                let rule = Arc::new(crate::http::conn::StallRule::default());
+                rule.set(crate::http::conn::Stall::Exempt);
+                let stream = crate::http::conn::Timed::new(
+                    stream,
+                    std::time::Duration::MAX,
+                    std::time::Duration::MAX,
+                    rule,
+                );
                 let svc = hyper::service::service_fn(move |req| {
                     let m = m.clone();
                     async move { Ok::<_, Infallible>(handle(&m, req).await) }

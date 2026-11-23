@@ -13,6 +13,27 @@ host-wide pages or administrative configuration. Viewer responses omit
 credentials, integration paths, environment values and administrative diagnostics.
 See [login](features/login.md), [boards](features/boards.md) and
 [integrations](features/integrations.md). JSON responses are `no-store`.
+Buffered API `application/json` bodies from 1,025 to 262,144 bytes carry
+`Vary: Accept-Encoding` and use gzip when the request accepts it. An
+explicit `gzip;q=0` selects identity. Larger JSON responses use identity.
+Event streams, log downloads, and static assets bypass runtime gzip.
+
+The session cookie uses `HttpOnly; SameSite=Strict; Path=/` with a seven-day
+sliding expiry. Issuing, renewing or clearing it adds `Secure` when a
+[trusted proxy](configuration.md#incoming-reverse-proxy) reports HTTPS.
+Plain HTTP uses the same session flow without the flag.
+
+A request body that does not arrive in full within 15 s returns
+`408 Request Timeout` (`request_timeout`); see
+[connection limits](configuration.md#incoming-reverse-proxy).
+
+Credential-entry throttling returns `429 Too Many Requests` with
+`Retry-After` in seconds. The per-IP limiter uses the TCP peer by default and
+honours `X-Forwarded-For` only from configured trusted proxies. The global
+failed-attempt limit also applies. The server runs one credential operation
+at a time. Up to eight additional login, onboarding, invitation acceptance,
+or password-change requests can wait up to five seconds for it. A full queue
+or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 
 ## Version 1
 
@@ -24,14 +45,20 @@ See [login](features/login.md), [boards](features/boards.md) and
 | GET | `/api/v1/icons/<name>` | Viewer | Dashboard icon. |
 | GET | `/api/v1/boards` | Viewer | Boards. |
 | POST | `/api/v1/boards` | Admin | Board create. |
+| POST | `/api/v1/boards/test-link` | Unscoped Admin or Owner | Test a service URL entered in the board editor using the connection policy. |
 | GET | `/api/v1/boards/<id>` | Viewer | Board. |
 | PUT | `/api/v1/boards/<id>` | Admin | Board save. |
 | PATCH | `/api/v1/boards/<id>` | Admin | Board update. |
 | DELETE | `/api/v1/boards/<id>` | Admin | Board delete. |
-| GET | `/api/v1/boards/<id>/suggestions` | Admin | Board suggestions. |
+| GET | `/api/v1/boards/<id>/suggestions` | Admin | Board suggestions, capped at 256. |
 | GET | `/api/v1/boards/<id>/draft` | Admin | Board draft. |
 | PUT | `/api/v1/boards/<id>/draft` | Admin | Board draft save. |
 | DELETE | `/api/v1/boards/<id>/draft` | Admin | Board draft delete. |
+| GET | `/api/v1/providers` | Viewer | Implemented providers and schemas |
+| POST | `/api/v1/providers/test` | Admin | Test draft connection fields |
+| GET | `/api/v1/providers/detected` | Unscoped Admin or Owner | Local containers that look like a provider, and Tailscale when this host is on a tailnet, with proposed URLs; never contacted. |
+| GET | `/api/v1/providers/widgets` | Admin | Read widget options for an integration |
+| POST | `/api/v1/providers/install` | Admin | Save an instance and add selected widgets |
 | GET | `/api/v1/integrations` | Viewer | Integrations. |
 | POST | `/api/v1/integrations` | Admin | Integration create. |
 | GET | `/api/v1/integrations/<id>` | Viewer | Integration. |
@@ -51,7 +78,7 @@ See [login](features/login.md), [boards](features/boards.md) and
 | GET | `/api/v1/containers/<name>/top` | Admin | Container top. |
 | GET | `/api/v1/alarm` | Viewer | Alarm. |
 | GET | `/api/v1/strips` | Viewer | Strips. |
-| GET | `/api/v1/history` | Viewer | History. |
+| GET | `/api/v1/history` | Viewer | History. `metric=<key>` returns that series only, without events; `metric=none` returns events only. |
 | GET | `/api/v1/bookmarks` | Viewer | Bookmarks. |
 | GET | `/api/v1/widgets` | Viewer | Widgets. |
 | GET | `/api/v1/alerts` | Viewer | Alerts. |
@@ -59,22 +86,214 @@ See [login](features/login.md), [boards](features/boards.md) and
 | GET | `/api/v1/host` | Viewer | Host. |
 | GET | `/api/v1/host/history` | Viewer | Host history. |
 | GET | `/api/v1/stream` | Viewer | Stream. |
+| GET | `/api/v1/onboarding/draft` | Owner | Read the guided setup draft or its completed board ID. |
+| PUT | `/api/v1/onboarding/draft` | Owner | Save draft fields and write-only credential changes. |
+| GET | `/api/v1/onboarding/discovery` | Owner | Read at most 256 service suggestions and source availability. |
+| POST | `/api/v1/onboarding/test` | Owner | Test an included item from the saved draft. |
+| POST | `/api/v1/onboarding/commit` | Owner | Create the first board and mark the draft complete atomically. |
 | POST | `/api/v1/onboarding/owner` | Public | Onboard. |
 | POST | `/api/v1/invites/accept` | Public | Invite accept. |
 | GET | `/api/v1/invites/validate` | Public | Invite validate. |
 | GET | `/api/v1/invites` | Owner | Invites. |
 | POST | `/api/v1/invites` | Owner | Invite create. |
 | DELETE | `/api/v1/invites/<id>` | Owner | Invite revoke. |
-| GET | `/api/v1/users` | Owner | Users. |
+| GET | `/api/v1/users` | Owner | Users, including the `legacy_hash` boolean for each account. |
 | PATCH | `/api/v1/users/<id>/role` | Owner | User role. |
 | PATCH | `/api/v1/users/<id>/disabled` | Owner | User disabled. |
 | PUT | `/api/v1/users/<id>/scopes` | Owner | User scopes. |
 | POST | `/api/v1/users/<id>/sign-out` | Owner | User sign out. |
 | DELETE | `/api/v1/users/<id>` | Owner | User delete. |
+| POST | `/api/v1/account/board-tour` | Viewer | Record completion or dismissal of the board tour for the signed-in account. |
 | POST | `/api/v1/account/password` | Viewer | Password. |
 | GET | `/api/v1/account/sessions` | Viewer | Sessions. |
 | DELETE | `/api/v1/account/sessions/<id>` | Viewer | Session revoke. |
 | DELETE | `/api/v1/account/sessions` | Viewer | Sessions revoke. |
+
+### Board documents
+
+`GET /api/v1/boards/<id>` returns `{board, document, resolved}`. `PUT` saves a
+whole `document` as one revision (and `PUT …/draft` stores one privately):
+
+```json
+{"version": 3, "name": "Home", "icon": "home",
+ "appearance": {"background": "aurora", "density": "compact", "surface": "glass", "accent": "teal"},
+ "sections": [{"id": "…", "title": "Media", "position": 0, "collapsed": false, "items": [
+   {"id": "…", "x": 0, "y": 0, "w": 4, "h": 2,
+    "look": {"accent": "rose", "icon": "jellyfin", "link": "https://media.example", "hide_status": false, "hide_metrics": true},
+    "payload": {"kind": "container", "target": {"by": "compose", "project": "media", "service": "jellyfin"}}}]}]}
+```
+
+- Each section is its own 12-column canvas. An item is the rectangle `x`
+  (0–11), `y`, `w` (1–12, `x + w` ≤ 12) and `h` (1–16 rows); items of one
+  section must not overlap, or the save is refused with field `layout`. The
+  server then moves every item up as far as it goes (in `y`, then `x` order),
+  the same compaction the editor applies, and returns the stored layout.
+  Items are listed in reading order (`y`, then `x`).
+- `appearance` presets: `background` `none`, `dawn`, `dusk`, `aurora`, `ocean`,
+  `forest`, `graphite`; `density` `comfortable` or `compact`; `surface`
+  `solid`, `glass` or `outline`; optional `accent` `blue`, `violet`, `green`,
+  `amber`, `rose`, `teal` or `slate`. There is no custom image or CSS: the
+  page's CSP allows only same-origin images.
+- A provider widget placed from the integration dialog gets its widget's
+  `default_size` (else 4 × 3); board reads give such widgets a `min_size`,
+  below which the editor does not resize them.
+- `look` is optional per item: an accent, an icon name and link that override
+  the target's, and whether to hide the status pill and metrics.
+- Reads always include `name` (and `icon` when set). A saved document with a
+  `name` sets the board's name and icon (no `icon` clears it) in the same
+  revision; one without `name` keeps both.
+- Boards saved before the canvas were migrated in place: sections stayed,
+  and items kept their saved order, each flowed into the first free slot of
+  its old size (4, 8 or 12 columns; rows by kind and old height).
+
+### Board freshness and tour
+
+Board reads and successful board updates return at most 4 MiB of JSON.
+Resolved widget data has a 512 KiB budget within that limit. Later widgets
+that exceed the budget show an unavailable message. Live updates can
+still provide their data. If the remaining
+board metadata exceeds 4 MiB, the API returns a 413 response.
+
+Provider catalog and installation:
+
+- `GET /api/v1/providers` returns implemented provider descriptors, typed
+  connection fields and per-widget option schemas. The `public_internet` and
+  `contacts` fields describe the provider's outbound behavior. `color` is the
+  provider's brand colour (`#rrggbb`) for subtle accents. A field with
+  `when: {field, equals}` applies only while that other field has that value
+  (for example the Pi-hole v5 token); clients hide and omit it otherwise.
+  Each widget has `default_size` and `min_size` (`{w, h}` in board grid
+  units: 12 columns, rows of about 80 px) and a `sample` structured body:
+  static, fictional example data for previews, never upstream data. Exactly
+  one widget per provider is `recommended`.
+- Structured bodies (`structured` on widget views, `sample` on descriptors)
+  are one of `stat`, `stat_grid`, `status_list`, `item_list`, `clock`,
+  `rich_text`, `meter`, `table`, `unavailable`, `meters` (`rows` of
+  `{label, percent, detail?}`), `tiles` (`{label, value, glyph?, delta?,
+  tone?, series?}`, `series` oldest first, at most 48 points), `rows`
+  (`{title, secondary?, value?, status?, progress?, bars?}`, `bars` at most
+  48 recent checks) and `agenda` (`entries` of `{time, title, secondary?,
+  all_day?, status?}`, `time` in Unix seconds). `glyph` is one of a fixed
+  generic set (see `web/src/api/gen/Glyph.ts`); `status`, `tone` and `bars`
+  use `up`, `warn` and `down`.
+- `GET /api/v1/icons/<name>` serves the server's vendored brand icons (the
+  bootstrap's `brand_icons`: `{name, color, mono}`) whatever `[icons] remote`
+  says, with `private, max-age=2592000`. Other names need `[icons] remote =
+  true` and use the on-disk cache, with `private, max-age=86400`.
+- `POST /api/v1/providers/test` accepts `{integration, integration_id?}`.
+  The draft connection uses the integration input below. Supplying an existing
+  ID lets the test reuse its saved credentials for the same origin. The
+  response has `ok`, `class`, `message`, `latency_ms` and a `fingerprint` when a
+  failed TLS handshake presented a leaf certificate. The response never
+  includes upstream data. The test does not write the draft or record saved
+  health evidence.
+- `POST /api/v1/providers/install` accepts
+  `{integration, integration_id?, board_id?, widgets?, remove?}`. Each selected
+  widget is `{id, placement?, options}`. Use the widget descriptor ID for
+  `id` and the widget's saved placement ID when editing it. A nonempty
+  selection requires a board. Connection and board updates commit together.
+  The selected board's placement gets the options and refresh interval. An
+  empty selection saves the connection alone. `remove` lists saved placement
+  IDs of this integration on the board to take off it; removals and the
+  selection land in the same board revision, and an ID that is not this
+  integration's placement on that board is refused. `section` (an index
+  into the board's sections) adds new widgets to that section instead of
+  a new "Widgets" section.
+- `GET /api/v1/providers/widgets?integration=<id>&board=<id>` returns a map
+  of widget descriptor IDs to arrays of placements `{id, options}`. Scoped
+  admins can test or update a granted integration by supplying its ID. Reading
+  or saving widget placements also requires that board's grant. Installing or
+  draft testing a new integration requires unscoped Admin or Owner access.
+- Integration input uses `name`, `kind` (the provider ID), `base_url`,
+  `enabled`, and optional `icon`, `options`, `fingerprint`, and
+  `credentials`. Each credential field ID maps to a replacement string or
+  null to clear it. Omit a field to keep its saved value for the same origin.
+  Admin details expose a map of saved field IDs to bound origins. The legacy
+  Generic HTTP `secret` and `clear_secret` inputs still address its bearer
+  field. `has_secret` indicates whether any field is saved.
+  `fingerprint` is 64 hexadecimal digits for an HTTPS URL. Adding or
+  changing it while credentials are saved returns 400 for each saved field
+  not re-entered in the same request; removing it keeps them.
+- Add `board=<id>` to a stream that subscribes to the `widget` topic to
+  receive provider widget updates for that board. The caller must be able
+  to read it. Placements with identical fetch inputs share the result. Provider widget views supply a discriminated
+  `structured` display body alongside the existing status and freshness
+  fields.
+
+Widget reads, including board resolution and widget stream events, return
+`status: "stale"` when the latest refresh fails after a successful result.
+`body` and `values` retain that result, `last_good_at` gives its Unix timestamp,
+`fetched_at` gives the latest attempt, and `error` explains the failure. An
+initial failure has `status: "error"`, a null body and empty values. After an
+integration's connection, Provider internet access or `[http] allow_hosts`
+changes, its provider widgets stay `stale` with `error: "Refreshing"` until
+the next fetch completes; that result replaces the old one, failed or not.
+
+Integration reads, including board resolution, expose `enabled` and a nullable
+`check`. The check contains the latest manual verdict and the timestamp and
+latency of the last successful test if there was one. Connection changes,
+Provider internet access or `[http] allow_hosts` changes and server restart
+clear the in-memory test evidence. The test POST still returns the single
+attempt's verdict; a `busy` or `changed` verdict is not stored.
+
+Signed-in sessions return `board_tour_pending: true` until the account dismisses
+or completes its tour. POST `/api/v1/account/board-tour` with the session and CSRF
+token to clear the flag. The write is idempotent and returns 204.
+
+### Guided setup
+
+Browser owner creation initializes one setup draft for the new owner. A signed-in
+owner with unfinished setup gets `setup_pending: true` in the session response.
+Existing owners and owners created through host recovery keep their current
+landing page.
+
+- Read `/onboarding/draft` for the current revision, document, effective theme,
+  and any staged credential origins. A completed draft carries its `board_id`.
+- PUT the current `revision`, the complete `document` and a list of `credentials`
+  changes to `/onboarding/draft`. Item IDs are 32 lowercase hexadecimal digits.
+  The document contains the current step, an optional theme and the included or
+  excluded items. Provider targets include `kind: "provider"`, the registry
+  ID in `provider`, plus the same `base_url`, `enabled`, `fingerprint` and
+  `options` as Settings. Each credential change supplies `item_id`, schema
+  `field`, `base_url` and a write-only `secret`. Omit the change to keep that
+  field, or send null to clear it. Draft responses return saved field origins
+  under `credential_bindings`. Staged credentials expire after seven days
+  without a draft save; the draft itself is kept, and an expired field must
+  be entered again.
+  Setup writes accept up to 512 KiB and 512 items. Item names and sections
+  accept up to 256 UTF-8 bytes, URLs up to 2,048 bytes, and icon names up to
+  96 bytes. The legacy discovery source field accepts up to 4,096 bytes.
+- GET `/onboarding/discovery` for Docker availability, config status and the
+  regular board suggestions. Docker failure leaves the other sources usable.
+- POST `revision` and `item_id` to `/onboarding/test` to test a saved, included
+  item. It uses the existing connection policy, rate limit and verdict format.
+  A test verdict does not affect whether setup can be committed. Link tests from
+  setup and the board editor use the same outbound policy, including
+  Provider internet access: with it off, a public destination returns
+  `internet_off`. A link that answers with a redirect or 401/403 is reported
+  reachable (`ok: true`) with the status in the message; a saved link is
+  never shown as healthy. Test URLs must use
+  HTTP or HTTPS and omit query strings and fragments.
+- POST `revision` to `/onboarding/commit` from Review. A single transaction adds
+  the selected services to the Home board (as sections under its first one;
+  without a Home board it creates one named Home), saves any new
+  integrations, sets the default board when none is set and the optional
+  theme, clears staged credentials and records the resulting `board_id`.
+  Repeated commits return that ID. A stale save, test, or first commit
+  returns 409.
+- Dashboard settings accept `default_board`, `home_board`, `default_theme`, and
+  `provider_internet`, in a PATCH. Null clears the corresponding setting. A
+  cleared theme falls back to `[page].theme` in the configuration file.
+  `default_board` is the board `/app` opens; `home_board` is the board the
+  Home page shows. Both must be boards the caller can see, and both are
+  returned (and in the bootstrap) only when visible to the caller.
+- The Home board is created once per install at server start (setting
+  `home_seeded`): Hobnail widgets (Host, Needs attention, Top containers,
+  Stacks, Recent events, CPU and memory over 24 h) in the built-in `hobnail`
+  integration, then the `[[widgets]]` and `[[bookmarks]]` of the configuration
+  file. It is named Home, or Overview when a board is already named Home (that
+  board is left as it is), and becomes the default board only when no default
+  is set. Deleting it clears `home_board`; it is not created again.
 
 ## Kept legacy routes
 

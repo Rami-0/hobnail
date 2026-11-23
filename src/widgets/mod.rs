@@ -79,9 +79,13 @@ mod tests;
 pub use path::Path;
 pub use template::Template;
 
+mod rich;
+pub use rich::{RichBlock, RichKind, RichSpan};
+
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -201,11 +205,349 @@ pub struct WidgetBody {
     pub text: Option<String>,
 }
 
+/// Shared provider display vocabulary. Providers select a shape, and supply text
+/// values rather than markup. The legacy TOML widget body remains compatible.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(tag = "kind", rename_all = "snake_case"))]
+pub enum StructuredBody {
+    Stat {
+        value: String,
+    },
+    StatGrid {
+        rows: Vec<(String, String)>,
+    },
+    StatusList {
+        rows: Vec<(String, Health)>,
+    },
+    ItemList {
+        items: Vec<BodyItem>,
+    },
+    Clock {
+        zones: Vec<(String, String)>,
+        hour12: bool,
+        calendar: bool,
+    },
+    RichText {
+        blocks: Vec<RichBlock>,
+    },
+    Meter {
+        label: String,
+        percent: u8,
+    },
+    Table {
+        headings: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Unavailable {
+        message: String,
+    },
+    /// Labelled bars, such as CPU, memory and disk use.
+    Meters {
+        rows: Vec<MeterRow>,
+    },
+    /// Stat tiles: a value with a glyph, an optional delta and trend.
+    Tiles {
+        tiles: Vec<StatTile>,
+    },
+    /// Rows with a status dot, progress, secondary text, a trailing value
+    /// and recent status bars.
+    Rows {
+        rows: Vec<BodyRow>,
+    },
+    /// Dated entries; the client groups them by its local day.
+    Agenda {
+        entries: Vec<AgendaEntry>,
+    },
+    /// One of Hobnail's own widgets (`view`: `attention`, `host`, `containers`,
+    /// `stacks`, `events`, `logs`, `history`), drawn by the client from the
+    /// host, container, history and log data it already reads.
+    Hobnail {
+        view: String,
+        #[serde(default)]
+        options: HobnailOptions,
+    },
+}
+
+/// A Hobnail widget's validated options.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct HobnailOptions {
+    /// `cpu` or `memory` (top containers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub sort: Option<String>,
+    /// Containers listed or log lines shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub count: Option<u8>,
+    /// The log tail's container; none means the busiest running one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub container: Option<String>,
+    /// A `/api/v1/history` series key, e.g. `cpu`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub metric: Option<String>,
+    /// `1h`, `6h` or `24h`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub range: Option<String>,
+}
+
+/// A labelled bar. `detail` says what the percentage is of, e.g. "4.1 of 16 GiB".
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct MeterRow {
+    pub label: String,
+    pub percent: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub detail: Option<String>,
+}
+
+/// A generic glyph for a stat tile. The client maps each to one icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum Glyph {
+    Activity,
+    Alert,
+    Calendar,
+    Check,
+    Clock,
+    Cpu,
+    Database,
+    Disk,
+    Download,
+    Film,
+    Globe,
+    Image,
+    Memory,
+    Music,
+    Play,
+    Server,
+    Shield,
+    Tv,
+    Upload,
+    Users,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct StatTile {
+    pub label: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub glyph: Option<Glyph>,
+    /// A short change, e.g. "+12%" or "3 new".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub delta: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub tone: Option<Health>,
+    /// Oldest first, at most [`MAX_SERIES`] points, for a sparkline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(test, ts(as = "Option<Vec<f32>>", optional))]
+    pub series: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BodyRow {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub secondary: Option<String>,
+    /// Right-aligned text, e.g. a speed or a count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub status: Option<Health>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub progress: Option<u8>,
+    /// Recent checks, oldest first, at most [`MAX_SERIES`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(test, ts(as = "Option<Vec<Health>>", optional))]
+    pub bars: Vec<Health>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct AgendaEntry {
+    /// Unix seconds.
+    pub time: u64,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub secondary: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
+    pub all_day: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub status: Option<Health>,
+}
+
+/// The most points a series or status-bar strip keeps.
+pub const MAX_SERIES: usize = 48;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum Health {
+    Up,
+    Down,
+    Warn,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BodyItem {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub icon: Option<String>,
+    pub secondary: Option<String>,
+    pub link: Option<String>,
+    pub time: Option<u64>,
+}
+
+impl StructuredBody {
+    /// Keep percentages in range and the newest [`MAX_SERIES`] points.
+    pub(crate) fn limit(&mut self) {
+        fn newest<T>(items: &mut Vec<T>) {
+            if items.len() > MAX_SERIES {
+                items.drain(..items.len() - MAX_SERIES);
+            }
+        }
+        match self {
+            Self::Meter { percent, .. } => *percent = (*percent).min(100),
+            Self::Meters { rows } => rows.iter_mut().for_each(|r| r.percent = r.percent.min(100)),
+            Self::Tiles { tiles } => {
+                for tile in tiles {
+                    tile.series.retain(|n| n.is_finite());
+                    newest(&mut tile.series);
+                }
+            }
+            Self::Rows { rows } => {
+                for row in rows {
+                    row.progress = row.progress.map(|n| n.min(100));
+                    newest(&mut row.bars);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        fn opt(text: &Option<String>) -> usize {
+            text.as_ref().map_or(0, String::capacity)
+        }
+        fn strings(items: &Vec<String>) -> usize {
+            items.capacity() * size_of::<String>()
+                + items.iter().map(String::capacity).sum::<usize>()
+        }
+        match self {
+            Self::Stat { value }
+            | Self::Meter { label: value, .. }
+            | Self::Unavailable { message: value } => value.capacity(),
+            Self::Clock { zones: rows, .. } | Self::StatGrid { rows } => {
+                rows.capacity() * size_of::<(String, String)>()
+                    + rows
+                        .iter()
+                        .map(|(k, v)| k.capacity() + v.capacity())
+                        .sum::<usize>()
+            }
+            Self::StatusList { rows } => {
+                rows.capacity() * size_of::<(String, Health)>()
+                    + rows.iter().map(|(k, _)| k.capacity()).sum::<usize>()
+            }
+            Self::ItemList { items } => {
+                items.capacity() * size_of::<BodyItem>()
+                    + items
+                        .iter()
+                        .map(|i| {
+                            i.title.capacity()
+                                + i.icon.as_ref().map_or(0, String::capacity)
+                                + i.secondary.as_ref().map_or(0, String::capacity)
+                                + i.link.as_ref().map_or(0, String::capacity)
+                        })
+                        .sum::<usize>()
+            }
+            Self::RichText { blocks } => {
+                blocks.capacity() * size_of::<RichBlock>()
+                    + blocks.iter().map(RichBlock::retained_bytes).sum::<usize>()
+            }
+            Self::Table { headings, rows } => {
+                strings(headings)
+                    + rows.capacity() * size_of::<Vec<String>>()
+                    + rows.iter().map(strings).sum::<usize>()
+            }
+            Self::Meters { rows } => {
+                rows.capacity() * size_of::<MeterRow>()
+                    + rows
+                        .iter()
+                        .map(|r| r.label.capacity() + opt(&r.detail))
+                        .sum::<usize>()
+            }
+            Self::Tiles { tiles } => {
+                tiles.capacity() * size_of::<StatTile>()
+                    + tiles
+                        .iter()
+                        .map(|t| {
+                            t.label.capacity()
+                                + t.value.capacity()
+                                + opt(&t.delta)
+                                + t.series.capacity() * size_of::<f32>()
+                        })
+                        .sum::<usize>()
+            }
+            Self::Rows { rows } => {
+                rows.capacity() * size_of::<BodyRow>()
+                    + rows
+                        .iter()
+                        .map(|r| {
+                            r.title.capacity()
+                                + opt(&r.secondary)
+                                + opt(&r.value)
+                                + r.bars.capacity() * size_of::<Health>()
+                        })
+                        .sum::<usize>()
+            }
+            Self::Hobnail { view, options } => {
+                view.capacity()
+                    + opt(&options.sort)
+                    + opt(&options.container)
+                    + opt(&options.metric)
+                    + opt(&options.range)
+            }
+            Self::Agenda { entries } => {
+                entries.capacity() * size_of::<AgendaEntry>()
+                    + entries
+                        .iter()
+                        .map(|e| e.title.capacity() + opt(&e.secondary))
+                        .sum::<usize>()
+            }
+        }
+    }
+}
+
 /// Result of one widget run.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct WidgetOutput {
     #[serde(skip)]
     pub display: WidgetBody,
+    #[serde(skip)]
+    pub structured: Option<Arc<StructuredBody>>,
     /// Extracted values by name, for alert rules (`widget` rules read these).
     /// Every field, plus `_status` (HTTP status / exit code), `_ms`
     /// (latency), `_ok` (status rule result, when one is set) and `_text`
@@ -216,6 +558,311 @@ pub struct WidgetOutput {
     /// Unix seconds.
     pub fetched_at: u64,
     pub duration_ms: u64,
+    /// Timestamp of retained display data, present only after a refresh fails.
+    #[serde(skip)]
+    pub stale_since: Option<u64>,
+}
+
+// Retained display and alert values share one cache. Reserve space for a
+// later error beside the last good data. The aggregate is 1.25% of 20 MiB.
+const WIDGET_OUTPUT_BYTES: usize = 32 * 1024;
+const WIDGET_CACHE_BYTES: usize = 256 * 1024;
+const WIDGET_ERROR_BYTES: usize = 512;
+
+fn map_bytes<'a>(len: usize, entries: impl Iterator<Item = (&'a String, &'a Value)>) -> usize {
+    // Allow for the tree root, node slack and links as well as the entries.
+    let overhead = if len == 0 { 0 } else { 1024 + 256 * len };
+    overhead
+        + entries
+            .map(|(key, value)| key.capacity() + value_bytes(value))
+            .sum::<usize>()
+}
+
+fn value_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(s) => s.capacity(),
+        Value::Array(values) => {
+            values.capacity() * size_of::<Value>() + values.iter().map(value_bytes).sum::<usize>()
+        }
+        Value::Object(values) => map_bytes(values.len(), values.iter()),
+        _ => 0,
+    }
+}
+
+impl WidgetOutput {
+    fn retained_bytes(&self) -> usize {
+        size_of::<Self>()
+            + self.structured.as_ref().map_or(0, |body| {
+                size_of::<StructuredBody>() + 2 * size_of::<usize>() + body.retained_bytes()
+            })
+            + self.display.rows.capacity() * size_of::<(String, String)>()
+            + self
+                .display
+                .rows
+                .iter()
+                .map(|(label, value)| label.capacity() + value.capacity())
+                .sum::<usize>()
+            + [&self.display.headline, &self.display.text, &self.error]
+                .into_iter()
+                .flatten()
+                .map(String::capacity)
+                .sum::<usize>()
+            + map_bytes(self.values.len(), self.values.iter())
+    }
+
+    fn bound(&mut self) {
+        if let Some(error) = &mut self.error {
+            if error.capacity() > WIDGET_ERROR_BYTES {
+                *error = error[..error.floor_char_boundary(WIDGET_ERROR_BYTES)].to_owned();
+            }
+        }
+        if self.retained_bytes() > WIDGET_OUTPUT_BYTES - WIDGET_ERROR_BYTES {
+            self.display = WidgetBody::default();
+            self.structured = None;
+            self.values.clear();
+            self.error = Some("Widget output exceeded the 32 KiB retained data limit.".into());
+        }
+    }
+
+    /// Keep the display but show it as stale (from its fetch time) until the
+    /// next result replaces it. An error with no retained data is left as is.
+    fn mark_stale(&mut self) {
+        if self.stale_since.is_none() && self.error.is_none() {
+            self.stale_since = Some(self.fetched_at);
+        }
+    }
+
+    pub(crate) fn record(&mut self, mut next: Self) {
+        if next.error.is_some() {
+            let last_good = self
+                .stale_since
+                .or_else(|| self.error.is_none().then_some(self.fetched_at));
+            if let Some(at) = last_good {
+                next.display = std::mem::take(&mut self.display);
+                next.structured = self.structured.take();
+                next.values = std::mem::take(&mut self.values);
+                next.duration_ms = self.duration_ms;
+                next.stale_since = Some(at);
+            }
+        }
+        *self = next;
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct WidgetCache {
+    slots: std::collections::HashMap<String, WidgetSlot>,
+    retained_bytes: usize,
+    next_attempt: u64,
+    // Live provider fetch keys outlast evictable body slots and config reloads.
+    provider_attempts: std::collections::HashMap<String, ProviderAttempt>,
+}
+
+const PROVIDER_PREFIX: &str = "provider-fetch:";
+
+/// When a provider fetch key last started or completed, and whether its
+/// provider is declared public (its refresh floor protects a public quota).
+#[derive(Clone, Copy)]
+pub(crate) struct ProviderAttempt {
+    at: Instant,
+    public: bool,
+}
+
+#[derive(Default)]
+struct WidgetSlot {
+    first_attempt: u64,
+    completed: Option<(u64, Instant)>,
+    output: Option<Box<WidgetOutput>>,
+    bytes: usize,
+    /// `output` came from the inputs before the last invalidation (another
+    /// origin, credential or pin). The next completed fetch replaces it,
+    /// failed or not, so old data never stands in for the new binding.
+    rebound: bool,
+}
+
+impl WidgetCache {
+    /// After a config.toml reload: drop the file-configured widgets' output.
+    /// Provider fetches do not read config.toml (apart from `[http]
+    /// allow_hosts`, see [`Self::invalidate_providers`]), so their last
+    /// output stays on screen.
+    pub(crate) fn clear(&mut self) {
+        self.slots.retain(|id, slot| {
+            let keep = id.starts_with(PROVIDER_PREFIX);
+            if !keep {
+                self.retained_bytes -= slot.bytes;
+            }
+            keep
+        });
+    }
+
+    /// The inputs of the provider fetch keys under `prefix` changed (an
+    /// integration's credential, URL or pin, the internet switch or the
+    /// allowed hosts). Each keeps its last output, marked stale, until the
+    /// next fetch completes; that result replaces it even when it fails, so
+    /// data from the old inputs is never kept as last good for the new ones.
+    /// Fetches already in flight cannot record. Keys of
+    /// non-public providers become due at once; public ones keep their
+    /// deadline, whose floor protects the public service's quota.
+    pub(crate) fn invalidate_providers(&mut self, prefix: &str) {
+        let first = self.next_attempt + 1;
+        let attempts = &mut self.provider_attempts;
+        for (id, slot) in self.slots.iter_mut() {
+            if !id.starts_with(PROVIDER_PREFIX) || !id.starts_with(prefix) {
+                continue;
+            }
+            slot.first_attempt = first;
+            if let Some(output) = slot.output.as_deref_mut() {
+                output.mark_stale();
+                slot.rebound = true;
+            }
+            if !attempts.get(id).is_some_and(|attempt| attempt.public) {
+                slot.completed = None;
+            }
+        }
+        attempts.retain(|id, attempt| attempt.public || !id.starts_with(prefix));
+    }
+
+    /// Forget the provider fetch keys under `prefix` (a deleted integration).
+    pub(crate) fn remove_providers(&mut self, prefix: &str) {
+        self.remove_prefix(prefix);
+        self.provider_attempts
+            .retain(|id, _| !id.starts_with(prefix));
+    }
+
+    pub(crate) fn get(&self, id: &str) -> Option<&WidgetOutput> {
+        self.slots.get(id)?.output.as_deref()
+    }
+
+    pub(crate) fn deadline(&self, id: &str, refresh: Duration) -> Option<Instant> {
+        let at = self
+            .provider_attempts
+            .get(id)
+            .map(|attempt| attempt.at)
+            .or_else(|| self.slots.get(id)?.completed.map(|(_, at)| at))?;
+        Some(refresh_deadline(at, refresh))
+    }
+
+    /// The fetch for `id` reached a public address: from now on its refresh
+    /// floor and invalidation follow the public rules, like a public provider.
+    pub(crate) fn mark_public(&mut self, id: &str) {
+        if let Some(attempt) = self.provider_attempts.get_mut(id) {
+            attempt.public = true;
+        }
+    }
+
+    /// Whether the last fetch of `id` was public (declared or resolved).
+    pub(crate) fn attempt_public(&self, id: &str) -> bool {
+        self.provider_attempts
+            .get(id)
+            .is_some_and(|attempt| attempt.public)
+    }
+
+    pub(crate) fn begin_provider(&mut self, id: &str, started: Instant, public: bool) -> u64 {
+        self.provider_attempts.insert(
+            id.into(),
+            ProviderAttempt {
+                at: started,
+                public,
+            },
+        );
+        self.begin(id)
+    }
+
+    pub(crate) fn provider_attempts(
+        &mut self,
+    ) -> &mut std::collections::HashMap<String, ProviderAttempt> {
+        &mut self.provider_attempts
+    }
+
+    pub(crate) fn begin(&mut self, id: &str) -> u64 {
+        const MAX_PROVIDER_SLOTS: usize = 128;
+        if id.starts_with(PROVIDER_PREFIX) && !self.slots.contains_key(id) {
+            let mut providers = self
+                .slots
+                .iter()
+                .filter(|(id, _)| id.starts_with(PROVIDER_PREFIX));
+            if providers.clone().count() >= MAX_PROVIDER_SLOTS {
+                if let Some(oldest) = providers
+                    .by_ref()
+                    .min_by_key(|(_, slot)| {
+                        (slot.completed.is_none(), slot.completed.map(|(_, at)| at))
+                    })
+                    .map(|(id, _)| id.clone())
+                {
+                    self.retained_bytes -= self.slots.remove(&oldest).expect("cache slot").bytes;
+                }
+            }
+        }
+        self.next_attempt += 1;
+        self.slots
+            .entry(id.to_owned())
+            .or_insert_with(|| WidgetSlot {
+                first_attempt: self.next_attempt,
+                ..Default::default()
+            });
+        self.next_attempt
+    }
+
+    pub(crate) fn remove_prefix(&mut self, prefix: &str) {
+        self.slots.retain(|id, slot| {
+            let remove = id.starts_with(prefix);
+            if remove {
+                self.retained_bytes -= slot.bytes;
+            }
+            !remove
+        });
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        id: &str,
+        attempt: u64,
+        completed: Instant,
+        mut out: WidgetOutput,
+    ) -> bool {
+        let Some(slot) = self.slots.get_mut(id) else {
+            return false;
+        };
+        if attempt < slot.first_attempt
+            || slot.completed.is_some_and(|(latest, _)| latest >= attempt)
+        {
+            return false;
+        }
+        slot.completed = Some((attempt, completed));
+        if let Some(attempt) = self.provider_attempts.get_mut(id) {
+            attempt.at = completed;
+        }
+        out.bound();
+        self.retained_bytes -= slot.bytes;
+        match &mut slot.output {
+            Some(current) if !slot.rebound => current.record(out),
+            _ => slot.output = Some(Box::new(out)),
+        }
+        slot.rebound = false;
+        slot.bytes = slot
+            .output
+            .as_deref()
+            .map_or(0, WidgetOutput::retained_bytes);
+        self.retained_bytes += slot.bytes;
+        while self.retained_bytes > WIDGET_CACHE_BYTES {
+            let oldest = self
+                .slots
+                .iter_mut()
+                .filter(|(other, slot)| other.as_str() != id && slot.output.is_some())
+                .min_by_key(|(_, slot)| slot.completed.map(|(_, at)| at))
+                .expect("aggregate budget exceeds the single-widget budget")
+                .1;
+            self.retained_bytes -= std::mem::take(&mut oldest.bytes);
+            oldest.output = None;
+        }
+        true
+    }
+}
+
+pub(crate) fn refresh_deadline(now: Instant, refresh: Duration) -> Instant {
+    // Durations too large to represent as a deadline are effectively never due.
+    now.checked_add(refresh)
+        .unwrap_or_else(|| now + Duration::from_secs(100 * 365 * 24 * 3600))
 }
 
 /// Parsed paths and templates of one widget.
@@ -609,14 +1256,14 @@ async fn fetch_api(w: &WidgetConfig, policy: &HttpPolicy) -> Result<Fetched, Fai
 
 /// Replaces the values of a widget's secret headers in what came back
 /// (before anything is extracted, shown, stored or logged).
-struct Scrub(Vec<String>);
+pub(crate) struct Scrub(Vec<String>);
 
 const REDACTED: &str = "<redacted>";
 
 impl Scrub {
     /// Each value, the credentials after its scheme (`Bearer x` → `x`) and
     /// its JSON-escaped form; the longest first.
-    fn new(secrets: &[String]) -> Self {
+    pub(crate) fn new(secrets: &[String]) -> Self {
         let mut all: Vec<String> = Vec::new();
         for v in secrets.iter().map(|v| v.trim()).filter(|v| !v.is_empty()) {
             all.push(v.to_string());
@@ -647,7 +1294,7 @@ impl Scrub {
         out
     }
 
-    fn json(&self, v: &mut Value) {
+    pub(crate) fn json(&self, v: &mut Value) {
         if self.0.is_empty() {
             return;
         }

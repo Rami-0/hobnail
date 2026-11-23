@@ -24,3 +24,27 @@
 @media (max-width:519px){.settings-pair{grid-template-columns:1fr}}
 .settings-section>.sel{justify-self:start}
 .settings-row .settings-actions{gap:var(--s-1)}
+
+/* ---- integration cards (Settings → Integrations) ---- */
+.integration-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:var(--s-3)}
+.integration-card{--brand-c:var(--brand,var(--border));display:grid;gap:var(--s-2);align-content:start;padding:var(--s-4);border:1px solid color-mix(in oklab,var(--brand-c) 24%,var(--border));border-radius:var(--r-lg);background:linear-gradient(160deg,color-mix(in oklab,var(--brand-c) 9%,var(--card)),var(--card) 55%)}
+.integration-card>header{display:flex;align-items:center;gap:var(--s-3);min-width:0}
+.integration-card>header>div{flex:1;min-width:0;display:grid}
+.integration-card>header .service-icon{width:44px;height:44px;border-radius:var(--r-lg)}
+.integration-card h3{font-size:var(--fs-body);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.integration-card small{font-size:var(--fs-micro);text-transform:uppercase;letter-spacing:var(--track-label);color:var(--muted-foreground)}
+.integration-url{justify-self:start;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-xs);padding:2px 6px;border-radius:var(--r);background:var(--muted)}
+.integration-meta{display:grid;gap:4px;font-size:var(--fs-xs);color:var(--muted-foreground)}
+.integration-widgets{display:inline-flex;align-items:center;gap:4px;font-variant-numeric:tabular-nums}
+.integration-widgets svg{width:12px;height:12px;color:color-mix(in oklab,var(--brand-c) 70%,var(--muted-foreground))}
+.integration-card>footer{display:flex;flex-wrap:wrap;gap:var(--s-1);padding-top:var(--s-2);border-top:1px solid var(--border)}
+
+/* Provider internet access: the per-provider destinations, collapsed */
+.contacts-disclosure{margin-top:var(--s-2);border:1px solid var(--border);border-radius:var(--r-lg);background:var(--card)}
+.contacts-disclosure>summary{cursor:pointer;padding:var(--s-2) var(--s-3);font-size:var(--fs-sm);font-weight:500}
+.contacts-disclosure>summary .muted{color:var(--muted-foreground);font-weight:400}
+.contacts-list{list-style:none;margin:0;padding:0 var(--s-3) var(--s-3);display:grid;gap:6px;max-height:360px;overflow:auto}
+.contacts-list li{display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;font-size:var(--fs-xs);color:var(--muted-foreground)}
+.contacts-list strong{color:var(--foreground);font-weight:600}
+.contacts-public{padding:0 6px;border-radius:999px;background:var(--warning-bg);color:var(--warning)}
+.contacts-list li>span:last-child{flex-basis:100%}

@@ -6,12 +6,15 @@
 //!   check-config [path]    validate a config file and exit
 //!   notify-test <channel>  send a test notification to a configured channel
 //!   set-password [name]    recover the owner account (password from TTY or stdin)
+//!   reset-password <name>  reset an existing account password and revoke sessions
+//!   list-legacy-hashes     list usernames still on the 19 MiB profile
 //!   mock-receiver [addr]   local fake webhook/Slack/Telegram receiver for tests
 //!   version
 
 mod alerts;
 mod api;
 mod auth;
+mod board_grid;
 mod config;
 mod db;
 mod docker;
@@ -22,6 +25,7 @@ mod log;
 mod logs;
 mod mock;
 mod model;
+mod providers;
 mod read_model;
 mod settings;
 mod state;
@@ -53,7 +57,9 @@ fn main() {
         "healthcheck" => rt.block_on(healthcheck()),
         "check-config" => check_config(rest),
         "notify-test" => rt.block_on(alerts::cli_notify_test(rest)),
-        "set-password" => auth::cli_set_password(rest),
+        "set-password" => auth::cli_set_password(rest, false),
+        "reset-password" => auth::cli_set_password(rest, true),
+        "list-legacy-hashes" => auth::cli_list_legacy_hashes(rest),
         "mock-receiver" => rt.block_on(mock::run(rest)),
         "version" | "--version" | "-V" => {
             let b = state::BuildInfo::current();
@@ -68,7 +74,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password [username] | mock-receiver [addr] | version]"
+                "usage: hobnail [serve | healthcheck | check-config [path] | notify-test <channel> | set-password [username] | reset-password <username> | list-legacy-hashes | mock-receiver [addr] | version]"
             );
             2
         }
@@ -93,6 +99,30 @@ async fn serve() -> i32 {
         built = st.build.time,
         data_dir = st.env.data_dir.display(),
     );
+
+    if let Ok(users) = st.db.legacy_hash_users() {
+        if !users.is_empty() {
+            let message = if auth::legacy_verify_fits(auth::read_memory_limit()) {
+                "legacy Argon2id hashes: first sign-in needs about 20.5 MiB; allow more than 20 MiB until each account signs in or is reset with hobnail reset-password <username>; check with hobnail list-legacy-hashes"
+            } else {
+                "legacy Argon2id hashes: the memory limit is too small to verify them, so these accounts cannot sign in; reset each with hobnail reset-password <username> without the limit or from a one-off container with the server stopped; check with hobnail list-legacy-hashes"
+            };
+            warn!(message, count = users.len());
+        }
+    }
+
+    // The sign-in floor applies while legacy hashes remain (or the scan
+    // fails); measure the hash speed once instead of starting from 150 ms.
+    if !st
+        .db
+        .legacy_hash_users()
+        .is_ok_and(|users| users.is_empty())
+    {
+        let s = st.clone();
+        tokio::spawn(async move { auth::calibrate_floor(&s).await });
+    }
+
+    api::home::seed(&st);
 
     st.db.record_event(
         util::unix_now() as i64,

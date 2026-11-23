@@ -194,7 +194,12 @@ server draft endpoint. Never put credentials in drafts, URLs or storage.
 | `[data-testid="board-picker"]`, `form[data-testid="board-link-form"]` | searchable suggestions and manual link form |
 | `[data-testid="board-suggestion"]` | one filtered suggestion action |
 | `[data-testid="board-leave"]` | unsaved-navigation prompt; Keep editing / Leave and keep draft |
-| `[data-section="<index>"][data-item="<index>"] .drag-handle` | item Move / Resize controls; Alt+arrows moves, Shift+arrows resizes |
+| `[data-section="<index>"][data-item="<index>"] .drag-handle` | a tile's grip: arrows (or Alt+arrows) move it one cell, Shift+arrows resize it; the live region announces each step |
+| `.canvas-item` with `--x --y --w --h` style properties, inside `[data-canvas="<section>"]` | a tile's rectangle on its section's 12-column canvas (editor and read page) |
+| `.resize-handle`, `.canvas-placeholder` | a tile's corner resize handle; where a dragged tile will land |
+| `.tile-tools`, `[data-testid="tile-customize"]` | a tile's tool strip (Move earlier/later on phones, Customize, Remove) |
+| `[data-testid="board-item-editor"]`, `[data-testid="board-panel"]`, `button[data-testid="board-style"]` | the tile Customize side panel, the board Style panel and its toggle |
+| `button[data-testid="board-undo"]`, `button[data-testid="board-redo"]`, `button[data-testid="board-add-tile"]` | edit bar undo / redo (also Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y) and Add |
 | `[data-testid="draft-status"]` | pending / saved / failed server draft status |
 | `[data-testid="board-draft"]`, `[data-testid="draft-resume"]`, `[data-testid="draft-discard"]` | draft recovery choices |
 | `[data-testid="board-conflict"]`, `[data-testid="board-rebase"]` | explicit conflict recovery |
@@ -221,7 +226,7 @@ same-session conflicts use the original document for a three-way rebase.
 | `#ev-<id>` | Timeline row opened by a chart marker |
 | `[data-testid="palette-open"]` | Open the command palette |
 | `[data-testid="palette"] [role="combobox"]` | Palette query and active option |
-| `[data-testid="overview"]` | Overview page |
+| `[data-testid="hobnail-attention"]`, `.hobnail-widget[data-view="<view>"]` | Needs attention, and any Hobnail widget, on a board (the Home board replaced the Overview page; `/app/overview` opens it) |
 | `[data-testid="alerts"]` | Alerts read page |
 | `[data-testid="host-sample"][data-sampled-at]` | Timestamp of the current Host sample |
 | `[data-testid="host-disclosure"]` | A Host facts disclosure |

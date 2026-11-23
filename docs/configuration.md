@@ -121,6 +121,77 @@ load. Example:
 :root { --accent: #2f81f7; --r: 4px; --font: "Inter", system-ui, sans-serif; }
 ```
 
+## Incoming reverse proxy
+
+Set `RH_TRUSTED_PROXIES` to a comma-separated list of exact IPv4 or IPv6
+addresses and restart Hobnail. The default is empty. List only proxies you
+control. Include the TCP peer IP as Hobnail sees it and any upstream proxy IPs
+that should be skipped when walking `X-Forwarded-For`. A shared address such as
+a Docker gateway can also represent direct clients. Use a dedicated proxy
+address and restrict direct access to the backend.
+
+Hobnail serves HTTP. Configure the trusted proxy to overwrite
+`X-Forwarded-Proto` with a single `https` or `http` value based on the
+external connection. HTTPS requests then receive a Secure session cookie.
+Preserve the external Host and add it to `RH_ALLOWED_HOSTS` if necessary.
+
+For login throttling, the trusted proxy must append the IP of its TCP peer to
+`X-Forwarded-For` or replace the header with that IP if it is the edge proxy.
+Hobnail walks the list from right to left, skips configured proxy IPs and
+uses the first other IP. Use bare IPv4 or IPv6 literals without ports.
+A missing list, malformed hop in the trusted part of the chain, or list
+with only trusted IPs falls back to the TCP peer.
+
+Connection limits keep slow, silent or oversized requests within the memory
+budget and stop a few peers from holding every connection:
+
+- A request line plus headers (cookies included) may total 16 KiB; a larger
+  request gets `431 Request Header Fields Too Large`.
+- A connection that has not sent a complete request head within 10 s is
+  closed, including an idle keep-alive connection.
+- A request body must arrive in full within 15 s of its head, or the request
+  gets `408 Request Timeout`.
+- A response write that makes no progress for 15 s (a client that stopped
+  reading) closes the connection; for a refusal or error (status 400 and
+  up, a few hundred bytes) the limit is 5 s. Only a signed-in event stream,
+  log stream or log download that is being served is exempt; a refused
+  request to one of those paths is not.
+- At most 48 connections are open at once, event streams included
+  (`RH_MAX_CONNECTIONS`, 8 to 4096). Further connections wait in a short
+  kernel queue (64) until one closes; past that, the client's TCP stack
+  retries the connection after 1 s, then 3 s.
+- One peer may hold at most 12 of them (`RH_MAX_CONNECTIONS_PER_PEER`, 0 to
+  `RH_MAX_CONNECTIONS`; IPv6 peers count by /64); more get `503` with
+  `Retry-After: 1` and are closed. A browser needs one connection per open
+  tab for its event stream plus up to six for parallel requests, so 12
+  covers a device with two tabs. Addresses in `RH_TRUSTED_PROXIES` are
+  exempt, because every client arrives through them. If clients reach
+  Hobnail through another shared address that is not a trusted proxy, such
+  as Docker's userland proxy for ports published on `127.0.0.1`, Docker
+  Desktop, or rootless Docker or Podman, they share that peer's
+  connections: raise `RH_MAX_CONNECTIONS_PER_PEER` (up to
+  `RH_MAX_CONNECTIONS`) or set it to `0` to turn the per-peer limit off
+  and keep only the global cap. Connections over the per-peer limit are
+  refused rather than queued, so a single address cannot fill the server
+  by waiting.
+
+The defaults keep the whole container under its 20 MiB memory budget even
+when every connection is held by a client that sends requests and never
+reads the answers. Measured with 25 signed-in clients, a sign-in (Argon2
+uses 7 MiB while it runs) and 4 or 8 such addresses, the container's
+cgroup `memory.peak` was 15.4 to 16.0 MiB; with 64 connections it was 18.1
+to 18.9 MiB. Each connection such a client holds pins up to about 130 KiB
+of kernel socket memory.
+
+To serve more connections (many devices, or several users behind one
+address that is not a trusted proxy), raise the container's memory limit
+with them: allow about 0.2 MiB per connection above 48 on top of the
+20 MiB, for example `RH_MAX_CONNECTIONS=128` with a 36 MiB limit. Both settings need a
+restart (see [install.md](install.md#environment-variables)).
+
+A proxy that keeps a pool of idle upstream connections reconnects when
+Hobnail closes one.
+
 ## Outgoing HTTP
 
 ```toml
@@ -129,12 +200,16 @@ allow_hosts = ["192.168.1.10", "127.0.0.1", "*.example.com"]   # empty = any hos
 ```
 
 Applies to widgets, HTTP checks, icon fetches, notifications and integration
-tests. It matches hostnames (not URL paths). Integration connection tests check
+tests and refreshes. It matches hostnames (not URL paths). Provider requests check
 all resolved addresses and connect using those checked addresses. With no list,
 LAN addresses are allowed but loopback/link-local/metadata, multicast, reserved
 and selected translation addresses are refused. Explicit matching hosts are the
-host operator override; see [integrations](features/integrations.md). Tests stop
-at redirects and trust public certificate roots only; no certificate pinning.
+host operator override. Matching hostnames' DNS answers are trusted for that
+address-policy exemption. Provider requests stop at redirects and use public
+certificate roots by default. The integration editor also supports an explicit
+SHA-256 leaf pin. Public provider HTTP requests require the SQLite dashboard
+setting **Provider internet access**, which is off by default. See
+[Integrations](features/integrations.md).
 
 Widgets, notification channels, `[history]` and `[logs]` are configured in
 the same file: see [features/widgets.md](features/widgets.md),

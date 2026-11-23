@@ -13,7 +13,10 @@ export function useNear(ref: RefObject<Element | null>): { seen: boolean; visibl
     const element = ref.current;
     if (!element || none) return;
     ahead ??= new IntersectionObserver((entries) => {
-      for (const entry of entries) if (entry.isIntersecting) callbacks.get(entry.target)?.(true, false);
+      for (const entry of entries) if (entry.isIntersecting) {
+        ahead?.unobserve(entry.target);
+        callbacks.get(entry.target)?.(true, false);
+      }
     }, { rootMargin: "300px 0px" });
     viewport ??= new IntersectionObserver((entries) => {
       for (const entry of entries) callbacks.get(entry.target)?.(false, entry.isIntersecting);

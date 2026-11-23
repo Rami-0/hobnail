@@ -2,7 +2,7 @@
 //! tasks. Locks are std (short critical sections, never held across .await).
 
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, watch, Notify};
 
 use crate::config::ConfigStore;
 use crate::model::{Snapshot, StatsMap, SystemStats};
-use crate::widgets::WidgetOutput;
+use crate::widgets::{WidgetCache, WidgetOutput};
 
 #[derive(Debug, Clone)]
 pub struct BuildInfo {
@@ -45,6 +45,60 @@ pub struct Env {
     /// Extra Host header values (globs) accepted besides IPs, localhost and
     /// `hostname` (RH_ALLOWED_HOSTS, comma-separated). DNS-rebinding guard.
     pub allowed_hosts: Vec<String>,
+    /// Exact socket peer IPs allowed to supply forwarding headers.
+    pub trusted_proxies: Vec<IpAddr>,
+    /// Open connections at once, event streams included
+    /// (RH_MAX_CONNECTIONS).
+    pub max_connections: usize,
+    /// Open connections one peer address (IPv6: /64) may hold; 0 is no
+    /// per-peer limit (RH_MAX_CONNECTIONS_PER_PEER).
+    pub max_connections_per_peer: usize,
+}
+
+/// Highest `RH_MAX_CONNECTIONS`. Every open connection can pin about
+/// 200 KiB of socket and process memory (docs/configuration.md).
+pub(crate) const MAX_CONNECTIONS_CEILING: usize = 4096;
+/// Lowest `RH_MAX_CONNECTIONS`: a few devices with an event stream each.
+pub(crate) const MAX_CONNECTIONS_FLOOR: usize = 8;
+
+/// `RH_MAX_CONNECTIONS` (8 to 4096, default from
+/// [`crate::http::server::LIMITS`]) and `RH_MAX_CONNECTIONS_PER_PEER`
+/// (0, meaning no per-peer limit, up to the global cap; default from the
+/// same place).
+pub(crate) fn parse_connection_limits(
+    connections: Option<&str>,
+    per_peer: Option<&str>,
+) -> Result<(usize, usize), String> {
+    let set = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let defaults = crate::http::server::LIMITS;
+    let connections = match set(connections) {
+        None => defaults.connections,
+        Some(value) => match value.parse::<usize>() {
+            Ok(n) if (MAX_CONNECTIONS_FLOOR..=MAX_CONNECTIONS_CEILING).contains(&n) => n,
+            _ => {
+                return Err(format!(
+                    "RH_MAX_CONNECTIONS: expected {MAX_CONNECTIONS_FLOOR} to {MAX_CONNECTIONS_CEILING}, got {value:?}"
+                ))
+            }
+        },
+    };
+    let per_peer = match set(per_peer) {
+        None => defaults.per_peer.min(connections),
+        Some(value) => match value.parse::<usize>() {
+            Ok(n) if n <= connections => n,
+            _ => {
+                return Err(format!(
+                    "RH_MAX_CONNECTIONS_PER_PEER: expected 0 (no limit) to RH_MAX_CONNECTIONS ({connections}), got {value:?}"
+                ))
+            }
+        },
+    };
+    Ok((connections, per_peer))
 }
 
 impl Env {
@@ -72,6 +126,10 @@ impl Env {
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|_| "home".into())
         });
+        let (max_connections, max_connections_per_peer) = parse_connection_limits(
+            std::env::var("RH_MAX_CONNECTIONS").ok().as_deref(),
+            std::env::var("RH_MAX_CONNECTIONS_PER_PEER").ok().as_deref(),
+        )?;
         Ok(Self {
             listen,
             data_dir,
@@ -85,6 +143,18 @@ impl Env {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            trusted_proxies: var("RH_TRUSTED_PROXIES", "")
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.parse::<IpAddr>()
+                        .map(|ip| ip.to_canonical())
+                        .map_err(|_| "RH_TRUSTED_PROXIES: expected comma-separated IP addresses")
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            max_connections,
+            max_connections_per_peer,
         })
     }
 }
@@ -99,22 +169,26 @@ pub struct AppState {
     pub containers: watch::Sender<Arc<Snapshot>>,
     pub container_stats: Mutex<(crate::docker::StatsSampler, StatsMap)>,
     pub system: Mutex<(crate::system::Sampler, Option<SystemStats>)>,
-    pub widgets: Mutex<HashMap<String, WidgetOutput>>,
+    pub(crate) widgets: Mutex<WidgetCache>,
     /// Local history database (docs/DESIGN.md section 4). May be disabled.
     pub db: Arc<crate::db::Db>,
     pub alerts: Mutex<crate::alerts::Status>,
     /// Login back-off state (per instance; see `auth::RateLimiter`).
     pub password_limiter: Mutex<crate::auth::PasswordLimiter>,
+    pub(crate) integration_checks: Mutex<HashMap<String, crate::api::integrations::CheckSlot>>,
     pub integration_tests: Mutex<HashMap<i64, VecDeque<std::time::Instant>>>,
     pub login_limiter: Mutex<crate::auth::RateLimiter>,
     /// Serializes password hashing and verification to bound peak memory.
-    pub login_verifying: Mutex<()>,
+    pub(crate) credential_queue: crate::auth::CredentialQueue,
     /// Internal notifications for JSON stream topics and config changes.
     pub events: broadcast::Sender<Arc<str>>,
     /// Woken when the first viewer connects.
     pub wake: Notify,
     viewers: AtomicUsize,
     widget_viewers: AtomicUsize,
+    pub(crate) provider_viewers: crate::api::provider_widgets::Viewers,
+    pub(crate) provider_connections: crate::providers::Connections,
+    pub(crate) provider_requests: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -137,19 +211,50 @@ impl AppState {
                 crate::system::Sampler::new(&env.host_proc, &env.host_sys),
                 None,
             )),
-            widgets: Mutex::new(HashMap::new()),
+            widgets: Mutex::default(),
             db,
             alerts: Mutex::new(Default::default()),
             password_limiter: Mutex::new(Default::default()),
+            integration_checks: Mutex::new(HashMap::new()),
             integration_tests: Mutex::new(HashMap::new()),
             login_limiter: Mutex::new(Default::default()),
-            login_verifying: Mutex::new(()),
+            credential_queue: Default::default(),
             events,
             wake: Notify::new(),
             viewers: AtomicUsize::new(0),
             widget_viewers: AtomicUsize::new(0),
+            provider_viewers: Default::default(),
+            provider_connections: Default::default(),
+            provider_requests: Arc::new(tokio::sync::Semaphore::new(4)),
             env,
         })
+    }
+
+    pub(crate) fn begin_widget(
+        &self,
+        config: &Arc<crate::config::Config>,
+        id: &str,
+    ) -> Option<u64> {
+        let mut cache = self.widgets.lock().unwrap();
+        Arc::ptr_eq(config, &self.config.current()).then(|| cache.begin(id))
+    }
+
+    pub(crate) fn record_widget(
+        &self,
+        config: &Arc<crate::config::Config>,
+        id: &str,
+        attempt: u64,
+        completed: std::time::Instant,
+        out: WidgetOutput,
+    ) -> bool {
+        let mut cache = self.widgets.lock().unwrap();
+        if !Arc::ptr_eq(config, &self.config.current())
+            || !cache.record(id, attempt, completed, out)
+        {
+            return false;
+        }
+        self.changed(&format!("w-{id}"));
+        true
     }
 
     pub fn snapshot(&self) -> Arc<Snapshot> {
@@ -209,5 +314,33 @@ impl Drop for ViewerGuard {
             self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
         }
         self.0.viewers.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn connection_limits_default_to_48_and_12_and_stay_in_range() {
+        use super::parse_connection_limits as parse;
+        assert_eq!(parse(None, None), Ok((48, 12)));
+        assert_eq!(parse(Some(" "), Some("")), Ok((48, 12)));
+        assert_eq!(parse(Some("256"), Some("64")), Ok((256, 64)));
+        assert_eq!(parse(None, Some("0")), Ok((48, 0)), "0: no per-peer limit");
+        assert_eq!(parse(None, Some("48")), Ok((48, 48)));
+        assert_eq!(
+            parse(Some("8"), None),
+            Ok((8, 8)),
+            "the default share fits the cap"
+        );
+        for bad in ["7", "4097", "-1", "many"] {
+            assert!(parse(Some(bad), None).is_err(), "{bad}");
+        }
+        for bad in ["49", "-1", "1.5"] {
+            assert!(parse(None, Some(bad)).is_err(), "{bad}");
+        }
+        assert!(
+            parse(Some("32"), Some("33")).is_err(),
+            "share above the cap"
+        );
     }
 }

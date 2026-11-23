@@ -175,7 +175,154 @@ ALTER TABLE boards ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE boards ADD COLUMN sections TEXT NOT NULL DEFAULT '[]'
   CHECK (json_valid(sections) AND json_type(sections) = 'array');
 ",
+    "
+CREATE TABLE setup_credentials (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_id)
+) WITHOUT ROWID;
+",
+    "ALTER TABLE users ADD COLUMN board_tour_seen INTEGER NOT NULL DEFAULT 0;",
+    "
+CREATE TABLE provider_widgets (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT ('provider:' || lower(hex(randomblob(16)))),
+  integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  widget TEXT NOT NULL,
+  options TEXT NOT NULL CHECK (json_valid(options)),
+  UNIQUE (integration_id, widget)
+);
+",
+    "
+CREATE UNIQUE INDEX integrations_id_origin ON integrations(id,origin);
+CREATE TABLE integration_credentials (
+  integration_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (integration_id, field),
+  FOREIGN KEY (integration_id, origin) REFERENCES integrations(id,origin) ON DELETE CASCADE
+) WITHOUT ROWID;
+INSERT INTO integration_credentials (integration_id,field,origin,secret)
+  SELECT id,'secret',secret_origin,secret FROM integrations WHERE secret IS NOT NULL;
+UPDATE integrations SET secret=NULL,secret_origin=NULL WHERE secret IS NOT NULL;
+",
+    "
+ALTER TABLE setup_credentials RENAME TO setup_credentials_before_fields;
+CREATE TABLE setup_credentials (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_id TEXT NOT NULL,
+  field TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  PRIMARY KEY (user_id, item_id, field)
+) WITHOUT ROWID;
+INSERT INTO setup_credentials (user_id,item_id,field,origin,secret)
+  SELECT user_id,item_id,'secret',origin,secret FROM setup_credentials_before_fields;
+DROP TABLE setup_credentials_before_fields;
+",
+    "
+ALTER TABLE provider_widgets RENAME TO provider_widgets_before_placements;
+CREATE TABLE provider_widgets (
+  id TEXT PRIMARY KEY NOT NULL,
+  integration_id TEXT NOT NULL REFERENCES integrations(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  widget TEXT NOT NULL,
+  options TEXT NOT NULL CHECK (json_valid(options))
+);
+CREATE INDEX provider_widgets_integration ON provider_widgets(integration_id, widget);
+CREATE INDEX provider_widgets_board ON provider_widgets(board_id);
+INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+  SELECT 'provider:' || item.id, pw.integration_id, item.board_id, pw.widget, pw.options
+  FROM board_items item JOIN provider_widgets_before_placements pw
+    ON item.kind='widget' AND pw.id=json_extract(item.config,'$.widget_id');
+-- Drafts can contain both saved items and new copies of the old shared widget.
+-- Prefer the saved item's placement, then reuse a placement on this board.
+CREATE TEMP TABLE provider_draft_targets AS
+  SELECT refs.board_id, refs.legacy_id, coalesce((
+    SELECT 'provider:' || item.id FROM board_items item
+    WHERE item.board_id=refs.board_id AND item.kind='widget'
+      AND json_extract(item.config,'$.widget_id')=refs.legacy_id
+    ORDER BY item.id LIMIT 1
+  ), 'provider:' || lower(hex(randomblob(16)))) AS placement
+  FROM (
+    SELECT DISTINCT board.id AS board_id, old.id AS legacy_id
+    FROM drafts draft JOIN boards board ON draft.key='board:' || board.id
+    CROSS JOIN json_each(draft.value,'$.sections') section
+    CROSS JOIN json_each(section.value,'$.items') item
+    JOIN provider_widgets_before_placements old
+      ON json_extract(item.value,'$.payload.widget_id')=old.id
+    WHERE json_extract(item.value,'$.payload.kind')='widget'
+  ) refs;
+INSERT INTO provider_widgets (id,integration_id,board_id,widget,options)
+  SELECT target.placement, old.integration_id, target.board_id, old.widget, old.options
+  FROM provider_draft_targets target JOIN provider_widgets_before_placements old
+    ON old.id=target.legacy_id
+  WHERE NOT EXISTS (SELECT 1 FROM provider_widgets WHERE id=target.placement);
+UPDATE drafts AS draft
+  SET value=json_set(value,'$.sections',json((
+    SELECT json_group_array(json(json_set(section.value,'$.items',json((
+      SELECT json_group_array(json(CASE WHEN target.placement IS NULL THEN item.value
+        ELSE json_set(item.value,'$.payload.widget_id',coalesce((
+          SELECT 'provider:' || saved.id FROM board_items saved
+          WHERE saved.id=json_extract(item.value,'$.id') AND saved.board_id=target.board_id
+            AND saved.kind='widget' AND json_extract(saved.config,'$.widget_id')=target.legacy_id
+        ), target.placement)) END) ORDER BY item.key)
+      FROM json_each(section.value,'$.items') item
+      LEFT JOIN provider_draft_targets target
+        ON draft.key='board:' || target.board_id
+        AND json_extract(item.value,'$.payload.kind')='widget'
+        AND json_extract(item.value,'$.payload.widget_id')=target.legacy_id
+    )))) ORDER BY section.key)
+    FROM json_each(draft.value,'$.sections') section
+  )))
+  WHERE EXISTS (SELECT 1 FROM provider_draft_targets target WHERE draft.key='board:' || target.board_id)
+    AND json_type(draft.value,'$.sections')='array';
+DROP TABLE provider_draft_targets;
+UPDATE board_items SET config=json_set(config,'$.widget_id','provider:' || id)
+  WHERE kind='widget' AND EXISTS (
+    SELECT 1 FROM provider_widgets WHERE provider_widgets.id='provider:' || board_items.id);
+DROP TABLE provider_widgets_before_placements;
+",
+    "
+-- Old installs stored a copied integration name with no provenance. Mark
+-- sections matching the current name and provider-only legacy sections,
+-- which may already have been renamed or lost their integration.
+UPDATE boards AS board SET sections=json((
+    SELECT json_group_array(json(CASE WHEN EXISTS (
+        SELECT 1 FROM board_items item
+        LEFT JOIN provider_widgets pw ON pw.id=json_extract(item.config,'$.widget_id')
+        LEFT JOIN integrations i ON i.id=pw.integration_id
+        WHERE item.board_id=board.id AND json_extract(item.layout,'$.section')=json_extract(section.value,'$.id')
+            AND item.kind='widget' AND json_extract(item.config,'$.widget_id') LIKE 'provider:%'
+            AND (i.name=json_extract(section.value,'$.title') OR NOT EXISTS (
+                SELECT 1 FROM board_items other
+                WHERE other.board_id=board.id AND json_extract(other.layout,'$.section')=json_extract(section.value,'$.id')
+                AND NOT (other.kind='widget' AND json_extract(other.config,'$.widget_id') LIKE 'provider:%')
+            ))
+    ) THEN json_set(section.value,'$.legacy_provider_title',(
+        SELECT CASE WHEN count(DISTINCT i.id)=1 THEN min(i.id) ELSE '' END
+        FROM board_items item
+        JOIN provider_widgets pw ON pw.id=json_extract(item.config,'$.widget_id')
+        JOIN integrations i ON i.id=pw.integration_id
+        WHERE item.board_id=board.id AND json_extract(item.layout,'$.section')=json_extract(section.value,'$.id')
+            AND item.kind='widget' AND i.name=json_extract(section.value,'$.title')
+    )) ELSE section.value END) ORDER BY section.key)
+    FROM json_each(board.sections) section
+)) WHERE sections != '[]';
+",
+    // Followed by `board_layout::upgrade` (see `migrate`).
+    "
+ALTER TABLE boards ADD COLUMN appearance TEXT NOT NULL DEFAULT '{}'
+  CHECK (json_valid(appearance) AND json_type(appearance) = 'object');
+",
 ];
+
+/// The migration after which saved board layouts move from responsive spans
+/// to canvas rectangles (v16); the JSON rewrite needs the grid's flow, in Rust.
+const BOARD_CANVAS: usize = 15;
+const _: () = assert!(BOARD_CANVAS < MIGRATIONS.len());
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
 pub(super) fn configure(conn: &Connection, file: bool) -> rusqlite::Result<()> {
@@ -234,6 +381,9 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<(), String> {
     let v = version(&tx)?;
     for (n, sql) in MIGRATIONS.iter().enumerate().skip(v) {
         tx.execute_batch(sql).map_err(e)?;
+        if n == BOARD_CANVAS {
+            super::board_layout::upgrade(&tx).map_err(e)?;
+        }
         tx.pragma_update(None, "user_version", (n + 1) as i64)
             .map_err(e)?;
     }
@@ -290,6 +440,114 @@ mod tests {
     }
 
     #[test]
+    fn provider_upgrade_preserves_existing_http_connections_and_board_targets() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        let previous = MIGRATIONS
+            .iter()
+            .position(|sql| sql.contains("CREATE TABLE integration_credentials"))
+            .unwrap();
+        for sql in &MIGRATIONS[..previous] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", previous as i64)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO integrations (id,name,kind,origin,config,secret,secret_origin)
+                VALUES ('legacy','Old HTTP','http','https://fixture.test',
+                        '{"base_url":"https://fixture.test/status","enabled":true}',
+                        'fake-bearer','https://fixture.test');
+               INSERT INTO boards (id,name,created,updated) VALUES ('old-board','Board',1,1);
+               INSERT INTO board_items (id,board_id,kind,config,integration_id) VALUES
+                ('old-link','old-board','integration','{"kind":"integration","integration_id":"legacy"}','legacy'),
+                ('old-widget','old-board','widget','{"kind":"widget","widget_id":"local-toml"}',NULL);
+               INSERT INTO boards (id,name,created,updated) VALUES ('other-board','Other',1,1);
+               INSERT INTO provider_widgets(id,integration_id,widget,options)
+                   VALUES ('provider:old','legacy','json','{"paths":["value"],"refresh":30}');
+               INSERT INTO board_items(id,board_id,kind,config) VALUES
+                   ('provider-a','old-board','widget','{"kind":"widget","widget_id":"provider:old"}'),
+                   ('provider-b','other-board','widget','{"kind":"widget","widget_id":"provider:old"}');
+               INSERT INTO users (id,name,password_hash,role,created,updated)
+                   VALUES (1,'owner','hash','owner',1,1);
+               INSERT INTO drafts (user_id,key,value,updated) VALUES
+                   (1,'board:old-board','{"version":2,"sections":[{"id":"section-a","title":"Section","position":0,"items":[
+                     {"id":"provider-a","position":0,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"provider:old"}},
+                     {"position":1,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"provider:old"}},
+                     {"position":2,"spans":{"mobile":4,"tablet":4,"desktop":4,"rows":1},
+                      "payload":{"kind":"widget","widget_id":"local-toml"}}]}]}',3);
+               INSERT INTO boards (id,name,created,updated) VALUES ('draft-only','Draft only',1,1);
+               INSERT INTO drafts (user_id,key,value,updated)
+                   SELECT 1,'board:draft-only',value,updated FROM drafts WHERE key='board:old-board';"#,
+        ).unwrap();
+        migrate(&mut conn).unwrap();
+        let saved = conn
+            .query_row(
+                "SELECT json_extract(config,'$.base_url'), c.secret, c.origin
+             FROM integrations JOIN integration_credentials c ON integration_id=id
+             WHERE id='legacy' AND field='secret' ",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            saved,
+            (
+                "https://fixture.test/status".into(),
+                "fake-bearer".into(),
+                "https://fixture.test".into()
+            )
+        );
+        let targets: String = conn.query_row(
+            "SELECT group_concat(id) FROM (SELECT id FROM board_items WHERE board_id='old-board' ORDER BY id)",
+            [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(targets, "old-link,old-widget,provider-a");
+        let placements: i64 = conn.query_row(
+            "SELECT count(*) FROM provider_widgets pw JOIN board_items item
+             ON item.board_id=pw.board_id AND json_extract(item.config,'$.widget_id')=pw.id
+             WHERE pw.integration_id='legacy' AND pw.widget='json'
+               AND json_extract(pw.options,'$.paths[0]')='value' AND json_extract(pw.options,'$.refresh')=30",
+             [], |row| row.get(0)).unwrap();
+        assert_eq!(placements, 2);
+        let draft: String = conn
+            .query_row(
+                "SELECT value FROM drafts WHERE key='board:old-board'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let draft: serde_json::Value = serde_json::from_str(&draft).unwrap();
+        let items = &draft["sections"][0]["items"];
+        assert_eq!(draft["version"], 2);
+        assert_eq!(items[0]["payload"]["widget_id"], "provider:provider-a");
+        assert_eq!(items[1]["payload"]["widget_id"], "provider:provider-a");
+        assert_eq!(items[2]["payload"]["widget_id"], "local-toml");
+        let draft_only: i64 = conn.query_row(
+            "SELECT count(*) FROM provider_widgets pw JOIN drafts d ON d.key='board:' || pw.board_id
+             WHERE pw.board_id='draft-only' AND pw.id=json_extract(d.value,'$.sections[0].items[1].payload.widget_id')
+               AND pw.integration_id='legacy' AND pw.widget='json'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(draft_only, 1);
+        let credentials_in_widgets: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM provider_widgets WHERE instr(options,'fake-bearer')>0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(credentials_in_widgets, 0);
+    }
+
+    #[test]
     fn boards_start_empty_and_integration_secrets_are_origin_bound() {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn, false).unwrap();
@@ -315,15 +573,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(items, 0);
-        let integration: String = conn
-            .query_row(
-                "INSERT INTO integrations (name, kind, origin, secret, secret_origin)
-             VALUES ('Example', 'example', 'https://example.test', 'secret', 'https://example.test')
-             RETURNING id",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let integration: String = conn.query_row(
+            "INSERT INTO integrations (name,kind,origin) VALUES ('Example','http','https://example.test')
+             RETURNING id", [], |row| row.get(0)).unwrap();
+        conn.execute(
+            "INSERT INTO integration_credentials (integration_id,field,origin,secret)
+                      VALUES (?1,'secret','https://example.test','fixture')",
+            [&integration],
+        )
+        .unwrap();
         assert_eq!(integration.len(), 32);
         assert!(conn
             .execute(
@@ -331,14 +589,162 @@ mod tests {
                 [&integration],
             )
             .is_err());
+        assert!(conn
+            .execute(
+                "INSERT INTO integration_credentials (integration_id,field,origin,secret)
+                      VALUES (?1,'other','https://wrong.test','fixture')",
+                [&integration]
+            )
+            .is_err());
+        conn.execute(
+            "DELETE FROM integration_credentials WHERE integration_id=?1",
+            [&integration],
+        )
+        .unwrap();
         assert_eq!(
             conn.execute(
-                "UPDATE integrations SET origin = 'https://new.example.test', secret = NULL,
-             secret_origin = NULL WHERE id = ?1",
-                [&integration],
+                "UPDATE integrations SET origin='https://new.example.test' WHERE id=?1",
+                [&integration]
             )
             .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn legacy_provider_title_migration_marks_only_candidate_sections() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        let previous = BOARD_CANVAS - 1;
+        for migration in &MIGRATIONS[..previous] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", previous as i64)
+            .unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO integrations(id,name,kind,origin,config)
+                VALUES ('provider','New name','http','https://fixture.test','{}');
+            INSERT INTO boards(id,name,created,updated,sections)
+                VALUES ('board','Board',1,1,'[
+                    {"id":"legacy","title":"Old name","position":0},
+                    {"id":"mixed","title":"New name","position":1},
+                    {"id":"other","title":"Other","position":2}
+                ]');
+            INSERT INTO provider_widgets(id,integration_id,board_id,widget,options) VALUES
+                ('provider:a','provider','board','json','{}'),
+                ('provider:b','provider','board','json','{}');
+            INSERT INTO board_items(id,board_id,kind,config,layout) VALUES
+                ('a','board','widget','{"widget_id":"provider:a"}','{"section":"legacy"}'),
+                ('b','board','widget','{"widget_id":"provider:b"}','{"section":"mixed"}'),
+                ('c','board','link','{}','{"section":"mixed"}'),
+                ('d','board','link','{}','{"section":"other"}');
+        "#,
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let markers = conn
+            .query_row(
+                "SELECT json_extract(sections,'$[0].legacy_provider_title'),
+                    json_extract(sections,'$[1].legacy_provider_title'),
+                    json_extract(sections,'$[2].legacy_provider_title')
+             FROM boards WHERE id='board'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(markers, (String::new(), "provider".into(), None));
+    }
+
+    #[test]
+    fn board_canvas_migration_flows_saved_spans_into_rectangles() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        for migration in &MIGRATIONS[..BOARD_CANVAS] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", BOARD_CANVAS as i64)
+            .unwrap();
+        let span = |desktop: u8, rows: u8| {
+            format!(r#""spans":{{"mobile":4,"tablet":4,"desktop":{desktop},"rows":{rows}}}"#)
+        };
+        conn.execute_batch(&format!(
+            r#"
+            INSERT INTO users(id,name,password_hash,role,created,updated) VALUES (1,'owner','x','owner',1,1);
+            INSERT INTO boards(id,name,icon,created,updated,sections)
+                VALUES ('board','Home','home',1,1,'[
+                    {{"id":"a","title":"Apps","position":0}},
+                    {{"id":"b","title":"Links","position":1}}
+                ]');
+            INSERT INTO board_items(id,board_id,kind,config,layout) VALUES
+                ('i1','board','container','{{}}','{{"section":"a","position":1,{wide}}}'),
+                ('i2','board','container','{{}}','{{"section":"a","position":0,{small}}}'),
+                ('i3','board','widget','{{}}','{{"section":"a","position":2,{tall}}}'),
+                ('i4','board','link','{{}}','{{"section":"b","position":0,{small}}}'),
+                ('i5','board','link','{{}}','{{"section":"b","position":1,{small}}}');
+            INSERT INTO drafts(user_id,key,value,updated) VALUES
+                (1,'board:board','{{"version":0,"sections":[{{"title":"Apps","position":0,"items":[
+                    {{"position":0,{wide},"payload":{{"kind":"link","title":"A","url":"https://a.test"}}}},
+                    {{"position":1,{small},"payload":{{"kind":"widget","widget_id":"w"}}}}
+                ]}}]}}',1),
+                (1,'board:gone','{{"version":0,"sections":[]}}',1);
+            "#,
+            wide = span(8, 1),
+            small = span(4, 1),
+            tall = span(4, 2),
+        ))
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let layout = |id: &str| -> serde_json::Value {
+            let raw: String = conn
+                .query_row("SELECT layout FROM board_items WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            serde_json::from_str(&raw).unwrap()
+        };
+        let rect = |x: u16, y: u16, w: u16, h: u16, section: &str| serde_json::json!({"section": section, "x": x, "y": y, "w": w, "h": h});
+        // Saved order: i2 (4 wide), i1 (8 wide) beside it, then i3 below.
+        assert_eq!(layout("i2"), rect(0, 0, 4, 2, "a"));
+        assert_eq!(layout("i1"), rect(4, 0, 8, 2, "a"));
+        assert_eq!(layout("i3"), rect(0, 2, 4, 5, "a"));
+        assert_eq!(layout("i4"), rect(0, 0, 4, 1, "b"));
+        assert_eq!(layout("i5"), rect(4, 0, 4, 1, "b"));
+        let draft: String = conn
+            .query_row(
+                "SELECT value FROM drafts WHERE key='board:board'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let draft: serde_json::Value = serde_json::from_str(&draft).unwrap();
+        assert_eq!(draft["name"], "Home");
+        assert_eq!(draft["icon"], "home");
+        let items = &draft["sections"][0]["items"];
+        assert_eq!(items[0]["w"], 8);
+        assert_eq!(items[0]["h"], 1);
+        assert_eq!(
+            (items[1]["x"].as_u64(), items[1]["w"].as_u64()),
+            (Some(8), Some(4))
+        );
+        assert!(items[0].get("spans").is_none() && items[0].get("position").is_none());
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM drafts WHERE key='board:gone'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+        let appearance: String = conn
+            .query_row("SELECT appearance FROM boards", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(appearance, "{}");
     }
 }

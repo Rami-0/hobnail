@@ -250,7 +250,13 @@ fn commit_checked(
     let revision = db.add_revision(now, user, &d.note, &d.text);
     db.record_event(now, d.kind, "info", user, &d.note);
     crate::info!("config saved from the app", note = d.note, user = user);
-    state.config.reload();
+    {
+        let mut widgets = state.widgets.lock().unwrap();
+        let previous = state.config.current();
+        if state.config.reload() {
+            crate::live::reloaded(state, &previous, &mut widgets);
+        }
+    }
     state.changed("reload");
     Ok(json!({
         "ok": true,

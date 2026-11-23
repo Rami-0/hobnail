@@ -5,8 +5,9 @@ General, Containers and groups, Bookmarks, Widgets, Notifications, Appearance,
 History and data, Config file, Security, Boards and Integrations; Users is
 Owner-only. Scoped Admins can edit granted boards and integrations only.
 The Settings link remembers this browser's last tab. Signed-out users see
-sign-in; Viewers receive no configuration. Bookmark/widget dialogs also open
-on Overview and notification dialogs on Alerts for unrestricted Admin/Owner.
+sign-in; Viewers receive no configuration. Notification dialogs also open on
+Alerts for unrestricted Admin/Owner; bookmarks and widgets are added to a
+board (such as Home) from the board editor's Add picker.
 Boards and integrations use SQLite, independently of TOML revisions; see
 [boards.md](boards.md) and [integrations.md](integrations.md).
 
@@ -161,3 +162,10 @@ atomically (temp file + rename, same mode) → add a revision → record a
   confirm.
 - *Security:* recent authentication events and account links. Password and
   session management live on `/app/account`; password changes revoke sessions.
+
+### Reorder a legacy collection
+
+Use the up and down buttons to stage changes to TOML collection order. Choose
+**Save order** to apply all moves in one revision or **Cancel** to restore the
+saved list. If the configuration changes during the edit, cancel the draft
+and start again from the latest list.

@@ -18,15 +18,40 @@ pub async fn config_watcher(state: Arc<AppState>) {
     iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         iv.tick().await;
+        let mut widgets = state.widgets.lock().unwrap();
+        let previous = state.config.current();
         if state.config.poll() {
-            state.widgets.lock().unwrap().clear();
+            reloaded(&state, &previous, &mut widgets);
             state.changed("reload");
         }
     }
 }
 
+/// After a config.toml reload, with the widget cache lock held: drop the
+/// file-configured widgets' output. Provider widgets keep theirs; only an
+/// `[http] allow_hosts` change affects them, and then they refetch (public
+/// providers at their floor) showing the last data as stale, and stored
+/// integration test verdicts are dropped.
+pub(crate) fn reloaded(
+    state: &AppState,
+    previous: &Arc<crate::config::Config>,
+    widgets: &mut crate::widgets::WidgetCache,
+) {
+    let current = state.config.current();
+    if Arc::ptr_eq(previous, &current) {
+        return;
+    }
+    widgets.clear();
+    if previous.http.allow_hosts != current.http.allow_hosts {
+        widgets.invalidate_providers("provider-fetch:");
+        // Stored test verdicts were made under the previous outbound policy.
+        state.integration_checks.lock().unwrap().clear();
+    }
+}
+
 pub async fn run(state: Arc<AppState>) {
     let in_flight: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let provider_jobs = Arc::default();
     let mut last_sys: Option<Instant> = None;
     let mut last_stats: Option<Instant> = None;
     loop {
@@ -48,31 +73,29 @@ pub async fn run(state: Arc<AppState>) {
             refresh_container_stats(&state);
         }
 
-        let unix_now = crate::util::unix_now();
         for w in cfg.widgets.iter().filter(|_| state.widget_viewers() > 0) {
             let due = {
                 let cache = state.widgets.lock().unwrap();
                 cache
-                    .get(&w.id)
-                    .is_none_or(|o| o.fetched_at + w.refresh.0.as_secs().max(1) <= unix_now)
+                    .deadline(&w.id, w.refresh.0)
+                    .is_none_or(|deadline| deadline <= now)
             };
             if !due || !in_flight.lock().unwrap().insert(w.id.clone()) {
                 continue;
             }
+            let Some(attempt) = state.begin_widget(&cfg, &w.id) else {
+                in_flight.lock().unwrap().remove(&w.id);
+                continue;
+            };
             let (st, w, fl, run_config) =
                 (state.clone(), w.clone(), in_flight.clone(), cfg.clone());
             tokio::spawn(async move {
                 let out = crate::widgets::run(&w, &run_config.http).await;
-                {
-                    let mut cache = st.widgets.lock().unwrap();
-                    if Arc::ptr_eq(&run_config, &st.config.current()) {
-                        cache.insert(w.id.clone(), out);
-                    }
-                }
+                st.record_widget(&run_config, &w.id, attempt, Instant::now(), out);
                 fl.lock().unwrap().remove(&w.id);
-                st.changed(&format!("w-{}", w.id));
             });
         }
+        crate::api::provider_widgets::poll(&state, &cfg, &provider_jobs, now);
         tokio::time::sleep(TICK).await;
     }
 }

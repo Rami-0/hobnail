@@ -1,4 +1,6 @@
 //! Account and dashboard access persistence.
+pub(crate) const SETUP_DRAFT_KEY: &str = "owner-setup";
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
@@ -108,7 +110,9 @@ impl Invite {
             id: row.get(0)?,
             role: Role::read(row, 1)?,
             scopes: scopes
-                .map(|s| serde_json::from_str(&s).map_err(|_| rusqlite::Error::InvalidQuery))
+                .map(|s| {
+                    serde_json::from_slice(s.as_bytes()).map_err(|_| rusqlite::Error::InvalidQuery)
+                })
                 .transpose()?,
             created: row.get(3)?,
             expires: row.get(4)?,
@@ -197,6 +201,18 @@ pub(crate) fn read_accounts(conn: &Connection) -> rusqlite::Result<Vec<Account>>
     let mut stmt = conn.prepare(&format!("SELECT {ACCOUNT} FROM users ORDER BY name"))?;
     let rows = stmt.query_map([], |r| Account::read(conn, r))?;
     rows.collect()
+}
+
+pub(crate) fn legacy_hash_users(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT name,password_hash FROM users ORDER BY name")?;
+    let mut rows = stmt.query([])?;
+    let mut names = Vec::new();
+    while let Some(row) = rows.next()? {
+        if crate::auth::is_legacy_hash(&row.get::<_, String>(1)?) {
+            names.push(row.get(0)?);
+        }
+    }
+    Ok(names)
 }
 
 /// Revoke outstanding invitations whose promised access can no longer be granted.
@@ -314,6 +330,10 @@ impl Db {
                 return Ok(Err(AccountError::OnboardingLocked));
             }
             let id = insert_user(&tx, name, hash, Role::Owner, now)?;
+            tx.execute(
+                "INSERT INTO drafts (user_id,key,value,updated) VALUES (?1,?2,'{}',?3)",
+                params![id, SETUP_DRAFT_KEY, now],
+            )?;
             insert_session(&tx, id, session, now, expires)?;
             tx.commit()?;
             Ok(Ok(()))
@@ -342,6 +362,30 @@ impl Db {
                 insert_user(&tx, name.unwrap_or("admin"), hash, Role::Owner, now)?;
             }
             tx.execute("DELETE FROM kv WHERE key = 'auth.onboarding_locked'", [])?;
+            tx.commit()?;
+            Ok(Ok(()))
+        })
+    }
+
+    pub(crate) fn legacy_hash_users(&self) -> Result<Vec<String>> {
+        self.with(Err(AccountError::Storage), |i| {
+            Ok(Ok(legacy_hash_users(&i.conn)?))
+        })
+    }
+
+    pub(crate) fn reset_account_password(&self, name: &str, hash: &str, now: i64) -> Result<()> {
+        self.with(Err(AccountError::Storage), |i| {
+            let tx = i
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let Some(id) = tx.query_row(
+                "UPDATE users SET password_hash = ?2, updated = ?3 WHERE name = ?1 RETURNING id",
+                params![name, hash, now],
+                |r| r.get::<_, i64>(0),
+            ).optional()? else {
+                return Ok(Err(AccountError::Missing));
+            };
+            tx.execute("DELETE FROM sessions WHERE user_id = ?1", [id])?;
             tx.commit()?;
             Ok(Ok(()))
         })
@@ -380,6 +424,19 @@ impl Db {
             tx.commit()?;
             Ok(Ok(()))
         })
+    }
+
+    /// The verified login already has a session. A failed upgrade can be
+    /// retried on the next login and must not replace a concurrent reset.
+    pub(crate) fn upgrade_password_hash(&self, user: i64, previous: &str, replacement: &str) {
+        self.with((), |i| {
+            i.conn.execute(
+                "UPDATE users SET password_hash = ?3
+                 WHERE id = ?1 AND password_hash = ?2 AND disabled = 0",
+                params![user, previous, replacement],
+            )?;
+            Ok(())
+        });
     }
 
     #[cfg(test)]
@@ -533,6 +590,7 @@ impl Db {
                     tx.execute("DELETE FROM users WHERE id = ?1", [user])?;
                 }
             }
+            self.invalidate_provider_scope();
             tx.commit()?;
             Ok(Ok(()))
         })

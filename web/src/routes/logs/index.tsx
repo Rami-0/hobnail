@@ -171,7 +171,7 @@ export default function LogsPage() {
   const download = new URLSearchParams(stack ? { stack } : { c: panes.join(",") });
   if (!range) download.set("tail", String(picker.ring));
   const filters = [..."ewido"].filter((l) => !levels.includes(l)).length + Number(show !== "all") + Number(!!range);
-  return <div className="page logs-page" data-testid="logs-viewer"><nav className="crumb" aria-label="Breadcrumb"><a href="/app/logs">Logs</a></nav>
+  return <div className="page logs-page" data-testid="logs-viewer"><div className="crumb"><a href="/app/logs">Logs</a></div>
     {route.route.name === "container_logs" ? <ContainerContext name={route.route.ctr} query={route.query} /> :
       <PageHeader title={stack ?? (panes.length === 1 ? panes[0] : "Side by side")} />}
     {(missing.length > 0 || (stack !== null && !stackExists)) && <p className="banner warn" role="alert">Not found: {missing.join(", ") || stack}</p>}
@@ -182,7 +182,7 @@ export default function LogsPage() {
     <Button className="log-filters" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>Filters {filters || ""}</Button>
     <div className={`log-filter-controls ${expanded ? "is-open" : ""}`}>
       <Select label="Show" value={show} onChange={(v) => setSearch({ show: v === "all" ? null : v }, { replace: true })} options={[{ value: "all", label: "All lines" }, { value: "0", label: "Only matching" }, ...[1, 3, 10].map((n) => ({ value: String(n), label: `Matching ±${n} lines` }))]} />
-      <div className="log-levels seg" role="group" aria-label="Log levels">{Object.entries(levelNames).map(([l, label]) => <Button key={l} size="sm" variant="ghost" aria-label={`Show ${label.toLowerCase()} lines`} aria-pressed={levels.includes(l)} onClick={() => setSearch({ levels: levels.includes(l) ? levels.replace(l, "") || "-" : levels.replace("-", "") + l }, { replace: true })}>{label}<span className="log-level-count">{Object.values(paneCounts).reduce((total, counts) => total + (counts[l] ?? 0), 0)}</span></Button>)}</div>
+      <div className="log-levels seg" role="group" aria-label="Log levels">{Object.entries(levelNames).map(([l, label]) => <Button key={l} size="sm" variant="ghost" aria-pressed={levels.includes(l)} onClick={() => setSearch({ levels: levels.includes(l) ? levels.replace(l, "") || "-" : levels.replace("-", "") + l }, { replace: true })}>{label} <span className="log-level-count">{Object.values(paneCounts).reduce((total, counts) => total + (counts[l] ?? 0), 0)}</span></Button>)}</div>
       <Select label="Range" value={range} onChange={(v) => { if (v === "custom") setPreviousRange(rangeQuery); setSearch({ range: v, since: null, until: null, from: null, to: null }, { replace: true }); }} options={[{ value: "", label: "Live" }, { value: "15m", label: "15 min" }, { value: "1h", label: "1 h" }, { value: "6h", label: "6 h" }, { value: "24h", label: "24 h" }, { value: "start", label: "Since start" }, { value: "custom", label: "Custom" }]} />
       <div className="log-view-options">
       <Button size="sm" variant="ghost" aria-pressed={wrap} onClick={() => { setWrap(!wrap); savePref("wrap", !wrap); }}>Wrap</Button><Button size="sm" variant="ghost" aria-pressed={time} onClick={() => { setTime(!time); savePref("time", !time); }}>Time</Button><Button size="sm" variant="ghost" aria-pressed={paused} onClick={() => setPaused(!paused)}>{paused ? "Resume" : "Pause"}</Button>

@@ -4,10 +4,10 @@ use std::sync::Arc;
 use hyper::{Response, StatusCode};
 use serde::Serialize;
 
-use super::containers::{event_row, internal, parse_window_with_default, EventRow};
+use super::containers::{internal, parse_window_with_default, EventRow};
 use super::error::ApiError;
 use super::history_window::restarts_per_day;
-use crate::db::{accounts::Role, Agg, EventFilter, Range, Series, SysMetric};
+use crate::db::{accounts::Role, Agg, EventFilter, EventRef, Range, Series, SysMetric};
 use crate::http::query::{parse_query, query_get};
 use crate::http::server::Body;
 use crate::state::AppState;
@@ -52,6 +52,17 @@ const METRICS: [SysMetric; 8] = [
 const PAGE: usize = 60;
 const SCAN_LIMIT: usize = 10_000;
 
+fn read_event(event: EventRef<'_>) -> EventRow {
+    EventRow {
+        id: event.id,
+        at: event.ts,
+        kind: event.kind.into(),
+        level: event.level.into(),
+        subject: event.subject.into(),
+        message: event.detail.into(),
+    }
+}
+
 fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryView, ApiError> {
     let window = parse_window_with_default(query, now, Range::H24)?;
     let (from, to, range) = (window.from(), window.to, window.range);
@@ -77,6 +88,12 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
     if !matches!(level, "all" | "incidents" | "info" | "warn" | "error") {
         return Err(ApiError::bad_request("unknown event level", Some("level")));
     }
+    // `metric=<key>`: that series only, without events (a board widget);
+    // `metric=none`: events only.
+    let only = query_get(&query, "metric");
+    if only.is_some_and(|key| key != "none" && !METRICS.iter().any(|m| m.as_str() == key)) {
+        return Err(ApiError::bad_request("unknown metric", Some("metric")));
+    }
     let db = &state.db;
     let clip = |series: Series, shift| {
         series
@@ -88,6 +105,7 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
     };
     let metrics = METRICS
         .into_iter()
+        .filter(|metric| only.is_none_or(|key| key == metric.as_str()))
         .map(|metric| {
             let series = db.system_series(metric, range, to);
             HistoryMetric {
@@ -101,55 +119,81 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
             }
         })
         .collect();
+    if only.is_some_and(|key| key != "none") {
+        return Ok(HistoryView {
+            from,
+            to,
+            now,
+            range: range.as_str().into(),
+            recording: db.is_enabled(),
+            metrics,
+            starts_per_day: Default::default(),
+            events: Vec::new(),
+            markers: Vec::new(),
+            older: None,
+        });
+    }
     let config = state.config.current();
     let snap = state.snapshot();
     let hidden = |name: &str| super::containers::excluded_subject(&config, &snap, name);
-    let starts_per_day = restarts_per_day(
-        (1..=7)
-            .map(|day| {
-                db.restart_counts(now - day * 86_400)
-                    .into_iter()
-                    .filter(|(name, _)| !hidden(name))
-                    .collect()
-            })
-            .collect(),
-    );
+    let starts_per_day = if only.is_some() {
+        Default::default()
+    } else {
+        restarts_per_day(
+            (1..=7)
+                .map(|day| {
+                    db.restart_counts(now - day * 86_400)
+                        .into_iter()
+                        .filter(|(name, _)| !hidden(name))
+                        .collect()
+                })
+                .collect(),
+        )
+    };
     let filter = EventFilter {
         since: Some(from),
         until: Some(to),
         ..Default::default()
     }
     .for_admin(role >= Role::Admin);
-    let mut scanned = db.window_events(&filter, SCAN_LIMIT);
-    let markers = scanned
-        .iter()
-        .filter(|e| !hidden(&e.subject) && e.level != "info")
-        .take(200)
-        .map(event_row)
-        .collect();
+    let matches_level = |event_level: &str| match level {
+        "all" => true,
+        "incidents" => event_level != "info",
+        _ => event_level == level,
+    };
+    let ((markers, mut events), mut cutoff) = db.scan_window_events(
+        &filter,
+        SCAN_LIMIT,
+        |(markers, events): &mut (Vec<_>, Vec<_>), event| {
+            let marker = markers.len() < 200 && event.level != "info";
+            let page = before.is_none() && events.len() <= PAGE && matches_level(event.level);
+            if (marker || page) && !hidden(event.subject) {
+                let row = read_event(event);
+                if marker && page {
+                    markers.push(row.clone());
+                    events.push(row);
+                } else if marker {
+                    markers.push(row);
+                } else {
+                    events.push(row);
+                }
+            }
+        },
+    );
     if let Some(before) = before {
-        scanned = db.window_events(
+        (events, cutoff) = db.scan_window_events(
             &EventFilter {
                 before_id: Some(before),
                 ..filter
             },
             SCAN_LIMIT,
+            |events: &mut Vec<_>, event| {
+                if events.len() <= PAGE && matches_level(event.level) && !hidden(event.subject) {
+                    events.push(read_event(event));
+                }
+            },
         );
     }
-    let cutoff = (scanned.len() == SCAN_LIMIT)
-        .then(|| scanned.last().map(|e| e.id))
-        .flatten();
-    let mut events: Vec<_> = scanned
-        .iter()
-        .filter(|e| !hidden(&e.subject))
-        .filter(|e| match level {
-            "all" => true,
-            "incidents" => e.level != "info",
-            _ => e.level == level,
-        })
-        .take(PAGE + 1)
-        .map(event_row)
-        .collect();
     let older = if events.len() > PAGE {
         events.pop();
         events.last().map(|e| e.id)
@@ -180,5 +224,39 @@ pub(super) async fn get(state: &Arc<AppState>, query: &str, role: Role) -> Respo
         Ok(Ok(data)) => super::json(StatusCode::OK, &data),
         Ok(Err(error)) => error.response(),
         Err(_) => internal(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filtered_history_preserves_scan_cutoff_and_window_markers() {
+        let state = crate::testutil::state_with(vec![], "[containers.hidden]\nhide = true");
+        let now = crate::auth::now_s();
+        state.db.with((), |i| {
+            i.conn.execute(
+                "WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<10002)
+                 INSERT INTO events(id, ts, kind, level, subject, detail)
+                 SELECT n, ?1, 'container.health',
+                   CASE WHEN n IN (1, 10000, 10002) THEN 'warn' ELSE 'info' END,
+                   CASE WHEN n=10002 THEN 'hidden' ELSE 'visible' END, '' FROM seq",
+                [now - 1],
+            )?;
+            Ok(())
+        });
+        let first = read(&state, "range=1h", now, Role::Owner).unwrap();
+        assert_eq!(
+            first.events.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [10000]
+        );
+        assert_eq!(first.markers, first.events);
+        assert_eq!(first.older, Some(3));
+
+        let second = read(&state, "range=1h&before=3", now, Role::Owner).unwrap();
+        assert_eq!(second.events.iter().map(|e| e.id).collect::<Vec<_>>(), [1]);
+        assert_eq!(second.markers, first.markers);
+        assert_eq!(second.older, None);
     }
 }

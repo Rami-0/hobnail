@@ -1,7 +1,8 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { Checkbox } from "../../ui/Checkbox.tsx";
 import { eventLabel } from "../container/events.ts";
-import { lazy, memo, Suspense, useEffect } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { NearCharts } from "../container/NearCharts.tsx";
 import type { HistoryView } from "../../api/gen/HistoryView.ts";
 import { useRead } from "../../live/read.ts";
 import { containerHref, logsHref } from "../../app/paths.ts";
@@ -11,9 +12,43 @@ import { Button } from "../../ui/Button.tsx";
 import { ChartPlaceholder } from "../../ui/Sparkline.tsx";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
 import { historyWindow, RANGES, windowSteps } from "./window.ts";
+import { MAX_DEFER_MS, QUIET_MS, quietDelay } from "./quiet.ts";
 import "./history.css";
 
-const Charts = lazy(() => import("../../charts/RechartsUsage.tsx"));
+/** Apply background History reads once the current gesture has settled. */
+function useQuietCommit() {
+  const input = useRef({ pressed: new Set<number | string>(), until: 0 });
+  useEffect(() => {
+    const current = input.current;
+    const track = (event: PointerEvent | KeyboardEvent) => {
+      const id = "pointerId" in event ? event.pointerId : event.code;
+      if (event.type.endsWith("down")) current.pressed.add(id);
+      else current.pressed.delete(id);
+      current.until = performance.now() + QUIET_MS;
+    };
+    const clear = () => { current.pressed.clear(); current.until = 0; };
+    const lifetime = new AbortController();
+    for (const event of ["pointerdown", "pointerup", "pointercancel", "lostpointercapture", "keydown", "keyup"] as const) {
+      window.addEventListener(event, track, { capture: true, signal: lifetime.signal });
+    }
+    window.addEventListener("blur", clear, { signal: lifetime.signal });
+    document.addEventListener("visibilitychange", clear, { signal: lifetime.signal });
+    return () => lifetime.abort();
+  }, []);
+
+  return useCallback((commit: () => void) => {
+    const current = input.current;
+    const deadline = performance.now() + MAX_DEFER_MS;
+    const apply = () => {
+      const delay = quietDelay(current.pressed.size > 0, current.until, deadline, performance.now());
+      if (delay > 0) timer = window.setTimeout(apply, delay);
+      else commit();
+    };
+    // Give already queued input a chance to arrive before applying the reply.
+    let timer = window.setTimeout(apply, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+}
 
 export default function History() {
   const { search, hash } = useRoute();
@@ -21,7 +56,8 @@ export default function History() {
   const bootstrap = useBootstrap();
   const sessionScoped = bootstrap?.scoped;
   const { data: containers } = useContainers();
-  const { data, error } = useRead<HistoryView>(sessionScoped === false ? `/api/v1/history?${query}` : null);
+  const quietCommit = useQuietCommit();
+  const { data, error } = useRead<HistoryView>(sessionScoped === false ? `/api/v1/history?${query}` : null, undefined, undefined, quietCommit);
 
   const selected = hash.startsWith("#ev-") ? Number(hash.slice(4)) : null;
   const extra = data?.markers.find((e) => e.id === selected && !data.events.some((row) => row.id === e.id));
@@ -30,9 +66,9 @@ export default function History() {
     const target = selected === null ? (hash === "#events" ? "events" : "") : `ev-${selected}`;
     if (target) document.getElementById(target)?.scrollIntoView({ block: "nearest" });
   }, [selected, hash, data]);
+  const names = useMemo(() => new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name))), [containers]);
   if (sessionScoped) return <p className="page">History is unavailable with board-scoped access.</p>;
 
-  const names = new Set(containers?.groups.flatMap((g) => g.containers.map((c) => c.name)));
   const steps = data ? windowSteps(data.from, data.to, data.now) : null;
   return <div className="page" data-testid="history">
     <PageHeader title="History" description="Host metrics and incidents from the local history database." />
@@ -68,7 +104,7 @@ export default function History() {
       <section className="panel history-block" id="events" aria-label="Incident timeline">
         <div className="panel-h"><h2>Incident timeline</h2></div>
         <div className="history-controls seg" role="group" aria-label="Incident severity">
-          {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => setSearch({ level: item, before: null })}>{item === "all" ? "All events" : item}</Button>)}
+          {["incidents", "all", "info", "warn", "error"].map((item) => <Button key={item} aria-pressed={level === item} onClick={() => { if (item !== level || search.has("before")) setSearch({ level: item, before: null }); }}>{item === "all" ? "All events" : item}</Button>)}
         </div>
         {data.events.length === 0 && !extra && <p>No matching events in this window.</p>}
         <ul className="history-events rows">
@@ -89,13 +125,11 @@ export default function History() {
 }
 
 const HistoryCharts = memo(function HistoryCharts({ data }: { data: HistoryView }) {
-  return <Suspense fallback={<ChartPlaceholder count={data.metrics.length} />}>
-        <Charts
-          series={{ from: data.from, to: data.to, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
-          metrics={data.metrics}
-          recording={data.recording}
-          onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
-          onMarker={(id) => navigate(`/app/history?${historyWindow(new URLSearchParams(window.location.search)).query}#ev-${id}`)}
-        />
-      </Suspense>;
+  return <NearCharts
+    series={{ from: data.from, to: data.to, step: 0, cpu: [], mem: [], cpu_max: null, mem_max: null, markers: data.markers }}
+    metrics={data.metrics}
+    recording={data.recording}
+    onZoom={(from, to) => setSearch({ from: String(from), to: String(to), before: null })}
+    onMarker={(id) => navigate(`/app/history?${historyWindow(new URLSearchParams(window.location.search)).query}#ev-${id}`)}
+  />;
 });

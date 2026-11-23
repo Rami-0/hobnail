@@ -1,0 +1,13 @@
+app 172.17.0.5 pid 3637507 asset /assets/index-82zXNFp6.js
+== pipe401-4ip
+| phase | memory.current median / max MiB | app fds median / max | client requests / errors / events | latency p50 / p95 / p99 ms | attackers |
+|---|---|---|---|---|---|
+| idle | 1.63 / 2.17 | 14 / 15 | - | - | - |
+| pipe401-4ip | 4.72 / 7.04 | 29 / 63 | 5125 / 44 / 693 | 3.3 / 19.9 / 3939.0 | pipe401x4: 1759 conns, 1695 closed by server (0 503, 0 408), held median [0.0, 0.0, 4.4, 0.0] s |
+  - pipe401-4ip: /assets/Dq3Tttx_.js 503
+  - pipe401-4ip: /assets/DuiywtwS.js 503
+  - pipe401-4ip: /assets/GuidedSetup-C2K8AfYe.css 503
+  - pipe401-4ip: /assets/Palette-CalNTs6s.css 503
+  - pipe401-4ip: /assets/host-CTKVTlhx.css 503
+| pipe401-4ip-after | 2.79 / 3.32 | 14 / 15 | - | - | - |
+memory.peak 16097280 (15.35 MiB)

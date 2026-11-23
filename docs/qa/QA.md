@@ -227,7 +227,7 @@ So nobody "fixes" it.
 |---|---|---|---|---|---|---|
 | SET-40 | major | The URL is not checked although the hint says "http(s) link.": "not a url" and `javascript:alert(1)` were both saved as bookmarks (HTTP 200) | Accept only http(s) URLs, error on the field | `src/settings/ops.rs:877`, `src/ui/settings/bookmarks.rs:25` | P1 | fixed c38e18b |
 | SET-41 | major | One long name without spaces (308 characters) breaks the tab: the Name column takes the width, every URL wraps three characters per line, one row grows to thousands of pixels and the page scrolls sideways (document 2973 px wide at 1440) | Long values wrap or are cut with an ellipsis; a length limit in the form | `static/settings.css:132` | P5 | fixed 4eb67a3 |
-| SET-42 | minor | Each click on an up / down arrow is a full save: a request, a toast, a new revision ("bookmarks: reordered") and a rebuilt list. The same for widgets | Drag or arrows that save once | `static/settings.js:581`, `static/settings.js:639` | P2 | deferred: owner decision at the design gate (Y13): the one-click reorder arrows stay, one revision per step |
+| SET-42 | minor | Each click on an up / down arrow is a full save: a request, a toast, a new revision ("bookmarks: reordered") and a rebuilt list. The same for widgets | Drag or arrows that save once | `static/settings.js:581`, `static/settings.js:639` | P2 | fixed in M2 (D17): stage arrow moves, then Save order or Cancel |
 | SET-43 | minor | The same name can be added any number of times (five `qa-bm` rows); they cannot be told apart in the list or in the delete question | Warn on a duplicate name | `static/settings.js:567` | P1 | fixed 4eb67a3 |
 
 ### Widgets
@@ -1069,7 +1069,7 @@ findings. Current measured passes and misses are in the
 
 | Finding | Current outcome |
 |---|---|
-| SET-42 | Board edit mode has private drafts and explicit Save/Cancel, one document write per session (D17). Legacy config collection reorder arrows still write one revision per click; the original finding is only partly addressed. |
+| SET-42 | Board documents use private drafts and explicit Save/Cancel. Legacy TOML collections stage arrow moves and submit the final order once on **Save order**. The Settings browser check asserts three moves write zero revisions, Cancel writes zero, and Save writes exactly one. |
 | SET-46 | Still deferred. Fetch now returns structured display/values, not the raw upstream response. There are no provider integrations to replace this workflow. |
 | SET-69 | The React raw editor wraps on phones (`web/src/routes/settings/settings.css`); tested by settings-check. |
 | NAV-81 | The client has a shared sign-in/credential-entry flow. Application data requires login; obsolete public/read-only lock prompts were removed. |
@@ -1083,3 +1083,41 @@ findings. Current measured passes and misses are in the
 | ROB-10 | A fresh React load needs its JS and CSS before content. Immutable assets help repeat visits; cold-browser LCP still misses budgets. A 400 kbit/s first visit was not measured in M5. |
 | ROB-14 | Structured widget bodies and plain errors are rendered by React, with result age. Read refresh retains the current result, but an error replaces it: a separate last-good-value cache and raw-error disclosure are not built. Partly addressed. |
 | ROB-17 | Superseded by D6: the application requires JavaScript and says so in noscript. Health, API and authenticated log downloads still answer; old no-script UI controls are deleted. |
+
+### M2 guided setup and first-board verification
+
+Run `web/e2e/m2-check.mjs` through `scripts/e2e.sh` against a fresh
+`web/e2e/fake-instance.sh start <image> <port> --m2-fixtures` instance.
+Pass the application URL, the printed fixture control URL, a width (390 or
+1440), a theme (light or dark) and `selected` or `empty`. For `empty`, start
+the fixture with `--docker-unavailable`. Use a fresh instance for each case,
+set `HB_PASSWORD` to a test password and set `OUT` for screenshots.
+
+The selected path exercises every wizard step and its navigation, draft
+recovery after reload and sign-in in a fresh browser context, a failed connection
+test, and the board with the exact selection. The empty path exercises
+unavailable Docker, completing setup without selections, and the normal
+board picker. Both paths check the tour, keyboard focus, clipping, page
+overflow, and Chromium console, CSP, exception and request diagnostics.
+The fake upstream cycles through initial failure, success, failed refresh and
+recovery for widgets and manual integration tests.
+
+Run `web/e2e/settings-check.mjs` separately for SET-42. It accepts an optional
+profile such as `390-dark` after the application URL. The revision assertions
+start from an already recorded config. On the first edit of a file, the
+existing history mechanism can also capture the pre-edit file as a checkpoint.
+
+M2 verification passed in all eight Chromium runs across the two widths, two
+themes and two setup paths. The selected path passed 157 assertions per
+profile and the empty path passed 100. All four Settings profiles passed the
+reorder revision assertions, and the separate board regression passed 106
+checks. The phone run initially found that Back from a scrolled Configure
+form focused the next heading above the viewport. The regression now checks
+that focused wizard headings are visible.
+
+A release-image memory smoke kept a stale widget and a stale integration on
+the board with 1, 10 and 25 dashboard clients. It completed 2,160 HTTP reads
+and 36 streams with zero errors. The 25-client phase reached 4.79 MiB sampled
+working set. The lifetime peak was 22,228,992 bytes (21.20 MiB), reached during
+owner credential creation, before guided setup or cached data. The 20 MiB
+lifetime target remains open.

@@ -36,7 +36,7 @@ export function Field({ label, hint, error, children, id, wide }: FieldProps) {
   const ctx = useMemo(() => ({ id, describedBy, invalid }), [id, describedBy, invalid]);
   return (
     <SdkField invalid={invalid} className={wide ? "fld wide" : "fld"}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      {label !== null && label !== undefined && <FieldLabel htmlFor={id}>{label}</FieldLabel>}
       <Ctx.Provider value={ctx}>{children}</Ctx.Provider>
       {error && (
         <FieldError className="fld-err" id={errId}>

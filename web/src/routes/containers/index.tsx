@@ -29,6 +29,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -41,7 +42,7 @@ import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { GroupRow } from "../../api/gen/GroupRow.ts";
 import { setSearch, useRoute } from "../../app/router.ts";
 import { bytes, imageLabel, pct, portLinks, rowLink, statusText, viewerHost, duration } from "../../format/index.ts";
-import { NO_STAT, stats, useBootstrap, useContainers, useNow, useStatsMap, useStrips } from "../../live/index.ts";
+import { stats, useBootstrap, useContainers, useNow, useStatsMap, useStrips } from "../../live/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/Note.tsx";
 import { HealthStrip, Sparkline } from "../../ui/Sparkline.tsx";
@@ -58,7 +59,7 @@ import {
   isGrouped,
   keepOrder,
   noneWhy,
-  orderOf,
+  orderForPin,
   parseView,
   remember,
   select,
@@ -105,6 +106,7 @@ function statReadings() {
 /** Rows rendered on the first frame; the rest follow in slices of this size, one per task. */
 const FIRST = 10;
 const SLICE = 10;
+const NO_ROWS: ContainerRow[] = [];
 
 function useProgressive(total: number): number {
   const [limit, setLimit] = useState(FIRST);
@@ -178,7 +180,10 @@ export default function ContainersPage() {
   }, []);
 
   // ---- the order: recomputed, unless the reader is in the table ----
-  const [inTable, setInTable] = useState({ focus: false, pointer: false });
+  type Snapshot = { key: string; sections: Section[] };
+  const [inTable, setInTable] = useState<{ focus: boolean; pointer: boolean; snapshot: Snapshot | null }>({
+    focus: false, pointer: false, snapshot: null,
+  });
   const frozen = inTable.focus || inTable.pointer;
   const groups = useMemo<GroupRow[]>(() => data?.groups ?? [], [data]);
   const now = useNow();
@@ -187,18 +192,29 @@ export default function ContainersPage() {
   const byNumber = view.sort === "cpu" || view.sort === "mem";
   const live = useStatsMap(byNumber && !frozen);
   const fresh = useMemo(
-    () => select(groups, view, now, byNumber ? (n: string) => live.get(n) ?? NO_STAT : undefined),
-    [groups, view, now, byNumber, live],
+    () => select(groups, view, now, byNumber ? (n: string) => (frozen ? stats.get(n) : live.get(n) ?? stats.get(n)) : undefined),
+    [groups, view, now, byNumber, frozen, live],
   );
   // The order on screen when the reader came in; a change of the view
   // itself (a sort click) is the reader's own and starts a new one.
+  const committed = useRef<Snapshot>(null);
   const [pin, setPin] = useState<{ key: string; keys: string[] } | null>(null);
-  if (frozen && (!pin || pin.key !== canonical)) setPin({ key: canonical, keys: orderOf(fresh) });
+  if (frozen && (!pin || pin.key !== canonical)) {
+    setPin({ key: canonical, keys: orderForPin(canonical, fresh, inTable.snapshot) });
+  }
   if (!frozen && pin) setPin(null);
   const sections = useMemo(
     () => (frozen && pin && pin.key === canonical ? keepOrder(fresh, pin.keys) : fresh),
     [frozen, pin, canonical, fresh],
   );
+  useLayoutEffect(() => {
+    committed.current = { key: canonical, sections };
+  }, [canonical, sections]);
+
+  const enter = (kind: "focus" | "pointer") => {
+    const snapshot = committed.current;
+    setInTable((s) => s[kind] ? s : { ...s, [kind]: true, snapshot: s.focus || s.pointer ? s.snapshot : snapshot });
+  };
 
   // ---- live cells: fed by the stats store, outside React; only the cells
   // whose numbers changed re-render ----
@@ -231,7 +247,7 @@ export default function ContainersPage() {
     const closed = !!sec.group && grouped && isClosed(sec.group, view, folded);
     const take = closed ? 0 : Math.max(0, Math.min(sec.rows.length, budget));
     budget -= take;
-    slices.push({ section: sec, closed, rows: take === sec.rows.length ? sec.rows : sec.rows.slice(0, take) });
+    slices.push({ section: sec, closed, rows: take === 0 ? NO_ROWS : take === sec.rows.length ? sec.rows : sec.rows.slice(0, take) });
   }
 
   // ---- keyboard: the shell's map does j/k, l and / (it finds the rows by
@@ -308,20 +324,21 @@ export default function ContainersPage() {
     body = (
       <div
         className="tablewrap"
-        onFocus={() => setInTable((s) => (s.focus ? s : { ...s, focus: true }))}
+        onFocus={() => enter("focus")}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setInTable((s) => ({ ...s, focus: false }));
         }}
         onPointerEnter={(e) => {
-          if (e.pointerType === "mouse") setInTable((s) => ({ ...s, pointer: true }));
+          if (e.pointerType === "mouse") enter("pointer");
         }}
         onPointerLeave={() => setInTable((s) => (s.pointer ? { ...s, pointer: false } : s))}
       >
         <table ref={tableRef} className={grouped ? "tbl ctbl grouped" : "tbl ctbl"} data-testid="containers">
-          <caption className="count" role="status" aria-live="polite" data-testid="showing">
+          {/* A caption may not take role=status: the live region sits inside it. */}
+          <caption className="count"><output data-testid="showing">
             Showing <b className="num">{shown}</b> of <span className="num">{total}</span> containers
             {hiddenInFolded > 0 ? ` · ${hiddenInFolded} in collapsed stacks` : ""}
-          </caption>
+          </output></caption>
           <thead>
             <tr>
               <SortTh view={view} k="name" label="Name" cls="c-name" setView={setView} />
@@ -551,7 +568,7 @@ function Waiting({ n, grouped = false }: { n: number; grouped?: boolean }) {
   </tr>;
 }
 
-function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
+const SectionBody = memo(function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, host, cells, onFold }: SectionProps) {
   const g = section.group;
   const waiting = closed ? 0 : section.rows.length - rows.length;
   if (!g) {
@@ -598,7 +615,7 @@ function SectionBody({ section, closed, rows, strip, stripStep, rowStrips, now, 
       <Waiting n={waiting} grouped />
     </tbody>
   );
-}
+});
 
 interface RowProps {
   row: ContainerRow;
@@ -612,27 +629,7 @@ interface RowProps {
 /** Fields a row shows apart from the live numbers (those are the cells' own). */
 function sameRow(a: RowProps, b: RowProps): boolean {
   if (a.strip !== b.strip || a.host !== b.host || a.cells !== b.cells || a.stripStep !== b.stripStep) return false;
-  const x = a.row;
-  const y = b.row;
-  if (x === y) return Math.floor(a.now / 60) === Math.floor(b.now / 60);
-  // Uptime is shown in minutes at the finest: a new `now` matters once a minute.
-  if (Math.floor(a.now / 60) !== Math.floor(b.now / 60) && x.started_at !== null) return false;
-  return (
-    x.name === y.name &&
-    x.title === y.title &&
-    x.image === y.image &&
-    x.stack === y.stack &&
-    x.icon === y.icon &&
-    x.link === y.link &&
-    x.dot === y.dot &&
-    x.label === y.label &&
-    x.state === y.state &&
-    x.exit_code === y.exit_code &&
-    x.restarts === y.restarts &&
-    x.started_at === y.started_at &&
-    JSON.stringify(x.ports) === JSON.stringify(y.ports) &&
-    JSON.stringify(x.attention) === JSON.stringify(y.attention)
-  );
+  return a.row === b.row && Math.floor(a.now / 60) === Math.floor(b.now / 60);
 }
 
 const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: RowProps) {
@@ -679,8 +676,7 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
       <td className="c-hist" data-l="24 h">
         {near ? <HealthStrip codes={strip ?? []} label={r.title} step={stripStep} /> : null}
       </td>
-      <LiveCell name={r.name} kind="cpu" running={running} near={near} visible={visible} cells={cells} />
-      <LiveCell name={r.name} kind="mem" running={running} near={near} visible={visible} cells={cells} />
+      <ResourceCells name={r.name} running={running} near={near} visible={visible} cells={cells} />
       <td className="c-ports" data-l="Ports">
         {ports.slice(0, 3).map((p) =>
           p.url ? (
@@ -722,40 +718,34 @@ const Row = memo(function Row({ row: r, strip, stripStep, now, host, cells }: Ro
   );
 }, sameRow);
 
-function LiveCell({
-  name,
-  kind,
-  running,
-  near,
-  visible,
-  cells,
-}: {
+function ResourceCells({ name, running, near, visible, cells }: {
   name: string;
-  kind: "cpu" | "mem";
   running: boolean;
   near: boolean;
-  /** On or near the screen now: only then does the cell follow its numbers. */
   visible: boolean;
   cells: LiveCells;
 }) {
-  const sub = useCallback((fn: () => void) => (visible ? cells.subscribe(name, fn) : () => {}), [cells, name, visible]);
+  const sub = useCallback((fn: () => void) => (visible && running ? cells.subscribe(name, fn) : unsubscribeNothing), [cells, name, visible, running]);
   const cell = useSyncExternalStore(sub, () => cells.get(name));
-  const scale = useSyncExternalStore(near && visible ? cells.subscribeScale : noSub, cells.getScale);
-  const v = kind === "cpu" ? cell.cpu : cell.mem;
-  return (
-    <td className={`c-num c-${kind}`} data-l={kind === "cpu" ? "CPU" : "Memory"}>
-      <span className={running && v !== null ? "num" : "num muted"}>{!running || v === null ? "—" : kind === "cpu" ? pct(v) : bytes(v)}</span>
-      {running && near && (
-        <Sparkline
-          values={kind === "cpu" ? cell.cpuHist : cell.memHist}
-          max={kind === "cpu" ? scale.cpu : scale.mem}
-          label=""
-          color={kind === "cpu" ? "--ch-cpu" : "--ch-mem"}
-          className="cell-spark"
-        />
-      )}
-    </td>
-  );
+  const scale = useSyncExternalStore(near && visible && running ? cells.subscribeScale : noSub, cells.getScale);
+  return <>
+    <ResourceCell kind="cpu" value={running ? cell.cpu : null} history={running && near ? cell.cpuHist : null} max={scale.cpu} />
+    <ResourceCell kind="mem" value={running ? cell.mem : null} history={running && near ? cell.memHist : null} max={scale.mem} />
+  </>;
 }
 
-const noSub = () => () => {};
+const ResourceCell = memo(function ResourceCell({ kind, value, history, max }: {
+  kind: "cpu" | "mem";
+  value: number | null;
+  history: (number | null)[] | null;
+  max: number;
+}) {
+  const cpu = kind === "cpu";
+  return <td className={`c-num c-${kind}`} data-l={cpu ? "CPU" : "Memory"}>
+    <span className={value === null ? "num muted" : "num"}>{value === null ? "—" : cpu ? pct(value) : bytes(value)}</span>
+    {history && <Sparkline values={history} max={max} label="" color={cpu ? "--ch-cpu" : "--ch-mem"} className="cell-spark" />}
+  </td>;
+});
+
+const unsubscribeNothing = () => {};
+const noSub = () => unsubscribeNothing;

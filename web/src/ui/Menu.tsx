@@ -1,5 +1,6 @@
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { lazy, useState, type ReactNode } from "react";
 import { Button } from "./Button.tsx";
+import { LoadBoundary } from "./LoadBoundary.tsx";
 const MenuImpl = lazy(() => import("./MenuImpl.tsx"));
 
 export interface MenuItem {
@@ -13,7 +14,7 @@ export interface MenuItem {
 }
 
 export interface MenuProps {
-  /** The button's accessible name ("Account: admin"). */
+  /** The button's accessible name ("Account: admin, AD"). */
   label: string;
   /** What the button shows. */
   trigger: ReactNode;
@@ -34,5 +35,6 @@ export function Menu(props: MenuProps) {
     onClick={() => setLoaded(true)} onKeyDown={(e) => { if (e.key === "ArrowDown") { e.preventDefault(); setLoaded(true); } }}>
     {props.trigger}
   </Button>;
-  return loaded ? <Suspense fallback={trigger}><MenuImpl {...props} /></Suspense> : trigger;
+  // A missing menu chunk leaves the trigger; the page stays.
+  return loaded ? <LoadBoundary fallback={trigger} failed={trigger}><MenuImpl {...props} /></LoadBoundary> : trigger;
 }

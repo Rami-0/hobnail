@@ -132,6 +132,9 @@ fn state_on(socket: &std::path::Path, tag: &str) -> Arc<AppState> {
         host_sys: "/nonexistent".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
+        max_connections: 64,
+        max_connections_per_peer: 16,
     });
     st.containers.send_replace(Arc::new(crate::model::Snapshot {
         containers: vec![ctr("web", Some("shop"), "running")],
@@ -197,6 +200,35 @@ async fn stream_tails_and_stops_after_disconnect() {
     );
     assert!(took < Duration::from_secs(5), "stopped after {took:?}");
     eprintln!("docker stream closed {took:?} after the viewer left");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_stream_the_client_stops_reading_ends_after_the_send_deadline() {
+    let fake = fake_docker("unread").await;
+    let st = state_on(&fake.path, "unread");
+    let hash = crate::auth::sha256_hex(b"unread");
+    let now = crate::auth::now_s();
+    assert!(st.db.create_session(&hash, now, now + 600));
+    let q = crate::http::query::parse_query("c=web&tail=10");
+    // The body is held but never polled: a client that stopped reading.
+    let _unread = super::tail::sse(&st, vec!["web".into()], super::stream_query(&q, 500), hash);
+    let t = Instant::now();
+    while fake.open.load(Ordering::SeqCst) == 0 && t.elapsed() < Duration::from_secs(5) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(fake.open.load(Ordering::SeqCst), 1, "the tail started");
+    let limit = super::tail::SEND_DEADLINE + Duration::from_secs(5);
+    while fake.open.load(Ordering::SeqCst) > 0 && t.elapsed() < limit {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        fake.closed.load(Ordering::SeqCst),
+        "the stream gave up on the full queue and closed the docker tail"
+    );
+    assert!(
+        t.elapsed() >= super::tail::SEND_DEADLINE,
+        "not before the deadline"
+    );
 }
 
 /// A closed window is read from its start (`tail=all` toward Docker) and
@@ -276,11 +308,13 @@ async fn download_streams_text_with_disposition() {
     // download uses follow=0, and the fake closes nothing; read a bit.
     let (addr, cookie) = serve(st).await;
     let mut s = TcpStream::connect(addr).await.unwrap();
-    s.write_all(format!("GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\n\r\n").as_bytes())
+    s.write_all(format!("GET /api/logs/download?c=web&since=1h HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\nAccept-Encoding: gzip\r\n\r\n").as_bytes())
         .await
         .unwrap();
     let got = read_until(&mut s, "line 2", Duration::from_secs(8)).await;
     assert!(got.starts_with("HTTP/1.1 200"), "{got}");
+    assert!(!got.contains("content-encoding:"));
+    assert!(!got.contains("vary:"));
     assert!(
         got.contains("content-type: text/plain; charset=utf-8"),
         "{got}"

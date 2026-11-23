@@ -1,24 +1,25 @@
 //! Account credentials, sessions, CSRF and login throttling.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, OnceLock};
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use http_body_util::{BodyExt, Limited};
 use hyper::header::{
     HeaderValue, CACHE_CONTROL, CONTENT_TYPE, COOKIE, HOST, ORIGIN, REFERER, RETRY_AFTER,
     SET_COOKIE,
 };
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use ring::{digest, rand::SecureRandom};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::api::error::ApiError;
 use crate::db::accounts::AccountError;
 
 use crate::db::{Db, EventFilter};
-use crate::http::server::{full, set, Body, Peer};
+use crate::http::server::{full, set, Body};
 use crate::state::AppState;
 
 pub const COOKIE_NAME: &str = "rh_session";
@@ -29,6 +30,228 @@ pub const MIN_PASSWORD_CHARS: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 1024;
 /// Login request bodies larger than this are refused.
 const MAX_BODY: usize = 4096;
+
+/// Eight waiting requests retain only parsed credentials and request state.
+pub(crate) const CREDENTIAL_WAITERS: usize = 8;
+const CREDENTIAL_WAIT: Duration = Duration::from_secs(5);
+/// Sign-in responses while legacy hashes remain take at least this long
+/// after the request obtains the credential permit.
+pub(crate) const MIN_CREDENTIAL_FLOOR: Duration = Duration::from_millis(150);
+/// The most the floor can grow to, and the fixed answer time (from obtaining
+/// the permit) of any operation that outran its floor. With the factor and
+/// margin below it covers the legacy estimate for current-profile verifies
+/// up to 975 ms, over 20 times the 45 ms measured in M5.
+pub(crate) const MAX_CREDENTIAL_FLOOR: Duration = Duration::from_secs(2);
+/// Legacy verify cost relative to a current one. By work alone it is
+/// 19,456 KiB x 2 / (7,168 KiB x 5) = 1.09; M5 measured 1.55 (68.85 / 44.52 ms
+/// medians); 2 leaves room above that.
+const LEGACY_COST_FACTOR: u32 = 2;
+/// Added to the scaled estimate for scheduling jitter (the M5 legacy maximum
+/// was 82.52 ms against a 44.52 ms current median: 2 x 44.52 + 50 covers it).
+const LEGACY_MARGIN: Duration = Duration::from_millis(50);
+/// Verify times are kept for one to two of these windows.
+const SAMPLE_WINDOW: Duration = Duration::from_secs(150);
+
+pub(crate) struct CredentialQueue {
+    active: Arc<Semaphore>,
+    waiters: Semaphore,
+    samples: Mutex<VerifySamples>,
+    /// The memory limit source (the cgroup in production, fixed in tests).
+    pub(crate) memory_limit: fn() -> Option<u64>,
+}
+
+impl Default for CredentialQueue {
+    fn default() -> Self {
+        Self {
+            active: Arc::new(Semaphore::new(1)),
+            waiters: Semaphore::new(CREDENTIAL_WAITERS),
+            samples: Mutex::new(VerifySamples::new(Instant::now())),
+            memory_limit: read_memory_limit,
+        }
+    }
+}
+
+/// Current-profile verify times (real accounts and the dummy record used for
+/// unknown and disabled ones): the maximum over the last 150 to 300 seconds,
+/// falling back to the latest sample once both windows are empty. An outlier
+/// (a loaded host) therefore stops widening the floor within five minutes.
+/// Legacy verifications are never recorded: the bound must not move in a way
+/// that depends on which account was tried.
+#[derive(Debug)]
+struct VerifySamples {
+    started: Instant,
+    current: Duration,
+    previous: Duration,
+    latest: Duration,
+}
+
+impl VerifySamples {
+    fn new(now: Instant) -> Self {
+        Self {
+            started: now,
+            current: Duration::ZERO,
+            previous: Duration::ZERO,
+            latest: Duration::ZERO,
+        }
+    }
+
+    fn roll(&mut self, now: Instant) {
+        let age = now.saturating_duration_since(self.started);
+        if age >= SAMPLE_WINDOW {
+            self.previous = if age >= SAMPLE_WINDOW * 2 {
+                Duration::ZERO
+            } else {
+                self.current
+            };
+            self.current = Duration::ZERO;
+            self.started = now;
+        }
+    }
+
+    fn record(&mut self, verify: Duration, now: Instant) {
+        self.roll(now);
+        self.current = self.current.max(verify);
+        self.latest = verify;
+    }
+
+    fn bound(&mut self, now: Instant) -> Duration {
+        self.roll(now);
+        let recent = self.current.max(self.previous);
+        if recent.is_zero() {
+            self.latest
+        } else {
+            recent
+        }
+    }
+}
+
+/// The smallest memory limit under which a legacy 19 MiB hash is verified.
+/// The heaviest measured M5 workload peaked at 12.45 MiB without it; adding
+/// the 19 MiB Argon2 block gives 31.45 MiB, and the rest is headroom for
+/// allocator fragmentation, kernel and socket memory and cold file cache.
+pub(crate) const LEGACY_VERIFY_MIN_LIMIT: u64 = 36 << 20;
+
+/// This process's memory limit: cgroup v2 `memory.max`, else cgroup v1
+/// `memory.limit_in_bytes`. `max`, a v1 "unlimited" value or nothing
+/// readable is no limit.
+pub(crate) fn read_memory_limit() -> Option<u64> {
+    let read = |path| std::fs::read_to_string(path).ok();
+    memory_limit_from(
+        read("/sys/fs/cgroup/memory.max").as_deref(),
+        read("/sys/fs/cgroup/memory/memory.limit_in_bytes").as_deref(),
+    )
+}
+
+/// cgroup v1 reports "no limit" as a huge page-aligned number
+/// (9223372036854771712 on 4 KiB pages) rather than `max`; anything at or
+/// above 2^60 bytes is treated as unlimited.
+const V1_UNLIMITED: u64 = 1 << 60;
+
+fn memory_limit_from(v2: Option<&str>, v1: Option<&str>) -> Option<u64> {
+    match v2 {
+        Some(text) => parse_memory_max(text),
+        None => parse_memory_max(v1?).filter(|&limit| limit < V1_UNLIMITED),
+    }
+}
+
+fn parse_memory_max(text: &str) -> Option<u64> {
+    text.trim().parse().ok()
+}
+
+pub(crate) fn legacy_verify_fits(limit: Option<u64>) -> bool {
+    limit.is_none_or(|limit| limit >= LEGACY_VERIFY_MIN_LIMIT)
+}
+
+/// Whether `stored` may be verified now. A legacy hash under a memory limit
+/// too small for it is refused (and logged) instead of risking an OOM kill.
+fn may_verify(state: &AppState, stored: &str) -> bool {
+    if !is_legacy_hash(stored) {
+        return true;
+    }
+    let limit = (state.credential_queue.memory_limit)();
+    if legacy_verify_fits(limit) {
+        return true;
+    }
+    crate::warn!(
+        "legacy Argon2id hash not verified: the memory limit is too small; reset the account with hobnail reset-password <username>",
+        limit = limit.unwrap_or_default(),
+        required = LEGACY_VERIFY_MIN_LIMIT,
+    );
+    false
+}
+
+/// The floor for a current-profile bound: the legacy estimate (the bound
+/// scaled by [`LEGACY_COST_FACTOR`] plus [`LEGACY_MARGIN`]), so every padded
+/// attempt, legacy or not, answers at the same time; at least 150 ms and at
+/// most [`MAX_CREDENTIAL_FLOOR`].
+fn credential_floor(bound: Duration) -> Duration {
+    (bound * LEGACY_COST_FACTOR + LEGACY_MARGIN).clamp(MIN_CREDENTIAL_FLOOR, MAX_CREDENTIAL_FLOOR)
+}
+
+/// When to answer: at the floor deadline, or, if the work ran past it, at the
+/// fixed cap, so how far it overran is not measurable. Work that outlasts
+/// even the cap is answered when it ends.
+fn answer_at(
+    acquired: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+    finished: tokio::time::Instant,
+) -> tokio::time::Instant {
+    if finished <= deadline {
+        deadline
+    } else {
+        finished.max(acquired + MAX_CREDENTIAL_FLOOR)
+    }
+}
+
+impl CredentialQueue {
+    pub(crate) async fn acquire(&self) -> Option<OwnedSemaphorePermit> {
+        if let Ok(permit) = self.active.clone().try_acquire_owned() {
+            return Some(permit);
+        }
+        let _slot = self.waiters.try_acquire().ok()?;
+        tokio::time::timeout(CREDENTIAL_WAIT, self.active.clone().acquire_owned())
+            .await
+            .ok()?
+            .ok()
+    }
+
+    /// The current padding for sign-in responses (see [`credential_floor`]).
+    pub(crate) fn floor(&self) -> Duration {
+        self.floor_at(Instant::now())
+    }
+
+    fn floor_at(&self, now: Instant) -> Duration {
+        let mut samples = self.samples.lock().unwrap_or_else(|e| e.into_inner());
+        credential_floor(samples.bound(now))
+    }
+
+    /// Records one current-profile verification (never a legacy one).
+    fn observe_verify(&self, verify: Duration, now: Instant) {
+        self.samples
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(verify, now);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn waiting(&self) -> usize {
+        CREDENTIAL_WAITERS - self.waiters.available_permits()
+    }
+}
+
+pub(crate) fn credential_busy(legacy: bool) -> Response<Body> {
+    let message = "credential service busy; try again";
+    let mut response = if legacy {
+        json_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            &serde_json::json!({"error": message, "retry_after": 1}),
+        )
+    } else {
+        ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", message).response()
+    };
+    set(&mut response, RETRY_AFTER, "1");
+    response
+}
 
 pub(crate) fn now_s() -> i64 {
     crate::util::unix_now() as i64
@@ -103,24 +326,72 @@ pub(crate) async fn route(
         return r;
     }
     if req.uri().path() == "/api/logout" {
-        return logout(state, session.expect("logout gate"));
+        let secure = crate::http::proxy::is_https(&req, &state.env);
+        return logout(state, session.expect("logout gate"), secure);
     }
     credential_route(state, req, CredentialAction::Login).await
 }
 
+pub fn cli_list_legacy_hashes(args: &[String]) -> i32 {
+    if !args.is_empty() {
+        eprintln!("usage: hobnail list-legacy-hashes");
+        return 1;
+    }
+    let result = Db::open(&crate::db::path_from_env())
+        .map_err(|e| e.to_string())
+        .and_then(|db| db.legacy_hash_users().map_err(|e| format!("{e:?}")));
+    match result {
+        Ok(users) => {
+            for name in users {
+                println!("{name}");
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("list-legacy-hashes: {e}");
+            1
+        }
+    }
+}
+
+fn store_console_password(
+    db: &Db,
+    name: Option<&str>,
+    password: &str,
+    reset: bool,
+) -> Result<(), String> {
+    check_password_policy(password)?;
+    let hash = hash_password(password)?;
+    let now = now_s();
+    if reset {
+        db.reset_account_password(name.expect("reset requires a name"), &hash, now)
+    } else {
+        db.recover_owner(name, &hash, now)
+    }
+    .map_err(|e| format!("{e:?}"))
+}
+
 /// `hobnail set-password`: reads the new password from the TTY without
 /// echo (twice), or one line from stdin when piped; stores the hash in the
-/// database and signs every session out.
-pub fn cli_set_password(args: &[String]) -> i32 {
-    if args.len() > 1 || args.first().is_some_and(|name| !valid_name(name)) {
-        eprintln!("usage: hobnail set-password [username] (1–64 letters, digits, dots, hyphens or underscores)");
+/// database and signs out the affected account.
+pub fn cli_set_password(args: &[String], reset: bool) -> i32 {
+    let (command, operand) = if reset {
+        ("reset-password", "<username>")
+    } else {
+        ("set-password", "[username]")
+    };
+    if args.len() > 1
+        || (reset && args.is_empty())
+        || args.first().is_some_and(|name| !valid_name(name))
+    {
+        eprintln!("usage: hobnail {command} {operand} (1–64 letters, digits, dots, hyphens or underscores)");
         return 1;
     }
     let path = crate::db::path_from_env();
     let db = match Db::open(&path) {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("set-password: cannot open the database: {e}");
+            eprintln!("{command}: cannot open the database: {e}");
             return 1;
         }
     };
@@ -129,23 +400,23 @@ pub fn cli_set_password(args: &[String]) -> i32 {
         let a = match tty::read_secret("New password: ") {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("set-password: {e}; nothing changed");
+                eprintln!("{command}: {e}; nothing changed");
                 return 1;
             }
         };
         if let Err(e) = check_password_policy(&a) {
-            eprintln!("set-password: {e}; nothing changed");
+            eprintln!("{command}: {e}; nothing changed");
             return 1;
         }
         let b = match tty::read_secret("Repeat password: ") {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("set-password: {e}; nothing changed");
+                eprintln!("{command}: {e}; nothing changed");
                 return 1;
             }
         };
         if a != b {
-            eprintln!("set-password: the passwords do not match; nothing changed");
+            eprintln!("{command}: the passwords do not match; nothing changed");
             return 1;
         }
         a
@@ -153,40 +424,39 @@ pub fn cli_set_password(args: &[String]) -> i32 {
         let mut line = String::new();
         match std::io::stdin().read_line(&mut line) {
             Ok(0) => {
-                eprintln!("set-password: no password on stdin; nothing changed");
+                eprintln!("{command}: no password on stdin; nothing changed");
                 return 1;
             }
             Ok(_) => line.trim_end_matches(['\n', '\r']).to_string(),
             Err(_) => {
-                eprintln!("set-password: could not read stdin; nothing changed");
+                eprintln!("{command}: could not read stdin; nothing changed");
                 return 1;
             }
         }
     };
-    let result = check_password_policy(&password)
-        .and_then(|()| hash_password(&password))
-        .and_then(|hash| {
-            db.recover_owner(args.first().map(String::as_str), &hash, now_s())
-                .map_err(|e| format!("{e:?}"))
-        });
-    match result {
+    let name = args.first().map(String::as_str);
+    match store_console_password(&db, name, &password, reset) {
         Ok(()) => {
             db.record_event(
                 now_s(),
                 "auth.password_changed",
                 "info",
-                "owner",
+                if reset {
+                    name.expect("reset requires a name")
+                } else {
+                    "owner"
+                },
                 "set from the console",
             );
             println!(
-                "Password {} in {}. The owner's sessions were signed out.",
-                if had { "changed" } else { "set" },
+                "Password {} in {}. The account's sessions were signed out.",
+                if reset || had { "changed" } else { "set" },
                 path.display()
             );
             0
         }
         Err(e) => {
-            eprintln!("set-password: {e}; nothing changed");
+            eprintln!("{command}: {e}; nothing changed");
             1
         }
     }
@@ -199,10 +469,6 @@ pub(crate) fn change_password_for(
     new: &str,
 ) -> Result<(), String> {
     check_password_policy(new)?;
-    let _permit = state
-        .login_verifying
-        .try_lock()
-        .map_err(|_| "too many attempts; try again in 1 s")?;
     let key = session.account.id;
     let lock = || {
         state
@@ -217,7 +483,12 @@ pub(crate) fn change_password_for(
         .db
         .credential(&session.account.name)
         .ok_or("sign in required")?;
-    if current.len() > MAX_PASSWORD_BYTES || !verify_password(&stored, current) {
+    if !may_verify(state, &stored) {
+        return Err(
+            "this account's old password hash needs more memory than the server may use; ask the owner to run hobnail reset-password".into(),
+        );
+    }
+    if current.len() > MAX_PASSWORD_BYTES || verify_password(&stored, current).is_none() {
         lock().failure(key, now_ms());
         state.db.record_event(
             now_s(),
@@ -308,7 +579,7 @@ fn argon2(memory: u32, passes: u32) -> Argon2<'static> {
 }
 
 fn hash_password(password: &str) -> Result<String, String> {
-    hash_with(&argon2(19_456, 2), password)
+    hash_with(&argon2(7_168, 5), password)
 }
 
 fn hash_with(algorithm: &Argon2<'_>, password: &str) -> Result<String, String> {
@@ -319,30 +590,52 @@ fn hash_with(algorithm: &Argon2<'_>, password: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-fn verify_password(stored: &str, password: &str) -> bool {
-    let Ok(hash) = PasswordHash::new(stored) else {
-        return false;
-    };
-    let production =
-        hash.params.get_decimal("m") == Some(19_456) && hash.params.get_decimal("t") == Some(2);
-    let test = cfg!(test)
-        && hash.params.get_decimal("m") == Some(32)
-        && hash.params.get_decimal("t") == Some(1);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PasswordProfile {
+    Current,
+    Legacy,
+    #[cfg(test)]
+    Test,
+}
+
+fn password_profile(hash: &PasswordHash<'_>) -> Option<PasswordProfile> {
     if hash.algorithm.as_str() != "argon2id"
         || hash.version != Some(19)
         || hash.params.get_decimal("p") != Some(1)
-        || !(production || test)
     {
-        return false;
+        return None;
     }
+    Some(
+        match (hash.params.get_decimal("m")?, hash.params.get_decimal("t")?) {
+            (7_168, 5) => PasswordProfile::Current,
+            (19_456, 2) => PasswordProfile::Legacy,
+            #[cfg(test)]
+            (32, 1) => PasswordProfile::Test,
+            _ => return None,
+        },
+    )
+}
+
+pub(crate) fn is_legacy_hash(stored: &str) -> bool {
+    PasswordHash::new(stored)
+        .ok()
+        .as_ref()
+        .and_then(password_profile)
+        == Some(PasswordProfile::Legacy)
+}
+
+fn verify_password(stored: &str, password: &str) -> Option<PasswordProfile> {
+    let hash = PasswordHash::new(stored).ok()?;
+    let profile = password_profile(&hash)?;
     Argon2::default()
         .verify_password(password.as_bytes(), &hash)
-        .is_ok()
+        .ok()?;
+    Some(profile)
 }
 
 // Public dummy record with the same work factors as a real password.
 const DUMMY_HASH: &str =
-    "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    "$argon2id$v=19$m=7168,t=5,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 fn valid_name(name: &str) -> bool {
     (1..=64).contains(&name.len())
@@ -415,7 +708,12 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     std::hint::black_box(d) == 0
 }
 
-pub(crate) fn refresh_cookie(state: &AppState, session: &Session, response: &mut Response<Body>) {
+pub(crate) fn refresh_cookie(
+    state: &AppState,
+    session: &Session,
+    secure: bool,
+    response: &mut Response<Body>,
+) {
     if response.headers().contains_key(SET_COOKIE) {
         return;
     }
@@ -427,13 +725,14 @@ pub(crate) fn refresh_cookie(state: &AppState, session: &Session, response: &mut
         set(
             response,
             SET_COOKIE,
-            &session_cookie(&session.token, expires - now),
+            &session_cookie(&session.token, expires - now, secure),
         );
     }
 }
 
-fn session_cookie(token: &str, max_age: i64) -> String {
-    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}")
+fn session_cookie(token: &str, max_age: i64, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!("{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}")
 }
 
 /// `host[:port]` of an `http(s)://` Origin or Referer value.
@@ -563,6 +862,11 @@ impl RateLimiter {
         self.ips.remove(&ip);
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_test_failure(&mut self, ip: IpAddr) {
+        self.failure(ip, now_ms());
+    }
+
     fn forget_old(&mut self, now_ms: u64) {
         self.ips
             .retain(|_, s| now_ms.saturating_sub(s.last_ms) < FORGET_AFTER_MS);
@@ -612,14 +916,6 @@ enum Attempt {
 }
 
 /// The client address for the rate limit (IPv4-mapped IPv6 folded to IPv4).
-fn peer_ip<B>(req: &Request<B>) -> IpAddr {
-    req.extensions()
-        .get::<Peer>()
-        .map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| {
-            p.0.ip().to_canonical()
-        })
-}
-
 pub(crate) async fn credential_route(
     state: &Arc<AppState>,
     req: Request<hyper::body::Incoming>,
@@ -665,7 +961,8 @@ pub(crate) async fn credential_route(
             "send application/json",
         );
     }
-    let ip = peer_ip(&req);
+    let secure = crate::http::proxy::is_https(&req, &state.env);
+    let ip = crate::http::proxy::client_ip(&req, &state.env);
     if let Err(secs) = state
         .login_limiter
         .lock()
@@ -674,24 +971,36 @@ pub(crate) async fn credential_route(
     {
         return limited(secs);
     }
-    let Ok(body) = Limited::new(req.into_body(), MAX_BODY).collect().await else {
-        return error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "body_too_large",
-            "request too large",
-        );
+    use crate::http::conn::{collect_body, BodyDeadline, BodyError};
+    let deadline = req.extensions().get::<BodyDeadline>().copied();
+    let body = match collect_body(deadline.as_ref(), req.into_body(), MAX_BODY).await {
+        Ok(body) => body,
+        Err(BodyError::TimedOut) => {
+            return error(
+                StatusCode::REQUEST_TIMEOUT,
+                "request_timeout",
+                "the request body did not arrive in time",
+            )
+        }
+        Err(BodyError::TooLarge) => {
+            return error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "body_too_large",
+                "request too large",
+            )
+        }
     };
-    let Ok(credentials) = serde_json::from_slice(&body.to_bytes()) else {
+    let Ok(credentials) = serde_json::from_slice(&body) else {
         return error(
             StatusCode::BAD_REQUEST,
             "bad_request",
             "username and password required",
         );
     };
-    let st = state.clone();
-    let outcome = tokio::task::spawn_blocking(move || authenticate(&st, ip, action, credentials))
-        .await
-        .unwrap_or(Err(Attempt::Failed));
+    let Some(permit) = state.credential_queue.acquire().await else {
+        return credential_busy(legacy);
+    };
+    let outcome = run_credential(state, permit, ip, action, credentials).await;
     let token = match outcome {
         Ok(token) => token,
         Err(Attempt::Limited(secs)) => return limited(secs),
@@ -746,9 +1055,71 @@ pub(crate) async fn credential_route(
     set(
         &mut response,
         SET_COOKIE,
-        &session_cookie(&token, SESSION_TTL_SECS),
+        &session_cookie(&token, SESSION_TTL_SECS, secure),
     );
     response
+}
+
+/// Runs one credential operation with the permit and answers no earlier than
+/// its floor deadline while legacy hashes remain.
+///
+/// The deadline starts when this request holds the only permit, and the
+/// permit is kept until then. A queued request therefore waits for the
+/// previous holder's deadline, never for its hash, so neither its own
+/// response time nor a later one reveals which hash profile was checked.
+/// The work, the wait and the release run in a detached task that owns the
+/// permit: a client that disconnects (dropping this future) cannot release
+/// it early. The task only awaits; hashing stays on the blocking pool.
+async fn run_credential(
+    state: &Arc<AppState>,
+    permit: OwnedSemaphorePermit,
+    ip: IpAddr,
+    action: CredentialAction,
+    credentials: Credentials,
+) -> Result<String, Attempt> {
+    let acquired = tokio::time::Instant::now();
+    let deadline = acquired + state.credential_queue.floor();
+    let st = state.clone();
+    let task = tokio::spawn(async move {
+        let joined = tokio::task::spawn_blocking(move || {
+            // Fail closed: a scan error pads like a remaining legacy hash.
+            let padded = action == CredentialAction::Login
+                && !st
+                    .db
+                    .legacy_hash_users()
+                    .is_ok_and(|users| users.is_empty());
+            (authenticate(&st, ip, action, credentials), padded)
+        })
+        .await;
+        let (outcome, padded) = joined.unwrap_or((Err(Attempt::Failed), true));
+        if padded {
+            let finished = tokio::time::Instant::now();
+            tokio::time::sleep_until(answer_at(acquired, deadline, finished)).await;
+        }
+        drop(permit);
+        outcome
+    });
+    task.await.unwrap_or(Err(Attempt::Failed))
+}
+
+/// Measures one current-profile verify at boot, so the floor is not just
+/// the 150 ms constant until the first sign-in after a restart. Runs only
+/// while legacy hashes remain (the floor applies only then), under the
+/// permit, so it never overlaps a sign-in; it costs one 7 MiB hash. The
+/// legacy estimate is derived from it (no 19 MiB hash runs at boot).
+pub(crate) async fn calibrate_floor(state: &Arc<AppState>) {
+    let Some(permit) = state.credential_queue.acquire().await else {
+        return;
+    };
+    let st = state.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let started = Instant::now();
+        let _ = verify_password(DUMMY_HASH, "calibration");
+        st.credential_queue
+            .observe_verify(started.elapsed(), Instant::now());
+    })
+    .await;
 }
 
 fn authenticate(
@@ -757,19 +1128,6 @@ fn authenticate(
     action: CredentialAction,
     credentials: Credentials,
 ) -> Result<String, Attempt> {
-    // Onboarding queues behind a raced onboarding request so the loser
-    // sees the committed owner and receives 409. Other operations can retry.
-    let _permit = if action == CredentialAction::Onboard {
-        state
-            .login_verifying
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-    } else {
-        state
-            .login_verifying
-            .try_lock()
-            .map_err(|_| Attempt::Limited(1))?
-    };
     let lock = || {
         state
             .login_limiter
@@ -795,10 +1153,34 @@ fn authenticate(
     let expires = now + SESSION_TTL_SECS;
     let result = if action == CredentialAction::Login {
         let credential = db.credential(&username);
-        let stored = credential.as_ref().map_or(DUMMY_HASH, |(_, hash, _)| hash);
-        let verified = password.len() <= MAX_PASSWORD_BYTES && verify_password(stored, &password);
-        match credential {
-            Some((id, stored, false)) if verified => db.sign_in(id, &stored, &hash, now, expires),
+        // Unknown and disabled accounts can never sign in: check the dummy
+        // record, so a disabled legacy account costs no 19 MiB hash.
+        let stored = match &credential {
+            Some((_, hash, false)) => hash.as_str(),
+            _ => DUMMY_HASH,
+        };
+        let verified = (password.len() <= MAX_PASSWORD_BYTES && may_verify(state, stored))
+            .then(|| {
+                let started = Instant::now();
+                let verified = verify_password(stored, &password);
+                if !is_legacy_hash(stored) {
+                    state
+                        .credential_queue
+                        .observe_verify(started.elapsed(), Instant::now());
+                }
+                verified
+            })
+            .flatten();
+        match (credential, verified) {
+            (Some((id, stored, false)), Some(profile)) => {
+                db.sign_in(id, &stored, &hash, now, expires).map(|()| {
+                    if profile == PasswordProfile::Legacy {
+                        if let Ok(replacement) = hash_password(&password) {
+                            db.upgrade_password_hash(id, &stored, &replacement);
+                        }
+                    }
+                })
+            }
             _ => Err(AccountError::Invalid),
         }
     } else {
@@ -861,14 +1243,10 @@ fn authenticate(
     }
 }
 
-fn logout(state: &AppState, session: &Session) -> Response<Body> {
+fn logout(state: &AppState, session: &Session, secure: bool) -> Response<Body> {
     state.db.delete_session(&session.hash);
     let mut r = json_response(StatusCode::OK, &serde_json::json!({ "ok": true }));
-    set(
-        &mut r,
-        SET_COOKIE,
-        &format!("{COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
-    );
+    set(&mut r, SET_COOKIE, &session_cookie("", 0, secure));
     r
 }
 
@@ -945,15 +1323,306 @@ pub(crate) fn set_password_for_tests(db: &Db, password: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn the_floor_is_the_scaled_legacy_estimate_of_recent_verifies() {
+        let ms = Duration::from_millis;
+        assert_eq!(credential_floor(Duration::ZERO), MIN_CREDENTIAL_FLOOR);
+        assert_eq!(credential_floor(ms(45)), MIN_CREDENTIAL_FLOOR);
+        assert_eq!(credential_floor(ms(200)), ms(450));
+        assert_eq!(credential_floor(ms(975)), MAX_CREDENTIAL_FLOOR);
+        assert_eq!(credential_floor(ms(9_000)), MAX_CREDENTIAL_FLOOR);
+
+        let queue = CredentialQueue::default();
+        let t0 = Instant::now();
+        assert_eq!(queue.floor_at(t0), MIN_CREDENTIAL_FLOOR, "no sample yet");
+        queue.observe_verify(ms(400), t0); // an outlier under load
+        queue.observe_verify(ms(45), t0 + ms(10));
+        assert_eq!(queue.floor_at(t0 + ms(20)), ms(850));
+        // Still inside the previous window.
+        let later = t0 + SAMPLE_WINDOW + ms(30);
+        queue.observe_verify(ms(60), later);
+        assert_eq!(queue.floor_at(later), ms(850));
+        // Two windows on, the outlier is gone: 2 x 60 + 50 ms.
+        let much_later = later + SAMPLE_WINDOW;
+        assert_eq!(queue.floor_at(much_later), ms(170));
+        // Without a recent sample the latest one holds: never below the
+        // estimate of the last measured hash speed.
+        queue.observe_verify(ms(300), much_later);
+        assert_eq!(queue.floor_at(much_later + SAMPLE_WINDOW * 5), ms(650));
+    }
+
+    #[test]
+    fn an_overrun_answers_at_the_fixed_cap() {
+        let t0 = tokio::time::Instant::now();
+        let ms = Duration::from_millis;
+        let deadline = t0 + ms(150);
+        assert_eq!(answer_at(t0, deadline, t0 + ms(80)), deadline);
+        assert_eq!(answer_at(t0, deadline, deadline), deadline);
+        assert_eq!(
+            answer_at(t0, deadline, t0 + ms(151)),
+            t0 + MAX_CREDENTIAL_FLOOR
+        );
+        assert_eq!(
+            answer_at(t0, deadline, t0 + ms(1999)),
+            t0 + MAX_CREDENTIAL_FLOOR
+        );
+        assert_eq!(answer_at(t0, deadline, t0 + ms(2500)), t0 + ms(2500));
+    }
+
+    #[test]
+    fn legacy_account_attempts_never_change_the_bound() {
+        let state = crate::testutil::state_with(vec![], "");
+        let legacy = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &legacy, 0).unwrap();
+        let state = with_memory_limit(state, || None);
+        let snapshot = |st: &AppState| format!("{:?}", st.credential_queue.samples.lock().unwrap());
+        let before = snapshot(&state);
+        // A wrong password, a refusal before hashing, and the same under a
+        // memory limit that refuses the legacy verify.
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "wrong horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "wrong horse"),
+            Err(Attempt::Limited(_))
+        ));
+        let state = with_memory_limit(state, || Some(20 << 20));
+        assert!(matches!(
+            login_attempt(&state, 2, "admin", "correct horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert_eq!(snapshot(&state), before);
+        // A successful legacy sign-in rehashes, still without a sample.
+        let state = with_memory_limit(state, || None);
+        login_attempt(&state, 3, "admin", "correct horse").unwrap();
+        assert_eq!(snapshot(&state), before);
+        // An unknown account verifies the current-profile dummy: recorded.
+        assert!(matches!(
+            login_attempt(&state, 4, "nobody", "wrong horse"),
+            Err(Attempt::Wrong)
+        ));
+        assert_ne!(snapshot(&state), before);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_sign_in_keeps_the_permit_until_its_deadline() {
+        let state = crate::testutil::state_with(vec![], "");
+        set_password_for_tests(&state.db, "correct horse");
+        state.db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated)
+                 VALUES ('old','$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA','viewer',0,0)",
+                [],
+            )?;
+            Ok(())
+        });
+        let permit = state.credential_queue.acquire().await.unwrap();
+        let acquired = tokio::time::Instant::now();
+        let sign_in = run_credential(
+            &state,
+            permit,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            CredentialAction::Login,
+            Credentials {
+                username: "admin".into(),
+                password: "wrong horse".into(),
+                token: None,
+            },
+        );
+        // The client goes away while the (fast, test-profile) hash runs.
+        assert!(tokio::time::timeout(Duration::from_millis(20), sign_in)
+            .await
+            .is_err());
+        let _next = state.credential_queue.acquire().await.unwrap();
+        assert!(
+            acquired.elapsed() >= MIN_CREDENTIAL_FLOOR,
+            "released after {:?}",
+            acquired.elapsed()
+        );
+    }
+
+    #[test]
+    fn memory_limits_gate_legacy_verification() {
+        assert_eq!(parse_memory_max("max\n"), None);
+        assert_eq!(parse_memory_max(""), None);
+        assert_eq!(parse_memory_max("20971520\n"), Some(20 << 20));
+        // cgroup v2 wins when present; v1 is the fallback.
+        assert_eq!(memory_limit_from(Some("max\n"), Some("20971520\n")), None);
+        assert_eq!(memory_limit_from(Some("20971520\n"), None), Some(20 << 20));
+        assert_eq!(memory_limit_from(None, Some("20971520\n")), Some(20 << 20));
+        assert_eq!(memory_limit_from(None, Some("9223372036854771712\n")), None);
+        assert_eq!(memory_limit_from(None, Some("garbage")), None);
+        assert_eq!(memory_limit_from(None, None), None);
+        assert!(legacy_verify_fits(None));
+        assert!(!legacy_verify_fits(Some(20 << 20)));
+        assert!(!legacy_verify_fits(Some(LEGACY_VERIFY_MIN_LIMIT - 1)));
+        assert!(legacy_verify_fits(Some(LEGACY_VERIFY_MIN_LIMIT)));
+    }
+
+    fn with_memory_limit(mut state: Arc<AppState>, limit: fn() -> Option<u64>) -> Arc<AppState> {
+        Arc::get_mut(&mut state)
+            .unwrap()
+            .credential_queue
+            .memory_limit = limit;
+        state
+    }
+
+    fn login_attempt(
+        state: &AppState,
+        host: u8,
+        username: &str,
+        password: &str,
+    ) -> Result<String, Attempt> {
+        authenticate(
+            state,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, host)),
+            CredentialAction::Login,
+            Credentials {
+                username: username.into(),
+                password: password.into(),
+                token: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_small_memory_limit_refuses_legacy_verification_like_a_wrong_password() {
+        let state = with_memory_limit(crate::testutil::state_with(vec![], ""), || Some(20 << 20));
+        let previous = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &previous, 0).unwrap();
+        crate::log::capture_test_logs();
+        assert!(matches!(
+            login_attempt(&state, 1, "admin", "correct horse"),
+            Err(Attempt::Wrong)
+        ));
+        let logs = crate::log::take_test_logs().join("");
+        assert!(logs.contains("hobnail reset-password"), "{logs}");
+        assert!(!logs.contains("correct horse") && !logs.contains("\"admin\""));
+        assert_eq!(state.db.credential("admin").unwrap().1, previous);
+
+        // Without a limit the same password signs in and migrates.
+        let state = with_memory_limit(state, || None);
+        login_attempt(&state, 2, "admin", "correct horse").unwrap();
+        assert!(state.db.legacy_hash_users().unwrap().is_empty());
+    }
+
+    #[test]
+    fn disabled_accounts_are_checked_against_the_dummy_hash() {
+        let state = with_memory_limit(crate::testutil::state_with(vec![], ""), || Some(20 << 20));
+        set_password_for_tests(&state.db, "owner password");
+        let legacy = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated,disabled)
+                 VALUES ('gone',?1,'viewer',0,0,1)",
+                [&legacy],
+            )?;
+            Ok(())
+        });
+        crate::log::capture_test_logs();
+        assert!(matches!(
+            login_attempt(&state, 1, "gone", "correct horse"),
+            Err(Attempt::Wrong)
+        ));
+        // The legacy record was never chosen for verification.
+        assert_eq!(crate::log::take_test_logs(), Vec::<String>::new());
+    }
 
     #[test]
     fn argon2id_hashes_are_salted_and_verifiable() {
         let hash = hash_password("correct horse").unwrap();
-        assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"));
-        assert!(verify_password(&hash, "correct horse"));
-        assert!(!verify_password(&hash, "wrong horse"));
-        assert!(!verify_password("invalid", "correct horse"));
+        assert!(hash.starts_with("$argon2id$v=19$m=7168,t=5,p=1$"));
+        assert_eq!(
+            verify_password(&hash, "correct horse"),
+            Some(PasswordProfile::Current)
+        );
+        assert_eq!(verify_password(&hash, "wrong horse"), None);
+        assert_eq!(verify_password("invalid", "correct horse"), None);
         assert_ne!(hash, hash_password("correct horse").unwrap());
+    }
+
+    #[test]
+    fn console_reset_migrates_a_named_account_and_revokes_its_sessions() {
+        let state = crate::testutil::state_with(vec![], "");
+        let db = &state.db;
+        let old = hash_with(&argon2(19_456, 2), "old password").unwrap();
+        store_console_password(db, None, "owner password", false).unwrap();
+        db.with((), |i| {
+            i.conn.execute(
+                "INSERT INTO users(name,password_hash,role,created,updated) VALUES ('guest',?1,'viewer',0,0)",
+                [&old],
+            )?;
+            Ok(())
+        });
+        let (id, _, _) = db.credential("guest").unwrap();
+        let now = now_s();
+        db.sign_in(id, &old, "old-session", now, now + 100).unwrap();
+        assert_eq!(db.legacy_hash_users().unwrap(), ["guest"]);
+
+        store_console_password(db, Some("guest"), "new password", true).unwrap();
+
+        let (same_id, hash, _) = db.credential("guest").unwrap();
+        assert_eq!(same_id, id);
+        assert_eq!(
+            verify_password(&hash, "new password"),
+            Some(PasswordProfile::Current)
+        );
+        assert!(!db.session_is_valid("old-session", now));
+        assert!(db.legacy_hash_users().unwrap().is_empty());
+        assert_eq!(db.accounts().unwrap().len(), 2);
+        assert!(store_console_password(db, Some("absent"), "new password", true).is_err());
+    }
+
+    #[test]
+    fn legacy_hash_upgrades_only_after_successful_login() {
+        let state = crate::testutil::state_with(vec![], "");
+        let previous = hash_with(&argon2(19_456, 2), "correct horse").unwrap();
+        state.db.recover_owner(None, &previous, 0).unwrap();
+        let login = |host, password: &str| {
+            authenticate(
+                &state,
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, host)),
+                CredentialAction::Login,
+                Credentials {
+                    username: "admin".into(),
+                    password: password.into(),
+                    token: None,
+                },
+            )
+        };
+        let read_hash = || state.db.credential("admin").unwrap().1;
+        assert!(matches!(login(1, "wrong horse"), Err(Attempt::Wrong)));
+        assert_eq!(read_hash(), previous);
+        assert_eq!(state.db.legacy_hash_users().unwrap(), ["admin"]);
+
+        state.db.with((), |i| {
+            i.conn.execute_batch(
+                "CREATE TRIGGER fail_upgrade BEFORE UPDATE OF password_hash ON users
+                 BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;",
+            )
+        });
+        let token = login(2, "correct horse").unwrap();
+        assert!(state
+            .db
+            .account_session(&sha256_hex(token.as_bytes()), now_s())
+            .is_some());
+        assert_eq!(read_hash(), previous);
+        state
+            .db
+            .with((), |i| i.conn.execute_batch("DROP TRIGGER fail_upgrade"));
+
+        login(2, "correct horse").unwrap();
+        let upgraded = read_hash();
+        assert!(state.db.legacy_hash_users().unwrap().is_empty());
+        assert_eq!(
+            verify_password(&upgraded, "correct horse"),
+            Some(PasswordProfile::Current)
+        );
+        login(2, "correct horse").unwrap();
+        assert_eq!(read_hash(), upgraded);
     }
 
     #[test]
@@ -1078,9 +1747,15 @@ mod tests {
 
     #[test]
     fn cookie_format() {
-        let c = session_cookie(&"aa".repeat(32), SESSION_TTL_SECS);
+        let c = session_cookie(&"aa".repeat(32), SESSION_TTL_SECS, true);
         assert!(c.starts_with("rh_session="));
-        for part in ["HttpOnly", "SameSite=Strict", "Path=/", "Max-Age=604800"] {
+        for part in [
+            "HttpOnly",
+            "SameSite=Strict",
+            "Path=/",
+            "Max-Age=604800",
+            "Secure",
+        ] {
             assert!(c.contains(part), "{c}");
         }
     }

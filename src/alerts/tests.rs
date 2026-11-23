@@ -26,6 +26,9 @@ fn app(dir: &std::path::Path, config: &str) -> Arc<AppState> {
         host_sys: "/sys".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
+        max_connections: 64,
+        max_connections_per_peer: 16,
     });
     assert!(
         st.config.snapshot().error.is_none(),
@@ -323,7 +326,15 @@ fn state_file_round_trip_and_corruption() {
         error: None,
     };
     assert_eq!(
-        evaluate(&mut c, &cfg, &Probes::default(), &snap, "h", 5000),
+        evaluate(
+            &mut c,
+            &cfg,
+            &Probes::default(),
+            &snap,
+            "h",
+            5000,
+            &Mutex::default()
+        ),
         1
     );
     c.save_if_dirty();
@@ -335,7 +346,15 @@ fn state_file_round_trip_and_corruption() {
     let mut c2 = core_in(&dir);
     assert_eq!(c2.outbox.len(), 1);
     assert_eq!(
-        evaluate(&mut c2, &cfg, &Probes::default(), &snap, "h", 5100),
+        evaluate(
+            &mut c2,
+            &cfg,
+            &Probes::default(),
+            &snap,
+            "h",
+            5100,
+            &Mutex::default()
+        ),
         0
     );
     assert!(c2.next_id > c2.outbox[0].id);
@@ -355,7 +374,15 @@ fn state_file_round_trip_and_corruption() {
 
     // Rules that no longer exist are pruned.
     let cfg_none = parse("").unwrap();
-    evaluate(&mut c2, &cfg_none, &Probes::default(), &snap, "h", 5200);
+    evaluate(
+        &mut c2,
+        &cfg_none,
+        &Probes::default(),
+        &snap,
+        "h",
+        5200,
+        &Mutex::default(),
+    );
     assert_eq!(c2.engine.len(), 0);
 
     // A corrupt file means a fresh start, not a crash.
@@ -377,20 +404,26 @@ fn docker_outage_neither_fires_nor_resolves() {
         fetched_at: 1,
         error: None,
     };
-    evaluate(&mut c, &cfg, &p, &snap, "h", 100);
+    evaluate(&mut c, &cfg, &p, &snap, "h", 100, &Mutex::default());
     let broken = Snapshot {
         error: Some("docker unreachable".into()),
         fetched_at: 2,
         ..Default::default()
     };
-    assert_eq!(evaluate(&mut c, &cfg, &p, &broken, "h", 200), 0);
+    assert_eq!(
+        evaluate(&mut c, &cfg, &p, &broken, "h", 200, &Mutex::default()),
+        0
+    );
     assert_eq!(c.engine.open().count(), 1);
     // Back, and the container is gone: resolved as removed.
     let gone = Snapshot {
         fetched_at: 3,
         ..Default::default()
     };
-    assert_eq!(evaluate(&mut c, &cfg, &p, &gone, "h", 300), 1);
+    assert_eq!(
+        evaluate(&mut c, &cfg, &p, &gone, "h", 300, &Mutex::default()),
+        1
+    );
     assert_eq!(c.outbox.len(), 0, "rule has no channels: page only");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -659,7 +692,7 @@ async fn telegram_error_never_contains_the_token() {
         format!("http://{addr}/fail"),
         "http://127.0.0.1:1".to_string(),
     ] {
-        let c: ChannelConfig = toml::from_str(&format!(
+        let c: ChannelConfig = toml_edit::de::from_str(&format!(
             "type='telegram'\ntoken_env='{var}'\nchat_id=1\napi_base='{base}'\ntimeout='1s'"
         ))
         .unwrap();
@@ -672,7 +705,7 @@ async fn telegram_error_never_contains_the_token() {
     }
     // Disallowed host: the policy error names the host only.
     let c: ChannelConfig =
-        toml::from_str(&format!("type='telegram'\ntoken_env='{var}'\nchat_id=1")).unwrap();
+        toml_edit::de::from_str(&format!("type='telegram'\ntoken_env='{var}'\nchat_id=1")).unwrap();
     let t = channels::resolve(&c).unwrap();
     let strict = crate::config::HttpPolicy {
         allow_hosts: vec!["example.com".into()],

@@ -13,10 +13,10 @@ config at all. The Docker events stream keeps the list current within ~0.3 s.
   container's Logs and Metrics tabs); there are no links to Dozzle or Beszel.
 - Logs are one click from every place a container is named: "Logs" in the
   table row (first action), a logs icon on each sidebar item (and on a stack,
-  for compose projects), on Overview's "Needs attention", "Top CPU" and
-  "Recent events" rows, on Host, History and Alerts rows, and in Settings ›
+  for compose projects), on the Home board's Needs attention rows, on Host,
+  History and Alerts rows, and in Settings ›
   Containers and groups. The container page's Logs tab is the viewer.
-- Why a container is red is one click from Overview. Admin/Owner can see
+- Why a container is red is one click from the Home board's Needs attention. Admin/Owner can see
   probe diagnostics and recent health checks; Viewers never receive them.
   Since-times are clamped to the current container start.
 - Overrides (config or Settings → Containers and groups): name, group, icon,

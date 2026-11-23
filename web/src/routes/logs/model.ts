@@ -2,6 +2,8 @@
 // Pure log contracts and transformations. Stream timestamps remain milliseconds.
 export interface LogLine { c: string; t: number; m: string; s?: number; l?: string; x?: number }
 export interface Row extends LogLine { id: number; plain: string; segments: Segment[]; fold: ReturnType<typeof jsonFold> }
+const byTime = (a: Row, b: Row) => a.t - b.t || a.id - b.id;
+
 export class Ring {
   rows: Row[] = [];
   next = 0;
@@ -12,14 +14,22 @@ export class Ring {
       const segments = ansi(line.m), plain = segments.map((segment) => segment.text).join("");
       return { ...line, id: this.next++, plain, segments, fold: jsonFold(plain) };
     });
-    incoming.sort((a, b) => a.t - b.t || a.id - b.id);
+    incoming.sort(byTime);
     const room = Math.max(0, this.cap - this.rows.length);
-    this.rows = older ? [...(room ? incoming.slice(-room) : []), ...this.rows] : [...this.rows, ...incoming];
-    this.rows.sort((a, b) => a.t - b.t || a.id - b.id);
+    const left = older ? (room ? incoming.slice(-room) : []) : this.rows;
+    const right = older ? this.rows : incoming;
+    this.rows = left.concat(right);
+    // Reconnect and split streams can deliver batches out of order.
+    const last = left.at(-1), first = right[0];
+    if (last && first && byTime(last, first) > 0) this.rows.sort(byTime);
     if (!older && this.rows.length > this.cap) this.rows = this.rows.slice(-this.cap);
   }
 }
 export interface Segment { text: string; classes: string; fg?: string; bg?: string }
+/** Where a segment's ANSI foreground goes: "--fg", whose lightness logs.css
+ * clamps per theme so it reads on the pane, or, when the segment sets its own
+ * background, the plain colour, which pairs with that background instead. */
+export const fgProperty = (s: Segment) => s.bg ? "color" : "--fg";
 const palette = ["#121212", "#d65c5c", "#6bb576", "#c9ad58", "#729fe0", "#ba83d0", "#64b7bb", "#d0d0d0", "#777777", "#ff8585", "#93dc9b", "#f0d57f", "#9cc3ff", "#e3acfa", "#94e1e5", "#ffffff"];
 const cube = (k: number) => k ? 55 + k * 40 : 0;
 function color(n: number): string {
@@ -115,17 +125,21 @@ export function matcher(q: string, re: boolean, sensitive: boolean): { test: (s:
   try { const r = new RegExp(q, sensitive ? "" : "i"); return { test: (s) => r.test(s), error: null }; }
   catch { return { test: () => false, error: "Invalid regular expression" }; }
 }
-export function filterRows(rows: Row[], test: (s: string, id: number) => boolean, only: boolean, context: number, levels: string): { rows: Row[]; hits: Row[]; counts: Record<string, number> } {
+export function filterRows(rows: Row[], test: ((s: string, id: number) => boolean) | null, only: boolean, context: number, levels: string): { rows: Row[]; hits: Row[]; counts: Record<string, number> } {
   const hits: Row[] = [];
+  const shown: Row[] = [];
   const indexes = new Set<number>();
+  const counts: Record<string, number> = { e: 0, w: 0, i: 0, d: 0, o: 0 };
   rows.forEach((row, i) => {
-    if (!test(row.plain, row.id)) return;
-    hits.push(row);
+    const level = row.l || "o";
+    counts[level] = (counts[level] || 0) + 1;
+    const allowed = levels.includes(level);
+    if (allowed && !only) shown.push(row);
+    if (!test?.(row.plain, row.id)) return;
+    if (allowed) hits.push(row);
     if (only) for (let k = Math.max(0, i - context); k <= Math.min(rows.length - 1, i + context); k++) indexes.add(k);
   });
-  const counts: Record<string, number> = { e: 0, w: 0, i: 0, d: 0, o: 0 };
-  for (const r of rows) counts[r.l || "o"] = (counts[r.l || "o"] || 0) + 1;
-  return { rows: rows.filter((r, i) => levels.includes(r.l || "o") && (!only || indexes.has(i))), hits: hits.filter((r) => levels.includes(r.l || "o")), counts };
+  return { rows: only ? rows.filter((r, i) => indexes.has(i) && levels.includes(r.l || "o")) : shown, hits, counts };
 }
 export function names(q: URLSearchParams, key: string): string[] { return [...new Set(q.getAll(key).flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean))]; }
 export function permalink(hash: string): number | null { const m = /^#t=(\d+(?:\.\d+)?)$/.exec(hash); const t = m ? Number(m[1]) : NaN; return Number.isFinite(t) && t >= 0 ? t : null; }

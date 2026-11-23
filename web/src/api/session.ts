@@ -4,7 +4,8 @@
 // refresh when the server says the token is stale.
 import { useSyncExternalStore } from "react";
 
-import { createClient, type ApiResult } from "./client.ts";
+import { createClient } from "./client.ts";
+import { clearEntryReads, entrySession, takeEntryRead } from "./entry-reads.ts";
 import type { Session } from "./gen/Session.ts";
 
 export type SessionState =
@@ -14,15 +15,6 @@ export type SessionState =
   | { status: "error"; session: Session | null; message: string };
 
 let state: SessionState = { status: "loading", session: null };
-const entryReads = new Map<string, Promise<Response | null>>();
-
-/** Start a protected direct-entry read before the route chunk mounts. */
-export function prefetchEntryRead(path: string): void {
-  const request = fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).catch(() => null);
-  entryReads.set(path, request);
-  window.setTimeout(() => entryReads.delete(path), 10_000);
-}
-
 const listeners = new Set<() => void>();
 
 function set(next: SessionState): void {
@@ -42,14 +34,17 @@ export function subscribeSession(fn: () => void): () => void {
 }
 
 let inflight: Promise<SessionState> | null = null;
+let initial = true;
 
 /** Re-read the session (after login, logout, a stale CSRF token). Concurrent calls share one request. */
 export function refreshSession(): Promise<SessionState> {
   inflight ??= (async () => {
     try {
-      const r: ApiResult<Session> = await api.get<Session>("/api/v1/session");
+      const request = initial ? entrySession : api.get<Session>("/api/v1/session");
+      initial = false;
+      const r = await request;
       if (r.kind === "ok") {
-        if (!r.data.user || (state.session?.user && state.session.user.name !== r.data.user.name)) entryReads.clear();
+        if (!r.data.user || (state.session?.user && state.session.user.name !== r.data.user.name)) clearEntryReads();
         set({ status: "ready", session: r.data });
       }
       else {
@@ -79,9 +74,8 @@ export async function refreshEditingSession(): Promise<Session | null> {
 
 export const api = createClient({
   async fetch(path, init) {
-    const request = init.method === "GET" ? entryReads.get(path) : undefined;
+    const request = init.method === "GET" ? takeEntryRead(path) : undefined;
     if (request) {
-      entryReads.delete(path);
       const response = await request;
       init.signal?.throwIfAborted();
       if (response) return response;

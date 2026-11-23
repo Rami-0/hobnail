@@ -21,14 +21,18 @@ pub mod container_facts;
 mod container_tabs;
 pub mod containers;
 mod dashboard_settings;
+mod detect;
 pub mod error;
 mod history;
 mod history_window;
+pub mod home;
 mod host;
-mod integrations;
+pub(crate) mod integrations;
 mod logs;
 mod overview;
+pub(crate) mod provider_widgets;
 pub mod session;
+mod setup;
 pub mod stream;
 pub mod strips;
 #[cfg(test)]
@@ -56,6 +60,21 @@ pub(crate) async fn route(
     };
     let query = req.uri().query().unwrap_or("");
     match m.route.handler {
+        Handler::ProviderCatalog => json(StatusCode::OK, &crate::providers::REGISTRY),
+        Handler::ProviderDetected => {
+            detect::route(state, &req, &principal.expect("provider gate").account)
+                .unwrap_or_else(ApiError::response)
+        }
+        Handler::ProviderTest | Handler::ProviderInstall | Handler::ProviderWidgetOptions => {
+            provider_widgets::route(
+                state,
+                req,
+                m.route.handler,
+                &principal.expect("provider gate").account,
+            )
+            .await
+            .unwrap_or_else(ApiError::response)
+        }
         Handler::Integrations
         | Handler::IntegrationCreate
         | Handler::Integration
@@ -75,6 +94,7 @@ pub(crate) async fn route(
         | Handler::BoardUpdate
         | Handler::BoardDelete
         | Handler::BoardSuggestions
+        | Handler::BoardLinkTest
         | Handler::BoardDraft
         | Handler::BoardDraftSave
         | Handler::BoardDraftDelete => {
@@ -83,7 +103,11 @@ pub(crate) async fn route(
                 .unwrap_or_else(ApiError::response)
         }
         Handler::Alarm => alarm::get(state, &principal.expect("viewer gate").account),
-        Handler::Session => session::get(state, req.headers()),
+        Handler::Session => session::get(state, &req),
+        Handler::BoardTourDismiss => {
+            session::dismiss_board_tour(state, principal.expect("viewer gate").account.id)
+                .unwrap_or_else(ApiError::response)
+        }
         Handler::Bootstrap => bootstrap::get(state, &principal.expect("viewer gate").account),
         Handler::DashboardSettings => {
             dashboard_settings::route(state, req, &principal.expect("settings gate").account)
@@ -92,10 +116,22 @@ pub(crate) async fn route(
         }
         Handler::DashboardIcon => {
             let name = m.param("name").unwrap_or_default();
-            if !state.config.current().icons.remote || validate_icon(Some(name)).is_err() {
+            let vendored = crate::http::icons::brand(name).is_some();
+            if !(vendored || state.config.current().icons.remote)
+                || validate_icon(Some(name)).is_err()
+            {
                 return ApiError::not_found().response();
             }
             crate::http::icons::dashboard_icon(state, &format!("{name}.svg"), None).await
+        }
+        handler @ (Handler::SetupDraft
+        | Handler::SetupSave
+        | Handler::SetupDiscover
+        | Handler::SetupTest
+        | Handler::SetupCommit) => {
+            setup::route(state, req, handler, &principal.expect("owner gate").account)
+                .await
+                .unwrap_or_else(ApiError::response)
         }
         Handler::Onboard => {
             crate::auth::credential_route(state, req, CredentialAction::Onboard).await
@@ -193,7 +229,11 @@ pub(crate) async fn route(
 
 /// A JSON response that no cache stores (every `/api/v1` answer).
 pub fn json(status: StatusCode, v: &impl Serialize) -> Response<Body> {
-    let mut r = full(status, serde_json::to_vec(v).unwrap_or_default());
+    json_bytes(status, serde_json::to_vec(v).unwrap_or_default())
+}
+
+fn json_bytes(status: StatusCode, bytes: Vec<u8>) -> Response<Body> {
+    let mut r = full(status, bytes);
     set(&mut r, CONTENT_TYPE, "application/json");
     set(&mut r, CACHE_CONTROL, "no-store");
     r
@@ -203,7 +243,6 @@ async fn read_json<T: serde::de::DeserializeOwned>(
     req: Request<Incoming>,
     limit: usize,
 ) -> Result<T, ApiError> {
-    use http_body_util::{BodyExt, Limited};
     let json = req
         .headers()
         .get(hyper::header::CONTENT_TYPE)
@@ -217,18 +256,23 @@ async fn read_json<T: serde::de::DeserializeOwned>(
             "send application/json",
         ));
     }
-    let bytes = Limited::new(req.into_body(), limit)
-        .collect()
+    use crate::http::conn::{collect_body, BodyDeadline, BodyError};
+    let deadline = req.extensions().get::<BodyDeadline>().copied();
+    let bytes = collect_body(deadline.as_ref(), req.into_body(), limit)
         .await
-        .map_err(|_| {
-            ApiError::new(
+        .map_err(|error| match error {
+            BodyError::TimedOut => ApiError::new(
+                StatusCode::REQUEST_TIMEOUT,
+                "request_timeout",
+                "the request body did not arrive in time",
+            ),
+            BodyError::TooLarge => ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "body_too_large",
                 "request too large",
-            )
+            ),
         })?;
-    serde_json::from_slice(&bytes.to_bytes())
-        .map_err(|_| ApiError::bad_request("invalid JSON body", None))
+    serde_json::from_slice(&bytes).map_err(|_| ApiError::bad_request("invalid JSON body", None))
 }
 
 impl From<rusqlite::Error> for ApiError {
@@ -258,13 +302,7 @@ fn validate_label(value: &str, field: &str) -> Result<(), ApiError> {
 }
 
 fn validate_icon(icon: Option<&str>) -> Result<(), ApiError> {
-    if icon.is_some_and(|name| {
-        name.is_empty()
-            || name.len() > 96
-            || !name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-    }) {
+    if icon.is_some_and(|name| !crate::http::icons::valid_slug(name)) {
         return Err(ApiError::bad_request(
             "use a dashboard-icons name",
             Some("icon"),

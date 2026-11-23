@@ -22,13 +22,19 @@ const PUBLIC_WRITES: &[(&str, &str)] = &[
 ];
 
 const WRITES: &[(&str, &str)] = &[
+    ("PUT", "/api/v1/onboarding/draft"),
+    ("POST", "/api/v1/onboarding/test"),
+    ("POST", "/api/v1/onboarding/commit"),
     ("PATCH", "/api/v1/settings"),
     ("POST", "/api/v1/boards"),
+    ("POST", "/api/v1/boards/test-link"),
     ("PUT", "/api/v1/boards/sample-1"),
     ("PATCH", "/api/v1/boards/sample-1"),
     ("DELETE", "/api/v1/boards/sample-1"),
     ("PUT", "/api/v1/boards/sample-1/draft"),
     ("DELETE", "/api/v1/boards/sample-1/draft"),
+    ("POST", "/api/v1/providers/test"),
+    ("POST", "/api/v1/providers/install"),
     ("POST", "/api/v1/integrations"),
     ("PUT", "/api/v1/integrations/sample-1"),
     ("DELETE", "/api/v1/integrations/sample-1"),
@@ -46,6 +52,7 @@ const WRITES: &[(&str, &str)] = &[
     ("POST", "/api/v1/users/sample-1/sign-out"),
     ("DELETE", "/api/v1/users/sample-1"),
     ("POST", "/api/v1/account/password"),
+    ("POST", "/api/v1/account/board-tour"),
     ("DELETE", "/api/v1/account/sessions/sample-1"),
     ("DELETE", "/api/v1/account/sessions"),
     ("POST", "/api/logout"),
@@ -124,6 +131,21 @@ async fn req(
     headers: &[(&str, &str)],
     body: &str,
 ) -> Resp {
+    let (status, head, body) = raw_req(addr, method, path, headers, body).await;
+    Resp {
+        status,
+        head,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    }
+}
+
+async fn raw_req(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (u16, String, Vec<u8>) {
     let mut s = TcpStream::connect(addr).await.unwrap();
     let mut r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\nContent-Length: {}\r\n",
@@ -137,18 +159,10 @@ async fn req(
     s.write_all(r.as_bytes()).await.unwrap();
     let mut out = Vec::new();
     s.read_to_end(&mut out).await.unwrap();
-    let text = String::from_utf8_lossy(&out).into_owned();
-    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
-    let status = head
-        .split_whitespace()
-        .nth(1)
-        .and_then(|c| c.parse().ok())
-        .unwrap_or(0);
-    Resp {
-        status,
-        head: head.to_string(),
-        body: body.to_string(),
-    }
+    let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8(out[..split].to_vec()).unwrap();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head, out.split_off(split + 4))
 }
 
 fn state() -> Arc<AppState> {
@@ -932,6 +946,9 @@ async fn privacy_state(tag: &str) -> Arc<AppState> {
         host_sys: "/nonexistent".into(),
         hostname: "testhost".into(),
         allowed_hosts: vec![],
+        trusted_proxies: vec![],
+        max_connections: 64,
+        max_connections_per_peer: 16,
     });
     assert!(
         st.config.snapshot().error.is_none(),
@@ -1216,6 +1233,56 @@ async fn api_v1_container_window_and_names() {
     }
 }
 
+#[tokio::test]
+async fn the_event_stream_outlives_the_header_read_timeout() {
+    let st = state();
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let limits = super::server::Limits {
+        header_timeout: std::time::Duration::from_millis(200),
+        ..super::server::LIMITS
+    };
+    crate::auth::set_password_for_tests(&st.db, PW);
+    tokio::spawn(super::server::serve_limited(st.clone(), l, limits));
+    let (cookie, _) = login(addr).await;
+    let (mut s, _) = Stream::open(addr, "/api/v1/stream?topics=system", &cookie).await;
+    assert_eq!(s.next().await.0, "hello");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    crate::live::refresh_system(&st);
+    assert_eq!(s.next().await.0, "system");
+}
+
+#[tokio::test]
+async fn a_dripped_json_body_gets_408_and_frees_the_connection() {
+    let st = state();
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    let limits = super::server::Limits {
+        body_timeout: std::time::Duration::from_millis(300),
+        ..super::server::LIMITS
+    };
+    crate::auth::set_password_for_tests(&st.db, PW);
+    tokio::spawn(super::server::serve_limited(st, l, limits));
+    let (cookie, csrf) = login(addr).await;
+    let mut s = TcpStream::connect(addr).await.unwrap();
+    s.write_all(
+        format!(
+            "POST /api/v1/boards HTTP/1.1\r\nHost: {addr}\r\nOrigin: http://{addr}\r\nCookie: {cookie}\r\nX-RH-CSRF: {csrf}\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{{\"name\""
+        )
+        .as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut out = Vec::new();
+    tokio::time::timeout(std::time::Duration::from_secs(3), s.read_to_end(&mut out))
+        .await
+        .expect("answered and closed")
+        .unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.starts_with("HTTP/1.1 408"), "{text}");
+    assert!(text.contains("request_timeout"), "{text}");
+}
+
 /// An open `/api/v1/stream` connection (HTTP/1.0: the body is the raw
 /// event stream, no chunk framing).
 struct Stream {
@@ -1227,7 +1294,7 @@ impl Stream {
     async fn open(addr: std::net::SocketAddr, path: &str, cookie: &str) -> (Stream, String) {
         let mut s = TcpStream::connect(addr).await.unwrap();
         s.write_all(
-            format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nCookie: {cookie}\r\n\r\n").as_bytes(),
+            format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nCookie: {cookie}\r\nAccept-Encoding: gzip\r\n\r\n").as_bytes(),
         )
         .await
         .unwrap();
@@ -1334,6 +1401,8 @@ async fn api_v1_stream_events_and_viewer_count() {
         Some("text/event-stream")
     );
     assert_eq!(header(&head, "cache-control").as_deref(), Some("no-store"));
+    assert!(header(&head, "content-encoding").is_none());
+    assert!(header(&head, "vary").is_none());
     let (name, v) = s.next().await;
     assert_eq!(name, "hello");
     assert_eq!(v["sha"], st.build.sha);
@@ -2184,6 +2253,20 @@ async fn viewer_cannot_read_administrative_details() {
     assert_eq!(history["metrics"].as_array().unwrap().len(), 8);
     assert!(history["metrics"][0]["yesterday"].is_array());
     assert!(!history.to_string().contains("auth.login_failed"));
+    // One series for a board widget: no events, no restart counts.
+    let one = req(addr, "GET", "/api/v1/history?range=1h&metric=mem", &h, "").await;
+    let one = json_of(&one, "one metric");
+    assert_eq!(one["metrics"].as_array().unwrap().len(), 1);
+    assert_eq!(one["metrics"][0]["key"], "mem");
+    assert!(one["events"].as_array().unwrap().is_empty());
+    assert!(one["starts_per_day"].as_object().unwrap().is_empty());
+    let events = req(addr, "GET", "/api/v1/history?range=1h&metric=none", &h, "").await;
+    assert!(json_of(&events, "events only")["metrics"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let unknown = req(addr, "GET", "/api/v1/history?metric=nope", &h, "").await;
+    assert_eq!(unknown.status, 400);
     let bad = req(addr, "GET", "/api/v1/history?from=1", &h, "").await;
     assert_eq!(bad.status, 400);
     assert_eq!(
@@ -2234,6 +2317,312 @@ async fn viewer_cannot_read_administrative_details() {
     let owner_history = req(addr, "GET", path, &[("Cookie", &owner)], "").await;
     assert_eq!(owner_history.status, 200);
     assert!(owner_history.body.contains("auth.login_failed"));
+}
+
+#[tokio::test]
+async fn large_api_json_negotiates_gzip_over_the_listener() {
+    let containers = (0..48)
+        .map(|n| crate::testutil::ctr(&format!("service-{n}"), Some("lab"), "running"))
+        .collect();
+    let st = crate::testutil::state_with(containers, "");
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let request = |encoding| {
+        let cookie = &cookie;
+        async move {
+            let (status, head, body) = raw_req(
+                addr,
+                "GET",
+                "/api/v1/containers",
+                &[("Cookie", cookie), ("Accept-Encoding", encoding)],
+                "",
+            )
+            .await;
+            assert_eq!(status, 200);
+            assert_eq!(header(&head, "vary").as_deref(), Some("Accept-Encoding"));
+            assert_eq!(
+                header(&head, "content-length")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+                body.len()
+            );
+            (header(&head, "content-encoding"), body)
+        }
+    };
+
+    let (encoding, identity) = request("identity").await;
+    assert_eq!(encoding, None);
+    assert!(identity.len() > 1024);
+    let (encoding, gzip) = request("gzip").await;
+    assert_eq!(encoding.as_deref(), Some("gzip"));
+    assert_eq!(&gzip[..3], &[0x1f, 0x8b, 8]);
+    // Each request carries the server's current Unix second.
+    let payload = |body: &[u8]| {
+        let mut json: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert!(json
+            .as_object_mut()
+            .unwrap()
+            .remove("now")
+            .unwrap()
+            .is_i64());
+        json
+    };
+    let decoded = miniz_oxide::inflate::decompress_to_vec(&gzip[10..gzip.len() - 8]).unwrap();
+    assert_eq!(payload(&decoded), payload(&identity));
+    let (encoding, refused) = request("gzip;q=0").await;
+    assert_eq!(encoding, None);
+    assert_eq!(payload(&refused), payload(&identity));
+}
+
+#[tokio::test]
+async fn small_api_json_stays_identity_over_the_listener() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let addr = start(st).await;
+    let (cookie, _) = login(addr).await;
+    let request = |encoding| {
+        let cookie = &cookie;
+        async move {
+            let response = req(
+                addr,
+                "GET",
+                "/api/v1/settings",
+                &[("Cookie", cookie), ("Accept-Encoding", encoding)],
+                "",
+            )
+            .await;
+            assert_eq!(response.status, 200);
+            assert_eq!(header(&response.head, "content-encoding"), None);
+            assert_eq!(header(&response.head, "vary"), None);
+            response.body
+        }
+    };
+    let body = request("gzip").await;
+    assert!(body.len() <= 1024);
+    assert_eq!(body, request("identity").await);
+}
+
+async fn queued_login(addr: std::net::SocketAddr) -> Resp {
+    req(
+        addr,
+        "POST",
+        "/api/login",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &format!("http://{addr}")),
+        ],
+        &serde_json::json!({"username": "admin", "password": PW}).to_string(),
+    )
+    .await
+}
+
+async fn wait_for_queued_logins(st: &AppState, count: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while st.credential_queue.waiting() != count {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("logins reached the credential queue");
+}
+
+#[tokio::test]
+async fn concurrent_logins_fill_the_queue_and_overflow_gets_retry_after() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    let logins: Vec<_> = (0..crate::auth::CREDENTIAL_WAITERS)
+        .map(|_| tokio::spawn(queued_login(addr)))
+        .collect();
+    wait_for_queued_logins(&st, logins.len()).await;
+
+    let overflow = queued_login(addr).await;
+    assert_eq!(overflow.status, 429);
+    assert_eq!(header(&overflow.head, "retry-after").as_deref(), Some("1"));
+
+    drop(permit);
+    for login in logins {
+        assert_eq!(login.await.unwrap().status, 200);
+    }
+}
+
+#[tokio::test]
+async fn waiting_login_times_out_and_releases_its_queue_slot() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    let login = tokio::spawn(queued_login(addr));
+    wait_for_queued_logins(&st, 1).await;
+    assert_eq!(req(addr, "GET", "/healthz", &[], "").await.status, 200);
+    let timed_out = login.await.unwrap();
+    assert_eq!(timed_out.status, 429);
+    assert_eq!(header(&timed_out.head, "retry-after").as_deref(), Some("1"));
+    assert_eq!(st.credential_queue.waiting(), 0);
+
+    drop(permit);
+    assert_eq!(queued_login(addr).await.status, 200);
+}
+
+#[tokio::test]
+async fn queued_logins_recheck_ip_and_global_backoff() {
+    for global in [false, true] {
+        let st = state();
+        crate::auth::set_password_for_tests(&st.db, PW);
+        let permit = st.credential_queue.acquire().await.unwrap();
+        let addr = start(st.clone()).await;
+        let login = tokio::spawn(queued_login(addr));
+        wait_for_queued_logins(&st, 1).await;
+        {
+            let mut limiter = st.login_limiter.lock().unwrap();
+            if global {
+                // The first five global failures are free. None is from the
+                // queued login's client IP.
+                for n in 1..=6 {
+                    limiter.record_test_failure(std::net::Ipv4Addr::new(192, 0, 2, n).into());
+                }
+            } else {
+                limiter.record_test_failure(std::net::Ipv4Addr::LOCALHOST.into());
+            }
+        }
+        drop(permit);
+        let throttled = login.await.unwrap();
+        assert_eq!(throttled.status, 429);
+        assert_eq!(header(&throttled.head, "retry-after").as_deref(), Some("1"));
+        assert!(throttled.body.contains("too many failed attempts"));
+    }
+}
+
+#[tokio::test]
+async fn login_throttles_the_rightmost_untrusted_ip_from_trusted_proxies() {
+    for use_proxy in [false, true] {
+        let mut st = state();
+        if use_proxy {
+            Arc::get_mut(&mut st).unwrap().env.trusted_proxies = ["127.0.0.1", "192.0.2.1"]
+                .map(|s| s.parse().unwrap())
+                .to_vec();
+        }
+        crate::auth::set_password_for_tests(&st.db, PW);
+        let addr = start(st).await;
+        let origin = format!("http://{addr}");
+        let peer = if use_proxy {
+            "198.51.100.2"
+        } else {
+            "127.0.0.1"
+        };
+        let attempt = |client, password| {
+            let chain = format!("203.0.113.1, {client}");
+            let body = serde_json::json!({"username": "admin", "password": password}).to_string();
+            let origin = &origin;
+            async move {
+                req(
+                    addr,
+                    "POST",
+                    "/api/login",
+                    &[
+                        ("Origin", origin),
+                        ("Content-Type", "application/json"),
+                        ("X-Forwarded-For", &chain),
+                        ("X-Forwarded-For", "::ffff:192.0.2.1"),
+                    ],
+                    &body,
+                )
+                .await
+            }
+        };
+
+        let failed = attempt(peer, "wrong password").await;
+        assert_eq!(failed.status, 401);
+        let throttled = attempt(peer, PW).await;
+        assert_eq!(throttled.status, 429);
+        assert!(header(&throttled.head, "retry-after").is_some());
+        let other = attempt("198.51.100.3", PW).await;
+        assert_eq!(other.status, if use_proxy { 200 } else { 429 });
+    }
+}
+
+#[tokio::test]
+async fn only_trusted_proxy_https_sets_secure_session_cookies() {
+    let untrusted = state();
+    crate::auth::set_password_for_tests(&untrusted.db, PW);
+    let direct = start(untrusted).await;
+    let mut trusted = state();
+    Arc::get_mut(&mut trusted).unwrap().env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+    crate::auth::set_password_for_tests(&trusted.db, PW);
+    let proxied = start(trusted.clone()).await;
+
+    for (addr, proto, secure) in [
+        (direct, "https", false),
+        (proxied, "http", false),
+        (proxied, "https,http", false),
+        (proxied, "https", true),
+    ] {
+        let origin = format!("https://{addr}");
+        let response = req(
+            addr,
+            "POST",
+            "/api/login",
+            &[
+                ("Content-Type", "application/json"),
+                ("Origin", &origin),
+                ("X-Forwarded-Proto", proto),
+            ],
+            &serde_json::json!({"username": "admin", "password": PW}).to_string(),
+        )
+        .await;
+        assert_eq!(response.status, 200);
+        let cookie = header(&response.head, "set-cookie").unwrap();
+        assert_eq!(cookie.ends_with("; Secure"), secure);
+        if secure {
+            let csrf: serde_json::Value = serde_json::from_str(&response.body).unwrap();
+            let response = req(
+                addr,
+                "POST",
+                "/api/logout",
+                &[
+                    ("Origin", &origin),
+                    ("X-Forwarded-Proto", proto),
+                    ("Cookie", cookie.split(';').next().unwrap()),
+                    ("X-RH-CSRF", csrf["csrf"].as_str().unwrap()),
+                ],
+                "",
+            )
+            .await;
+            assert_eq!(response.status, 200);
+            assert!(header(&response.head, "set-cookie")
+                .unwrap()
+                .ends_with("Max-Age=0; Secure"));
+        }
+    }
+
+    for (index, path) in ["/api/v1/session", "/api/v1/bootstrap"]
+        .into_iter()
+        .enumerate()
+    {
+        let token = format!("{index:064x}");
+        let hash = crate::auth::sha256_hex(token.as_bytes());
+        let now = crate::auth::now_s();
+        let ttl = crate::auth::SESSION_TTL_SECS;
+        assert!(trusted
+            .db
+            .create_session(&hash, now - 7200, now + ttl - 7200));
+        let cookie = format!("rh_session={token}");
+        let response = req(
+            proxied,
+            "GET",
+            path,
+            &[("Cookie", &cookie), ("X-Forwarded-Proto", "https")],
+            "",
+        )
+        .await;
+        assert_eq!(response.status, 200);
+        assert!(header(&response.head, "set-cookie")
+            .unwrap()
+            .ends_with("; Secure"));
+    }
 }
 
 #[tokio::test]
@@ -2353,4 +2742,101 @@ sample_interval = "45s"
             _ => assert_eq!(data["hash"], hash, "{url}"),
         }
     }
+}
+
+/// A legacy-profile PHC string: listed by the legacy scan, never verified here.
+const LEGACY_PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+fn add_user(st: &AppState, name: &str, hash: rusqlite::types::Value, disabled: bool) {
+    st.db.with((), |i| {
+        i.conn.execute(
+            "INSERT INTO users(name,password_hash,role,created,updated,disabled)
+             VALUES (?1,?2,'viewer',0,0,?3)",
+            rusqlite::params![name, hash, disabled],
+        )?;
+        Ok(())
+    });
+}
+
+async fn login_as(addr: std::net::SocketAddr, username: &str, password: &str) -> Resp {
+    req(
+        addr,
+        "POST",
+        "/api/login",
+        &[
+            ("Content-Type", "application/json"),
+            ("Origin", &format!("http://{addr}")),
+        ],
+        &serde_json::json!({"username": username, "password": password}).to_string(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn every_sign_in_outcome_waits_for_the_floor_while_legacy_hashes_remain() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let fast = st.db.credential("admin").unwrap().1;
+    add_user(&st, "old", LEGACY_PHC.to_string().into(), false);
+    add_user(&st, "gone", fast.into(), true);
+    let addr = start(st.clone()).await;
+    for (username, password, status) in [
+        ("admin", "wrong horse", 401),
+        ("nobody", PW, 401),
+        ("gone", PW, 401),
+        ("admin", PW, 200),
+    ] {
+        *st.login_limiter.lock().unwrap() = Default::default();
+        let sent = std::time::Instant::now();
+        let response = login_as(addr, username, password).await;
+        assert_eq!(response.status, status, "{username}");
+        assert!(
+            sent.elapsed() >= crate::auth::MIN_CREDENTIAL_FLOOR,
+            "{username} answered after {:?}",
+            sent.elapsed()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_login_limited_after_queueing_waits_for_its_own_floor() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    add_user(&st, "old", LEGACY_PHC.to_string().into(), false);
+    let permit = st.credential_queue.acquire().await.unwrap();
+    let addr = start(st.clone()).await;
+    // A fails against the target; B, from the same client, queues behind it
+    // and is then refused by the back-off A's failure started.
+    let a = tokio::spawn(login_as(addr, "admin", "wrong horse"));
+    wait_for_queued_logins(&st, 1).await;
+    let b = tokio::spawn(queued_login(addr));
+    wait_for_queued_logins(&st, 2).await;
+    let released = std::time::Instant::now();
+    drop(permit);
+    let floor = crate::auth::MIN_CREDENTIAL_FLOOR;
+    let a = a.await.unwrap();
+    assert_eq!(a.status, 401);
+    assert!(released.elapsed() >= floor);
+    let b = b.await.unwrap();
+    assert_eq!(b.status, 429);
+    // B obtained the permit only at A's deadline, not when A's hash ended,
+    // and then waited its own floor.
+    assert!(
+        released.elapsed() >= floor * 2,
+        "B answered {:?} after release",
+        released.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_legacy_scan_still_pads_failed_logins() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    // A non-text hash makes the legacy scan fail.
+    add_user(&st, "broken", rusqlite::types::Value::Blob(vec![0]), false);
+    assert!(st.db.legacy_hash_users().is_err());
+    let addr = start(st.clone()).await;
+    let sent = std::time::Instant::now();
+    assert_eq!(login_as(addr, "admin", "wrong horse").await.status, 401);
+    assert!(sent.elapsed() >= crate::auth::MIN_CREDENTIAL_FLOOR);
 }

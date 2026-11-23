@@ -13,6 +13,9 @@ use super::{
 
 pub(crate) const HOUR: i64 = 3600;
 const WEEK: i64 = 7 * 86_400;
+/// How long credentials staged in the owner-setup draft outlive the draft's
+/// last save (docs/api.md, onboarding).
+const SETUP_CREDENTIALS_KEEP: i64 = WEEK;
 
 /// Background task: runs `maintain` a minute after start, then checks every
 /// ten minutes (`maintain` itself does the work at most hourly). The work
@@ -139,6 +142,44 @@ fn rollup_600(i: &mut Inner, now: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Drop placements with neither a saved board item nor an unexpired draft
+/// reference. Run after board rewrites and with periodic draft expiry.
+pub(crate) fn prune_provider_placements(
+    conn: &rusqlite::Connection,
+    board: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let board_filter = if board.is_some() {
+        "AND pw.board_id=:board"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "DELETE FROM provider_widgets AS pw
+           WHERE NOT EXISTS (
+             SELECT 1 FROM board_items item WHERE item.board_id=pw.board_id AND item.kind='widget'
+             AND json_extract(item.config,'$.widget_id')=pw.id)
+           AND NOT EXISTS (
+             SELECT 1 FROM drafts draft
+             CROSS JOIN json_each(draft.value,'$.sections') section
+             CROSS JOIN json_each(section.value,'$.items') item
+             WHERE draft.key='board:' || pw.board_id AND draft.updated>=:cutoff
+               AND json_extract(item.value,'$.payload.kind')='widget'
+               AND json_extract(item.value,'$.payload.widget_id')=pw.id
+           ) {board_filter}"
+    );
+    let cutoff = now - WEEK;
+    if let Some(board) = board {
+        conn.execute(
+            &sql,
+            rusqlite::named_params! {":board": board, ":cutoff": cutoff},
+        )?;
+    } else {
+        conn.execute(&sql, rusqlite::named_params! {":cutoff": cutoff})?;
+    }
+    Ok(())
+}
+
 pub(super) fn prune(i: &mut Inner, now: i64) -> rusqlite::Result<()> {
     // Never drop data that has not been rolled up yet.
     let raw_cut = (now - RAW_KEEP_SECS).min(i.w60);
@@ -176,7 +217,23 @@ pub(super) fn prune(i: &mut Inner, now: i64) -> rusqlite::Result<()> {
             [],
         )?;
         tx.execute("DELETE FROM events WHERE ts < ?1", [now - EVENTS_KEEP_SECS])?;
-        tx.execute("DELETE FROM drafts WHERE updated < ?1", [now - WEEK])?;
+        tx.execute(
+            "DELETE FROM drafts WHERE updated < ?1 AND key != ?2",
+            params![now - WEEK, super::accounts::SETUP_DRAFT_KEY],
+        )?;
+        // The setup draft itself is kept (it is the owner's progress), but
+        // credentials staged for it expire after SETUP_CREDENTIALS_KEEP of
+        // inactivity, so an abandoned setup does not hold secrets forever.
+        tx.execute(
+            "DELETE FROM setup_credentials WHERE NOT EXISTS (
+               SELECT 1 FROM drafts d WHERE d.user_id = setup_credentials.user_id
+                 AND d.key = ?2 AND d.updated >= ?1)",
+            params![
+                now - SETUP_CREDENTIALS_KEEP,
+                super::accounts::SETUP_DRAFT_KEY
+            ],
+        )?;
+        prune_provider_placements(&tx, None, now)?;
         tx.execute("DELETE FROM sessions WHERE expires <= ?1", [now])?;
         tx.commit()?;
     }
@@ -230,4 +287,75 @@ pub(super) fn clear(db: &Db) {
         let _ = i.conn.execute_batch("PRAGMA incremental_vacuum;");
         Ok(())
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maintenance_prunes_expired_draft_only_provider_placements() {
+        let db = Db::open_in_memory().unwrap();
+        db.dashboard(|conn| {
+            conn.execute_batch(r#"
+                INSERT INTO users(id,name,password_hash,role,created,updated)
+                    VALUES (1,'owner','fixture','owner',0,0);
+                INSERT INTO boards(id,name,created,updated) VALUES ('fixture','Fixture',0,0);
+                INSERT INTO integrations(id,name,kind,origin,config)
+                    VALUES ('fixture','Fixture','http','http://fixture.test','{}');
+                INSERT INTO provider_widgets(id,integration_id,board_id,widget,options) VALUES
+                    ('provider:saved','fixture','fixture','json','{}'),
+                    ('provider:draft','fixture','fixture','json','{}'),
+                    ('provider:orphan','fixture','fixture','json','{}');
+                INSERT INTO board_items(id,board_id,kind,config)
+                    VALUES ('saved','fixture','widget','{"widget_id":"provider:saved"}');
+                INSERT INTO drafts(user_id,key,value,updated) VALUES
+                    (1,'board:fixture','{"sections":[{"items":[{"payload":{"kind":"widget","widget_id":"provider:draft"}}]}]}',1);
+            "#)
+        }).unwrap();
+        run_once(&db, WEEK);
+        let count = || {
+            db.dashboard(|conn| {
+                conn.query_row("SELECT count(*) FROM provider_widgets", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+            })
+            .unwrap()
+        };
+        assert_eq!(count(), 2);
+        run_once(&db, WEEK + HOUR);
+        assert_eq!(count(), 1);
+    }
+
+    #[test]
+    fn maintenance_expires_staged_setup_credentials_after_a_week_idle() {
+        let db = Db::open_in_memory().unwrap();
+        let key = crate::db::accounts::SETUP_DRAFT_KEY;
+        db.dashboard(|conn| {
+            conn.execute_batch(
+                "INSERT INTO users(id,name,password_hash,role,created,updated) VALUES
+                    (1,'active','fixture','owner',0,0),
+                    (2,'abandoned','fixture','admin',0,0),
+                    (3,'draftless','fixture','admin',0,0);
+                 INSERT INTO setup_credentials(user_id,item_id,field,origin,secret) VALUES
+                    (1,'item','secret','http://a.test','one'),
+                    (2,'item','secret','http://a.test','two'),
+                    (3,'item','secret','http://a.test','three');",
+            )?;
+            conn.execute(
+                "INSERT INTO drafts(user_id,key,value,updated) VALUES (1,?1,'{}',?2),(2,?1,'{}',?3)",
+                params![key, 2 * WEEK, WEEK - 1],
+            )
+        })
+        .unwrap();
+        run_once(&db, 2 * WEEK);
+        let kept = db
+            .dashboard(|conn| {
+                let mut st = conn.prepare("SELECT user_id FROM setup_credentials ORDER BY 1")?;
+                let rows = st.query_map([], |row| row.get::<_, i64>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .unwrap();
+        assert_eq!(kept, vec![1]);
+    }
 }

@@ -6,8 +6,13 @@ watchdog script to keep `services.yaml` in sync with Docker.
 
 Status: the React client at `/app` is the only UI. The old UI is preserved on
 `rust-only`; its URLs have no compatibility handlers. Browser owner setup,
-invited accounts, boards and generic HTTP integration connection tests are built.
-Provider integrations and the full guided setup sequence are not built yet.
+invited accounts, boards, the guided setup sequence (five steps with a saved
+draft and a skippable tour) and the provider catalog are built: 27 service
+providers, 8 widgets that need no service, Generic HTTP and native Docker,
+covering all 37 ticked lines of
+[the integrations list](docs/plans/integrations-candidates.md). Every provider
+is tested against fake servers; none has been checked against a real instance
+yet ([integrations.md](docs/features/integrations.md)).
 The spec is [docs/DESIGN.md](docs/DESIGN.md); current measurements are in
 [the React results](docs/plans/react-port-phase-2-5.md). The table below records
 the historical 2026-11-17 measurements, not the React deployment.
@@ -87,7 +92,8 @@ CPU, memory, disk, network, temperature, host uptime.
 The model follows Glance: a set of built-in widget types, plus a few generic
 ones that let anyone build their own without writing Rust.
 
-Widget types: 1 and 2 are built. Items 3–6 are the clearly marked not-built-yet list:
+Widget types: 1, 2 and 4 are built. Items 3, 5 and 6 are not built and are out
+of scope for this release:
 1. **Custom API widget (v1).** URL, optional headers, a path expression to pull
    fields out of the JSON response, and a small template that renders them. This
    covers most self-hosted APIs (Beszel, Mailpit, Odoo health, Tailscale) with
@@ -97,7 +103,8 @@ Widget types: 1 and 2 are built. Items 3–6 are the clearly marked not-built-ye
 3. **Extension widget (later).** Point at a URL that returns a ready-made HTML
    fragment, so a widget can be a tiny service written in any language. This is
    the same idea as Glance's `extension` widget.
-4. **Feed widgets (later).** RSS/Atom, and similar read-only feeds.
+4. **Feed widgets (built).** RSS/Atom, built as the RSS / Atom provider
+   ([integrations.md](docs/features/integrations.md)).
 5. **Embed widget.** Show another service's page in a frame.
 6. **Plugin interface (much later).** Possibly WASM. Only if types 1–5 prove too
    limiting.
@@ -111,6 +118,10 @@ Rules for every widget:
   text, revisions and diffs. Integration credentials entered in the browser
   are write-only in SQLite and origin-bound, never returned or logged.
 - Outgoing HTTP can be restricted to an allow-list of hosts.
+- Service data comes from the provider catalog (Settings, Integrations): each
+  provider declares its fields, connection test and widgets, and integrations
+  can reach only LAN and Tailscale addresses until the owner turns on internet
+  access, which is off by default.
 
 ## 5. Notifications and alerts
 
@@ -162,6 +173,9 @@ look.
 - Custom command widgets and cross-host fetches are off unless explicitly enabled.
 - No telemetry, and no calls to the internet at runtime beyond what the user
   configures (icons and fonts are local).
+- Integrations reach the internet only after the owner turns on internet
+  access (off by default); provider credentials are per field, write-only and
+  sent only to the origin they were entered for.
 
 ## 7. Experience
 
@@ -207,6 +221,9 @@ widgets, notification channels and rules, appearance, retention.
   `hobnail set-password [username]` is optional host recovery; legacy-password
   databases require that recovery before browser onboarding can proceed.
 - `command` widgets are never editable from the app.
+- Integrations are added from the provider catalog in Settings, with a
+  connection test before saving; the Provider internet access switch (off by default)
+  is in Settings too.
 - Config forms use env-var names or file paths. Browser-entered integration
   credentials are write-only in SQLite, bound to their origin, and never
   returned. Changing the origin requires entering the credential again.
@@ -220,7 +237,8 @@ container, no hierarchy. v2 follows Dozzle's layout language instead.
 - Sidebar with a stack tree, a command palette (`Ctrl/⌘ K`), dense sortable
   tables, dark first with a light theme, tabular numbers, charts drawn in the browser (Recharts; small graphics as SVG).
 - Pages: Overview, Containers, Container detail, History, Alerts, Settings.
-- Works from 390 px to wide desktop; keyboard reachable; WCAG AA contrast.
+- Works from 360 px to wide desktop (tested in Chromium, Firefox and WebKit up
+  to 2560 px and at 200% zoom); keyboard reachable; WCAG AA contrast.
 - React 19, TypeScript, Vite, UI SDK and Lucide; no WASM or server-side JavaScript.
 - Details and tokens: [docs/DESIGN.md](docs/DESIGN.md) sections 1 to 3.
 
@@ -238,8 +256,10 @@ container, no hierarchy. v2 follows Dozzle's layout language instead.
 
 ## Milestones
 
-The tables below retain the original Rust-UI roadmap. React port results and
-remaining acceptance misses are recorded separately in the linked M5 report.
+The tables below retain the original Rust-UI roadmap. React port results are
+in [react-port-phase-2-5.md](docs/plans/react-port-phase-2-5.md); the final
+list of accepted limitations and missed budgets is the status table in
+[react-port-decisions.md](docs/plans/react-port-decisions.md#finish-hobnail-status-2026-11-23).
 
 Each milestone ends with the measurements from section 1 recorded.
 
@@ -270,7 +290,11 @@ v3: make it the one tool you keep open.
 | W2 | Breadth | Endpoint and uptime monitors, alert rule builder with silences, images/volumes/networks/disk pages, read-only compose view with drift. |
 | W3 | Reach and control | Owner decides on container actions; arrangeable Overview and pages; Glance-style widgets; Prometheus `/metrics`; multi-host design note. |
 
-Budgets for v3 are in the plan (idle 8 MiB or less, image 13 MB or less after old UI removal).
+Budgets for v3: container memory under 10 MiB preferred and 20 MiB at most
+([the binding decision](docs/decisions/react-client-and-dashboard.md)), image
+13.5 MB or less per the 2026-11-20 sign-off. The plan's earlier idle figure of
+8 MiB or less still holds (idle measures about 1.6 to 4 MiB); the 10 MiB
+preference is missed under full history (see the status table linked above).
 
 Until M6, it runs **alongside** Homepage on a different port. Homepage stays
 untouched. Idle RAM is measured at every milestone, and M4 specifically checks the
@@ -283,7 +307,8 @@ cost of always-on alert checks.
   Homepage's YAML.
 - **D2. Widget model: start with the custom API and command widgets**, and grow
   towards Glance's set (extension, feed, embed widgets) over time. No plugin
-  system from day one.
+  system from day one. Status: feed widgets are built (RSS / Atom provider);
+  embed and extension widgets are out of scope for this release.
 
 ## Decisions we still have to make
 
@@ -298,7 +323,9 @@ cost of always-on alert checks.
 ## Current technology
 
 Hyper with a single-threaded Tokio runtime; Docker HTTP reads; serde and TOML;
-SQLite; rustls with public roots; a React client embedded as raw and gzip assets.
+SQLite; rustls with public roots, plus an optional pinned leaf fingerprint per
+integration (D21, confirmed on first use); `miniz_oxide` for gzip of larger JSON
+responses (D9); a React client embedded as raw and gzip assets.
 UI SDK (`@ui-sdk/react`, `@ui-sdk/core`) is pinned exactly to 0.1.0-beta.10,
 published 2026-11-18, under the owner's sole exception to the seven-day rule.
 All interactive primitives are wrapped in `web/src/ui/`. Other npm packages

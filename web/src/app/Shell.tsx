@@ -8,19 +8,21 @@
 // goes into it and back to the opener; a closed drawer is out of the tab
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS.
-import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, LayoutGridIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
+import { lazy, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
 import { problemCount, useBootstrap, useContainers, useHiddenProblems, useNewBuild } from "../live/index.ts";
 import { Banner } from "../ui/Note.tsx";
 import { Button } from "../ui/Button.tsx";
+import { LoadBoundary, LoadError } from "../ui/LoadBoundary.tsx";
 import { Account } from "./Account.tsx";
 import { isTyping, keyAction, moveRow, type GoPage, type KeyState } from "./keys.ts";
 import { StalePill } from "./Live.tsx";
 import { interceptedPath, logsHref } from "./paths.ts";
 import { settingsHref, local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
+import { homeHref } from "./home.ts";
 import { pageFilter } from "./page-filter.ts";
 import { openDialogs, subscribeDialogs } from "../ui/layers.ts";
 import { getToasts, subscribeToasts } from "../ui/toast.ts";
@@ -31,11 +33,11 @@ function hasToasts() {
   return getToasts().shown.length > 0;
 }
 
-function ShellToasts() {
+function ShellToasts({ onError }: { onError: () => void }) {
   const visible = useSyncExternalStore(subscribeToasts, hasToasts, hasToasts);
   // Dialog saves can release a toast in the same commit that closes the modal.
   const dialogs = useSyncExternalStore(subscribeDialogs, openDialogs, openDialogs);
-  return <Suspense fallback={null}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</Suspense>;
+  return <LoadBoundary fallback={null} failed={null} onError={onError}>{visible || dialogs > 0 ? <LazyToaster /> : <output className="toasts" aria-live="polite" />}</LoadBoundary>;
 }
 
 const LazyToaster = lazy(() => import("../ui/Toaster.tsx").then((m) => ({ default: m.Toaster })));
@@ -137,6 +139,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const [open, setOpenState] = useState(false);
   const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
+  // A shell chunk that failed to load (palette, shortcuts, toasts): close
+  // what it was for, so keys work again, and offer a reload.
+  const [lost, setLost] = useState(false);
+  const lose = () => { setPalette(false); setKeys(false); setLost(true); };
   const sideRef = useRef<HTMLElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const drawer = useRef({ pushed: false, popping: false, from: null as HTMLElement | null });
@@ -357,7 +363,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
 
   return (
     <>
-      <a className="skip" href="#main">
+      {/* Focus <main> directly: after a jump to the #main fragment WebKit
+          pulls focus back to <main> on Tab while the page lays out. */}
+      <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>
         Skip to content
       </a>
       <div className="app">
@@ -391,10 +399,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
                 </nav>
               ) : <span className="title">{title}</span>}
             </div>
-            <Button variant="outline" className="cmd" data-testid="palette-open" aria-label="Search and commands" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
+            <Button variant="outline" className="cmd" data-testid="palette-open" aria-label="Search or jump to…" aria-keyshortcuts="Control+k Meta+k" aria-haspopup="dialog" aria-expanded={palette} onClick={() => setPalette(true)}>
               <SearchIcon aria-hidden="true" />
               <span className="cmd-t">Search or jump to…</span>
-              <kbd className="cmd-k">⌘ K</kbd>
+              <kbd className="cmd-k" />
             </Button>
             {b && !b.scoped && !phone && <Vitals />}
             <ThemeButton />
@@ -404,6 +412,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
             <Account />
           </header>
           <main id="main" tabIndex={-1}>
+            {lost && <LoadError>Could not load part of Hobnail.</LoadError>}
             {newBuild && (
               <Banner
                 kind="info"
@@ -437,9 +446,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         </div>
       </div>
       <nav className="bbar" aria-label="Quick navigation" inert={overPage}>
-        <a className="bb-i" href={!b?.scoped ? "/app/overview" : "/app"} aria-current={r === "overview" || r === "home" ? "page" : undefined}>
-          <LayoutGridIcon aria-hidden="true" />
-          <span>Overview</span>
+        <a className="bb-i" href={homeHref(b)} aria-current={r === "overview" || r === "home" || (loc.route.name === "board" && loc.route.id === b?.home_board) ? "page" : undefined}>
+          <HouseIcon aria-hidden="true" />
+          <span>Home</span>
         </a>
         <a className="bb-i" href={appHref("/containers")} aria-current={r === "containers" || r === "container" ? "page" : undefined}>
           <BoxIcon aria-hidden="true" />
@@ -473,10 +482,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>More</span>
         </Button>
       </nav>
-      {palette && <Suspense fallback={null}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></Suspense>}
-      {keys && <Suspense fallback={null}><Shortcuts open={keys} onClose={() => setKeys(false)} /></Suspense>}
+      {palette && <LoadBoundary fallback={null} failed={null} onError={lose}><Palette onClose={() => setPalette(false)} onHelp={() => setKeys(true)} /></LoadBoundary>}
+      {keys && <LoadBoundary fallback={null} failed={null} onError={lose}><Shortcuts open={keys} onClose={() => setKeys(false)} /></LoadBoundary>}
       <StalePill />
-      <ShellToasts />
+      <ShellToasts onError={lose} />
     </>
   );
 }

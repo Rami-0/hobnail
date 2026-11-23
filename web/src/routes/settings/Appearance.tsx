@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { cssSyntax } from "./cssSyntax.ts";
 import { api } from "../../api/session.ts";
-import { applyDefaultTheme, isTheme, readTheme, THEME_KEY, THEME_LABEL, THEMES } from "../../app/theme.ts";
+import { applyDefaultTheme, isTheme, readTheme, THEME_KEY } from "../../app/theme.ts";
 import { local } from "../../app/prefs.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { Switch } from "../../ui/Switch.tsx";
-import { Select } from "../../ui/Select.tsx";
+import { ThemeSelect } from "../../configuration/ThemeSelect.tsx";
+import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
+import { fetchBootstrap } from "../../live/index.ts";
 import type { GeneralData } from "./General.tsx";
 import { SettingsForm } from "./SettingsForm.tsx";
-import { endpoint, FailureNote, saved, useSettings, type Control, type Failure, type Save } from "./shared.tsx";
+import { FailureNote, useSettings, type Control, type Failure } from "./shared.tsx";
 
 const fields: Control[] = [{ key: "css", label: "custom.css", format: "code" }];
 
@@ -59,26 +61,35 @@ export default function Appearance() {
   const [previous, setPrevious] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure>();
+  const [dashboard, setDashboard] = useState<DashboardSettings>();
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.get<DashboardSettings>("/api/v1/settings", { signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") setDashboard(result.data);
+      else setFailure(result);
+    });
+    return () => controller.abort();
+  }, []);
   return <>
     <section className="settings-section"><h2>Theme</h2>
-      <FailureNote failure={failure ?? theme.failure} rebase={() => { void theme.load().then(() => setFailure(undefined)); }} />
-      {theme.data && <Select label="Default theme" value={String(theme.data.effective.theme ?? "auto")}
-        options={THEMES.map((value) => ({ value, label: THEME_LABEL[value] }))} disabled={busy}
+      <FailureNote failure={failure ?? theme.failure} retry={() => window.location.reload()} />
+      {theme.data && dashboard && <ThemeSelect value={dashboard.default_theme}
+        fallback={String(theme.data.effective.theme ?? "auto")} disabled={busy}
         onChange={async (value) => {
-          if (!theme.data || busy) return;
           setBusy(true);
-          const result = await api.post<Save>(endpoint("general"), { base_hash: theme.data.hash, values: { theme: value } });
+          const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { default_theme: value } });
           if (result.kind === "ok") {
             setFailure(undefined);
-            saved(result.data);
-            await theme.load();
+            setDashboard(result.data);
+            void fetchBootstrap();
           } else setFailure(result);
           setBusy(false);
         }} />}
       {personal && <div><Button onClick={() => {
         local()?.removeItem?.(THEME_KEY);
         setPersonal(null);
-        const fallback = theme.data?.effective.theme;
+        const fallback = dashboard?.default_theme ?? theme.data?.effective.theme;
         applyDefaultTheme(isTheme(fallback) ? fallback : "auto");
       }}>Use the default here</Button></div>}
     </section>

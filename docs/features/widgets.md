@@ -159,6 +159,17 @@ Their read API returns a structured body (text, rows, status and values); React
 renders it without inserting upstream HTML. Boards can include configured
 widget IDs; missing IDs stay visible as missing. Scoped readers receive only
 widgets targeted by granted boards, not the host-wide Widgets endpoint.
-The current result and its age remain during a read refresh. An error result
-replaces it; there is no last-good-value cache across failed widget fetches. The preview returns no raw upstream
-response. Feed, embed, extension and provider widget types are not built yet.
+The current result and its age remain during a read refresh. When a refresh
+fails, the last good result stays on screen with a stale badge showing its age
+and the error beside it, until the next result replaces it. Retained data is
+capped at 32 KiB per widget and 256 KiB for all widgets together; a larger
+result is replaced by an error instead of being kept. When an integration's
+credentials, URL or pin change, its widgets keep the old data marked stale with
+"Refreshing" while the first fetch against the new settings runs, and that
+fetch's result (success or failure) replaces it, so data from the old origin is
+never kept as last good. The preview returns no raw upstream response.
+
+Provider widgets (one per provider metric, placed from Settings → Integrations
+or the guided setup) and the RSS / Atom feed widget are built; see
+[integrations.md](integrations.md). Embed and extension widget types are not
+built and are out of scope for this release.

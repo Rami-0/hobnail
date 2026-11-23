@@ -28,7 +28,7 @@ export function Select({ label, value, onChange, options, className, hideLabel, 
     <SdkSelect value={value} items={options} onValueChange={(next) => { if (next !== null) onChange(next); }}
       name={rest.name} disabled={rest.disabled} placeholder={placeholder}>
       <SelectTrigger id={sid} className={["in select-trigger", className ?? ""].filter(Boolean).join(" ")}
-        aria-describedby={f?.describedBy} aria-invalid={f?.invalid || undefined}
+        aria-describedby={f?.describedBy} aria-invalid={f?.invalid || undefined} aria-required={rest.required || undefined}
         aria-label={typeof label === "string" ? label : undefined}>
         <SelectValue />
         <ChevronDownIcon aria-hidden="true" />

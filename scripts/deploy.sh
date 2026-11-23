@@ -21,10 +21,12 @@ built=$(date -u +%Y-%m-%dT%H:%MZ)
 echo "==> building hobnail $sha"
 DOCKER_BUILDKIT=1 docker build \
   --build-arg RH_GIT_SHA="$sha" --build-arg RH_BUILD_TIME="$built" \
-  -t hobnail:latest -t "hobnail:$sha" .
+  -t "hobnail:$sha" .
+scripts/check-image-size.py "hobnail:$sha"
 # The version line carries the content hash the build verified (stale-binary guard).
 echo "==> $(docker run --rm --entrypoint /hobnail "hobnail:$sha" version)"
 
+docker tag "hobnail:$sha" hobnail:latest
 echo "==> deploying to $STACK"
 mkdir -p "$STACK/data"
 cp deploy/compose.yaml "$STACK/compose.yaml"

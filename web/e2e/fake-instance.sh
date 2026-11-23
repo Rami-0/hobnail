@@ -37,11 +37,34 @@ stop() {
 if [ "$cmd" = stop ]; then stop; echo "stopped $hb, $fd"; exit 0; fi
 
 stop
+m2=0; socket=/fake/docker.sock
+for option in "$@"; do
+  [ "$option" != --m2-fixtures ] || m2=1
+  [ "$option" != --docker-unavailable ] || socket=/fake/unavailable.sock
+done
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/hobnail-fake.XXXXXX")
 mkdir -p "$tmp/data" "$tmp/fake"
 uid="$(id -u):$(id -g)"
+fixture_port=""
+if [ "$m2" = 1 ]; then
+  fixture_port="-p 127.0.0.1::8081"
+  cat >"$tmp/data/config.toml" <<'TOML'
+[http]
+allow_hosts = ["127.0.0.1"]
+
+[[widgets]]
+id = "m2-reading"
+type = "custom-api"
+title = "Fixture reading"
+url = "http://127.0.0.1:8081/fixture/m2/reading"
+refresh = "1s"
+template = "{{reading}}"
+fields = { reading = "$.reading" }
+status = { field = "_status", ok = [200] }
+TOML
+fi
 docker run -d --name "$fd" --label "io.hobnail.e2e.dir=$tmp" -u "$uid" --init \
-  -p "127.0.0.1:$port:8080" \
+  -p "127.0.0.1:$port:8080" $fixture_port \
   -v "$dir":/repo:ro -v "$tmp/fake":/fake \
   node:26-alpine node /repo/web/e2e/fake-docker.mjs /fake/docker.sock --sys /fake/sys --quiet "$@" >/dev/null
 i=0; until [ -S "$tmp/fake/docker.sock" ]; do i=$((i+1)); [ $i -lt 100 ] || { docker logs "$fd" >&2; stop; echo "fake docker did not start" >&2; exit 1; }; sleep 0.1; done
@@ -49,8 +72,12 @@ docker logs "$fd"
 docker run -d --name "$hb" -u "$uid" --network "container:$fd" \
   -v "$tmp/data":/data -v "$tmp/fake":/fake:ro \
   -e RH_LISTEN=0.0.0.0:8080 -e RH_HOSTNAME=homelab -e RH_DATA_DIR=/data \
-  -e RH_DOCKER_SOCKET=/fake/docker.sock -e RH_HOST_SYS=/fake/sys -e RH_HOST_PROC=/proc \
+  -e RH_DOCKER_SOCKET="$socket" -e RH_HOST_SYS=/fake/sys -e RH_HOST_PROC=/proc \
   "$image" serve >/dev/null
 i=0; until curl -fsS "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; do i=$((i+1)); [ $i -lt 100 ] || { docker logs "$hb" >&2; echo "hobnail did not start" >&2; exit 1; }; sleep 0.1; done
 
 echo "hobnail $image on http://127.0.0.1:$port (fake docker $fd, files in $tmp)"
+
+if [ "$m2" = 1 ]; then
+  echo "M2 fixture control: http://$(docker port "$fd" 8081/tcp)"
+fi

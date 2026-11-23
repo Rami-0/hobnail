@@ -15,6 +15,14 @@
 //                    or start event, plus a health_status event (default 0: off)
 //   --hostile        add 4 containers with long / hostile names, titles, URLs
 //                    and images (HTML, quotes, RTL override, javascript: links)
+//   --m2-fixtures    serve a controllable HTTP reading on port 8081
+//   --services       add a homelab of real-looking images for integration
+//                    detection (linuxserver/sonarr, pihole/pihole,
+//                    jellyfin/jellyfin, home-assistant, a renamed radarr,
+//                    uptime-kuma, plain postgres and redis) plus a "hobnail"
+//                    container standing for Hobnail itself (its id starts with
+//                    this host name, which a Hobnail sharing this network
+//                    namespace also has), so shared-network URLs are proposed
 //   --quiet          no request log
 // Names: svc001..svcNNN, service = name, project stackMM (round robin).
 // About 1 in 7 is stopped (exit codes 0 / 1 / 137 / 143 / 2), a few are
@@ -33,6 +41,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -49,6 +58,7 @@ const LOOSE = Number(opt("loose", 0));
 const SYS = opt("sys", null);
 const CHURN = Number(opt("churn", 0));
 const HOSTILE = flag("hostile");
+const SERVICES = flag("services");
 const LOG_FIXTURES = flag("log-fixtures");
 const QUIET = flag("quiet");
 
@@ -116,6 +126,27 @@ if (HOSTILE) {
     containers.push(c);
   });
 }
+if (SERVICES) {
+  // [name, image, ports ([IP, PrivatePort, PublicPort, Type] as above), networks {name: ip}]
+  const lan = "192.168.1.50";
+  const s = [
+    ["hobnail", "ghcr.io/example/hobnail:latest", [], { homelab_default: "172.30.0.2" }],
+    ["sonarr", "lscr.io/linuxserver/sonarr:latest", [[lan, 8989, 8989, "tcp"]], { homelab_default: "172.30.0.3" }],
+    ["pihole", "pihole/pihole:2024.07.0", [[lan, 80, 8053, "tcp"], ["0.0.0.0", 53, 53, "udp"]], { bridge: "172.17.0.4" }],
+    ["jellyfin", "jellyfin/jellyfin:10.10.3", [], { homelab_default: "172.30.0.5" }],
+    ["homeassistant", "ghcr.io/home-assistant/home-assistant:stable", [[lan, 8123, 8123, "tcp"]], { bridge: "172.17.0.6" }],
+    ["my-radarr", "registry.example.com/media/movies:1", [["127.0.0.1", 7878, 7878, "tcp"]], { bridge: "172.17.0.7" }],
+    ["uptime-kuma", "louislam/uptime-kuma:1", [["0.0.0.0", 3001, 3001, "tcp"]], { homelab_default: "172.30.0.8" }],
+    ["postgres", "postgres:16-alpine", [["", 5432, undefined, "tcp"]], { homelab_default: "172.30.0.9" }],
+    ["redis", "redis:7.4", [], { homelab_default: "172.30.0.10" }],
+  ];
+  s.forEach(([name, image, ports, networks], k) => {
+    const c = make(N + 10 + k);
+    Object.assign(c, { name, image, ports, networks, project: null, labels: {}, state: "running", health: k % 2 ? "healthy" : null, exit: null });
+    c.id = name === "hobnail" ? (os.hostname() + hex("self")).slice(0, 64) : hex("fake-container-" + name);
+    containers.push(c);
+  });
+}
 const byRef = (ref) => {
   ref = decodeURIComponent(ref);
   return containers.find((c) => c.id === ref || c.name === ref || c.name === ref.replace(/^\//, "") || (ref.length >= 4 && /^[0-9a-f]+$/.test(ref) && c.id.startsWith(ref)));
@@ -147,7 +178,7 @@ function listItem(c) {
     Ports: running(c) ? c.ports.map(([ip, pp, pub, t]) => (pub === undefined ? { PrivatePort: pp, Type: t } : { IP: ip, PrivatePort: pp, PublicPort: pub, Type: t })) : [],
     ...(c.health ? { Health: { Status: c.health, FailingStreak: c.health === "unhealthy" ? 4 : 0 } } : {}),
     HostConfig: { NetworkMode: c.project ? `${c.project}_default` : "bridge" },
-    NetworkSettings: { Networks: {} }, Mounts: [],
+    NetworkSettings: { Networks: Object.fromEntries(Object.entries(c.networks ?? {}).map(([n, ip]) => [n, { IPAddress: ip }])) }, Mounts: [],
   };
 }
 function healthLog(c) {
@@ -351,12 +382,56 @@ function stop() {
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 
-// Reachable only inside the fake instance's shared network namespace.
-http.createServer((req, res) => {
+// Normally reachable only inside the fake instance's network namespace.
+const m2Fixtures = flag("m2-fixtures");
+let m2Result = "fail";
+http.createServer(async (req, res) => {
+  if (m2Fixtures && req.url === "/fixture/m2/reading") {
+    if (m2Result === "fail") return json(res, 503, { error: "upstream unavailable" });
+    return json(res, 200, { reading: m2Result === "recover" ? "73 units" : "42 units" });
+  }
+  if (m2Fixtures && req.method === "PUT") {
+    const state = req.url?.match(/^\/fixture\/m2\/(fail|good|recover)$/)?.[1];
+    if (state) {
+      m2Result = state;
+      return res.writeHead(204).end();
+    }
+  }
+  if (m2Fixtures && req.url === "/fixture/http") {
+    if (req.headers.authorization !== "Bearer guided-fixture-bearer") return json(res, 401, {});
+    return json(res, 200, { reading: "42 units" });
+  }
+  if (m2Fixtures && req.url?.startsWith("/fixture/pihole/api/")) {
+    if (req.method === "POST" && req.url.endsWith("/api/auth")) {
+      let body = "";
+      for await (const data of req) body += data;
+      if (body !== '{"password":"pihole-fixture-password"}') return json(res, 401, {});
+      return json(res, 200, { session: { valid: true, sid: "pihole-fixture-sid" } });
+    }
+    if (req.headers["x-ftl-sid"] !== "pihole-fixture-sid") return json(res, 401, {});
+    if (req.method === "DELETE" && req.url.endsWith("/api/auth")) return res.writeHead(204).end();
+    if (req.method === "GET" && req.url.endsWith("/stats/summary")) {
+      return json(res, 200, { queries: { total: 1234, blocked: 321, percent_blocked: 26 } });
+    }
+    if (req.method === "GET" && req.url.endsWith("/dns/blocking")) return json(res, 200, { blocking: "enabled" });
+    // Top lists and history for the ranked and trend widgets.
+    if (req.method === "GET" && req.url.includes("/stats/top_domains")) {
+      const blocked = req.url.includes("blocked=true");
+      const names = blocked ? ["ads.tracker.example", "telemetry.example", "metrics.adnet.example", "pixel.example"] : ["api.github.com", "updates.example", "cdn.example", "time.example"];
+      return json(res, 200, { domains: names.map((domain, i) => ({ domain, count: 412 - i * 87 })) });
+    }
+    if (req.method === "GET" && req.url.includes("/stats/top_clients")) {
+      return json(res, 200, { clients: [["laptop", "192.168.1.20", 534], ["", "192.168.1.31", 301], ["tv", "192.168.1.40", 188]].map(([name, ip, count]) => ({ name, ip, count })) });
+    }
+    if (req.method === "GET" && req.url.endsWith("/history")) {
+      const now = Math.floor(Date.now() / 1000);
+      return json(res, 200, { history: Array.from({ length: 144 }, (_, i) => ({ timestamp: now - (143 - i) * 600, total: 30 + Math.round(25 * (1 + Math.sin(i / 9))) })) });
+    }
+  }
   if (req.url === "/fixture/health") return res.end("ok");
   if (req.url === "/fixture/session") {
     res.setHeader("Content-Type", "application/json");
     return res.end(JSON.stringify({ owner_exists: true }));
   }
   res.writeHead(404).end();
-}).listen(8081, "127.0.0.1");
+}).listen(8081, m2Fixtures ? "0.0.0.0" : "127.0.0.1");
