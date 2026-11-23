@@ -1,5 +1,5 @@
 use super::*;
-use widgets::StructuredBody;
+use widgets::{BodyRow, Glyph, Health, StatTile, StructuredBody};
 
 const TOKEN: &str = "token";
 const ENTITIES: &str = "entities";
@@ -39,18 +39,32 @@ pub const HOME_ASSISTANT: Provider = Provider {
         ENABLED,
     ],
     test,
-    widgets: &[Widget {
-        id: "entities",
-        name: "Entity states",
-        description: "See selected entities and how many are on or off.",
-        recommended: true,
-        default_size: size(4, 3),
-        min_size: size(3, 2),
-        sample: r#"{"kind":"stat_grid","rows":[["Living room","21.4 °C"],["Front door","Locked"],["Solar power","2.1 kW"]]}"#,
-        fields: &[ENTITY_FIELD, REFRESH],
-        fetch: overview,
-        validate: validate_entities,
-    }],
+    widgets: &[
+        Widget {
+            id: "entities",
+            name: "Entity states",
+            description: "The chosen entities as tiles: each friendly name with its state and unit, highlighted when on.",
+            recommended: true,
+            default_size: size(4, 2),
+            min_size: size(3, 2),
+            sample: r#"{"kind":"tiles","tiles":[{"label":"Living room","value":"21.4 °C","glyph":"activity"},{"label":"Front door","value":"locked","glyph":"shield"},{"label":"Hall light","value":"on","glyph":"check","tone":"up"},{"label":"Solar power","value":"2.1 kW","glyph":"activity"}]}"#,
+            fields: &[ENTITY_FIELD, REFRESH],
+            fetch: overview,
+            validate: validate_entities,
+        },
+        Widget {
+            id: "entity_list",
+            name: "Entity list",
+            description: "The chosen entities as a list with on/off dots and their states, and how many are on, off or unavailable.",
+            recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"rows","rows":[{"title":"2 on · 1 off · 0 unavailable"},{"title":"Hall light","secondary":"light.hall","value":"on","status":"up"},{"title":"Garage door","secondary":"cover.garage","value":"closed"},{"title":"Kitchen plug","secondary":"switch.kitchen","value":"off","status":"down"}]}"#,
+            fields: &[ENTITY_FIELD, REFRESH],
+            fetch: list,
+            validate: validate_entities,
+        },
+    ],
 };
 
 fn entities(options: &Values) -> Result<Vec<&str>, &'static str> {
@@ -112,6 +126,38 @@ struct Entity {
 #[derive(Deserialize)]
 struct Attributes {
     unit_of_measurement: Option<String>,
+    friendly_name: Option<String>,
+}
+
+fn unavailable(state: &str) -> bool {
+    matches!(state, "unknown" | "unavailable")
+}
+
+/// A generic glyph for an entity domain.
+fn glyph(id: &str, state: &str) -> Glyph {
+    match id.split_once('.').map_or("", |(domain, _)| domain) {
+        _ if unavailable(state) => Glyph::Alert,
+        "light" | "switch" | "input_boolean" | "fan" | "binary_sensor" if state == "on" => {
+            Glyph::Check
+        }
+        "lock" | "alarm_control_panel" => Glyph::Shield,
+        "media_player" => Glyph::Play,
+        "person" | "device_tracker" => Glyph::Users,
+        "camera" | "image" => Glyph::Image,
+        "calendar" => Glyph::Calendar,
+        "update" => Glyph::Download,
+        "weather" | "sun" => Glyph::Globe,
+        _ => Glyph::Activity,
+    }
+}
+
+/// An entity's display name, reading and on/off health.
+struct Reading {
+    id: String,
+    name: String,
+    value: String,
+    health: Option<Health>,
+    glyph: Glyph,
 }
 
 async fn state(conn: &Conn<'_>, id: &str) -> Result<Option<Entity>, Fault> {
@@ -129,38 +175,93 @@ async fn state(conn: &Conn<'_>, id: &str) -> Result<Option<Entity>, Fault> {
     }
 }
 
+async fn readings(conn: &Conn<'_>, options: &Values) -> Result<Vec<Reading>, Fault> {
+    let ids = entities(options).map_err(|_| Class::Protocol)?;
+    let mut readings = Vec::with_capacity(ids.len());
+    for id in ids {
+        readings.push(match state(conn, id).await? {
+            Some(entity) => {
+                let state = entity.state;
+                let health = match state.as_str() {
+                    "on" | "open" | "unlocked" | "playing" | "home" => Some(Health::Up),
+                    "off" => Some(Health::Down),
+                    s if unavailable(s) => Some(Health::Warn),
+                    _ => None,
+                };
+                let glyph = glyph(id, &state);
+                let value = match entity.attributes.unit_of_measurement {
+                    Some(unit) if !unavailable(&state) => format!("{state} {unit}"),
+                    _ => state,
+                };
+                let name = entity
+                    .attributes
+                    .friendly_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| id.into());
+                Reading {
+                    id: id.into(),
+                    name: display_text(conn, name),
+                    value: display_text(conn, value),
+                    health,
+                    glyph,
+                }
+            }
+            None => Reading {
+                id: id.into(),
+                name: id.into(),
+                value: "Unavailable".into(),
+                health: Some(Health::Warn),
+                glyph: Glyph::Alert,
+            },
+        });
+    }
+    Ok(readings)
+}
+
 fn overview<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
     Box::pin(async move {
-        let ids = entities(options).map_err(|_| Class::Protocol)?;
-        let mut rows = Vec::with_capacity(ids.len() + 1);
-        let (mut on, mut off, mut unavailable) = (0, 0, 0);
-        for id in ids {
-            let value = if let Some(entity) = state(conn, id).await? {
-                on += usize::from(entity.state == "on");
-                off += usize::from(entity.state == "off");
-                unavailable +=
-                    usize::from(matches!(entity.state.as_str(), "unknown" | "unavailable"));
-                let reading = match entity.attributes.unit_of_measurement {
-                    Some(unit) if !matches!(entity.state.as_str(), "unknown" | "unavailable") => {
-                        format!("{} {unit}", entity.state)
-                    }
-                    _ => entity.state,
-                };
-                display_text(conn, reading)
-            } else {
-                unavailable += 1;
-                "Unavailable".into()
-            };
-            rows.push((id.into(), value));
-        }
-        rows.insert(
-            0,
-            (
-                "Selected entities".into(),
-                format!("{on} on · {off} off · {unavailable} unavailable"),
-            ),
+        let tiles = readings(conn, options)
+            .await?
+            .into_iter()
+            .map(|reading| StatTile {
+                label: reading.name,
+                value: reading.value,
+                glyph: Some(reading.glyph),
+                delta: None,
+                // Only "on" and problems stand out; off is the quiet default.
+                tone: reading.health.filter(|h| *h != Health::Down),
+                series: Vec::new(),
+            })
+            .collect();
+        Ok(StructuredBody::Tiles { tiles })
+    })
+}
+
+fn list<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
+    Box::pin(async move {
+        let readings = readings(conn, options).await?;
+        let count = |health| readings.iter().filter(|r| r.health == Some(health)).count();
+        let summary = format!(
+            "{} on · {} off · {} unavailable",
+            readings.iter().filter(|r| r.value == "on").count(),
+            count(Health::Down),
+            readings
+                .iter()
+                .filter(|r| r.health == Some(Health::Warn))
+                .count(),
         );
-        Ok(StructuredBody::StatGrid { rows })
+        let mut rows = vec![BodyRow {
+            title: summary,
+            ..Default::default()
+        }];
+        rows.extend(readings.into_iter().map(|reading| BodyRow {
+            title: reading.name,
+            secondary: Some(reading.id),
+            value: Some(reading.value),
+            status: reading.health,
+            ..Default::default()
+        }));
+        Ok(StructuredBody::Rows { rows })
     })
 }
 
@@ -193,7 +294,7 @@ mod tests {
             Exchange {
                 request: "GET /prefix/api/states/sensor.temp HTTP/1.1",
                 status: 200,
-                body: r#"{"entity_id":"sensor.temp","state":"21","attributes":{"unit_of_measurement":"°C"}}"#,
+                body: r#"{"entity_id":"sensor.temp","state":"21","attributes":{"unit_of_measurement":"°C","friendly_name":"Living room"}}"#,
             },
             Exchange {
                 request: "GET /prefix/api/states/sensor.large HTTP/1.1",
@@ -204,6 +305,26 @@ mod tests {
                 request: "GET /prefix/api/states/sensor.long HTTP/1.1",
                 status: 200,
                 body: &long_state,
+            },
+            Exchange {
+                request: "GET /prefix/api/states/light.hall HTTP/1.1",
+                status: 200,
+                body: r#"{"entity_id":"light.hall","state":"off","attributes":{"friendly_name":"Hall light"}}"#,
+            },
+            Exchange {
+                request: "GET /prefix/api/states/sensor.gone HTTP/1.1",
+                status: 404,
+                body: r#"{"message":"Entity not found."}"#,
+            },
+            Exchange {
+                request: "GET /prefix/api/states/light.other HTTP/1.1",
+                status: 200,
+                body: r#"{"entity_id":"light.hall","state":"on","attributes":{}}"#,
+            },
+            Exchange {
+                request: "GET /prefix/api/states/light.hall HTTP/1.1",
+                status: 401,
+                body: "",
             },
             Exchange {
                 request: "GET /prefix/api/ HTTP/1.1",
@@ -234,20 +355,45 @@ mod tests {
                 let body = super::super::fetch(conn, &HOME_ASSISTANT.widgets[0], &options)
                     .await
                     .unwrap();
-                let StructuredBody::StatGrid { rows } = &body else {
-                    panic!("expected entity rows");
+                let StructuredBody::Tiles { tiles } = &body else {
+                    panic!("expected entity tiles");
                 };
-                assert!(rows[4].1.capacity() < 1024);
+                assert!(tiles[3].value.capacity() < 1024);
+                assert_eq!(
+                    serde_json::to_value(body).unwrap()["tiles"],
+                    json!([
+                        {"label":"light.hall","value":"on","glyph":"check","tone":"up"},
+                        {"label":"Living room","value":"21 °C","glyph":"activity"},
+                        {"label":"sensor.large","value":"Unavailable","glyph":"alert","tone":"warn"},
+                        {"label":"sensor.long","value":format!("{}…", "x".repeat(160)),"glyph":"activity"}
+                    ])
+                );
+                let options = Values::from_iter([(
+                    ENTITIES.into(),
+                    json!(["light.hall", "sensor.gone"]),
+                )]);
+                let body = super::super::fetch(conn, &HOME_ASSISTANT.widgets[1], &options)
+                    .await
+                    .unwrap();
                 assert_eq!(
                     serde_json::to_value(body).unwrap()["rows"],
                     json!([
-                        ["Selected entities", "1 on · 0 off · 1 unavailable"],
-                        ["light.hall", "on"],
-                        ["sensor.temp", "21 °C"],
-                        ["sensor.large", "Unavailable"],
-                        ["sensor.long", &format!("{}…", "x".repeat(160))]
+                        {"title":"0 on · 1 off · 1 unavailable"},
+                        {"title":"Hall light","secondary":"light.hall","value":"off","status":"down"},
+                        {"title":"sensor.gone","secondary":"sensor.gone","value":"Unavailable","status":"warn"}
                     ])
                 );
+                // A state for another entity than the one asked for is refused.
+                let options = Values::from_iter([(ENTITIES.into(), json!(["light.other"]))]);
+                let fault = super::super::fetch(conn, &HOME_ASSISTANT.widgets[1], &options)
+                    .await
+                    .unwrap_err();
+                assert_eq!(fault.class.message(), Class::Protocol.message());
+                let options = Values::from_iter([(ENTITIES.into(), json!(["light.hall"]))]);
+                let fault = super::super::fetch(conn, &HOME_ASSISTANT.widgets[0], &options)
+                    .await
+                    .unwrap_err();
+                assert_eq!(fault.class.message(), Class::Auth.message());
                 assert_test_fault(conn, &HOME_ASSISTANT, Class::Auth).await;
                 assert_test_fault(conn, &HOME_ASSISTANT, Class::Protocol).await;
             },
