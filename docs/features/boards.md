@@ -24,12 +24,33 @@ integration tile reads "Integration unavailable", with neither the integration
 ID nor its custom title in the response. A scoped editor's save maps the
 placeholders back, so saving the board keeps those items.
 
-Responsive spans are columns, not pixels: mobile 1–4, tablet 1–8, desktop 1–12,
-rows 1–12. Edit mode offers move/resize controls and pointer dragging; Alt+arrows
-moves and Shift+arrows resizes. A document has at most 64 sections and 512 items;
-there are at most 64 boards. Server IDs retain identity across edits.
+Each section is a canvas of 12 columns and fixed-height rows (80 px, or
+64 px when the board is compact). A tile is a rectangle on it: drag a tile
+anywhere and the others move out of the way, with a placeholder showing
+where it lands; tiles always float up so the canvas has no holes. Drag a
+tile's bottom-right corner to resize it in whole cells, down to the widget's
+minimum size. On a touch screen, press and hold a tile before dragging it.
+From the keyboard, focus a tile's grip: arrow keys move it one cell and
+Shift + arrow keys resize it, and each step is announced. Sections have a
+title, can be moved up and down, and can be collapsed (collapsed sections
+start folded; readers can unfold them). On a phone the board is one column
+in reading order (top to bottom, then left to right), and editing there is
+limited to reordering with Move earlier and Move later. Ctrl+Z and
+Ctrl+Shift+Z (or Ctrl+Y) undo and redo within an edit session.
 
-Save commits one versioned board document; Cancel discards that edit. Private
+Add puts the chosen item in the first free slot of the section. A tile's
+**Customize** panel sets its title, icon, link, accent colour, size and
+section, and whether it shows its status and metrics. **Style** sets the
+board's name and icon, a background preset, compact or comfortable
+spacing, the tile style (solid, glass or outline) and the board's accent.
+Backgrounds are built-in gradients: the page's CSP allows only same-origin
+images, so custom image URLs are not offered. A document has at most 64
+sections and 512 items; there are at most 64 boards. Server IDs retain
+identity across edits. Boards saved before the canvas keep every section
+and item: each item was placed, in saved order, in the first free slot of
+its old size.
+
+Save commits one versioned board document, including the name, icon and style; Cancel discards that edit. Private
 server drafts are saved separately while editing. Leaving with unsaved work
 offers to keep the draft; resuming and discarding are explicit choices. A 409
 never silently overwrites another edit: reload or rebase and review. In-session

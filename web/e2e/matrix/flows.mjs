@@ -352,6 +352,34 @@ export const flows = {
     await page.locator(`${tid("board-link-form")} button[type="submit"]`).click();
     await page.locator(tid("board-link-form")).waitFor({ state: "detached" });
     await h.state("edited");
+    // The canvas: Shift+arrows resize the focused tile; on wide canvases a
+    // pointer drag moves it (phones reorder instead, checked by board-check).
+    const tile = page.locator(".canvas-item", { hasText: "Matrix link" });
+    const cell = (key) => tile.evaluate((el, k) => el.style.getPropertyValue(`--${k}`), key);
+    const width = Number(await cell("w"));
+    await tile.locator(".drag-handle").focus();
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.waitForFunction((w) => Number([...document.querySelectorAll(".canvas-item")].find((el) => el.textContent.includes("Matrix link"))?.style.getPropertyValue("--w")) === w + 1, width);
+    await h.state("resized by keyboard");
+    const canvas = await tile.evaluate((el) => { const c = el.closest("[data-canvas]"); const b = c.getBoundingClientRect(); return { wide: c.clientWidth >= 560, x: b.left, w: b.width }; });
+    if (canvas.wide) {
+      await tile.scrollIntoViewIfNeeded();
+      const box = await tile.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + canvas.w / 2, box.y + box.height / 2, { steps: 8 });
+      await page.locator(".canvas-placeholder").waitFor();
+      await h.state("dragging a tile");
+      await page.mouse.up();
+      await page.waitForFunction(() => Number([...document.querySelectorAll(".canvas-item")].find((el) => el.textContent.includes("Matrix link"))?.style.getPropertyValue("--x")) >= 5);
+      await h.state("dropped");
+    }
+    await page.locator(tid("board-style")).click();
+    await page.locator(tid("board-panel")).waitFor();
+    await page.locator(`${tid("board-panel")} .bg-swatch[data-bg="aurora"]`).click();
+    await h.state("board style panel");
+    await page.locator(`${tid("board-panel")} .inspector-close`).click();
+    await page.locator(tid("board-panel")).waitFor({ state: "detached" });
     await page.locator(tid("board-save")).click();
     await page.locator(tid("board-editor")).waitFor({ state: "detached" });
     assert.equal(await page.locator(tid("board-tile")).count(), tiles + 1, "Save keeps the new link");
