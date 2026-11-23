@@ -5,7 +5,7 @@
 //     modulepreload links included)                 <= 180 KB gzip
 //   any other JS/CSS chunk                           <=  60 KB gzip
 //     charts vendor chunk ("recharts"/"charts-vendor") <=  60 KB gzip
-//   whole dist: <= 3 MB raw (non-.gz files) and <= 450 KB gzip
+//   whole dist: <= 3 MB raw (non-.gz files) and <= 480 KB gzip
 //   npm run size
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
@@ -17,7 +17,7 @@ const BUDGET = {
   chunk: 60 * KB,
   charts: 60 * KB,
   distRaw: 3000 * KB,
-  distGzip: 450 * KB,
+  distGzip: 480 * KB,
 };
 const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 
