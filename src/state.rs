@@ -47,6 +47,24 @@ pub struct Env {
     pub allowed_hosts: Vec<String>,
     /// Exact socket peer IPs allowed to supply forwarding headers.
     pub trusted_proxies: Vec<IpAddr>,
+    /// Open connections one peer address (IPv6: /64) may hold; 0 is no
+    /// per-peer limit (RH_MAX_CONNECTIONS_PER_PEER).
+    pub max_connections_per_peer: usize,
+}
+
+/// `RH_MAX_CONNECTIONS_PER_PEER`: 0 (off) to the global connection cap,
+/// default 32.
+pub(crate) fn parse_connections_per_peer(value: Option<&str>) -> Result<usize, String> {
+    let cap = crate::http::server::LIMITS.connections;
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(crate::http::server::LIMITS.per_peer);
+    };
+    match value.parse::<usize>() {
+        Ok(n) if n <= cap => Ok(n),
+        _ => Err(format!(
+            "RH_MAX_CONNECTIONS_PER_PEER: expected 0 (no limit) to {cap}, got {value:?}"
+        )),
+    }
 }
 
 impl Env {
@@ -97,6 +115,9 @@ impl Env {
                         .map_err(|_| "RH_TRUSTED_PROXIES: expected comma-separated IP addresses")
                 })
                 .collect::<Result<Vec<_>, _>>()?,
+            max_connections_per_peer: parse_connections_per_peer(
+                std::env::var("RH_MAX_CONNECTIONS_PER_PEER").ok().as_deref(),
+            )?,
         })
     }
 }
@@ -256,5 +277,21 @@ impl Drop for ViewerGuard {
             self.0.widget_viewers.fetch_sub(1, Ordering::Relaxed);
         }
         self.0.viewers.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn connections_per_peer_defaults_to_32_and_accepts_0_to_the_global_cap() {
+        use super::parse_connections_per_peer as parse;
+        assert_eq!(parse(None), Ok(32));
+        assert_eq!(parse(Some(" ")), Ok(32));
+        assert_eq!(parse(Some("0")), Ok(0));
+        assert_eq!(parse(Some(" 64 ")), Ok(64));
+        assert_eq!(parse(Some("128")), Ok(128));
+        for bad in ["129", "-1", "many", "1.5"] {
+            assert!(parse(Some(bad)).is_err(), "{bad}");
+        }
     }
 }

@@ -158,11 +158,16 @@ budget and stop a few peers from holding every connection:
 - At most 128 connections are open at once, event streams included; further
   connections wait until one closes.
 - One peer may hold at most 32 of them (IPv6 peers count by /64); more get
-  `503` and are closed. Addresses in `RH_TRUSTED_PROXIES` are exempt, because
-  every client arrives through them. If clients reach Hobnail through
-  another shared address that is not a trusted proxy, such as Docker's
-  userland proxy for ports published on `127.0.0.1`, they share that peer's
-  32 connections.
+  `503` with `Retry-After: 1` and are closed. Addresses in
+  `RH_TRUSTED_PROXIES` are exempt, because every client arrives through
+  them. If clients reach Hobnail through another shared address that is
+  not a trusted proxy, such as Docker's userland proxy for ports published
+  on `127.0.0.1`, Docker Desktop, or rootless Docker or Podman, they share
+  that peer's connections. Set `RH_MAX_CONNECTIONS_PER_PEER` (0 to 128,
+  default 32; restart needed) to raise the share, or to `0` to turn the
+  per-peer limit off and keep only the 128-connection cap. Connections
+  over the limit are refused rather than queued, so a single address
+  cannot fill the server by waiting.
 
 A proxy that keeps a pool of idle upstream connections reconnects when
 Hobnail closes one.

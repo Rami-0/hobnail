@@ -27,6 +27,7 @@ fn app(dir: &std::path::Path, config: &str) -> Arc<AppState> {
         hostname: "testhost".into(),
         allowed_hosts: vec![],
         trusted_proxies: vec![],
+        max_connections_per_peer: 32,
     });
     assert!(
         st.config.snapshot().error.is_none(),

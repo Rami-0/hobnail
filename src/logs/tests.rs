@@ -133,6 +133,7 @@ fn state_on(socket: &std::path::Path, tag: &str) -> Arc<AppState> {
         hostname: "testhost".into(),
         allowed_hosts: vec![],
         trusted_proxies: vec![],
+        max_connections_per_peer: 32,
     });
     st.containers.send_replace(Arc::new(crate::model::Snapshot {
         containers: vec![ctr("web", Some("shop"), "running")],

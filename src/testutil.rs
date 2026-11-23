@@ -26,6 +26,7 @@ pub fn state_with(containers: Vec<Container>, toml: &str) -> Arc<AppState> {
         hostname: "testhost".into(),
         allowed_hosts: vec![],
         trusted_proxies: vec![],
+        max_connections_per_peer: 32,
     };
     let mut st = AppState::new(env);
     // Tests never depend on the cgroup they happen to run in.

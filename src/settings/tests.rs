@@ -44,6 +44,7 @@ fn state_with(text: Option<&str>) -> (PathBuf, Arc<AppState>) {
         hostname: "testhost".into(),
         allowed_hosts: vec![],
         trusted_proxies: vec![],
+        max_connections_per_peer: 32,
     };
     (dir, AppState::new(env))
 }

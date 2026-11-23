@@ -57,6 +57,11 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   host cannot take every slot. IPv6 peers count by /64. Peers listed in
 ///   `RH_TRUSTED_PROXIES` are exempt, since every client arrives through
 ///   them. A peer over its limit gets 503 and the connection closes.
+///   `RH_MAX_CONNECTIONS_PER_PEER` sets it (0 turns it off) for clients
+///   that share an address without being a declared proxy. Over the limit
+///   the connection is refused, not queued: a queued connection would hold
+///   a global slot (one peer could then fill the cap by waiting) or, held
+///   outside the cap, an unbounded number of sockets.
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
     pub connections: usize,
@@ -78,7 +83,11 @@ pub(crate) const LIMITS: Limits = Limits {
 
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
 pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Result<(), String> {
-    serve_limited(state, listener, LIMITS).await
+    let limits = Limits {
+        per_peer: state.env.max_connections_per_peer,
+        ..LIMITS
+    };
+    serve_limited(state, listener, limits).await
 }
 
 pub(crate) async fn serve_limited(
@@ -104,7 +113,7 @@ pub(crate) async fn serve_limited(
                 continue;
             }
         };
-        let peer_slot = if is_trusted_proxy(&state.env, peer.ip()) {
+        let peer_slot = if limits.per_peer == 0 || is_trusted_proxy(&state.env, peer.ip()) {
             None
         } else {
             match peers.take(peer.ip()) {
@@ -452,6 +461,7 @@ mod tests {
             hostname: "homelab".into(),
             allowed_hosts: vec!["*.tail1234.ts.net".into()],
             trusted_proxies: vec![],
+            max_connections_per_peer: 32,
         }
     }
 
@@ -739,6 +749,38 @@ mod tests {
                 "{:?}",
                 String::from_utf8_lossy(&out)
             );
+        }
+
+        #[tokio::test]
+        async fn the_per_peer_setting_applies_and_0_turns_the_limit_off() {
+            for (setting, refused) in [(1, true), (0, false)] {
+                let mut env = crate::testutil::state_with(vec![], "").env.clone();
+                env.max_connections_per_peer = setting;
+                let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let addr = l.local_addr().unwrap();
+                tokio::spawn(serve_listener(crate::state::AppState::new(env), l));
+                let _held = futures_join(addr, 3).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let mut s = TcpStream::connect(addr).await.unwrap();
+                if !refused {
+                    s.write_all(
+                        b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                }
+                let out = drain(&mut s, Duration::from_secs(3)).await.unwrap();
+                let status = if refused {
+                    "HTTP/1.1 503"
+                } else {
+                    "HTTP/1.1 200"
+                };
+                assert!(
+                    out.starts_with(status.as_bytes()),
+                    "{setting}: {:?}",
+                    String::from_utf8_lossy(&out)
+                );
+            }
         }
 
         async fn futures_join(addr: SocketAddr, n: usize) -> Vec<TcpStream> {
