@@ -368,11 +368,13 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const needle = query.trim().toLowerCase();
   const matching = fresh.filter((suggestion) => suggestion.title.toLowerCase().includes(needle));
   const shown = matching.filter((suggestion) => tabOf(suggestion) === tab);
-  const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => tabOf(x) === id).length])) as Record<PickerTab, number>;
+
   const apps = fresh.filter((suggestion) => suggestion.detected);
   const native = catalog?.providers.find((provider) => provider.id === NATIVE) ?? null;
   const nativeWidgets = (native?.widgets ?? []).filter((widget) => `${widget.name} ${widget.description}`.toLowerCase().includes(needle));
   const localWidgets = (catalog?.providers ?? []).filter((provider) => provider.id !== NATIVE && !hasUrl(provider) && provider.widgets.length > 0 && `${provider.name} ${provider.description}`.toLowerCase().includes(needle));
+  const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => tabOf(x) === id).length])) as Record<PickerTab, number>;
+  counts.widgets += nativeWidgets.length + localWidgets.length;
   const integrationProviders = (catalog?.providers ?? []).filter(hasUrl);
   const liveRows = new Map(live.data?.groups.flatMap((group) => group.containers).map((row) => [row.name, row]) ?? []);
   const suggestionRow = (payload: BoardPayload) => payload.kind === "container" ? liveRows.get(payload.target.by === "name" ? payload.target.name : "") ?? [...liveRows.values()].find((row) => payload.target.by === "compose" && row.stack === payload.target.project && row.title === payload.target.service) : undefined;
