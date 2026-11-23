@@ -1,7 +1,7 @@
 use super::json_scan::{ArrayLength, Path, Scalar, Scanner, Visit};
 use super::*;
-use crate::util::human_bytes;
-use widgets::StructuredBody;
+use crate::util::{human_bytes, human_duration};
+use widgets::{BodyRow, Glyph, Health, StatTile, StructuredBody};
 
 const USERNAME: &str = "username";
 const PASSWORD: &str = "password";
@@ -13,7 +13,8 @@ pub const QBITTORRENT: Provider = Provider {
     category: "Downloads",
     icon: "qbittorrent",
     color: "#3a72c4",
-    description: "Show transfer speeds, torrent counts and free disk space.",
+    description:
+        "Show transfer speeds, torrent counts, free space and torrents with their progress.",
     docs: "https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0)",
     public_internet: false,
     contacts: "Your configured qBittorrent WebUI. Public addresses require internet access.",
@@ -42,19 +43,41 @@ pub const QBITTORRENT: Provider = Provider {
         ENABLED,
     ],
     test,
-    widgets: &[Widget {
-        id: "transfers",
-        name: "Torrent activity",
-        description:
-            "Download and upload speeds, active, seeding and queued torrents, and free space.",
-        recommended: true,
-        default_size: size(4, 2),
-        min_size: size(3, 2),
-        sample: r#"{"kind":"stat_grid","rows":[["Download","12.4 MB/s"],["Upload","1.1 MB/s"],["Active","3"],["Paused","12"]]}"#,
-        fields: &[REFRESH],
-        fetch: transfers,
-        validate: no_widget_options,
-    }],
+    widgets: &[
+        Widget {
+            id: "transfers",
+            name: "Torrent activity",
+            description:
+                "Download and upload speeds, active, seeding and queued torrents, and free space.",
+            recommended: true,
+            default_size: size(4, 2),
+            min_size: size(3, 2),
+            sample: r#"{"kind":"tiles","tiles":[{"label":"Download","value":"12.4 MiB/s","glyph":"download"},{"label":"Upload","value":"1.1 MiB/s","glyph":"upload"},{"label":"Active","value":"3","glyph":"activity"},{"label":"Seeding","value":"41","glyph":"upload"},{"label":"Queued","value":"2","glyph":"clock"},{"label":"Free space","value":"1.8 TiB","glyph":"disk"}]}"#,
+            fields: &[REFRESH],
+            fetch: transfers,
+            validate: no_widget_options,
+        },
+        Widget {
+            id: "torrents",
+            name: "Torrents",
+            description:
+                "Up to ten torrents with progress, state, speed and time left, fastest first.",
+            recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"rows","rows":[{"title":"example-distro-24.04.iso","secondary":"Downloading · 4.7 GiB · 6m left","value":"↓ 8.2 MiB/s","status":"up","progress":62},{"title":"sample-dataset.tar","secondary":"Stalled · 1.2 GiB","value":"↓ 0 B/s","status":"warn","progress":18},{"title":"example-album-flac","secondary":"Seeding · 640 MiB","value":"↑ 320 KiB/s","status":"up","progress":100}]}"#,
+            fields: &[
+                Field {
+                    default: Some("active"),
+                    choices: &["active", "downloading", "seeding", "completed", "all"],
+                    ..Field::new("filter", "Show", Kind::Select, "Which torrents to list.")
+                },
+                REFRESH,
+            ],
+            fetch: torrents,
+            validate: no_widget_options,
+        },
+    ],
 };
 
 async fn login(conn: &Conn<'_>) -> Result<Option<Session>, Fault> {
@@ -221,21 +244,27 @@ fn transfers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
             |session| async move {
                 let session = session.ok_or(Class::Auth)?;
                 let speed: TransferInfo = get(conn, &session, "api/v2/transfer/info", &[]).await?;
-                let mut rows = vec![
-                    (
-                        "Download".into(),
+                let mut tiles = vec![
+                    tile(
+                        "Download",
                         format!("{}/s", human_bytes(speed.dl_info_speed)),
+                        Glyph::Download,
                     ),
-                    (
-                        "Upload".into(),
+                    tile(
+                        "Upload",
                         format!("{}/s", human_bytes(speed.up_info_speed)),
+                        Glyph::Upload,
                     ),
                 ];
-                for (filter, label) in [("active", "Active"), ("seeding", "Seeding")] {
+                for (filter, label, glyph) in [
+                    ("active", "Active", Glyph::Activity),
+                    ("seeding", "Seeding", Glyph::Upload),
+                ] {
                     let count = within_response_limit(count(conn, &session, filter).await)?;
-                    rows.push((
-                        label.into(),
+                    tiles.push(tile(
+                        label,
                         count.map_or_else(unavailable, |n| n.to_string()),
+                        glyph,
                     ));
                 }
                 let snapshot = within_response_limit(
@@ -260,16 +289,134 @@ fn transfers<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
                 let free = snapshot
                     .and_then(|snapshot| snapshot.free)
                     .and_then(|free| u64::try_from(free).ok());
-                rows.push(("Queued".into(), queued.unwrap_or_else(unavailable)));
-                rows.push((
-                    "Free space".into(),
-                    free.map_or_else(unavailable, human_bytes),
+                tiles.push(tile(
+                    "Queued",
+                    queued.unwrap_or_else(unavailable),
+                    Glyph::Clock,
                 ));
-                Ok(StructuredBody::StatGrid { rows })
+                tiles.push(tile(
+                    "Free space",
+                    free.map_or_else(unavailable, human_bytes),
+                    Glyph::Disk,
+                ));
+                Ok(StructuredBody::Tiles { tiles })
             },
         )
         .await
     })
+}
+
+fn tile(label: &str, value: String, glyph: Glyph) -> StatTile {
+    StatTile {
+        label: label.into(),
+        value,
+        glyph: Some(glyph),
+        delta: None,
+        tone: None,
+        series: Vec::new(),
+    }
+}
+
+const TORRENT_ROWS: usize = 10;
+
+#[derive(Deserialize)]
+struct Torrent {
+    name: String,
+    progress: f64,
+    dlspeed: u64,
+    upspeed: u64,
+    eta: u64,
+    state: String,
+    size: u64,
+}
+
+/// A readable state, and its dot: transferring, stalled or failed. Stopped,
+/// queued and checking torrents get no dot.
+fn state(state: &str) -> (&'static str, Option<Health>) {
+    match state {
+        "downloading" | "forcedDL" => ("Downloading", Some(Health::Up)),
+        "uploading" | "forcedUP" => ("Seeding", Some(Health::Up)),
+        "metaDL" | "forcedMetaDL" => ("Fetching metadata", Some(Health::Up)),
+        "stalledDL" | "stalledUP" => ("Stalled", Some(Health::Warn)),
+        "error" => ("Error", Some(Health::Down)),
+        "missingFiles" => ("Missing files", Some(Health::Down)),
+        "pausedDL" | "pausedUP" | "stoppedDL" | "stoppedUP" => ("Stopped", None),
+        "queuedDL" | "queuedUP" => ("Queued", None),
+        "checkingDL" | "checkingUP" | "checkingResumeData" => ("Checking", None),
+        "allocating" => ("Allocating", None),
+        "moving" => ("Moving", None),
+        _ => ("Unknown", None),
+    }
+}
+
+fn torrents<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, StructuredBody> {
+    let filter = options
+        .get("filter")
+        .and_then(Value::as_str)
+        .unwrap_or("active");
+    Box::pin(async move {
+        conn.retry_session(
+            || login(conn),
+            |session| async move {
+                let session = session.ok_or(Class::Auth)?;
+                let limit = TORRENT_ROWS.to_string();
+                let sort = if filter == "seeding" {
+                    "upspeed"
+                } else {
+                    "dlspeed"
+                };
+                let list: Vec<Torrent> = get(
+                    conn,
+                    &session,
+                    "api/v2/torrents/info",
+                    &[
+                        ("filter", Input::Text(filter)),
+                        ("sort", Input::Text(sort)),
+                        ("reverse", Input::Text("true")),
+                        ("limit", Input::Text(&limit)),
+                    ],
+                )
+                .await?;
+                if list.is_empty() {
+                    return Ok(StructuredBody::Unavailable {
+                        message: "No torrents to show.".into(),
+                    });
+                }
+                let rows = list
+                    .into_iter()
+                    .take(TORRENT_ROWS)
+                    .map(|torrent| torrent_row(conn, torrent))
+                    .collect();
+                Ok(StructuredBody::Rows { rows })
+            },
+        )
+        .await
+    })
+}
+
+/// qBittorrent reports 8640000 (100 days) for an unknown ETA.
+const ETA_UNKNOWN: u64 = 8_640_000;
+
+fn torrent_row(conn: &Conn<'_>, torrent: Torrent) -> BodyRow {
+    let (label, status) = state(&torrent.state);
+    let progress = (torrent.progress.clamp(0.0, 1.0) * 100.0).floor() as u8;
+    let mut secondary = format!("{label} · {}", human_bytes(torrent.size));
+    if progress < 100 && torrent.dlspeed > 0 && torrent.eta < ETA_UNKNOWN {
+        secondary.push_str(&format!(" · {} left", human_duration(torrent.eta)));
+    }
+    let value = if torrent.dlspeed > 0 || progress < 100 {
+        format!("↓ {}/s", human_bytes(torrent.dlspeed))
+    } else {
+        format!("↑ {}/s", human_bytes(torrent.upspeed))
+    };
+    BodyRow {
+        title: display_text(conn, torrent.name),
+        secondary: Some(secondary),
+        value: Some(value),
+        status,
+        progress: Some(progress),
+        bars: Vec::new(),
+    }
 }
 
 fn unavailable() -> String {
@@ -281,6 +428,82 @@ mod tests {
     use super::*;
     use crate::providers::batch_test::{assert_header, assert_test_fault, exercise, Exchange};
     use serde_json::json;
+
+    /// Tiles as `[label, value]` pairs.
+    fn tiles(body: StructuredBody) -> serde_json::Value {
+        let body = serde_json::to_value(body).unwrap();
+        assert_eq!(body["kind"], "tiles");
+        body["tiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tile| json!([tile["label"], tile["value"]]))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn lists_torrents_with_progress_state_and_speed() {
+        const LOGIN: &str = "POST /prefix/api/v2/auth/login HTTP/1.1";
+        const LIST: &str = "GET /prefix/api/v2/torrents/info?filter=active&sort=dlspeed&reverse=true&limit=10 HTTP/1.1";
+        const SEEDING: &str = "GET /prefix/api/v2/torrents/info?filter=seeding&sort=upspeed&reverse=true&limit=10 HTTP/1.1";
+        let list = format!(
+            "[{},{},{}]",
+            torrent(1, "uploading"),
+            r#"{"name":"example-distro.iso","progress":0.625,"dlspeed":2097152,"upspeed":0,"eta":360,"state":"downloading","size":5368709120,"hash":"a"}"#,
+            r#"{"name":"broken.tar","progress":0.1,"dlspeed":0,"upspeed":0,"eta":8640000,"state":"missingFiles","size":1024,"hash":"b"}"#,
+        );
+        let options = |filter: &str| {
+            json!({ "filter": filter, "refresh": 60 })
+                .as_object()
+                .unwrap()
+                .clone()
+        };
+        exercise(
+            &QBITTORRENT,
+            &[(USERNAME, "fake-user"), (PASSWORD, "fake-password")],
+            Values::new(),
+            &[
+                Exchange { request: LOGIN, status: 200, body: "Ok." },
+                Exchange { request: LIST, status: 200, body: &list },
+                Exchange { request: SEEDING, status: 200, body: "[]" },
+                Exchange { request: LIST, status: 200, body: r#"{"not":"a list"}"# },
+                Exchange { request: LIST, status: 403, body: "" },
+                Exchange { request: LOGIN, status: 200, body: "Fails." },
+            ],
+            |index, wire| match index {
+                0 => "Set-Cookie: SID=fake-sid; Path=/\r\n",
+                5 => "",
+                _ => {
+                    assert_header(wire, "cookie: SID=fake-sid", "fake-sid");
+                    assert!(!wire.contains("fake-password") && !wire.contains("fake-user"));
+                    ""
+                }
+            },
+            async |conn| {
+                let widget = &QBITTORRENT.widgets[1];
+                let body = super::super::fetch(conn, widget, &options("active")).await.unwrap();
+                let body = serde_json::to_value(body).unwrap();
+                assert_eq!(body["kind"], "rows");
+                assert_eq!(body["rows"][0], json!({
+                    "title": "debian-1.iso é", "secondary": "Seeding · 1000 MiB",
+                    "value": "↑ 2.0 KiB/s", "status": "up", "progress": 100,
+                }));
+                assert_eq!(body["rows"][1], json!({
+                    "title": "example-distro.iso", "secondary": "Downloading · 5.0 GiB · 6m left",
+                    "value": "↓ 2.0 MiB/s", "status": "up", "progress": 62,
+                }));
+                assert_eq!(body["rows"][2]["status"], "down");
+                assert_eq!(body["rows"][2]["secondary"], "Missing files · 1.0 KiB");
+                let empty = super::super::fetch(conn, widget, &options("seeding")).await.unwrap();
+                assert_eq!(serde_json::to_value(empty).unwrap()["message"], "No torrents to show.");
+                let fault = super::super::fetch(conn, widget, &options("active")).await.unwrap_err();
+                assert!(matches!(fault.class, Class::Protocol));
+                let fault = super::super::fetch(conn, widget, &options("active")).await.unwrap_err();
+                assert!(matches!(fault.class, Class::Auth));
+            },
+        )
+        .await;
+    }
 
     /// One torrent as `torrents/info` and `sync/maindata` describe it (about 1 KB).
     fn torrent(index: usize, state: &str) -> String {
@@ -378,7 +601,7 @@ mod tests {
                     super::super::fetch(conn, &QBITTORRENT.widgets[0], &Values::new()).await
                 };
                 assert_eq!(
-                    serde_json::to_value(fetch().await.unwrap()).unwrap()["rows"],
+                    tiles(fetch().await.unwrap()),
                     json!([
                         ["Download", "1.0 KiB/s"],
                         ["Upload", "0 B/s"],
@@ -446,7 +669,7 @@ mod tests {
         }, async |conn| {
             conn.run((QBITTORRENT.test)(conn)).await.unwrap();
             let body = super::super::fetch(conn, &QBITTORRENT.widgets[0], &Values::new()).await.unwrap();
-            assert_eq!(serde_json::to_value(body).unwrap()["rows"], json!([
+            assert_eq!(tiles(body), json!([
                 ["Download", "1.0 MiB/s"], ["Upload", "1.0 KiB/s"], ["Active", "1"],
                 ["Seeding", "2"], ["Queued", "2"], ["Free space", "2.0 GiB"],
             ]));
