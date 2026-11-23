@@ -47,11 +47,11 @@ pub const PI_HOLE: Provider = Provider {
         Widget {
             id: "dns",
             name: "DNS activity",
-            description: "Show queries, blocked queries, percentage blocked, and blocking status.",
+            description: "Queries and blocked queries today, the share blocked, blocking status and a 24-hour query trend (v6).",
             recommended: true,
             default_size: size(4, 2),
             min_size: size(3, 2),
-            sample: r#"{"kind":"stat_grid","rows":[["Queries","48,213"],["Blocked","9,874"],["Blocked %","20.5%"],["Blocking","Enabled"]]}"#,
+            sample: r#"{"kind":"tiles","tiles":[{"label":"Queries","value":"48,213","glyph":"activity","series":[1620,1480,1310,1102,980,940,1210,1890,2410,2660,2580,2490,2350,2440,2610,2720,2800,2950,3120,2980,2710,2390,2040,1830]},{"label":"Blocked","value":"9,874","glyph":"shield"},{"label":"Blocked share","value":"20.5%","glyph":"shield"},{"label":"Blocking","value":"Enabled","glyph":"check","tone":"up"}]}"#,
             fields: &[REFRESH],
             validate: |_| Ok(()),
             fetch,
@@ -59,11 +59,11 @@ pub const PI_HOLE: Provider = Provider {
         Widget {
             id: "top_domains",
             name: "Top domains",
-            description: "The ten most queried domains, or the ten most blocked.",
+            description: "The ten most queried domains with their query counts, or the ten most blocked.",
             recommended: false,
             default_size: size(4, 4),
             min_size: size(3, 3),
-            sample: r#"{"kind":"table","headings":["Domain","Queries"],"rows":[["api.example.com","4210"],["cdn.example.net","2984"],["time.example.org","1502"]]}"#,
+            sample: r#"{"kind":"rows","rows":[{"title":"api.example.com","value":"4,210","progress":100},{"title":"cdn.example.net","value":"2,984","progress":70},{"title":"time.example.org","value":"1,502","progress":35},{"title":"mail.example.com","value":"880","progress":20}]}"#,
             fields: &[
                 Field {
                     default: Some("false"),
@@ -75,13 +75,25 @@ pub const PI_HOLE: Provider = Provider {
             fetch: top_domains,
         },
         Widget {
-            id: "top_clients",
-            name: "Top clients",
-            description: "The ten clients that sent the most queries.",
+            id: "top_blocked",
+            name: "Top blocked domains",
+            description: "The ten domains Pi-hole blocked most often.",
             recommended: false,
             default_size: size(4, 4),
             min_size: size(3, 3),
-            sample: r#"{"kind":"table","headings":["Client","Queries"],"rows":[["laptop (192.0.2.10)","12840"],["tv (192.0.2.21)","8211"],["phone (192.0.2.33)","4002"]]}"#,
+            sample: r#"{"kind":"rows","rows":[{"title":"ads.example.net","value":"8,516","progress":100,"status":"down"},{"title":"tracker.example.com","value":"3,120","progress":36,"status":"down"},{"title":"metrics.example.org","value":"1,044","progress":12,"status":"down"}]}"#,
+            fields: &[REFRESH],
+            validate: |_| Ok(()),
+            fetch: top_blocked,
+        },
+        Widget {
+            id: "top_clients",
+            name: "Top clients",
+            description: "The ten clients that sent the most queries, with their addresses.",
+            recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"rows","rows":[{"title":"laptop","secondary":"192.0.2.10","value":"12,840","progress":100},{"title":"tv","secondary":"192.0.2.21","value":"8,211","progress":63},{"title":"192.0.2.33","value":"4,002","progress":31}]}"#,
             fields: &[REFRESH],
             validate: |_| Ok(()),
             fetch: top_clients,
@@ -109,6 +121,10 @@ fn fetch<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, widgets::StructuredBo
 fn top_domains<'a>(conn: &'a Conn<'_>, options: &'a Values) -> Job<'a, widgets::StructuredBody> {
     let blocked = options.get("blocked").and_then(Value::as_bool) == Some(true);
     Box::pin(async move { activity(conn, Report::Domains { blocked }).await })
+}
+
+fn top_blocked<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, widgets::StructuredBody> {
+    Box::pin(async { activity(conn, Report::Domains { blocked: true }).await })
 }
 
 fn top_clients<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, widgets::StructuredBody> {
@@ -169,10 +185,10 @@ async fn v6(
     let auth = session.map(|sid| [Auth::Header("x-ftl-sid", Input::Session(sid))]);
     let auth = auth.as_ref().map_or(&[][..], |auth| &auth[..]);
     let count = TOP_COUNT.to_string();
-    let (path, list, name, blocked) = match report {
+    let (path, list, blocked) = match report {
         Report::Summary => return v6_summary(conn, auth).await,
-        Report::Domains { blocked } => ("/api/stats/top_domains", "domains", "Domain", blocked),
-        Report::Clients => ("/api/stats/top_clients", "clients", "Client", false),
+        Report::Domains { blocked } => ("/api/stats/top_domains", "domains", blocked),
+        Report::Clients => ("/api/stats/top_clients", "clients", false),
     };
     let query = [
         ("count", Input::Text(&count)),
@@ -188,38 +204,77 @@ async fn v6(
     )
     .await?;
     let entries = data[list].as_array().ok_or(Class::Protocol)?;
-    let redactor = conn.output_redactor();
     let mut rows = Vec::with_capacity(entries.len().min(TOP_COUNT));
     for entry in entries.iter().take(TOP_COUNT) {
-        let label = if let Report::Clients = report {
+        let count = entry["count"].as_u64().ok_or(Class::Protocol)?;
+        rows.push(if let Report::Clients = report {
             let ip = entry["ip"].as_str().ok_or(Class::Protocol)?;
             match entry["name"].as_str().filter(|name| !name.is_empty()) {
-                // Joining can reshape a secret; check the parts first.
-                Some(name) => redactor.transformed(&[name, ip], format!("{name} ({ip})")),
-                None => ip.into(),
+                Some(name) => Ranked::new(name, Some(ip), count),
+                None => Ranked::new(ip, None, count),
             }
         } else {
-            entry["domain"].as_str().ok_or(Class::Protocol)?.into()
-        };
-        rows.push((label, entry["count"].as_u64().ok_or(Class::Protocol)?));
+            Ranked::new(
+                entry["domain"].as_str().ok_or(Class::Protocol)?,
+                None,
+                count,
+            )
+        });
     }
-    Ok(table(conn, name, rows))
+    Ok(ranked(conn, rows, blocked))
 }
 
-/// A ranked name and count table, most queries first.
-fn table(conn: &Conn<'_>, name: &str, rows: Vec<(String, u64)>) -> widgets::StructuredBody {
+/// One ranked entry: a domain or client, its address and its query count.
+struct Ranked {
+    title: String,
+    secondary: Option<String>,
+    count: u64,
+}
+
+impl Ranked {
+    fn new(title: &str, secondary: Option<&str>, count: u64) -> Self {
+        Self {
+            title: title.into(),
+            secondary: secondary.map(Into::into),
+            count,
+        }
+    }
+}
+
+/// Ranked rows, most queries first, each bar relative to the top entry.
+fn ranked(conn: &Conn<'_>, rows: Vec<Ranked>, blocked: bool) -> widgets::StructuredBody {
     if rows.is_empty() {
-        return widgets::StructuredBody::Stat {
-            value: "No queries recorded".into(),
+        return widgets::StructuredBody::Unavailable {
+            message: "No queries recorded".into(),
         };
     }
-    widgets::StructuredBody::Table {
-        headings: vec![name.into(), "Queries".into()],
+    let top = rows.iter().map(|row| row.count).max().unwrap_or(0).max(1);
+    widgets::StructuredBody::Rows {
         rows: rows
             .into_iter()
-            .map(|(label, count)| vec![display_text(conn, label), count.to_string()])
+            .map(|row| widgets::BodyRow {
+                title: display_text(conn, row.title),
+                secondary: row.secondary.map(|text| display_text(conn, text)),
+                value: Some(grouped(row.count)),
+                progress: Some((row.count.saturating_mul(100) / top).min(100) as u8),
+                status: blocked.then_some(widgets::Health::Down),
+                ..Default::default()
+            })
             .collect(),
     }
+}
+
+/// 48213 → "48,213".
+pub(super) fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 async fn v6_summary(conn: &Conn<'_>, auth: &[Auth<'_>]) -> Result<widgets::StructuredBody, Fault> {
@@ -239,6 +294,22 @@ async fn v6_summary(conn: &Conn<'_>, auth: &[Auth<'_>]) -> Result<widgets::Struc
         },
     )
     .await?;
+    // The 24-hour graph is optional: an older build may lack it, or it may
+    // exceed the response budget. The counters show either way.
+    let history = match conn
+        .request(Step {
+            auth,
+            ..Step::get("/api/history")
+        })
+        .await
+    {
+        Ok(response) => parse_optional::<History>(response),
+        Err(fault) => Err(fault),
+    };
+    let series = within_response_limit(history)?
+        .flatten()
+        .map(hourly)
+        .unwrap_or_default();
     let queries = &summary["queries"];
     stats(
         "Queries",
@@ -246,16 +317,46 @@ async fn v6_summary(conn: &Conn<'_>, auth: &[Auth<'_>]) -> Result<widgets::Struc
         &queries["blocked"],
         &queries["percent_blocked"],
         &status["blocking"],
+        series,
     )
+}
+
+#[derive(Deserialize)]
+struct History {
+    history: Vec<Slot>,
+}
+
+#[derive(Deserialize)]
+struct Slot {
+    timestamp: f64,
+    total: u64,
+}
+
+/// Sum FTL's 10-minute slots into hourly totals, the newest 24.
+fn hourly(history: History) -> Vec<f32> {
+    let mut hours: Vec<(i64, u64)> = Vec::new();
+    for slot in history.history {
+        let hour = (slot.timestamp / 3600.0).floor() as i64;
+        match hours.last_mut() {
+            Some((last, total)) if *last == hour => *total += slot.total,
+            _ => hours.push((hour, slot.total)),
+        }
+    }
+    let skip = hours.len().saturating_sub(24);
+    hours
+        .into_iter()
+        .skip(skip)
+        .map(|(_, n)| n as f32)
+        .collect()
 }
 
 async fn v5(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, Fault> {
     let count = TOP_COUNT.to_string();
-    let (request, key, name) = match report {
-        Report::Summary => ("summaryRaw", "", ""),
-        Report::Domains { blocked: false } => ("topItems", "top_queries", "Domain"),
-        Report::Domains { blocked: true } => ("topItems", "top_ads", "Domain"),
-        Report::Clients => ("getQuerySources", "top_sources", "Client"),
+    let (request, key) = match report {
+        Report::Summary => ("summaryRaw", ""),
+        Report::Domains { blocked: false } => ("topItems", "top_queries"),
+        Report::Domains { blocked: true } => ("topItems", "top_ads"),
+        Report::Clients => ("getQuerySources", "top_sources"),
     };
     let value = if key.is_empty() { "" } else { count.as_str() };
     let query = [
@@ -288,17 +389,18 @@ async fn v5(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, 
             .ok_or(Class::Protocol)?
             .iter()
             .map(|(label, count)| {
+                let count = count.as_u64().ok_or(Class::Protocol)?;
                 // Splitting at '|' can reshape a secret; check the raw key.
-                let label = match label.split_once('|') {
-                    Some((name, ip)) => redactor.transformed(&[label], format!("{name} ({ip})")),
-                    None => label.clone(),
-                };
-                Ok((label, count.as_u64().ok_or(Class::Protocol)?))
+                Ok(match label.split_once('|') {
+                    _ if redactor.matches(label) => Ranked::new(redaction::MARKER, None, count),
+                    Some((name, ip)) => Ranked::new(name, Some(ip), count),
+                    None => Ranked::new(label, None, count),
+                })
             })
             .collect::<Result<Vec<_>, Fault>>()?;
-        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.title.cmp(&b.title)));
         rows.truncate(TOP_COUNT);
-        return Ok(table(conn, name, rows));
+        return Ok(ranked(conn, rows, key == "top_ads"));
     }
     stats(
         "Queries today",
@@ -306,6 +408,7 @@ async fn v5(conn: &Conn<'_>, report: Report) -> Result<widgets::StructuredBody, 
         &data["ads_blocked_today"],
         &data["ads_percentage_today"],
         &data["status"],
+        Vec::new(),
     )
 }
 
@@ -320,7 +423,9 @@ fn stats(
     blocked: &Value,
     percentage: &Value,
     status: &Value,
+    series: Vec<f32>,
 ) -> Result<widgets::StructuredBody, Fault> {
+    use widgets::{Glyph, Health, StatTile};
     let count = |value: &Value| {
         value
             .as_u64()
@@ -336,19 +441,33 @@ fn stats(
         .as_f64()
         .filter(|n| (0.0..=100.0).contains(n))
         .ok_or(Class::Protocol)?;
-    let status = match status.as_str() {
-        Some("enabled") => "Enabled",
-        Some("disabled") => "Disabled",
-        Some("failed") => "Failed",
-        Some("unknown") => "Unknown",
+    let (status, glyph, tone) = match status.as_str() {
+        Some("enabled") => ("Enabled", Glyph::Check, Health::Up),
+        Some("disabled") => ("Disabled", Glyph::Alert, Health::Warn),
+        Some("failed") => ("Failed", Glyph::Alert, Health::Down),
+        Some("unknown") => ("Unknown", Glyph::Alert, Health::Warn),
         _ => return Err(Class::Protocol.into()),
     };
-    Ok(widgets::StructuredBody::StatGrid {
-        rows: vec![
-            (label.into(), count(queries)?.to_string()),
-            ("Blocked".into(), count(blocked)?.to_string()),
-            ("Blocked percentage".into(), format!("{percentage:.1}%")),
-            ("Blocking".into(), status.into()),
+    let tile = |label: &str, value: String, glyph| StatTile {
+        label: label.into(),
+        value,
+        glyph: Some(glyph),
+        delta: None,
+        tone: None,
+        series: Vec::new(),
+    };
+    Ok(widgets::StructuredBody::Tiles {
+        tiles: vec![
+            StatTile {
+                series,
+                ..tile(label, grouped(count(queries)?), Glyph::Activity)
+            },
+            tile("Blocked", grouped(count(blocked)?), Glyph::Shield),
+            tile("Blocked share", format!("{percentage:.1}%"), Glyph::Shield),
+            StatTile {
+                tone: Some(tone),
+                ..tile("Blocking", status.into(), glyph)
+            },
         ],
     })
 }
@@ -360,6 +479,17 @@ mod tests {
     use crate::{config::HttpPolicy, http::client::BoundCredential};
     use std::sync::Arc;
     use tokio::{net::TcpListener, sync::Semaphore};
+
+    /// Each row's title and count, for ranking assertions.
+    fn titles(body: widgets::StructuredBody) -> Value {
+        let body = serde_json::to_value(body).unwrap();
+        body["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| serde_json::json!([row["title"], row["value"]]))
+            .collect()
+    }
 
     async fn request_activity(
         addr: std::net::SocketAddr,
@@ -497,17 +627,22 @@ mod tests {
                 assert!(wire.starts_with("GET /dns/api/dns/blocking HTTP/1.1"));
                 assert!(wire.contains("x-ftl-sid: second\r\n"));
                 respond(&mut socket, 200, "", r#"{"blocking":"enabled"}"#).await;
+                // Three 10-minute slots: two in one hour, one in the next.
+                let (mut socket, wire) = receive(&listener).await;
+                assert!(wire.starts_with("GET /dns/api/history HTTP/1.1"));
+                assert!(wire.contains("x-ftl-sid: second\r\n"));
+                respond(&mut socket, 200, "", r#"{"history":[{"timestamp":7200,"total":10,"cached":1,"blocked":2,"forwarded":7},{"timestamp":7800,"total":5,"cached":0,"blocked":1,"forwarded":4},{"timestamp":10800,"total":1200,"cached":0,"blocked":0,"forwarded":1200}],"took":0.001}"#).await;
             },
         )
         .await;
         assert_eq!(
-            serde_json::to_value(body).unwrap()["rows"],
-            serde_json::json!([
-                ["Queries", "42"],
-                ["Blocked", "21"],
-                ["Blocked percentage", "50.0%"],
-                ["Blocking", "Enabled"],
-            ])
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({"kind":"tiles","tiles":[
+                {"label":"Queries","value":"42","glyph":"activity","series":[15.0,1200.0]},
+                {"label":"Blocked","value":"21","glyph":"shield"},
+                {"label":"Blocked share","value":"50.0%","glyph":"shield"},
+                {"label":"Blocking","value":"Enabled","glyph":"check","tone":"up"},
+            ]})
         );
     }
 
@@ -521,13 +656,13 @@ mod tests {
             respond(&mut socket, 200, "", r#"{"dns_queries_today":100.0,"ads_blocked_today":15,"ads_percentage_today":15.0,"status":"disabled"}"#).await;
         }).await;
         assert_eq!(
-            serde_json::to_value(body).unwrap()["rows"],
-            serde_json::json!([
-                ["Queries today", "100"],
-                ["Blocked", "15"],
-                ["Blocked percentage", "15.0%"],
-                ["Blocking", "Disabled"],
-            ])
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({"kind":"tiles","tiles":[
+                {"label":"Queries today","value":"100","glyph":"activity"},
+                {"label":"Blocked","value":"15","glyph":"shield"},
+                {"label":"Blocked share","value":"15.0%","glyph":"shield"},
+                {"label":"Blocking","value":"Disabled","glyph":"alert","tone":"warn"},
+            ]})
         );
     }
 
@@ -555,7 +690,10 @@ mod tests {
         }).await;
         assert_eq!(
             serde_json::to_value(body).unwrap(),
-            serde_json::json!({"kind":"table","headings":["Domain","Queries"],"rows":[["doubleclick.net","8516"],["ads.example","12"]]})
+            serde_json::json!({"kind":"rows","rows":[
+                {"title":"doubleclick.net","value":"8,516","progress":100,"status":"down"},
+                {"title":"ads.example","value":"12","progress":0,"status":"down"},
+            ]})
         );
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -568,13 +706,16 @@ mod tests {
             respond(&mut socket, 200, "", &serde_json::json!({"clients":clients,"total_queries":29160,"blocked_queries":6379,"took":0.001}).to_string()).await;
         }).await;
         let body = serde_json::to_value(body).unwrap();
-        assert_eq!(body["headings"], serde_json::json!(["Client", "Queries"]));
+        assert_eq!(body["kind"], "rows");
         assert_eq!(body["rows"].as_array().unwrap().len(), TOP_COUNT);
         assert_eq!(
             body["rows"][0],
-            serde_json::json!(["raspberrypi.lan (192.168.0.0)", "100"])
+            serde_json::json!({"title":"raspberrypi.lan","secondary":"192.168.0.0","value":"100","progress":100})
         );
-        assert_eq!(body["rows"][1], serde_json::json!(["192.168.0.1", "99"]));
+        assert_eq!(
+            body["rows"][1],
+            serde_json::json!({"title":"192.168.0.1","value":"99","progress":99})
+        );
     }
 
     #[tokio::test]
@@ -587,7 +728,7 @@ mod tests {
             respond(&mut socket, 200, "", r#"{"top_queries":{"a.example":3,"z.example":40,"m.example":40},"top_ads":{"ads.example":9}}"#).await;
         }).await;
         assert_eq!(
-            serde_json::to_value(body).unwrap()["rows"],
+            titles(body),
             serde_json::json!([["m.example", "40"], ["z.example", "40"], ["a.example", "3"]])
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -614,7 +755,10 @@ mod tests {
         .await;
         assert_eq!(
             serde_json::to_value(body).unwrap()["rows"],
-            serde_json::json!([["laptop.lan (192.168.0.9)", "70"], ["192.168.0.4", "5"]])
+            serde_json::json!([
+                {"title":"laptop.lan","secondary":"192.168.0.9","value":"70","progress":100},
+                {"title":"192.168.0.4","value":"5","progress":7},
+            ])
         );
     }
 
@@ -642,8 +786,8 @@ mod tests {
         )
         .await;
         assert_eq!(
-            serde_json::to_value(body).unwrap()["rows"],
-            serde_json::json!([["<redacted>", "9"], ["laptop.lan (192.168.0.9)", "7"]])
+            titles(body),
+            serde_json::json!([["<redacted>", "9"], ["laptop.lan", "7"]])
         );
         // v6: name and ip are joined; a name echoing the session is withheld whole.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -655,8 +799,8 @@ mod tests {
             respond(&mut socket, 200, "", r#"{"clients":[{"ip":"192.168.0.2","name":"echoed-sid-1","count":3},{"ip":"192.168.0.3","name":"tv.lan","count":1}]}"#).await;
         }).await;
         assert_eq!(
-            serde_json::to_value(body).unwrap()["rows"],
-            serde_json::json!([["<redacted>", "3"], ["tv.lan (192.168.0.3)", "1"]])
+            titles(body),
+            serde_json::json!([["<redacted>", "3"], ["tv.lan", "1"]])
         );
     }
 
