@@ -70,3 +70,14 @@ test("fresh suggestions skip taken targets and repeat identities, keeping order"
   assert.equal(new Set(keys).size, keys.length);
   assert.deepEqual(freshSuggestions([], []), []);
 });
+
+test("tile sizes map saved spans to grid columns and rows", async () => {
+  const { tileCols, tileSize, stepSize, TILE_SIZES } = await import("./document.ts");
+  assert.equal(tileCols({ mobile: 4, tablet: 4, desktop: 4, rows: 1 }), 1);
+  assert.equal(tileCols({ mobile: 4, tablet: 8, desktop: 6, rows: 1 }), 2);
+  assert.equal(tileCols({ mobile: 4, tablet: 8, desktop: 12, rows: 1 }), 3);
+  for (const [name, { spans }] of Object.entries(TILE_SIZES)) assert.equal(tileSize(spans), name);
+  assert.deepEqual(stepSize(TILE_SIZES.small.spans, "ArrowRight"), TILE_SIZES.wide.spans);
+  assert.deepEqual(stepSize(TILE_SIZES.small.spans, "ArrowDown"), TILE_SIZES.tall.spans);
+  assert.deepEqual(stepSize(TILE_SIZES.small.spans, "ArrowLeft"), TILE_SIZES.small.spans);
+});

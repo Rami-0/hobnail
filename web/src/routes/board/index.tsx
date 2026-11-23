@@ -1,5 +1,6 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
-import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { LayoutGridIcon, PencilIcon, PlugIcon, PlusIcon } from "lucide-react";
 import { reduceDocument } from "../../boards/document.ts";
 import { tourBoard } from "../../boards/tour.ts";
 import { api, useSession } from "../../api/session.ts";
@@ -7,45 +8,32 @@ import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardDraft } from "../../api/gen/BoardDraft.ts";
 import { Dialog } from "../../ui/Dialog.tsx";
 import type { BoardView } from "../../api/gen/BoardView.ts";
-import type { BoardItem } from "../../api/gen/BoardItem.ts";
-import { IntegrationStatus } from "../../ui/IntegrationStatus.tsx";
-import { WidgetContent } from "../../ui/WidgetContent.tsx";
 import type { WidgetView } from "../../api/gen/WidgetView.ts";
-import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
 import { useBootstrap, useContainers, onConfigChange, watchBoards, watchReadTopic } from "../../live/index.ts";
-import { useRoute, containerHref, navigate } from "../../app/router.ts";
+import { useRoute } from "../../app/router.ts";
 import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState, Note } from "../../ui/Note.tsx";
 import { LoadBoundary } from "../../ui/LoadBoundary.tsx";
 import { NotFound } from "../NotFound.tsx";
+import { Tile, cellStyle } from "./Tile.tsx";
+import type { Provider } from "../../api/gen/Provider.ts";
+import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import "./board.css";
 
 const Tour = lazy(() => import("./Tour.tsx"));
 const Editor = lazy(() => import("./Editor.tsx"));
+const ProviderDialog = lazy(() => import("../settings/ProviderDialog.tsx"));
 
-export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedItem }) {
-  const b = useBootstrap();
-  const live = useContainers();
-  const p = item.payload;
-  const matched = resolved?.container;
-  const container = matched ? live.data ? live.data.groups.flatMap((g) => g.containers).find((c) => c.name === matched.name) ?? null : matched : null;
-  const targetMissing = resolved?.missing || (p.kind === "container" && !!matched && !!live.data && !container);
-  const integration = resolved?.integration;
-  const widget = resolved?.widget;
-  const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? p.title ?? widget?.title ?? p.widget_id : p.title ?? integration?.name ?? "Integration";
-  const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : p.kind === "widget" ? widget?.icon : integration?.admin?.icon;
-  const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? (container ? containerHref(container.name) : null) : p.kind === "widget" ? widget?.link : (integration?.admin?.base_url ?? integration?.origin);
-  return <div className="board-tile" data-testid="board-tile" data-missing={targetMissing || undefined}>
-    <div className="board-tile-head"><ServiceIcon className="board-avatar" name={icon} title={title} enabled={b?.remote_icons ?? false} />
-      <h3>{href ? <a href={href}>{title}</a> : title}</h3></div>
-    {targetMissing ? <p className="bad-fg">Missing — this target is no longer available.</p> :
-      p.kind === "container" ? <p><span className={`dot ${container?.dot ?? "off"}`} /> {container?.label ?? "Status unavailable"}</p> :
-      p.kind === "link" ? <p className="muted">Saved link · {p.url}</p> :
-      p.kind === "integration" ? <><p className="muted">{(integration?.admin?.base_url ?? integration?.origin)}</p><IntegrationStatus integration={integration} /></> :
-      widget ? <WidgetContent widget={widget} remoteIcons={b?.remote_icons} /> : <p>Waiting for widget data…</p>}
-  </div>;
+/** "6 running · 1 stopped" for a section's containers. */
+function sectionSummary(view: BoardView, ids: (string | null | undefined)[]): string {
+  const rows = ids.map((id) => view.resolved.find((r) => r.id === id)?.container).filter((c) => !!c);
+  if (!rows.length) return "";
+  const up = rows.filter((c) => c.state === "running").length;
+  return up === rows.length ? `${up} running` : `${up} running · ${rows.length - up} stopped`;
 }
+
+export { Tile } from "./Tile.tsx";
 export default function BoardPage() {
   const { route, search, setSearch } = useRoute();
   const { session } = useSession();
@@ -64,6 +52,12 @@ export default function BoardPage() {
   const [widgetUpdates, setWidgetUpdates] = useState<Record<string, WidgetView>>({});
   const [error, setError] = useState("");
   const [missing, setMissing] = useState(false);
+  const [catalog, setCatalog] = useState<{ providers: Provider[]; internet: boolean } | null>(null);
+  async function openCatalog() {
+    const [providers, settings] = await Promise.all([api.get<Provider[]>("/api/v1/providers"), api.get<DashboardSettings>("/api/v1/settings")]);
+    if (providers.kind !== "ok") { setError(providers.message); return; }
+    setCatalog({ providers: providers.data, internet: settings.kind === "ok" && settings.data.provider_internet });
+  }
   const load = useCallback(async () => {
     const result = await api.get<BoardView>(`/api/v1/boards/${id}`);
     if (result.kind === "ok") { setView(result.data); setWidgetUpdates({}); setError(""); }
@@ -105,15 +99,19 @@ export default function BoardPage() {
       setChanged(false);
     }
   }
+  const itemCount = view?.document.sections.reduce((n, section) => n + section.items.length, 0) ?? 0;
   if (missing) return <NotFound path={`/app/boards/${id}`} />;
   if (!view) return <div className="page">{error || "Loading board…"}</div>;
   if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board">
-    <PageHeader title={view.board.name} icon={<ServiceIcon name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
-      actions={admin && <>
-        {!b?.scoped && <Button onClick={() => navigate(`/app/settings/integrations?board=${id}`)}>Add integration</Button>}
-        <Button variant="default" data-testid="board-edit" onClick={() => void openEditor()}>Edit board</Button>
-      </>} />
+    <PageHeader title={view.board.name} icon={<ServiceIcon tint name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
+      description={itemCount > 0 && <p className="muted">{itemCount} {itemCount === 1 ? "tile" : "tiles"} in {view.document.sections.length} {view.document.sections.length === 1 ? "section" : "sections"}</p>}
+      actions={admin && <div className="page-actions board-actions">
+        {!b?.scoped && <Button data-testid="board-add-integration" icon={<PlugIcon aria-hidden="true" />} onClick={() => void openCatalog()}>Add integration</Button>}
+        <Button variant="default" data-testid="board-edit" icon={<PencilIcon aria-hidden="true" />} onClick={() => void openEditor()}>Edit board</Button>
+      </div>} />
+    {catalog && <Suspense fallback={null}><ProviderDialog providers={catalog.providers} item={null} preferredBoard={id} icons={!!b?.remote_icons} internet={catalog.internet}
+      onClose={() => setCatalog(null)} onSaved={() => { setCatalog(null); void load(); }} /></Suspense>}
     <Dialog open={!!draft} title="Resume your board draft?" onClose={() => setDraft(null)} testId="board-draft" footer={<><Button data-testid="draft-discard" onClick={async () => { const result = await api.request("DELETE", `/api/v1/boards/${id}/draft`); if (result.kind === "ok") setDraft(null); else setError(result.message); }}>Discard draft</Button><Button data-testid="draft-resume" variant="default" onClick={() => { if (draft) { setPicker(undefined); setEditing(draft.document); } setDraft(null); }}>Resume draft</Button></>}><p>An unfinished edit is saved for your account. Resume it or discard it.</p></Dialog>
     {!draft && (tourReplay || (!tourClosed && session?.board_tour_pending && tourBoard(b) === id)) &&
       // A missing tour chunk leaves the board as it is.
@@ -122,18 +120,20 @@ export default function BoardPage() {
         if (tourReplay) setSearch({ tour: null }, { replace: true });
       }} /></LoadBoundary>}
     {error && <Note kind="bad">{error}</Note>}
-    {view.document.sections.length === 0 ? <EmptyState icon={<span>◇</span>} title="This board is empty" testId="board-empty"
+    {view.document.sections.length === 0 ? <div className="board-empty-card"><EmptyState icon={<LayoutGridIcon aria-hidden="true" />} title={admin ? "Add your first service" : "This board is empty"} testId="board-empty"
       actions={admin && <>
-        <Button data-testid="board-empty-add" onClick={() => void openEditor("add")}>Add</Button>
-        <Button data-testid="board-empty-discover" onClick={() => void openEditor("discover")}>Discover</Button>
+        <Button variant="default" data-testid="board-empty-add" icon={<PlusIcon aria-hidden="true" />} onClick={() => void openEditor("add")}>Add a service</Button>
+        <Button data-testid="board-empty-discover" onClick={() => void openEditor("discover")}>Browse containers</Button>
+        {!b?.scoped && <Button variant="ghost" icon={<PlugIcon aria-hidden="true" />} onClick={() => void openCatalog()}>Connect an integration</Button>}
       </>}>
-      {admin ? "Add a link or browse available services." : "No sections or items have been added to this board yet."}
-    </EmptyState> : view.document.sections.map((section) => <section key={section.id} className="board-section">
-      <h2>{section.title}</h2><div className="board-grid">{section.items.map((item) => {
+      {admin ? "Pin containers, links and live widgets here. Pick from what Hobnail already found, or connect a service like Pi-hole." : "No sections or items have been added to this board yet."}
+    </EmptyState></div> : view.document.sections.map((section) => <section key={section.id} className="board-section">
+      <header className="board-section-head"><h2>{section.title}</h2><span className="section-count" aria-label={`${section.items.length} items`}>{section.items.length}</span>
+        <span className="section-summary">{sectionSummary(view, section.items.map((item) => item.id))}</span></header>
+      <div className="board-grid">{section.items.map((item) => {
         const resolved = view.resolved.find((r) => r.id === item.id);
         const update = resolved?.widget ? widgetUpdates[resolved.widget.id] : null;
-        return <div key={item.id} className="board-cell"
-        style={{ "--mobile": item.spans.mobile, "--tablet": item.spans.tablet, "--desktop": item.spans.desktop, "--rows": item.spans.rows } as CSSProperties}>
+        return <div key={item.id} className="board-cell" style={cellStyle(item)}>
         <Tile item={item} resolved={resolved && update ? { ...resolved, widget: update } : resolved} />
       </div>; })}</div>
     </section>)}

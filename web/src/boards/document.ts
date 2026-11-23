@@ -144,3 +144,28 @@ export function payloadIdentity(payload: BoardPayload): string {
     case "integration": return `integration:${payload.integration_id}`;
   }
 }
+
+/** Board tiles sit in an auto-fill grid; the saved spans pick a size.
+ * The desktop span picks the columns (up to 4 of 12: one, up to 8: two,
+ * else three) and `rows` the height, so older boards keep their intent. */
+export type TileSize = "small" | "wide" | "tall" | "large";
+export const TILE_SIZES: Record<TileSize, { label: string; spans: GridSpans }> = {
+  small: { label: "Small", spans: { mobile: 4, tablet: 4, desktop: 4, rows: 1 } },
+  wide: { label: "Wide", spans: { mobile: 4, tablet: 8, desktop: 8, rows: 1 } },
+  tall: { label: "Tall", spans: { mobile: 4, tablet: 4, desktop: 4, rows: 2 } },
+  large: { label: "Large", spans: { mobile: 4, tablet: 8, desktop: 8, rows: 2 } },
+};
+export function tileCols(spans: GridSpans): 1 | 2 | 3 { return spans.desktop <= 4 ? 1 : spans.desktop <= 8 ? 2 : 3; }
+export function tileRows(spans: GridSpans): number { return Math.min(4, Math.max(1, spans.rows)); }
+export function tileSize(spans: GridSpans): TileSize {
+  const wide = tileCols(spans) > 1; const tall = tileRows(spans) > 1;
+  return wide ? tall ? "large" : "wide" : tall ? "tall" : "small";
+}
+/** One keyboard step: columns with Left/Right, rows with Up/Down. */
+export function stepSize(spans: GridSpans, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"): GridSpans {
+  const cols = tileCols(spans); const rows = tileRows(spans);
+  const nextCols = key === "ArrowLeft" ? Math.max(1, cols - 1) : key === "ArrowRight" ? Math.min(3, cols + 1) : cols;
+  const nextRows = key === "ArrowUp" ? Math.max(1, rows - 1) : key === "ArrowDown" ? Math.min(4, rows + 1) : rows;
+  const desktop = nextCols * 4;
+  return { mobile: 4, tablet: Math.min(8, desktop), desktop, rows: nextRows };
+}
