@@ -1,0 +1,12 @@
+app 172.17.0.5 pid 3651374 asset /assets/index-82zXNFp6.js
+== mixed-5ip
+| phase | memory.current median / max MiB | app fds median / max | client requests / errors / events | latency p50 / p95 / p99 ms | attackers |
+|---|---|---|---|---|---|
+| idle | 1.63 / 2.46 | 14 / 15 | - | - | - |
+| mixed-5ip | 5.78 / 6.05 | 30 / 37 | 4190 / 4 / 541 | 1.6 / 11.8 / 35.5 | headerx1: 2135 conns, 2085 closed by server (2048 503, 0 408), held median [0.0] s; bodyx1: 816 conns, 770 closed by server (742 503, 24 408), held median [0.0] s; noreadx1: 60 conns, 0 closed by server (0 503, 0 408), held median [None] s; pipe401x2: 204 conns, 175 closed by server (0 503, 0 408), held median [5.2, 5.4] s |
+  - mixed-5ip: /api/v1/containers 503
+  - mixed-5ip: /api/v1/containers 503
+  - mixed-5ip: /app TimeoutError: timed out
+  - mixed-5ip: /assets/76CrD2VX.js 503
+| mixed-5ip-after | 2.95 / 3.27 | 14 / 15 | - | - | - |
+memory.peak 16367616 (15.61 MiB)

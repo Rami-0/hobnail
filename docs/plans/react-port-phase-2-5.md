@@ -284,8 +284,14 @@ passed. Rust formatting, all-target Clippy with warnings denied, and 500 Rust
 tests passed. The repository Dockerfile also completed the release build. The
 separate unpacked image size gate reported the miss above.
 
-**Raw evidence.** All directories are below
-`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5-mem/`.
+**Raw evidence.** The run directories named below were in session scratch
+storage, which is not retained. Small samples were copied to
+[react-port-raw/finish-m5-mem/](react-port-raw/finish-m5-mem/): the summaries,
+metadata and samples of `final-unlimited`, `final-hard`, `final-hard-fresh`
+and `final-cold-db`, and the history A/B summary. Everything else named here
+(the request logs, `bench.py` as used in M5, the auth, baseline, browser and
+maintenance runs) is not retained; the M7 copy of `bench.py` is in
+[react-port-raw/finish-m7/](react-port-raw/finish-m7/). The original layout was:
 `disk/` points to disk-backed scratch after the tmpfs quota interruption. The
 release runs are `disk/final-unlimited/` and `disk/final-hard/`, with
 `samples.jsonl`, `meta.jsonl`, `requests.jsonl`, `sse.jsonl` and `fixture.jsonl`.
@@ -674,9 +680,11 @@ target to keep its fixture setup. They visit fewer preceding routes, so the
 fixture history can be younger. Readiness selectors for the other routes,
 throttling, update counts and thresholds were preserved.
 
-Raw `perf.json`, `perf.md`, `logs/results.json`, host pressure samples, build
-sizes and test output are under
-`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5b/`.
+The `perf.md` tables and `logs/results.json` of the `baseline`, `startup`,
+`batches` and `final` builds, and the report sources, are in
+[react-port-raw/finish-m5b/](react-port-raw/finish-m5b/). The `perf.json`
+files, host pressure samples, build logs and replays were in session scratch
+storage and are not retained.
 The directories `baseline`, `startup`, `batches` and `final` identify the
 builds. `ready-replay*` supplies the corrected Overview and Host runs.
 The later baseline timings and the baseline log sweep overlapped compilation.
@@ -797,9 +805,10 @@ windows and input scripts stayed the same. All 32 visits reached readiness.
 One fresh four-profile Logs sweep followed. Compilation and automated tests
 finished before measuring. Host CPU pressure averaged 9.56% over the minute
 before sweep one and 3.05% before sweep two, so some run-to-run variance
-remains. Raw browser results, build sizes and host pressure
-are in
-`/tmp/claude-1000/-home-dev-projects-rust-homepage/c3c8671c-4fd5-4601-90a5-2f27d491fe9d/scratchpad/m5b2/`.
+remains. The `perf.md` tables of the `entry`,
+`routes-safe` and `final` sweeps, the final log results and the pass report
+are in [react-port-raw/finish-m5b2/](react-port-raw/finish-m5b2/); the raw
+`perf.json` files, build sizes and host pressure were not retained.
 The directories `entry`, `routes-safe` and `final` contain the timed sweeps.
 
 LCP across routes is the median and worst of each sweep's slowest route.
@@ -1045,8 +1054,10 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    are missed. Chart chunks are split and individually capped at 60 KB; their
    aggregate named payload is 115,235 B gzip, above a combined 110 KB allowance.
 2. The **13.3 MB** M5 image exceeded the original 13 MB after-removal
-   budget. The owner accepted it and set a 13.5 MB gate. Lifetime memory
-   peaks including login exceed **20 MiB**.
+   budget. The owner accepted it and set a 13.5 MB gate. Since M5 only the
+   first sign-in of an account with a legacy 19 MiB hash exceeds **20 MiB**
+   (about 20.5 MiB); new hashes use 7 MiB, and legacy verification is refused
+   under a memory limit below 36 MiB.
 3. The final M5 browser runs still miss LCP, phone load tasks, desktop table
    and History live tasks, and phone History INP. Recharts loads near the
    viewport, and the phone first plot is still a long task. Container chart
@@ -1055,8 +1066,9 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    rule. No old-URL compatibility or RH_UI=classic exists; `rust-only` retains
    the old UI. This differs from the earlier plan's redirect/fallback wording.
 5. Board widget tiles render **structured widget bodies**, not server HTML;
-   existing widget IDs and generic HTTP integration tiles are supported, not
-   an unbuilt provider/widget catalog (`98707d5`, board/API code).
+   existing widget IDs and generic HTTP integration tiles were supported at
+   this point (`98707d5`, board/API code). Status: the provider catalog and
+   provider widgets were built in finish-hobnail M3 and M4.
 6. The scoped accounts model permits container visibility only through granted
    boards; host-wide pages are refused. Scoped Admins edit granted boards and
    integrations but cannot create/delete entities or alter global Settings.
@@ -1066,7 +1078,8 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 8. M1 adds **Secure** to session cookies when a configured trusted proxy
    reports HTTPS. Plain HTTP keeps working. For the per-IP login limit, the
    same trust list enables rightmost-untrusted `X-Forwarded-For` handling.
-   A single Argon2id permit preserves the 19 MiB workspace peak. Up to eight
+   A single Argon2id permit bounds the hashing workspace to one at a time
+   (7 MiB for current hashes since M5; 19 MiB only for a legacy hash). Up to eight
    requests wait asynchronously for up to five seconds, enough to absorb
    short bursts while bounding retained credential data and request latency.
    The active operation runs on a blocking worker. Queue overflow and
@@ -1074,14 +1087,17 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
    are checked again when a queued login reaches the worker.
 9. Credentials are bound to **origin, not path**. The database stores plaintext
    tokens with their binding; no token is returned. Tests stop at **any redirect**
-   rather than following even same-origin redirects. Public roots only: no
-   self-signed certificates or fingerprint pinning (D21 step b not built).
+   rather than following even same-origin redirects. Public roots only at
+   this point. Status: D21 step (b), a pinned leaf fingerprint per
+   integration confirmed on first use, was built in finish-hobnail M3.
 10. M2 adds the five-step owner setup wizard, resumable SQLite drafts, and
     an idempotent commit that opens a first board containing the owner's
     selections. Empty boards offer Add and Discover. The first-board tour is
     skippable, saved per account, and replayable. Service-specific providers
-    and the provider catalog remain deferred (D19). Integration icons remain
-    opt-in dashboard-icons.
+    and the provider catalog were deferred (D19) at that point; status: D19 is
+    decided and all 37 ticked lines of `integrations-candidates.md` were built
+    in finish-hobnail M3 and M4. Integration icons remain opt-in
+    dashboard-icons.
 11. UI SDK is installed under the owner's explicit D2 age exception, but its
     project-local skill was **not installed**: skills CLI 1.9.0, published
     2026-11-16, was younger than seven days (`web/AGENTS.md`). Other npm packages
@@ -1099,23 +1115,42 @@ From code and `git log 1bd6f10..HEAD` **[code]**, with measured consequences **[
 
 ## Budgets still missed
 
+Final numbers after the finish-hobnail M7 gate (2026-11-23; details in
+[measurements.md](../measurements.md#finish-hobnail-final-gate-m7-2026-11-23)).
+This list replaces the earlier pass-2 figures, which are kept in the sections
+above as history. The M5 gate's two browser runs (`544fedf`), the previous
+reference, are in
+[react-port-raw/finish-m5-gate-browser/](react-port-raw/finish-m5-gate-browser/);
+the M7 runs are in [react-port-raw/finish-m7/](react-port-raw/finish-m7/).
+
+- **Docker image gate 13.5 MB.** The final image is 13,548,510 B, 48,510 B
+  over (it already failed at `2257256`, before M7). Not fixed: it needs a
+  size reduction in code, not a cap change.
 - Original whole-dist ceilings of 1.3 MB raw and 400 KB gzip. The final
-  build is 1,349,605 B raw and 444,293 B gzip. The configured size checks pass.
-- Preferred lifetime memory under 10 MiB. M5 peaked at 12.45 MiB with full history.
-- Uncapped cold SQLite database peak under 20 MiB. The cold probe reached
-  187,559,936 B (178.87 MiB), primarily charged file cache.
-- First sign-in with a legacy hash exceeded 20 MiB in the migration probe.
-  Fresh-hash workload results are in the M5 table above.
-- LCP ≤400/1,200 ms. The second pass peaked at 696 ms desktop and
-  1,772 ms phone, both on container Logs. The phone table passed.
-- Phone load ≤200 ms. The table passed tracing and reached 233 ms by the
-  observer. The first container and History plots reached 295.8 ms and
-  255.8 ms. The Settings observer reached 230 ms.
-- Live update ≤50 ms. The desktop table peaked at 58.4 ms and phone
-  History at 54.5 ms. Desktop History passed at 29.2 ms.
-- The desktop container chart emitted no qualifying entry for the scripted
-  INP measurement. The measured interactions passed, including phone
-  History at 112 ms.
+  build is 1,349,701 B raw and 444,720 B gzip; the accepted 1.35 MB / 450 KB
+  caps pass with 299 B raw headroom.
+- Preferred lifetime memory under 10 MiB. The full workload peaks at
+  12.4 MiB (12.44 MiB without a limit, 12.39 MiB under 20 MiB), set by the
+  full-history reads; 25 dashboards stay at or under 8.15 MiB. The 20 MiB
+  budget holds, including 15.9 MiB under a connection attack at the
+  48-connection cap.
+- Lifetime memory over 20 MiB: only the first sign-in of a legacy 19 MiB
+  hash (about 20.5 MiB, M5), and it is refused under a memory limit below
+  36 MiB. Fresh-hash workloads stay under 20 MiB.
+- Uncapped cold SQLite database peak under 20 MiB. The M5 cold probe reached
+  187,559,936 B (178.87 MiB), primarily reclaimable file cache (not
+  re-measured).
+- LCP ≤400 ms desktop: 492/496 ms on the containers table and 584/448 ms on
+  History. LCP ≤1,200 ms phone: the table reached 1,456 ms in one of two
+  runs (1,196 ms in the other); phone History passed (980/968 ms). The
+  all-route phone LCP (1,772 ms, container Logs) was not re-measured.
+- Phone load ≤200 ms: History 253.3/343.3 ms by tracing; the table passed by
+  tracing (194/159.5 ms) but its long-task observer read 229/207 ms. Phone
+  Settings (230 ms in pass 2) was not re-measured.
+- Live update ≤50 ms: desktop table 58.6/58.3 ms and phone History
+  62.4/54.2 ms. Phone table and desktop History pass.
+- INP and CLS pass everywhere measured (INP at most 200 ms, CLS at most
+  0.0177).
 
 Passing checks at raised caps do not constitute the owner's acceptance of
 these deviations. [QA outcomes](../qa/QA.md#react-port-outcomes-of-the-deferred-findings)
@@ -1123,11 +1158,17 @@ state what actually changed for the fourteen deferred findings.
 
 ## Not verified
 
-Firefox/Safari, aarch64, cold-cache application memory, real screen readers,
-a full visual review of every screenshot, real mobile devices, a 400 kbit/s
-first visit, independently timed in-app route-change budgets, 30/90-day mature
-history sizes, real service providers, certificate pinning, native systemd
-packaging and concurrent-login throughput behind a real reverse proxy.
+Status after finish-hobnail M7: Firefox and WebKit are now covered by the
+emulated three-engine matrix (M6, M7); aarch64 is cross-built and was smoke
+tested under QEMU (M6), but there is no native arm64 production build and no
+run on arm64 hardware; certificate pinning is built and tested against fake
+TLS servers (M3). Still not verified: cold-cache application memory, real
+screen readers, a full visual review of every screenshot, real mobile devices
+(iPhone Safari, Android), a 400 kbit/s first visit, independently timed
+in-app route-change budgets, 30/90-day mature history sizes, real service
+providers (none of the 35 was checked against a real instance), native
+systemd packaging and concurrent-login throughput behind a real reverse
+proxy.
 The measurements use short-lived/fake-container data for browser/JSON tests;
 they are not long-running production guarantees. All throwaway containers and
 fresh data directories created here were removed after completion.

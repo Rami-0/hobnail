@@ -1,0 +1,4 @@
+{"phase": "poll-warmup", "requests": 1, "events": {"hello": 1, "widget": 36, "system": 3, "stats": 1}}
+{"phase": "clients-1", "requests": 1, "events": {"hello": 1, "widget": 90, "system": 21, "stats": 12, "containers": 1}}
+{"phase": "clients-10", "requests": 10, "events": {"hello": 10, "widget": 900, "system": 210, "stats": 120, "containers": 10}}
+{"phase": "clients-25", "requests": 25, "events": {"hello": 25, "widget": 2250, "system": 525, "stats": 300, "containers": 25}}
