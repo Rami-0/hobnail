@@ -152,22 +152,42 @@ budget and stop a few peers from holding every connection:
 - A request body must arrive in full within 15 s of its head, or the request
   gets `408 Request Timeout`.
 - A response write that makes no progress for 15 s (a client that stopped
-  reading) closes the connection. Only a signed-in event stream, log
-  stream or log download that is being served is exempt; a refused request
-  to one of those paths is not.
-- At most 128 connections are open at once, event streams included; further
-  connections wait until one closes.
-- One peer may hold at most 32 of them (IPv6 peers count by /64); more get
-  `503` with `Retry-After: 1` and are closed. Addresses in
-  `RH_TRUSTED_PROXIES` are exempt, because every client arrives through
-  them. If clients reach Hobnail through another shared address that is
-  not a trusted proxy, such as Docker's userland proxy for ports published
-  on `127.0.0.1`, Docker Desktop, or rootless Docker or Podman, they share
-  that peer's connections. Set `RH_MAX_CONNECTIONS_PER_PEER` (0 to 128,
-  default 32; restart needed) to raise the share, or to `0` to turn the
-  per-peer limit off and keep only the 128-connection cap. Connections
-  over the limit are refused rather than queued, so a single address
-  cannot fill the server by waiting.
+  reading) closes the connection; for a refusal or error (status 400 and
+  up, a few hundred bytes) the limit is 5 s. Only a signed-in event stream,
+  log stream or log download that is being served is exempt; a refused
+  request to one of those paths is not.
+- At most 48 connections are open at once, event streams included
+  (`RH_MAX_CONNECTIONS`, 8 to 4096). Further connections wait in a short
+  kernel queue (64) until one closes; past that, the client's TCP stack
+  retries the connection after 1 s, then 3 s.
+- One peer may hold at most 12 of them (`RH_MAX_CONNECTIONS_PER_PEER`, 0 to
+  `RH_MAX_CONNECTIONS`; IPv6 peers count by /64); more get `503` with
+  `Retry-After: 1` and are closed. A browser needs one connection per open
+  tab for its event stream plus up to six for parallel requests, so 12
+  covers a device with two tabs. Addresses in `RH_TRUSTED_PROXIES` are
+  exempt, because every client arrives through them. If clients reach
+  Hobnail through another shared address that is not a trusted proxy, such
+  as Docker's userland proxy for ports published on `127.0.0.1`, Docker
+  Desktop, or rootless Docker or Podman, they share that peer's
+  connections: raise `RH_MAX_CONNECTIONS_PER_PEER` (up to
+  `RH_MAX_CONNECTIONS`) or set it to `0` to turn the per-peer limit off
+  and keep only the global cap. Connections over the per-peer limit are
+  refused rather than queued, so a single address cannot fill the server
+  by waiting.
+
+The defaults keep the whole container under its 20 MiB memory budget even
+when every connection is held by a client that sends requests and never
+reads the answers. Measured with 25 signed-in clients, a sign-in (Argon2
+uses 7 MiB while it runs) and 4 or 8 such addresses, the container's
+cgroup `memory.peak` was 15.4 to 16.0 MiB; with 64 connections it was 18.1
+to 18.9 MiB. Each connection such a client holds pins up to about 130 KiB
+of kernel socket memory.
+
+To serve more connections (many devices, or several users behind one
+address that is not a trusted proxy), raise the container's memory limit
+with them: allow about 0.2 MiB per connection above 48 on top of the
+20 MiB, for example `RH_MAX_CONNECTIONS=128` with a 36 MiB limit. Both settings need a
+restart (see [install.md](install.md#environment-variables)).
 
 A proxy that keeps a pool of idle upstream connections reconnects when
 Hobnail closes one.

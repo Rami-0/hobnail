@@ -197,8 +197,12 @@ comma-separated; the compose file sets `0.0.0.0:3200` inside the container),
 `RH_HOSTNAME` (default: the host's name from `RH_HOST_PROC`),
 `RH_ALLOWED_HOSTS` (extra host names allowed in the `Host` header, globs,
 comma-separated; IPs, `localhost` and `RH_HOSTNAME` always work: this blocks
-DNS rebinding), `RH_TRUSTED_PROXIES` and `RH_MAX_CONNECTIONS_PER_PEER`
-(default 32, `0` = no per-peer limit; see
+DNS rebinding), `RH_TRUSTED_PROXIES`, `RH_MAX_CONNECTIONS` (open
+connections at once, default 48, 8 to 4096) and
+`RH_MAX_CONNECTIONS_PER_PEER` (default 12, up to `RH_MAX_CONNECTIONS`,
+`0` = no per-peer limit). The connection defaults fit the 20 MiB memory
+limit; to raise them, raise the container's memory limit too, by about
+0.2 MiB per connection above 48 (see
 [configuration.md](configuration.md#incoming-reverse-proxy)).
 
 ## Not built yet

@@ -8,7 +8,7 @@ use std::future::Future;
 use std::io;
 use std::net::IpAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -72,28 +72,73 @@ pub(crate) fn mark_streaming<B>(response: &mut hyper::Response<B>) {
     response.extensions_mut().insert(Streaming);
 }
 
-/// Whether the write-stall timer is off for this response: only a 200 that a
-/// streaming handler marked.
-pub(crate) fn exempt_from_stall<B>(response: &hyper::Response<B>) -> bool {
-    response.status() == hyper::StatusCode::OK && response.extensions().get::<Streaming>().is_some()
+/// How long the current response's writes may make no progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Stall {
+    /// The normal write-stall limit.
+    Normal = 0,
+    /// A refusal or error (status 400 and up): a few hundred bytes that a
+    /// reading client takes at once, so it needs no slow-client allowance.
+    /// Pipelined refusals to a client that never reads are what can fill
+    /// every slot, so they get the short limit.
+    Short = 1,
+    /// A streaming 200 a handler marked (see [`Streaming`]): no limit.
+    Exempt = 2,
 }
 
-/// A socket whose writes fail after `limit` without progress, unless the
-/// current response streams (`exempt`). A client that stops reading a
-/// response cannot hold its connection slot.
+impl Stall {
+    /// The stall rule for `response`, decided by its status and marker.
+    pub(crate) fn of<B>(response: &hyper::Response<B>) -> Self {
+        if response.status() == hyper::StatusCode::OK
+            && response.extensions().get::<Streaming>().is_some()
+        {
+            Self::Exempt
+        } else if response.status().as_u16() >= 400 {
+            Self::Short
+        } else {
+            Self::Normal
+        }
+    }
+}
+
+/// The current response's [`Stall`], shared between the service and the
+/// socket.
+#[derive(Default)]
+pub(crate) struct StallRule(AtomicU8);
+
+impl StallRule {
+    pub(crate) fn set(&self, stall: Stall) {
+        self.0.store(stall as u8, Ordering::Relaxed);
+    }
+
+    fn get(&self) -> Stall {
+        match self.0.load(Ordering::Relaxed) {
+            1 => Stall::Short,
+            2 => Stall::Exempt,
+            _ => Stall::Normal,
+        }
+    }
+}
+
+/// A socket whose writes fail after `limit` without progress (`short` for
+/// a refusal), unless the current response streams. A client that stops
+/// reading a response cannot hold its connection slot.
 pub(crate) struct Timed<T> {
     io: T,
     limit: Duration,
-    exempt: Arc<AtomicBool>,
+    short: Duration,
+    rule: Arc<StallRule>,
     stall: Option<Pin<Box<Sleep>>>,
 }
 
 impl<T> Timed<T> {
-    pub(crate) fn new(io: T, limit: Duration, exempt: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(io: T, limit: Duration, short: Duration, rule: Arc<StallRule>) -> Self {
         Self {
             io,
             limit,
-            exempt,
+            short,
+            rule,
             stall: None,
         }
     }
@@ -103,11 +148,16 @@ impl<T> Timed<T> {
         cx: &mut Context<'_>,
         result: Poll<io::Result<R>>,
     ) -> Poll<io::Result<R>> {
-        if result.is_ready() || self.exempt.load(Ordering::Relaxed) {
+        let rule = self.rule.get();
+        if result.is_ready() || rule == Stall::Exempt {
             self.stall = None;
             return result;
         }
-        let limit = self.limit;
+        let limit = if rule == Stall::Short {
+            self.short
+        } else {
+            self.limit
+        };
         let stall = self
             .stall
             .get_or_insert_with(|| Box::pin(tokio::time::sleep(limit)));
@@ -263,20 +313,37 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
-    async fn a_stalled_write_fails_unless_the_response_streams() {
-        let exempt = Arc::new(AtomicBool::new(false));
-        let (near, _far) = tokio::io::duplex(64);
-        let mut timed = Timed::new(near, Duration::from_millis(100), exempt.clone());
-        let error = tokio::time::timeout(Duration::from_secs(2), timed.write_all(&[0; 4096]))
-            .await
-            .expect("the stall timeout fires")
-            .unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-        exempt.store(true, Ordering::Relaxed);
-        let (near, _far) = tokio::io::duplex(64);
-        let mut streaming = Timed::new(near, Duration::from_millis(100), exempt);
+    async fn a_stalled_write_fails_after_its_limit_unless_the_response_streams() {
+        let rule = Arc::new(StallRule::default());
+        let stalled = |rule: &Arc<StallRule>| {
+            let (near, far) = tokio::io::duplex(64);
+            let timed = Timed::new(
+                near,
+                Duration::from_millis(600),
+                Duration::from_millis(100),
+                rule.clone(),
+            );
+            (timed, far)
+        };
+        for (stall, within) in [(Stall::Normal, 1_500), (Stall::Short, 400)] {
+            rule.set(stall);
+            let (mut timed, _far) = stalled(&rule);
+            let started = tokio::time::Instant::now();
+            let error = tokio::time::timeout(Duration::from_secs(2), timed.write_all(&[0; 4096]))
+                .await
+                .expect("the stall timeout fires")
+                .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+            let took = started.elapsed();
+            assert!(took < Duration::from_millis(within), "{stall:?}: {took:?}");
+            if stall == Stall::Normal {
+                assert!(took >= Duration::from_millis(600), "{took:?}");
+            }
+        }
+        rule.set(Stall::Exempt);
+        let (mut streaming, _far) = stalled(&rule);
         assert!(
-            tokio::time::timeout(Duration::from_millis(400), streaming.write_all(&[0; 4096]))
+            tokio::time::timeout(Duration::from_millis(900), streaming.write_all(&[0; 4096]))
                 .await
                 .is_err(),
             "an exempt write waits for the reader"
@@ -284,13 +351,20 @@ mod tests {
     }
 
     #[test]
-    fn only_a_marked_200_is_exempt_from_the_stall_timer() {
-        let mut streaming = hyper::Response::new(());
-        assert!(!exempt_from_stall(&streaming), "unmarked");
-        mark_streaming(&mut streaming);
-        assert!(exempt_from_stall(&streaming));
-        *streaming.status_mut() = hyper::StatusCode::UNAUTHORIZED;
-        assert!(!exempt_from_stall(&streaming), "a refusal keeps the timer");
+    fn the_response_decides_its_stall_rule() {
+        let mut response = hyper::Response::new(());
+        assert_eq!(Stall::of(&response), Stall::Normal, "unmarked 200");
+        mark_streaming(&mut response);
+        assert_eq!(Stall::of(&response), Stall::Exempt);
+        *response.status_mut() = hyper::StatusCode::UNAUTHORIZED;
+        assert_eq!(
+            Stall::of(&response),
+            Stall::Short,
+            "a refusal keeps a short timer"
+        );
+        let mut redirect = hyper::Response::new(());
+        *redirect.status_mut() = hyper::StatusCode::NOT_MODIFIED;
+        assert_eq!(Stall::of(&redirect), Stall::Normal);
     }
 
     #[tokio::test]

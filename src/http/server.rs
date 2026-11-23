@@ -18,11 +18,28 @@ use crate::state::AppState;
 pub type Body = UnsyncBoxBody<Bytes, Infallible>;
 
 pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String> {
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("bind {addr}: {e}"))?;
+    let listener = listen(addr).map_err(|e| format!("bind {addr}: {e}"))?;
     crate::info!("listening", addr = addr);
     serve_listener(state, listener).await
+}
+
+/// The listening socket. Its buffer sizes are set before `listen`, so
+/// connections waiting in the kernel's accept queue (the server is at its
+/// connection cap) inherit them too, and the queue is short: queued
+/// connections already receive data, which the container is charged for.
+/// Measured with 8 addresses pipelining past a 48-connection cap, the
+/// default 128 KiB receive buffers of queued connections added 2 MiB.
+pub(crate) fn listen(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let socket = if addr.is_ipv4() {
+        tokio::net::TcpSocket::new_v4()?
+    } else {
+        tokio::net::TcpSocket::new_v6()?
+    };
+    socket.set_reuseaddr(true)?;
+    socket.set_send_buffer_size(LIMITS.send_buffer as u32)?;
+    socket.set_recv_buffer_size(LIMITS.receive_buffer as u32)?;
+    socket.bind(addr)?;
+    socket.listen(LIMITS.backlog)
 }
 
 /// Per-connection limits for the accept loop.
@@ -38,13 +55,16 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   within 10 s, including an idle keep-alive connection waiting for its
 ///   next request. A response being streamed (the event stream) is not
 ///   affected.
-/// - `connections` caps open connections, event streams included. At the
-///   cap the server stops accepting; new connections wait in the kernel
-///   backlog until one closes. A connection holding a head just under 16 KiB
-///   costs about 34 KiB, so a full cap of such connections adds about
-///   5 MiB (measured: 200 attackers against the cap, 7.8 MiB container
-///   memory). 128 leaves room for 25 devices with an event stream and a few
-///   parallel requests each.
+/// - `connections` caps open connections, event streams included
+///   (`RH_MAX_CONNECTIONS`). At the cap the server stops accepting; new
+///   connections wait in the kernel backlog until one closes. The default
+///   of 48 is what keeps the container under 20 MiB when every slot is held
+///   by a client that pipelines requests and never reads (each pins up to
+///   about 130 KiB of socket memory) while a sign-in runs Argon2 (7 MiB):
+///   measured `memory.peak` 15.4 to 16.0 MiB with 4 or 8 attacking
+///   addresses and 25 clients, against 18.1 to 18.9 MiB at 64. 25 clients
+///   with an event stream each, from 5 or from 25 addresses, saw no errors
+///   and the same latency as at 128.
 /// - `body_timeout` is the whole-body deadline, from the request head, for
 ///   every handler that reads a body; past it the request gets 408. Bodies a
 ///   handler does not read are not waited for (hyper closes the read side).
@@ -53,8 +73,17 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   event stream, log stream or log download (a 200 its handler marked) is
 ///   exempt: it streams for as long as the client stays and has its own
 ///   keepalive and send deadline.
+/// - `backlog` bounds the kernel's queue of connections waiting for a slot
+///   (see [`listen`]); past it a client's connection attempt is retried by
+///   its TCP stack (after 1 s, then 3 s).
+/// - `refusal_write_timeout` is the stall limit for responses with status
+///   400 and up. They are a few hundred bytes, which a reading client takes
+///   at once, and pipelined refusals to a client that never reads are what
+///   could fill every slot; 5 s instead of 15 s frees such a slot three
+///   times sooner.
 /// - `per_peer` caps one peer's connections below `connections`, so a single
-///   host cannot take every slot. IPv6 peers count by /64. Peers listed in
+///   host cannot take every slot (default 12: a browser with two tabs
+///   needs two event streams and up to six parallel requests). IPv6 peers count by /64. Peers listed in
 ///   `RH_TRUSTED_PROXIES` are exempt, since every client arrives through
 ///   them. A peer over its limit gets 503 and the connection closes.
 ///   `RH_MAX_CONNECTIONS_PER_PEER` sets it (0 turns it off) for clients
@@ -64,11 +93,11 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   outside the cap, an unbounded number of sockets.
 /// - `send_buffer` and `receive_buffer` fix each connection's kernel
 ///   socket buffers (Linux doubles them: 64 KiB and 16 KiB), which the
-///   container's memory is charged for. Autotuned, 128 connections that
-///   pipelined requests and stopped reading peaked at 46 MiB in the 15 s
-///   before the stall timer closed them; fixed, at 26 MiB (16 MiB of it
-///   socket memory: a socket may queue one 64 KiB segment past its limit,
-///   so halving the send buffer saved only 3 MiB more). 64 KiB in flight
+///   container's memory is charged for; [`listen`] sets them on the
+///   listener, so queued connections have them too. Autotuned, 128
+///   connections that pipelined requests and stopped reading peaked at
+///   46 MiB; a socket may still queue one 64 KiB segment past its limit,
+///   so halving the send buffer saved only 3 MiB more. 64 KiB in flight
 ///   still sends the 450 KB client in a few round trips; requests are
 ///   small, so the receive buffer only paces large uploads.
 #[derive(Clone, Copy)]
@@ -78,25 +107,30 @@ pub(crate) struct Limits {
     pub max_buf: usize,
     pub body_timeout: Duration,
     pub write_timeout: Duration,
+    pub refusal_write_timeout: Duration,
     pub per_peer: usize,
     pub send_buffer: usize,
     pub receive_buffer: usize,
+    pub backlog: u32,
 }
 
 pub(crate) const LIMITS: Limits = Limits {
-    connections: 128,
+    connections: 48,
     header_timeout: Duration::from_secs(10),
     max_buf: 16 * 1024,
     body_timeout: Duration::from_secs(15),
     write_timeout: Duration::from_secs(15),
-    per_peer: 32,
+    refusal_write_timeout: Duration::from_secs(5),
+    per_peer: 12,
     send_buffer: 32 * 1024,
     receive_buffer: 8 * 1024,
+    backlog: 64,
 };
 
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
 pub async fn serve_listener(state: Arc<AppState>, listener: TcpListener) -> Result<(), String> {
     let limits = Limits {
+        connections: state.env.max_connections,
         per_peer: state.env.max_connections_per_peer,
         ..LIMITS
     };
@@ -143,24 +177,26 @@ pub(crate) async fn serve_limited(
         tokio::spawn(async move {
             let _permit = permit;
             let _peer_slot = peer_slot;
-            let exempt = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let io = super::conn::Timed::new(stream, limits.write_timeout, exempt.clone());
+            let rule = Arc::new(super::conn::StallRule::default());
+            let io = super::conn::Timed::new(
+                stream,
+                limits.write_timeout,
+                limits.refusal_write_timeout,
+                rule.clone(),
+            );
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
-                let exempt = exempt.clone();
+                let rule = rule.clone();
                 // Decided by the response, not the path: a refused request
-                // to a streaming path keeps the stall timer.
-                exempt.store(false, std::sync::atomic::Ordering::Relaxed);
+                // to a streaming path keeps the (short) stall timer.
+                rule.set(super::conn::Stall::Normal);
                 req.extensions_mut().insert(Peer(peer));
                 req.extensions_mut().insert(super::conn::BodyDeadline(
                     tokio::time::Instant::now() + limits.body_timeout,
                 ));
                 async move {
                     let response = respond(st, req).await;
-                    exempt.store(
-                        super::conn::exempt_from_stall(&response),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    rule.set(super::conn::Stall::of(&response));
                     Ok::<_, Infallible>(response)
                 }
             });
@@ -475,7 +511,8 @@ mod tests {
             hostname: "homelab".into(),
             allowed_hosts: vec!["*.tail1234.ts.net".into()],
             trusted_proxies: vec![],
-            max_connections_per_peer: 32,
+            max_connections: 64,
+            max_connections_per_peer: 16,
         }
     }
 
@@ -707,7 +744,8 @@ mod tests {
             // the stall timer must close the connection.
             let limits = Limits {
                 per_peer: 1,
-                write_timeout: Duration::from_millis(300),
+                write_timeout: Duration::from_secs(60),
+                refusal_write_timeout: Duration::from_millis(300),
                 ..LIMITS
             };
             let addr = start(limits).await;
@@ -763,6 +801,29 @@ mod tests {
                 "{:?}",
                 String::from_utf8_lossy(&out)
             );
+        }
+
+        #[tokio::test]
+        async fn queued_connections_inherit_the_listener_buffers() {
+            use std::os::fd::AsRawFd;
+            let l = listen("127.0.0.1:0".parse().unwrap()).unwrap();
+            let _client = TcpStream::connect(l.local_addr().unwrap()).await.unwrap();
+            let (accepted, _) = l.accept().await.unwrap();
+            for (option, want) in [(libc::SO_SNDBUF, 64 * 1024), (libc::SO_RCVBUF, 16 * 1024)] {
+                let mut value: libc::c_int = 0;
+                let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                // SAFETY: a valid socket and an out pointer of the given size.
+                let rc = unsafe {
+                    libc::getsockopt(
+                        accepted.as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        option,
+                        (&mut value as *mut libc::c_int).cast(),
+                        &mut len,
+                    )
+                };
+                assert_eq!((rc, value), (0, want), "option {option}");
+            }
         }
 
         #[tokio::test]

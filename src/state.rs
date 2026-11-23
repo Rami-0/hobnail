@@ -47,24 +47,58 @@ pub struct Env {
     pub allowed_hosts: Vec<String>,
     /// Exact socket peer IPs allowed to supply forwarding headers.
     pub trusted_proxies: Vec<IpAddr>,
+    /// Open connections at once, event streams included
+    /// (RH_MAX_CONNECTIONS).
+    pub max_connections: usize,
     /// Open connections one peer address (IPv6: /64) may hold; 0 is no
     /// per-peer limit (RH_MAX_CONNECTIONS_PER_PEER).
     pub max_connections_per_peer: usize,
 }
 
-/// `RH_MAX_CONNECTIONS_PER_PEER`: 0 (off) to the global connection cap,
-/// default 32.
-pub(crate) fn parse_connections_per_peer(value: Option<&str>) -> Result<usize, String> {
-    let cap = crate::http::server::LIMITS.connections;
-    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
-        return Ok(crate::http::server::LIMITS.per_peer);
+/// Highest `RH_MAX_CONNECTIONS`. Every open connection can pin about
+/// 200 KiB of socket and process memory (docs/configuration.md).
+pub(crate) const MAX_CONNECTIONS_CEILING: usize = 4096;
+/// Lowest `RH_MAX_CONNECTIONS`: a few devices with an event stream each.
+pub(crate) const MAX_CONNECTIONS_FLOOR: usize = 8;
+
+/// `RH_MAX_CONNECTIONS` (8 to 4096, default from
+/// [`crate::http::server::LIMITS`]) and `RH_MAX_CONNECTIONS_PER_PEER`
+/// (0, meaning no per-peer limit, up to the global cap; default from the
+/// same place).
+pub(crate) fn parse_connection_limits(
+    connections: Option<&str>,
+    per_peer: Option<&str>,
+) -> Result<(usize, usize), String> {
+    let set = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
     };
-    match value.parse::<usize>() {
-        Ok(n) if n <= cap => Ok(n),
-        _ => Err(format!(
-            "RH_MAX_CONNECTIONS_PER_PEER: expected 0 (no limit) to {cap}, got {value:?}"
-        )),
-    }
+    let defaults = crate::http::server::LIMITS;
+    let connections = match set(connections) {
+        None => defaults.connections,
+        Some(value) => match value.parse::<usize>() {
+            Ok(n) if (MAX_CONNECTIONS_FLOOR..=MAX_CONNECTIONS_CEILING).contains(&n) => n,
+            _ => {
+                return Err(format!(
+                    "RH_MAX_CONNECTIONS: expected {MAX_CONNECTIONS_FLOOR} to {MAX_CONNECTIONS_CEILING}, got {value:?}"
+                ))
+            }
+        },
+    };
+    let per_peer = match set(per_peer) {
+        None => defaults.per_peer.min(connections),
+        Some(value) => match value.parse::<usize>() {
+            Ok(n) if n <= connections => n,
+            _ => {
+                return Err(format!(
+                    "RH_MAX_CONNECTIONS_PER_PEER: expected 0 (no limit) to RH_MAX_CONNECTIONS ({connections}), got {value:?}"
+                ))
+            }
+        },
+    };
+    Ok((connections, per_peer))
 }
 
 impl Env {
@@ -92,6 +126,10 @@ impl Env {
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|_| "home".into())
         });
+        let (max_connections, max_connections_per_peer) = parse_connection_limits(
+            std::env::var("RH_MAX_CONNECTIONS").ok().as_deref(),
+            std::env::var("RH_MAX_CONNECTIONS_PER_PEER").ok().as_deref(),
+        )?;
         Ok(Self {
             listen,
             data_dir,
@@ -115,9 +153,8 @@ impl Env {
                         .map_err(|_| "RH_TRUSTED_PROXIES: expected comma-separated IP addresses")
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            max_connections_per_peer: parse_connections_per_peer(
-                std::env::var("RH_MAX_CONNECTIONS_PER_PEER").ok().as_deref(),
-            )?,
+            max_connections,
+            max_connections_per_peer,
         })
     }
 }
@@ -283,15 +320,27 @@ impl Drop for ViewerGuard {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn connections_per_peer_defaults_to_32_and_accepts_0_to_the_global_cap() {
-        use super::parse_connections_per_peer as parse;
-        assert_eq!(parse(None), Ok(32));
-        assert_eq!(parse(Some(" ")), Ok(32));
-        assert_eq!(parse(Some("0")), Ok(0));
-        assert_eq!(parse(Some(" 64 ")), Ok(64));
-        assert_eq!(parse(Some("128")), Ok(128));
-        for bad in ["129", "-1", "many", "1.5"] {
-            assert!(parse(Some(bad)).is_err(), "{bad}");
+    fn connection_limits_default_to_48_and_12_and_stay_in_range() {
+        use super::parse_connection_limits as parse;
+        assert_eq!(parse(None, None), Ok((48, 12)));
+        assert_eq!(parse(Some(" "), Some("")), Ok((48, 12)));
+        assert_eq!(parse(Some("256"), Some("64")), Ok((256, 64)));
+        assert_eq!(parse(None, Some("0")), Ok((48, 0)), "0: no per-peer limit");
+        assert_eq!(parse(None, Some("48")), Ok((48, 48)));
+        assert_eq!(
+            parse(Some("8"), None),
+            Ok((8, 8)),
+            "the default share fits the cap"
+        );
+        for bad in ["7", "4097", "-1", "many"] {
+            assert!(parse(Some(bad), None).is_err(), "{bad}");
         }
+        for bad in ["49", "-1", "1.5"] {
+            assert!(parse(None, Some(bad)).is_err(), "{bad}");
+        }
+        assert!(
+            parse(Some("32"), Some("33")).is_err(),
+            "share above the cap"
+        );
     }
 }
