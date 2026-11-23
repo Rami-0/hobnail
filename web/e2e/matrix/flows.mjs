@@ -8,7 +8,19 @@ import { focusWalk, guardNetwork, harness } from "./lib.mjs";
 const tid = (id) => `[data-testid="${id}"]`;
 const dialog = '[role="dialog"][data-open]';
 
+/** Open `route` and wait for `ready`. Once: a navigation or load that a
+ * host network change cut (lib.mjs navigationCut, setAsideCutLoad) is
+ * loaded again, also when the cut left the page without `ready`. */
 async function go(h, f, route, ready) {
+  const t0 = Date.now();
+  let again = false;
+  try { await open(h, f, route, ready); again = await h.setAsideCutLoad(t0); } catch (e) {
+    again = await h.setAsideCutLoad(t0, h.navigationCut(e));
+    if (!again) throw e;
+  }
+  if (again) await open(h, f, route, ready);
+}
+async function open(h, f, route, ready) {
   await h.page.goto(new URL(route, f.base).href);
   await h.page.locator(ready).first().waitFor();
   // A board's first visit opens its tour over the tiles. The sweep (whose
@@ -611,16 +623,7 @@ export const flows = {
 // The page sweep: every route of the shared fixture, at any viewport.
 export async function sweep(h, f, routes) {
   for (const [route, ready] of routes) {
-    const t0 = Date.now();
-    // Once: a navigation or load the host's network change cut is loaded
-    // again (lib.mjs navigationCut, setAsideCutLoad), also when the cut
-    // left the page without its ready element.
-    let again = false;
-    try { await go(h, f, route, ready); again = await h.setAsideCutLoad(t0); } catch (e) {
-      again = await h.setAsideCutLoad(t0, h.navigationCut(e));
-      if (!again) throw e;
-    }
-    if (again) await go(h, f, route, ready);
+    await go(h, f, route, ready);
     await h.state(route);
   }
 }
