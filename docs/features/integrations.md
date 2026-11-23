@@ -3,18 +3,28 @@
 Open **Settings → Integrations → Add integration**, or choose **Add
 integration** on a board. Search the catalog by service, category or
 description. The catalog lists registered providers with working connection
-tests and widgets. With `[icons] remote` enabled, Hobnail uses its existing
-dashboard-icons cache. Otherwise the catalog shows monograms.
+tests and widgets: each card shows the service's logo on a faint tint of its
+brand colour, its category and how many widgets it offers. The logos are
+built into Hobnail (see [Icons](#icons)), so they show without internet
+access.
 
-Choose a provider, give the instance a name, and enter its connection fields.
+Choose a provider to open its settings page: the logo and description, a
+**Setup guide** link to the service's own documentation, the connection
+fields with a hint on where to find each credential, and only the fields
+that apply to the chosen API version (the Pi-hole v5 token appears only for
+v5). Beside the form, **Widgets you can add** previews every widget. Give
+the instance a name and enter its connection fields.
 Use **Test connection** to test from the Hobnail server. The test reports
 problems with DNS, connectivity, TLS, credentials, timeout or the response
 format. You can correct inputs and retry in the same dialog or save the
 connection to test later. A saved link or untested connection has no health
 evidence.
 
-After a successful test, choose a board and review the recommended widgets.
-Each selected widget has its own options and refresh interval. Use **Edit** on
+After a successful test, choose a board. The **Add to board** gallery draws
+each widget with the real renderer from example data (marked "Example"),
+with its name, description, default board size (columns × rows) and a
+**Recommended** badge on the one most people want; that one starts switched
+on. Each selected widget has its own options and refresh interval. Use **Edit** on
 a saved integration to test changes, configure its widgets, or place them on
 another board. Each placement stores its own widget options and refresh
 interval. Placements share the saved connection. Open boards with identical
@@ -53,6 +63,26 @@ These are accepted pending owner sign-off at merge.
 - **Embed and extension widgets are not built** and are out of scope for
   this release.
 
+## Icons
+
+Hobnail ships optimised SVG logos for every provider and for common
+container images (PostgreSQL, Redis, nginx, Grafana and others), about 94 KB
+in all, and serves them from `/api/v1/icons/<name>` with a 30-day cache. They
+need no internet access, so they show with the default `[icons] remote =
+false`; other dashboard-icons names still need `[icons] remote = true`. A
+container without an icon picks a built-in logo from its image name (for
+example `pihole/pihole` or `jc21/nginx-proxy-manager`). Each logo sits on a
+plate tinted with the brand colour, and single-colour dark logos (GitHub,
+Tailscale) invert on dark themes. Widgets of a provider use its colour for
+their bars, glyphs, sparklines and the rule under the tile header.
+
+Logos come from [homarr-labs/dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache License 2.0); brandless providers (Generic HTTP, Bookmarks, Clock,
+Markdown note, Reachability, Weather, RSS, SSL expiry) use
+[Lucide](https://lucide.dev) glyphs (ISC). Product names and logos are
+trademarks of their owners, used for identification only. Sources and
+licences are listed in [`src/http/brand/NOTICE.md`](../../src/http/brand/NOTICE.md).
+
 ## Generic HTTP
 
 Generic HTTP connection tests and **HTTP status** widgets check the HTTP status.
@@ -87,15 +117,25 @@ Enter the service root URL with any reverse-proxy prefix. Leave off the
   access logs that record query strings. Prefer v6, which sends its session
   credential in a header.
 
-The **DNS activity** widget shows queries, blocked queries, percentage
-blocked and blocking status. The v6 widget reads `/api/stats/summary`
-and `/api/dns/blocking`. The v5 widget reads all four values from the
-legacy summary.
+The form shows only the credential of the selected version.
 
-**Top domains** lists the ten most queried domains with their query counts.
-Turn on **Show blocked domains** to list the ten most blocked instead.
-**Top clients** lists the ten clients that sent the most queries, with the
-hostname when Pi-hole knows one. v6 reads `/api/stats/top_domains` (with
+Widgets (4x2 / 4x4 grid units by default):
+
+- **DNS activity** (recommended): stat tiles for queries, blocked queries,
+  the blocked share and blocking status (green when enabled, amber when
+  disabled). On v6 the queries tile carries a 24-hour sparkline: Hobnail
+  reads `GET /api/history` (10-minute slots) and sums them into hourly
+  points. The graph is optional: a 404 or an oversized response drops only
+  the sparkline. v6 also reads `/api/stats/summary` and `/api/dns/blocking`;
+  v5 reads all four values from the legacy summary and has no sparkline.
+- **Top domains**: the ten most queried domains as ranked rows with their
+  query count and a bar relative to the top entry. **Show blocked domains**
+  lists the ten most blocked instead.
+- **Top blocked domains**: the same list for blocked domains, marked red.
+- **Top clients**: the ten clients that sent the most queries, the host
+  name as the title and the address as secondary text.
+
+The lists: v6 reads `/api/stats/top_domains` (with
 `blocked=true` for blocked domains) and `/api/stats/top_clients`, both
 with `count=10` and the session header. v5 reads `topItems=10` (its
 `top_queries` or `top_ads` map) or `getQuerySources=10` (`top_sources`,
@@ -107,7 +147,8 @@ Hobnail reports as an authentication failure.
 Verified against the public [authentication documentation](https://docs.pi-hole.net/api/auth/),
 the upstream [v6 summary, top domains and top clients](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/stats.yaml)
 (paths in [main.yaml](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/main.yaml))
-and [blocking](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/dns.yaml)
+[blocking](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/dns.yaml)
+and [activity graph](https://github.com/pi-hole/FTL/blob/master/src/api/docs/content/specs/history.yaml)
 schema files, and the tagged [v5.21 summary, `topItems` and `getQuerySources`](https://github.com/pi-hole/web/blob/v5.21/api_FTL.php)
 (authorization in [api.php](https://github.com/pi-hole/web/blob/v5.21/api.php))
 and [token handling](https://github.com/pi-hole/web/blob/v5.21/scripts/pi-hole/php/password.php)
@@ -115,6 +156,7 @@ source. The v6 summary schema gives totals without specifying a calendar-day
 window, so the widget labels that count **Queries**. Request flow and response
 parsing were exercised against fakes. Compatibility across older minor
 releases and live reverse-proxy configurations remains unverified.
+UNVERIFIED: that every v6 release serves `/api/history` (handled as optional).
 
 ## Uptime Kuma
 
@@ -122,17 +164,25 @@ Enter the service URL and the slug from a published status page, such as
 `home` from `/status/home`. Use letters, digits and hyphens for the slug.
 The status page grants read access without credentials.
 
-**Monitor status** shows up, down, pending, maintenance or unknown based on
-the latest heartbeat, along with the upstream 24-hour uptime percentage. It
-shows up to 24 monitors and the current pinned incident when present. Kuma's
+Widgets:
+
+- **Monitor status** (recommended, 4x4): one row per monitor with a status
+  dot (up, down, pending, maintenance or unknown from the latest
+  heartbeat), the state and latest response time, the upstream 24-hour
+  uptime as the value and the last 30 heartbeats as status bars. It shows
+  up to 24 monitors and the current pinned incident when present.
+- **Status summary** (4x2): tiles counting monitors up, down and
+  pending/other, and their average 24-hour uptime.
+
+Both read the same two public routes. Kuma's
 public JSON routes supply these together. Its documented Prometheus metrics
 expose monitor state and response time, but do not include the status page's
 uptime or pinned incident.
 
 The heartbeat route has no size option and returns the last 50 (1.23) or
 100 (2.x) beats of every public monitor, which passes 128 KiB at about 20
-monitors. Hobnail streams it and keeps only the latest status and 24-hour
-uptime of the monitors it displays. A monitor missing from the response
+monitors. Hobnail streams it and keeps only the latest status, ping, the
+last 30 statuses and the 24-hour uptime of the monitors it displays. A monitor missing from the response
 shows Unknown while the other rows stay current. Only a response over
 16 MiB leaves every row at "Heartbeat unavailable".
 
@@ -150,24 +200,25 @@ UNVERIFIED: Compatibility outside the inspected releases and live proxies.
 Enter the service URL and a Jellyfin Dashboard API key. Create a dedicated
 key in Dashboard → API Keys. Jellyfin grants application keys server-wide
 access without per-route scopes. Hobnail uses read endpoints only and sends
-the key in the `Authorization` header using the MediaBrowser scheme.
+the key only in the `Authorization` header using the MediaBrowser scheme.
 
-**Active streams** counts sessions with a current media item, including
-paused playback, and lists up to ten titles and clients. The unpaged
-`/Sessions` response can exceed the size limit, leaving active streams
-unavailable while other widgets can still refresh. **Library counts**
-shows server-wide movies, series, episodes, albums, songs and books.
-**Latest added** shows up to ten recently created library entries, newest
-first. Its server-wide `/Items` query works with an application key alone.
-Jellyfin's user-specific `/Items/Latest` needs a user ID.
+| Widget | Shows | Source |
+|---|---|---|
+| **Now playing** (recommended, id `streams`) | Up to ten sessions with a current item: title (`Series · SxxEyy` for episodes), user and device, playback progress from `PlayState.PositionTicks` / `RunTimeTicks`, time left or "Paused". | `GET /Sessions` |
+| **Library counts** | Tiles for movies, series, episodes, albums, songs and books, skipping empty kinds. | `GET /Items/Counts` |
+| **Latest added** | Ten recently created items: title, type with the episode title or album artist, production year. | `GET /Items?recursive=true&includeItemTypes=Movie,Episode,MusicAlbum,Audio,Book&sortBy=DateCreated&sortOrder=Descending&limit=10` |
+
+The unpaged `/Sessions` response can exceed the size limit, leaving Now
+playing unavailable while other widgets refresh. The server-wide `/Items`
+query works with an application key alone; `/Items/Latest` needs a user ID.
 
 Verified from:
 
-- [Jellyfin 10.11.10 OpenAPI](https://api.jellyfin.org/openapi/stable/jellyfin-openapi-10.11.10.json)
+- [Jellyfin 10.11.10 OpenAPI](https://api.jellyfin.org/openapi/stable/jellyfin-openapi-10.11.10.json) and the [current stable OpenAPI](https://api.jellyfin.org/openapi/jellyfin-openapi-stable.json) (SessionInfoDto `UserName`, `Client`, `DeviceName`, `NowPlayingItem`, `PlayState`; PlayerStateInfo `PositionTicks`, `IsPaused`; BaseItemDto `SeriesName`, `AlbumArtist`, `IndexNumber`, `ParentIndexNumber`, `RunTimeTicks`, `ProductionYear`)
 - [Authorization parser and API key lookup](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Server.Implementations/Security/AuthorizationContext.cs)
 - [Sessions](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/SessionController.cs), [server-wide item queries](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/ItemsController.cs) and [user-specific latest media](https://github.com/jellyfin/jellyfin/blob/v10.11.10/Jellyfin.Api/Controllers/UserLibraryController.cs)
 
-UNVERIFIED: Compatibility outside the inspected release and live proxies.
+UNVERIFIED: compatibility outside the inspected releases and live proxies.
 
 ## qBittorrent
 
@@ -176,118 +227,178 @@ account without separate read-only scopes. Hobnail only logs in and reads
 transfer data. Keep the session cookie name at `SID` for a default 5.0.5
 WebUI. If your WebUI uses a custom or port-qualified name, enter the exact
 configured name, such as `QBT_SID_8080`. Keep WebUI CSRF protection enabled.
+Every request after login carries only the `SID` cookie and the bound
+target's `Origin` and `Referer`; the session is renewed once on a 403.
 
-**Torrent activity** shows download and upload rates, the WebUI's active
-and seeding counts, queued uploads and downloads, and free space on the
-default save path. A torrent can appear in more than one count.
-Active and seeding counts stream the WebUI's filtered `torrents/info`
-lists and count their entries without keeping them. Queued and free-space
-figures stream the initial `sync/maindata` snapshot, keeping only a queued
-counter and the `server_state.free_space_on_disk` number. qBittorrent has
-no queued filter and reports free space only in that snapshot, which lists
-every torrent in full (over 128 KiB at about 100 torrents). Each streamed
-response may carry up to 16 MiB, enough for roughly 10,000 torrents. A
-larger list shows Unavailable for that count, and transfer speeds remain
-visible. All four requests share the 5-second provider deadline, so a slow
-WebUI with a very large library can time out.
+**Torrent activity** (recommended, 4×2) shows tiles for download and upload
+rates, the WebUI's active and seeding counts, queued uploads and downloads,
+and free space on the default save path. A torrent can appear in more than
+one count. Active and seeding counts stream the WebUI's filtered
+`torrents/info` lists and count their entries without keeping them. Queued
+and free-space figures stream the initial `sync/maindata` snapshot, keeping
+only a queued counter and the `server_state.free_space_on_disk` number.
+qBittorrent has no queued filter and reports free space only in that
+snapshot, which lists every torrent in full (over 128 KiB at about 100
+torrents). Each streamed response may carry up to 16 MiB, enough for
+roughly 10,000 torrents. A larger list shows Unavailable for that count,
+and transfer speeds remain visible. All four requests share the 5-second
+provider deadline, so a slow WebUI with a very large library can time out.
+
+**Torrents** (4×4) lists up to ten torrents from
+`GET /api/v2/torrents/info?filter=<show>&sort=dlspeed&reverse=true&limit=10`
+(sorted by `upspeed` for the seeding filter), fastest first. Choose Active
+(default), Downloading, Seeding, Completed or All. Each row shows the name,
+a progress bar, a readable state with a dot (green while transferring,
+amber when stalled, red for an error or missing files, none when stopped,
+queued or checking), the size, the time left while downloading, and the
+current download or upload speed. `limit` keeps the response small.
 
 Verified from:
 
 - [WebUI API v2 documentation for qBittorrent 5.0](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0))
+  (`torrents/info` parameters `filter`, `sort`, `reverse`, `limit`; fields
+  `name`, `progress`, `dlspeed`, `upspeed`, `eta`, `state`, `size`; the
+  state values)
 - [5.0.5 login result](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/authcontroller.cpp) and [session cookies, CSRF and expired sessions](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/webapplication.cpp)
 - [Sync snapshot and free space](https://github.com/qbittorrent/qBittorrent/blob/release-5.0.5/src/webui/api/synccontroller.cpp)
 - [`torrents/info` filters, `limit` and `offset`](https://github.com/qbittorrent/qBittorrent/blob/master/src/webui/api/torrentscontroller.cpp)
   ([5.0.x](https://github.com/qbittorrent/qBittorrent/blob/v5_0_x/src/webui/api/torrentscontroller.cpp)).
   Released branches reset an `offset` past the end to 0, so paging cannot
-  find the end of a list. Hobnail streams the unpaged list instead.
+  find the end of a list. Hobnail streams the unpaged list for counts.
 
-UNVERIFIED: Compatibility outside the inspected version and live proxies.
+UNVERIFIED: Compatibility outside the inspected version and live proxies;
+the `8640000` "unknown ETA" value (from qBittorrent clients, not the wiki);
+`stoppedUP`/`stoppedDL` and `forcedMetaDL` as the 5.x names of the paused
+and forced-metadata states.
 
 ## Sonarr
 
-Enter the service URL and the API key from Settings → General. Sonarr's
-instance API key is required and has no read-only scope. Hobnail sends it
-in `X-Api-Key` and uses only Sonarr API v3 GET routes.
+Enter the service URL and the API key from Settings → General → Security.
+Sonarr's instance API key is required and has no read-only scope. Hobnail
+sends it only in `X-Api-Key` and uses only Sonarr API v3 GET routes.
 
-**Sonarr overview** shows the download queue total, including pending and
-unknown items, the monitored missing-episode total and current health issues.
-**Upcoming episodes** lists up to ten monitored airings in the next 48 hours.
+| Widget | Shows | Source |
+|---|---|---|
+| **Episode calendar** (recommended, id `upcoming`) | A 7-day agenda from the start of today (UTC): series, `SxxEyy · episode title`, air time; downloaded episodes are marked. Up to 20 entries. | `GET api/v3/calendar?start&end&includeSeries=true` |
+| **Sonarr overview** | Tiles: queue total, monitored missing episodes, health (OK, or the issue count, red when any issue is an error). | `api/v3/queue/status`, `api/v3/wanted/missing?page=1&pageSize=1&monitored=true`, `api/v3/health` |
+| **Download queue** | Up to ten queue rows: series, `SxxEyy · title`, progress from `size`/`sizeleft`, time left while downloading or the queue status; tracked-download warnings and errors colour the dot. | `api/v3/queue?page=1&pageSize=10&includeSeries=true&includeEpisode=true` |
+| **Missing episodes** | The ten most recently aired monitored episodes without a file, with the air date. | `api/v3/wanted/missing?…&sortKey=episodes.airDateUtc&sortDirection=descending&includeSeries=true` |
+
+An oversized calendar, queue or missing response marks only that widget
+unavailable; an oversized health response leaves the other tiles.
 
 Verified from:
 
-- [Sonarr 4.0.17.2952 API v3 OpenAPI](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/openapi.json)
+- [Sonarr 4.0.17.2952 API v3 OpenAPI](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/openapi.json) (QueueResource `size`, `sizeleft`, `timeleft`, `status`, `trackedDownloadStatus`; EpisodeResource; queue and missing parameters)
 - [Queue status](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Queue/QueueStatusController.cs), [missing episodes](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Wanted/MissingController.cs) and [calendar](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/Calendar/CalendarController.cs)
+- [Wanted sort key](https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/frontend/src/Store/Actions/wantedActions.js) (`episodes.airDateUtc`)
 
-UNVERIFIED: Compatibility outside the inspected release and live proxies.
+UNVERIFIED: the `timeleft` text format `[d.]hh:mm:ss` (a .NET TimeSpan;
+anything else falls back to the status), compatibility outside the
+inspected release and live proxies.
 
 ## Radarr
 
-Enter the service URL and the API key from Settings → General. Radarr's
-instance API key is required and has no read-only scope. Hobnail sends it
-in `X-Api-Key` and uses only Radarr API v3 GET routes.
+Enter the service URL and the API key from Settings → General → Security.
+Radarr's instance API key is required and has no read-only scope. Hobnail
+sends it only in `X-Api-Key` and uses only Radarr API v3 GET routes.
 
-**Radarr overview** shows the download queue total, including pending and
-unknown items, the monitored missing-movie total and current health issues.
-**Upcoming movies** lists up to ten monitored movies with a theatrical,
-digital or physical release in the next 48 hours, in Radarr's calendar order.
+| Widget | Shows | Source |
+|---|---|---|
+| **Release calendar** (recommended, id `upcoming`) | A 7-day agenda of monitored movies, at the first cinema, digital or physical release inside the window, with the release kind and year; downloaded movies are marked. | `GET api/v3/calendar?start&end` |
+| **Radarr overview** | Tiles: queue total, monitored missing movies, health. | `api/v3/queue/status`, `api/v3/wanted/missing?page=1&pageSize=1&monitored=true`, `api/v3/health` |
+| **Download queue** | Up to ten queue rows: movie, year, progress, time left or status, tracked-download problems. | `api/v3/queue?page=1&pageSize=10&includeMovie=true` |
+| **Missing movies** | Ten monitored movies without a file, by sort title, with year and release status. | `api/v3/wanted/missing?…&sortKey=movieMetadata.sortTitle&sortDirection=ascending` |
 
 Verified from:
 
-- [Radarr API v3 OpenAPI](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/openapi.json)
-- [Queue status](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Queue/QueueStatusController.cs), [missing movies](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Wanted/MissingController.cs), [calendar](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Calendar/CalendarController.cs) and [release-window query](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/NzbDrone.Core/Movies/MovieRepository.cs)
+- [Radarr API v3 OpenAPI (develop)](https://github.com/Radarr/Radarr/blob/develop/src/Radarr.Api.V3/openapi.json) (QueueResource, MovieResource `inCinemas`, `digitalRelease`, `physicalRelease`, `hasFile`, `includeMovie`)
+- [Radarr API v3 OpenAPI at 25a2124](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/openapi.json), [queue status](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Queue/QueueStatusController.cs), [missing movies](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Wanted/MissingController.cs), [calendar](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/Radarr.Api.V3/Calendar/CalendarController.cs) and [release-window query](https://github.com/Radarr/Radarr/blob/25a2124d7d5bb10aae6b89726577303f4bd60f75/src/NzbDrone.Core/Movies/MovieRepository.cs)
+- [Wanted sort key](https://github.com/Radarr/Radarr/blob/develop/frontend/src/Store/Actions/wantedActions.js) (`movieMetadata.sortTitle`)
 
-UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
+UNVERIFIED: the serialised MovieStatusType values (`tba`, `announced`,
+`inCinemas`, `released`; others show "Unknown"), the `timeleft` format,
+compatibility outside the inspected revisions and live proxies.
 
 ## Prowlarr
 
-Enter the service URL and the API key from Settings → General. Prowlarr's
-instance API key is required and has no read-only scope. Hobnail sends it
-in `X-Api-Key` and uses only Prowlarr API v1 GET routes.
+Enter the service URL and the API key from Settings → General → Security.
+Prowlarr's instance API key is required and has no read-only scope.
+Hobnail sends it only in `X-Api-Key` and uses only Prowlarr API v1 GET
+routes.
 
-**Indexer activity** shows the number of temporarily blocked indexers,
-details for up to five of them, and total and failed grabs from the last
-seven days. The status endpoint reports temporary blocks due to upstream
-failures. The total grab count includes failed grabs.
+| Widget | Shows | Source |
+|---|---|---|
+| **Indexer activity** (recommended, id `indexers`) | Tiles: temporarily blocked indexers, and queries, grabs and failed grabs over the last seven days. | `GET api/v1/indexerstatus`, `api/v1/indexerstats?startDate&endDate` |
+| **Indexer status** | The ten busiest indexers this week, blocked ones first with their unblock time, then grabs and average response time (or failed queries), coloured down / warn / up. | the same two routes |
+
+The status endpoint reports temporary blocks due to upstream failures. The
+grab count includes failed grabs. The large `/api/v1/indexer` list is not
+read; indexers without statistics in the window are not listed.
 
 Verified from:
 
-- [Prowlarr API v1 OpenAPI](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/openapi.json)
+- [Prowlarr API v1 OpenAPI](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/openapi.json) and [develop](https://github.com/Prowlarr/Prowlarr/blob/develop/src/Prowlarr.Api.V1/openapi.json) (IndexerStatistics `numberOfQueries`, `numberOfGrabs`, `numberOfFailedQueries`, `numberOfFailedGrabs`, `averageResponseTime`)
 - [Indexer status](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/Indexers/IndexerStatusController.cs) and [blocked-provider filter](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/NzbDrone.Core/ThingiProvider/Status/ProviderStatusServiceBase.cs)
 - [Indexer stats](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/Prowlarr.Api.V1/Indexers/IndexerStatsController.cs) and [grab aggregation](https://github.com/Prowlarr/Prowlarr/blob/46c468c443ff3ebb86fc99347d3a15885d41d1e1/src/NzbDrone.Core/IndexerStats/IndexerStatisticsService.cs)
 
-UNVERIFIED: Compatibility outside the inspected upstream revision and live proxies.
+UNVERIFIED: `averageResponseTime` is in milliseconds (the spec gives no
+unit); compatibility outside the inspected revisions and live proxies.
 
 ## Jellyseerr / Overseerr
 
 Enter the Jellyseerr or Overseerr service URL and the instance API key
 from Settings → General. Both use API v1 and accept the key in
 `X-Api-Key`. The shared key acts as the original administrator and has
-no read-only scope. Hobnail uses only the request-count endpoint.
+no read-only scope. Hobnail sends it only in that header.
 
-**Media requests** shows the instance totals for pending and approved
-requests. Approved includes requests still being processed and those
-already available.
+| Widget | Shows | Source |
+|---|---|---|
+| **Media requests** (recommended, id `requests`) | Tiles: pending (a warning while anything waits), approved, processing and available requests. | `GET api/v1/request/count` |
+| **Reported issues** | Tiles: open and closed issues, and all issues by type (video, audio, subtitles, other). | `GET api/v1/issue/count` |
+
+A recent-requests list is not offered: request objects carry only TMDB ids,
+and resolving each title would take a large details request per row.
 
 Verified from:
 
 - [Jellyseerr 2.7.3 OpenAPI](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/jellyseerr-api.yml), [request counts](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/server/routes/request.ts) and [key authentication](https://github.com/Fallenbagel/jellyseerr/blob/v2.7.3/server/middleware/auth.ts)
+- [Jellyseerr develop API spec](https://github.com/Fallenbagel/jellyseerr/blob/develop/seerr-api.yml) (`/request/count` fields including `processing`, `available`; `/issue/count` `open`, `closed`, `video`, `audio`, `subtitles`, `others`; MediaRequest without a title)
 - [Overseerr 1.35.0 OpenAPI](https://github.com/sct/overseerr/blob/v1.35.0/overseerr-api.yml), [request counts](https://github.com/sct/overseerr/blob/v1.35.0/server/routes/request.ts) and [key authentication](https://github.com/sct/overseerr/blob/v1.35.0/server/middleware/auth.ts)
 
-UNVERIFIED: Compatibility outside the inspected releases and live proxies.
+UNVERIFIED: `/issue/count` on Overseerr releases before issues existed
+(they answer 404, shown as a status error); compatibility outside the
+inspected releases and live proxies.
 
 ## AdGuard Home
 
-Enter the Web UI URL and an AdGuard Home account username and password.
-The control API uses HTTP Basic authentication and has no read-only account
-scope. **DNS protection** reads the configured statistics interval and
-reports filtering-rule blocks, their share of all queries, and the current
-protection setting. With zero queries the percentage is undefined.
+Enter the Web UI URL and an AdGuard Home account username and password
+(the web interface login from `AdGuardHome.yaml` → `users`). The control
+API uses HTTP Basic authentication and has no read-only account scope.
+
+Widgets (all read `GET /control/stats/config` and, when statistics are on,
+`GET /control/stats`, whose one response carries the counters, the
+per-time-unit series and the top lists):
+
+- **DNS protection** (recommended, 4x2): stat tiles for queries over the
+  configured statistics interval with a sparkline from `dns_queries`,
+  filtering-rule blocks, their share of all queries (undefined with zero
+  queries), the average processing time (`avg_processing_time`, seconds,
+  shown in ms) and the protection setting from `GET /control/status`.
+  With statistics off it shows "Statistics: Off" and protection only.
+- **Top queried domains**, **Top blocked domains**, **Top clients** (4x4):
+  the first ten entries of `top_queried_domains`, `top_blocked_domains` and
+  `top_clients` as ranked rows with counts and bars relative to the top
+  entry. With statistics off they say so.
 
 Verified from:
 
 - [Upstream OpenAPI for v0.107.73](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.73/openapi/openapi.yaml)
+  (`Stats`, `TopArrayEntry` one-key objects, `GetStatsConfigResponse`)
 
-UNVERIFIED: Other versions and live reverse proxies.
+UNVERIFIED: Other versions and live reverse proxies. `TopArrayEntry` is
+loosely typed (`additionalProperties: number`); Hobnail reads each entry's
+first key.
 
 ## Technitium DNS
 
@@ -298,13 +409,24 @@ body of each read request.
 The connection test verifies zone list access. Dashboard View permission
 is checked when the widget refreshes.
 
-**DNS activity** shows queries and blocks from the last hour and the total
-number of zones visible to that user. Hobnail requests one zone per page
-and reads only the total. Verified against Technitium DNS Server v14.3.0.
+Widgets (all read `POST /api/dashboard/stats/get`, the last hour by
+default):
+
+- **DNS activity** (recommended, 4x2): stat tiles for queries in the last
+  hour with a per-minute sparkline (the "Total" dataset of
+  `mainChartData`), blocked and cached answers, clients, and the total
+  number of zones visible to that user (`POST /api/zones/list`, one zone
+  per page, total only).
+- **Top domains**, **Top blocked domains** (4x4): `topDomains` and
+  `topBlockedDomains` as ranked rows with hit counts and bars.
+- **Top clients** (4x4): `topClients` with the host name as the title and
+  the address as secondary text.
+
+Verified against Technitium DNS Server v14.3.0.
 
 Verified from:
 
-- [Upstream v14.3.0 API reference](https://github.com/TechnitiumSoftware/DnsServer/blob/v14.3.0/APIDOCS.md)
+- [Upstream v14.3.0 API reference](https://github.com/TechnitiumSoftware/DnsServer/blob/v14.3.0/APIDOCS.md) ("Get Stats", "List Zones")
 
 UNVERIFIED: Older pagination contracts, cluster aggregation and live reverse proxies.
 
@@ -316,17 +438,23 @@ token’s tailnet) and an API access token. A device-read Bearer token with
 `devices:core:read` is sufficient. Replace the token when it expires.
 Hobnail sends it only to the origin it was saved for.
 
-**Tailnet devices** counts devices connected to Tailscale’s control service
-and shows last seen for up to ten devices. **Expiring device keys** lists
-up to ten device keys expiring in the next 30 days, earliest first. The
-widgets read the API v2 device list and refresh at intervals of ten minutes
-or longer.
+Widgets (each reads the API v2 device list once and refreshes at
+intervals of ten minutes or longer):
+
+- **Tailnet devices** (recommended, 4x4): up to twelve devices, online
+  first, each with an online/offline dot, its first Tailscale address and
+  operating system, and "Online" or a relative last-seen time.
+- **Tailnet summary** (4x2): tiles for devices online and offline, keys
+  expiring within 30 days and clients with an update available.
+- **Expiring device keys** (4x3): up to ten device keys expiring in the
+  next 30 days, earliest first, with "in N days" (red within a week).
 
 Verified from:
 
 - [Upstream authentication reference](https://tailscale.com/docs/reference/tailscale-api)
 - [Upstream device-read scope](https://tailscale.com/docs/reference/trust-credentials)
 - [Upstream device list client](https://github.com/tailscale/tailscale-client-go-v2/blob/f9e92a86ee85097dbabd255384403cb32b94f7c0/devices.go)
+- [Upstream OpenAPI](https://api.tailscale.com/api/v2?outputOpenapiSchema=true) (`Device`: `addresses`, `os`, `updateAvailable`, `connectedToControl`, `lastSeen`)
 
 UNVERIFIED: OAuth token renewal, live responses and large tailnets. Use the default `-` for account aliases containing `@`.
 
@@ -337,19 +465,29 @@ of the account whose peers you want to see. A regular v15 user can see
 their assigned peers. An administrator can see all peers. v14 exposes the
 shared Web UI password and has no narrower scope.
 
-**WireGuard peers** shows the accessible peer count and up to ten peers
-with their latest handshake and received and sent bytes. Hobnail exchanges
-credentials for a session cookie. It uses the v14 password-only login with
-`connect.sid`, or the v15 username/password login with `wg-easy`.
+Hobnail exchanges credentials for a session cookie. It uses the v14
+password-only login with `connect.sid`, or the v15 username/password login
+with `wg-easy`, then reads `GET /api/wireguard/client` (v14) or
+`GET /api/client` (v15).
+
+Widgets:
+
+- **WireGuard peers** (recommended, 4x4): up to ten peers, connected ones
+  first. A peer counts as connected when its latest handshake is under
+  three minutes old (WireGuard renews sessions every two minutes under
+  traffic). Each row shows the relative handshake time, received and sent
+  bytes, and "Disabled" for switched-off peers.
+- **WireGuard summary** (4x2): tiles for peers, connected peers and total
+  data received and sent.
 
 Verified from:
 
 - [Upstream v14 session routes](https://github.com/wg-easy/wg-easy/blob/v14/src/lib/Server.js)
-- [Upstream v14 peer metrics](https://github.com/wg-easy/wg-easy/blob/v14/src/lib/WireGuard.js)
+- [Upstream v14 peer metrics](https://github.com/wg-easy/wg-easy/blob/v14/src/lib/WireGuard.js) (`enabled`, `latestHandshakeAt`, `transferRx`, `transferTx`)
 - [Upstream v15.1.0 session and client routes](https://github.com/wg-easy/wg-easy/tree/v15.1.0/src/server/api)
-- [Upstream v15.1.0 cookie and peer metrics](https://github.com/wg-easy/wg-easy/tree/v15.1.0/src/server/utils)
+- [Upstream v15.1.0 cookie and peer metrics](https://github.com/wg-easy/wg-easy/tree/v15.1.0/src/server/utils) (`clientStatus.ts` merges handshake and transfer into each client)
 
-UNVERIFIED: v14 without a password, v15 accounts with two-factor authentication, other releases and live instances.
+UNVERIFIED: v14 without a password, v15 accounts with two-factor authentication, other releases and live instances; that v15 clients carry `enabled` (read as enabled when absent).
 
 ## Nginx Proxy Manager
 
@@ -377,92 +515,146 @@ UNVERIFIED: Other releases, database-specific display formats and live reverse p
 ## Glances
 
 Enter the Glances web server URL. If authentication is enabled, enter both
-the username and password for HTTP Basic authentication. Glances does
-not expose a plugin-specific account scope.
+the username and password for HTTP Basic authentication; they are sent only
+in the `Authorization` header. Glances does not expose a plugin-specific
+account scope. Hobnail uses the REST API v4 and falls back to v3 if the v4
+CPU route (`/api/4/cpu`, also the connection test) returns 404.
 
-**Host resources** shows CPU and memory usage and up to five filesystems
-and five sensors. Hobnail uses the REST API v4 and falls back to v3 if
-the v4 CPU route returns 404. Missing or oversized optional plugin data
-shows as Unavailable.
+- **Host resources** (recommended, 4×3): meters for CPU, memory and swap
+  (when the host has swap) and the three fullest filesystems, with
+  used-of-total detail (`cpu`, `mem`, `memswap`, `fs/top/10`).
+- **CPU, memory and load** (4×2): tiles for CPU and memory use with a
+  sparkline of their last 24 history points, and the 1, 5 and 15-minute
+  load averages with the core count, amber when the 5-minute load exceeds
+  it (`cpu`, `mem`, `load`, `cpu/total/history/24`,
+  `mem/percent/history/24`). A server that keeps no history, or refuses
+  the history request, shows the tiles without a trend line.
+- **Top processes** (4×4): the ten busiest processes with PID, user, CPU
+  and memory share (`processlist/top/10`).
+- **Sensors** (4×3): up to ten temperature, fan and battery readings with
+  units, and a dot from Glances' own warning and critical thresholds when
+  it reports them (`sensors/top/10`).
+
+Missing optional plugins (404, or v4's "Unknown plugin" 400) and oversized
+responses show as Unavailable or are left out.
 
 Verified from:
 
+- [Upstream v4.3.3 REST API](https://github.com/nicolargo/glances/blob/v4.3.3/docs/api.rst)
+  (shapes of `fs`, `load`, `memswap`, `processlist`, `sensors`; `/top/<n>`;
+  `/<plugin>/<field>/history/<n>`)
 - [Upstream v4 REST API](https://glances.readthedocs.io/en/latest/api/restful.html)
 - [Upstream v3.4.0 REST API](https://glances.readthedocs.io/en/v3.4.0/api.html)
 
-UNVERIFIED: v5, platform-specific plugins and live reverse proxies.
+UNVERIFIED: v5 (which wraps plugin data differently), platform-specific
+plugins and live reverse proxies; v3 history and process list (v3 has no
+`/top`, so a large v3 process list shows as too large); that v4 lists
+processes busiest first (Hobnail sorts the ten it receives by CPU); sensor
+unit codes other than `C` and `R`.
 
 ## Plex
 
-Enter your Plex Media Server URL and a Plex access token for that server.
-An owner token is needed for full session visibility. Use a token limited
-to the libraries you need when only reading their data. Hobnail sends
-`X-Plex-Token` and requests JSON.
+Enter your Plex Media Server URL and a Plex access token for that server
+(in Plex Web: an item's ⋯ menu → Get Info → View XML, then the
+`X-Plex-Token` value in the address). An owner token is needed for full
+session visibility. Hobnail sends the token only in `X-Plex-Token` and
+requests JSON.
 
-**Active streams** shows the session count and up to ten titles. **Library
-counts** shows the number of visible libraries and up to five library item
-totals using first-page count metadata. **Recently added** shows up to ten
-items. An oversized response leaves independent data available and marks
-the affected widget or count unavailable.
+| Widget | Shows | Source |
+|---|---|---|
+| **Now playing** (recommended, id `streams`) | Up to ten sessions: title (`Show · SxxEyy`, `Artist · Track`), user and player, progress from `viewOffset` / `duration`, time left, or Paused / Buffering. | `GET /status/sessions` |
+| **Library counts** | A tile per library (up to six) with its item count and a glyph for its type (movie, show, artist, photo), from first-page count metadata. | `GET /library/sections`, `GET /library/sections/<key>/all` (page size 1) |
+| **Recently added** | Ten items: title, the episode title, album artist or library, and the year. | `GET /library/recentlyAdded` (page size 10) |
+
+An oversized response leaves independent data available and marks the
+affected widget or count unavailable.
 
 Verified from:
 
-- [Upstream Media Server API 1.2.3 reference](https://developer.plex.tv/pms/)
+- [Upstream Media Server API reference](https://developer.plex.tv/pms/) (session and recently-added response samples: `grandparentTitle`, `parentIndex`, `index`, `duration`, `viewOffset`, `User.title`, `Player.title`/`product`/`state`, `librarySectionTitle`, `year`; library section `type`)
 - [Upstream Media Server diagnostic trace for the global recently-added route](https://forums.plex.tv/t/library-scan-not-recognizing-video-files-after-update/898898)
 
-UNVERIFIED: Live token privilege combinations, and the JSON response shape and
-pagination of the global recently-added route.
+UNVERIFIED: live token privilege combinations; `Player.state` values other
+than playing, paused and buffering (shown as playing); the pagination of
+the global recently-added route.
 
 ## Immich
 
-Enter your Immich server URL and an API key from an administrator account.
-Grant only `server.statistics`, `server.storage` and `job.read`. Hobnail sends
-the key in the `x-api-key` header.
+Enter your Immich server URL and an API key from an administrator account
+(Account Settings → API Keys). Grant only `server.statistics`,
+`server.storage` and `job.read`. Hobnail sends the key only in the
+`x-api-key` header.
 
 The connection test verifies storage access. Library statistics and job
-permissions are checked when the widget refreshes.
+permissions are checked when a widget refreshes.
 
-**Immich overview** shows instance photo and video counts, used and available
-disk space, and active, waiting and failed jobs across the queues. If a
-response exceeds the cap, the other endpoints can still supply their data.
-A server that answers 404 for the deprecated `/api/jobs` route shows
-"Jobs: Unavailable" and keeps the storage and library rows.
+| Widget | Shows | Source |
+|---|---|---|
+| **Immich overview** (recommended) | Tiles: photos, videos, disk used "of" the disk size, and job activity (active, else waiting, else idle) with failed jobs as a warning. | `GET /api/server/storage`, `/api/server/statistics`, `/api/jobs` |
+| **Storage by user** | A meter for the server disk, then up to eight users by library size: against their quota when one is set, otherwise their share of all media. | `/api/server/storage`, `/api/server/statistics` (`usage`, `usageByUser`) |
+| **Background jobs** | The ten busiest job queues with active, waiting and failed counts; failures mark the row. | `/api/jobs` |
+
+If a response exceeds the cap, the other endpoints can still supply their
+data. A server that answers 404 for the deprecated `/api/jobs` route shows
+the overview's jobs tile as unavailable and the jobs widget as "no job
+queue route".
 
 Verified from:
 
 - [Upstream v2.5.6 OpenAPI schemas and permissions](https://github.com/immich-app/immich/blob/v2.5.6/open-api/immich-openapi-specs.json)
+- [Upstream main OpenAPI (3.4.0-rc.0)](https://github.com/immich-app/immich/blob/main/open-api/immich-openapi-specs.json) (ServerStatsResponseDto `usage`, `usageByUser`; UsageByUserDto `userName`, `usage`, `quotaSizeInBytes`; QueueStatisticsDto `active`, `waiting`, `failed`)
 
-UNVERIFIED: Releases without the legacy GET /api/jobs endpoint, which v2.5.6 marks deprecated, and live reverse proxies.
+UNVERIFIED: releases without the legacy GET /api/jobs endpoint and live
+reverse proxies; queue names are shown by splitting their camelCase keys.
 
 ## Transmission
 
 Enter the Web UI origin, including any reverse-proxy prefix before
 `/transmission/rpc`. Supply the RPC username and password if the daemon
-uses HTTP Basic authentication. The RPC credential has no read-only scope.
+uses HTTP Basic authentication; they are sent only in the `Authorization`
+header. The RPC credential has no read-only scope. Hobnail sends the real
+RPC on a cold connection and retries once with the session ID supplied by
+an HTTP 409 response (`X-Transmission-Session-Id`).
 
-**Torrent activity** shows global transfer speeds and the exact active
-torrent count reported by `session-stats`. When transfers are running, it lists up to ten downloading,
-seeding or verifying torrents from the `recently-active` RPC subset.
-If that subset exceeds the cap, speeds and the total remain available.
-Hobnail sends the real RPC on a cold connection and retries once with
-the session ID supplied by an HTTP 409 response.
+- **Torrent activity** (recommended, 4×2): tiles for global download and
+  upload speed and the active, paused and total torrent counts from
+  `session-stats` (paused and total are left out if the daemon omits them).
+- **Torrents** (4×4): `torrent-get` with the fields `name`, `status`,
+  `percentDone`, `rateDownload`, `rateUpload`, `eta`, `totalSize` and
+  `error`, for the `recently-active` subset (default; torrents that just
+  stopped are dropped) or for all torrents. The ten fastest show as rows
+  with a progress bar, state (green while downloading or seeding, red on a
+  torrent error), size, time left while downloading, and the current
+  speed. A list over the response cap shows "Torrent list too large".
 
 Verified from:
 
 - [Upstream 4.0.6 RPC specification](https://github.com/transmission/transmission/blob/4.0.6/docs/rpc-spec.md)
+  (torrent fields, the status 0–6 table, `recently-active`,
+  `pausedTorrentCount` and `torrentCount`)
 - [Upstream 4.0.6 statistics and torrent selection implementation](https://github.com/transmission/transmission/blob/4.0.6/libtransmission/rpcimpl.cc)
 
-UNVERIFIED: Nonstandard RPC path suffixes, releases that remove legacy RPC and live reverse proxies.
+UNVERIFIED: Nonstandard RPC path suffixes, releases that remove legacy RPC
+and live reverse proxies; the `eta` values -1 (not available) and -2
+(unknown) beyond the `transmission.h` comments.
 
 ## SABnzbd
 
 Enter the SABnzbd Web UI URL and the full API Key from Config → General.
-The NZB Key lacks queue access. Hobnail uses only the queue read call and
-sends the key in the form body.
+The NZB Key lacks queue access. Hobnail uses only the queue and history
+read calls and sends the key in the form body (`apikey`), never in a header
+or the URL.
 
-**Download queue** shows the total number of queued jobs, download speed
-and free space on the incomplete-download drive. It requests only one
-queue entry and reads the summary.
+- **Download queue** (recommended, 4×2): tiles for download speed (green
+  while downloading, amber with "Paused" when the queue is paused), the
+  total number of queued jobs, data left with the estimated time left, and
+  free space on the incomplete-download drive. It requests only one queue
+  entry and reads the summary (`mode=queue&limit=1`).
+- **Queued jobs** (4×4): the next ten jobs with a progress bar, state,
+  category, size and time left (`mode=queue&limit=10`).
+- **Recent history** (4×4): the last ten finished jobs with state (green
+  when completed, red with the failure message when failed, amber while
+  post-processing), category and size (`mode=history&limit=10`).
 
 A wrong or missing key is reported as an authentication failure, whether
 SABnzbd answers 403 with a plain message (4.5.x) or a JSON
@@ -473,23 +665,34 @@ Verified from:
 
 - [Upstream queue API reference](https://sabnzbd.org/wiki/advanced/api)
 - [JSON error reports (`report`)](https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py)
-- [Upstream v4.5.5 queue response and units](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/api.py)
+- [Upstream v4.5.5 queue response, slot fields and units](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/api.py)
+- [Upstream v4.5.5 history fields](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/database.py)
 - [Upstream v4.5.5 API key validation](https://github.com/sabnzbd/sabnzbd/blob/4.5.5/sabnzbd/interface.py)
 
-UNVERIFIED: Releases outside v4.5.5 and live reverse proxies.
+UNVERIFIED: Releases outside v4.5.5 and live reverse proxies; the full set
+of post-processing status strings (shown as in progress).
 
 ## Home Assistant
 
-Enter the Home Assistant URL and a long-lived access token from your profile.
-Use an account that can read the selected entities. The connection test checks
-`GET /api/` with the token in the Bearer header.
+Enter the Home Assistant URL and a long-lived access token from your profile
+(Profile → Security → Long-lived access tokens). Use an account that can read
+the selected entities. The connection test checks `GET /api/` with the token
+in the Bearer header.
 
-**Entity states** takes up to 16 distinct IDs such as `sensor.temperature`,
-one per line. It reads each ID separately and shows its state, any unit of
-measurement and the on/off counts across those entities. Missing and oversized
-entities appear as unavailable while other readings remain visible.
+Both widgets take up to 16 distinct entity IDs such as `sensor.temperature`,
+one per line, and read each with `GET /api/states/<entity_id>`. Missing and
+oversized entities appear as unavailable while other readings remain
+visible; a state answering for a different entity is refused.
 
-Verified from: [Home Assistant REST API](https://contributors.home-assistant.io/core/internals/rest-api/)
+- **Entity states** (recommended, 4x2): one tile per entity, named by its
+  `friendly_name` (else the ID), with the state and any unit of measurement,
+  a glyph from the entity domain (lock, media player, person, camera ...)
+  and a highlight when on or unavailable.
+- **Entity list** (4x4): the same entities as rows with on/off dots, the
+  entity ID as secondary text, led by the on / off / unavailable counts.
+
+Verified from: [Home Assistant REST API](https://contributors.home-assistant.io/core/internals/rest-api/),
+[developer REST API reference](https://developers.home-assistant.io/docs/api/rest/)
 and [Core 2025.11.0 API source](https://github.com/home-assistant/core/blob/2025.11.0/homeassistant/components/api/__init__.py).
 
 UNVERIFIED: live installations and the permissions of custom authentication providers.
@@ -514,20 +717,34 @@ used space and the separate Activity app.
 ## Syncthing
 
 Enter the GUI URL and the API Key from Settings → GUI. The key has Syncthing
-GUI API access. Hobnail sends it in `X-API-Key` and checks
+GUI API access. Hobnail sends it only in `X-API-Key` and checks
 `GET /rest/system/status`.
 
-**Synchronization** counts online peer devices and checks the first ten
-configured folders in ID order. A folder is locally in sync when idle with
-no pending changes or errors. Paused folders are included in the checked
-count. The widget reports partial coverage and keeps device counts if the
-folder list is oversized, or folder status if the device list is oversized.
+- **Synchronization** (recommended, 4×2): tiles for online peer devices
+  and folders in sync (green when all, amber when some, red when none). It
+  checks the first ten configured folders in ID order and notes how many
+  are configured when there are more. A folder is locally in sync when
+  idle with no pending changes or errors; paused folders count as checked
+  but not in sync. It keeps the device count if the folder list is
+  oversized, and the folder count if the device list is oversized
+  (`/rest/system/connections`, `/rest/config/folders`,
+  `/rest/db/status?folder=<id>`).
+- **Folders** (4×4): the first ten folders with their state as a dot
+  (in sync green; changes pending or working amber; error red; paused or
+  unavailable plain), file count, a completion bar from `globalBytes` and
+  `needBytes`, and the data left or the folder size.
+- **Devices** (4×3): up to ten remote devices, connected first, named from
+  `/rest/config/devices` (else the first block of the device ID), with the
+  address and client version while connected, red when disconnected and
+  plain when paused.
 
 Verified from: [REST API](https://docs.syncthing.net/dev/rest.html),
+[`/rest/system/connections`](https://github.com/syncthing/docs/blob/main/rest/system-connections-get.rst),
 [v2.0.11 API source](https://github.com/syncthing/syncthing/blob/v2.0.11/lib/api/api.go)
 and [folder summary](https://github.com/syncthing/syncthing/blob/v2.0.11/lib/model/folder_summary.go).
 
-UNVERIFIED: older releases and remote-device folder completion.
+UNVERIFIED: older releases and remote-device folder completion; the
+`/rest/config/devices` fields beyond `deviceID` and `name`.
 
 ## Duplicati
 
@@ -553,40 +770,78 @@ result), legacy 2.0 authentication and deployments using a pre-shared key.
 
 Enter the Proxmox VE URL (typically HTTPS on port 8006), full token ID
 (`USER@REALM!TOKENID`) and token secret. Grant the token `Sys.Audit` on
-the monitored nodes and `VM.Audit` on the monitored guests. A propagated
-`PVEAuditor` grant on `/` covers the cluster. Privilege-separated tokens
-also require the underlying user to have the corresponding grants. For
-self-signed TLS, check the server's SHA-256 fingerprint and confirm the
-matching leaf pin in Hobnail.
+the monitored nodes, `VM.Audit` on the monitored guests and
+`Datastore.Audit` on the storages to show. A propagated `PVEAuditor` grant
+on `/` covers the cluster. Privilege-separated tokens also require the
+underlying user to have the corresponding grants. For self-signed TLS,
+check the server's SHA-256 fingerprint and confirm the matching leaf pin in
+Hobnail. Requests carry `Authorization: PVEAPIToken=<id>=<secret>` only.
 
-**Cluster overview** checks `/api2/json/version` and uses the filtered
-`/api2/json/cluster/resources` node and VM lists. It counts online nodes and
-running VMs and containers visible to the token, excludes templates, and shows
-CPU and RAM for up to ten nodes. Oversized lists leave the other list visible.
+The connection test reads `/api2/json/version`. Every widget reads one
+filtered `/api2/json/cluster/resources?type=…` list, which shows only what
+the token may audit. A list over the response cap shows a message instead
+of failing the widget.
+
+- **Cluster overview** (recommended, 4×2): tiles for online nodes (green
+  when all are online, amber when some, red when none), running VMs and
+  running containers out of all of each, excluding templates
+  (`type=node`, `type=vm`).
+- **Node resources** (4×3): CPU (with the CPU count), memory and root disk
+  meters for up to four nodes, by name; an offline node shows as Offline
+  (`type=node`: `cpu`, `maxcpu`, `mem`, `maxmem`, `disk`, `maxdisk`).
+- **Virtual machines and containers** (4×4): up to ten guests, running
+  first then by ID, with ID and name, VM or container, node, uptime or
+  state, and CPU and memory while running. Templates are left out. Choose
+  all guests or only running ones (`type=vm`: `vmid`, `name`, `type`,
+  `node`, `status`, `uptime`, `cpu`, `mem`, `template`).
+- **Storage** (4×3): used space of up to eight storages, fullest first,
+  labelled with their node unless shared; a shared storage is listed once;
+  a storage whose status is not `available` is marked Unavailable
+  (`type=storage`: `storage`, `node`, `status`, `disk`, `maxdisk`,
+  `shared`).
 
 Verified from: [Proxmox VE token and role docs](https://pve.proxmox.com/pve-docs/chapter-pveum.html),
+[API schema (`/cluster/resources` return fields and type filter)](https://pve.proxmox.com/pve-docs/api-viewer/apidoc.js),
 [version API](https://github.com/proxmox/pve-manager/blob/d147600a85186460650b5c45c453948230e6a0fb/PVE/API2.pm)
 and [cluster API source](https://github.com/proxmox/pve-manager/blob/d147600a85186460650b5c45c453948230e6a0fb/PVE/API2/Cluster.pm).
 
-UNVERIFIED: live clusters and releases with different resource schemas.
+UNVERIFIED: live clusters and releases with different resource schemas;
+status strings other than `available` for storages and `running`/`stopped`
+for guests (the schema types `status` as a free string).
 
 ## TrueNAS SCALE
 
 Enter the TrueNAS SCALE URL and API key. The key needs read access to
 `disk.query`, `pool.query`, `alert.list` and `smart.test.results`. On
 24.10, a standard UI-generated legacy API key has broad appliance access.
-Hobnail uses it as a Bearer token and tests a one-entry disk query.
+Hobnail sends it only as a Bearer token and tests a one-entry disk query.
+Widgets refresh at most once a minute (default every five minutes).
 
-**Storage health** shows non-dismissed alerts, status and free space for
-up to ten pools, and the latest reported SMART self-test for up to ten
-disks. Missing results stay unknown. The provider reads the test log and
-does not start a test. Oversized lists leave independent metrics visible.
-If the SMART results route answers 404, each disk reads "SMART results
-unavailable" and the alert, pool and disk rows stay visible.
+- **Storage health** (recommended, 4×4): rows for the non-dismissed alert
+  count (green at zero, amber otherwise), up to ten pools with a status dot
+  (ONLINE green, DEGRADED amber, FAULTED, OFFLINE, UNAVAIL or REMOVED red),
+  free space and a used-space bar, and up to ten disks with their latest
+  reported SMART self-test (passed green, failed red, aborted amber).
+  Missing results stay unknown. The provider reads the test log and does
+  not start a test. Oversized lists leave independent rows visible. If the
+  SMART results route answers 404, each disk reads "SMART results
+  unavailable" and the other rows stay visible.
+- **Pool usage** (4×2): used space of up to ten pools as meters, from
+  `pool.query` `allocated` and `size`; pools without a known size are left
+  out.
+- **Alerts** (4×3): up to ten non-dismissed alerts, most severe first,
+  with their formatted text and level (critical and above red, warning
+  amber).
+
+Endpoints: `GET /api/v2.0/alert/list`, `/pool?limit=11&sort=name`,
+`/disk?limit=11&sort=name`, `/smart/test/results?limit=10&sort=disk`.
 
 Verified from [24.10.2 REST v2.0](https://www.truenas.com/docs/scale/24.10/api/scale_rest_api.html),
 [Bearer auth source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/restful.py),
-[SMART results source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/plugins/smart.py)
+[SMART results source](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/plugins/smart.py),
+[pool fields](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/plugins/pool_/pool.py),
+[alert fields](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/plugins/alert.py)
+and [alert levels](https://github.com/truenas/middleware/blob/TS-24.10.2/src/middlewared/middlewared/alert/base.py),
 and [TrueNAS 26 API removal notes](https://www.truenas.com/docs/scale/26/gettingstarted/versionnotes/).
 
 The REST API is deprecated in 25.04 and 25.10, and removed in TrueNAS 26.
@@ -594,7 +849,8 @@ TrueNAS 26 requires JSON-RPC over WebSocket, which the provider connection
 contract does not support.
 
 UNVERIFIED: live appliances, 25.x REST compatibility and disk health
-beyond the latest SMART self-test result.
+beyond the latest SMART self-test result; whether an alert's `formatted`
+text can carry markup (shown as plain text).
 
 ## Gitea / Forgejo
 
@@ -946,10 +1202,26 @@ issuer, validity in Unix seconds, SANs, SHA-256 fingerprint, and certificate
 verification verdict even when normal trust or pin verification rejects the
 leaf. A certificate inspection does not relax verification on HTTP requests.
 
+Give the provider a brand `color` (`#rrggbb`, the logo's main colour) and an
+`icon` slug; add the logo to `src/http/brand/` (optimised, under 10 KiB, with
+its source and licence in `NOTICE.md`) and to `BRANDS` in
+`src/http/icons.rs` with the same colour. A field can declare `when` to apply
+only for one value of another field, such as an API version.
+
+Each widget declares a `description`, `default_size` and `min_size` in board
+grid units (12 columns, rows of about 80 px; summaries are usually 4 × 2 and
+lists 4 × 4) and a `sample`: a small, static, fictional `StructuredBody` in
+JSON for the gallery, in the same shape the widget returns. Mark exactly one
+widget per provider `recommended`. The registry test checks all of these.
+
 Return a typed `Fault`. Keep raw responses, credentials and sessions out of
 errors and logs. A widget returns a `StructuredBody` with display data. Choose
 among a stat, stat grid, status list, item list, meter, table, clock, rich text
-or unavailable message. The React client renders these shapes from the schema and registry.
+or unavailable message, or the richer meters (labelled bars), tiles (a value
+with a generic glyph, a delta, a tone and an optional sparkline series), rows
+(status dot, secondary text, trailing value, progress and recent status
+bars) and agenda (dated entries the client groups by day). The React client
+renders every shape generically, with no code per provider.
 The shared output boundary redacts credentials and known sessions, including
 textual escapes and standard or URL-safe Base64. Redact JSON before truncating
 or formatting it so an encoded credential cannot survive as a partial display

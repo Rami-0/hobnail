@@ -23,8 +23,125 @@ use std::time::{Duration, Instant};
 use crate::http::server::{full, set, text, Body};
 use crate::state::AppState;
 
+/// A vendored brand icon: an optimised SVG built into the binary, served
+/// without any remote fetch (see `src/http/brand/NOTICE.md` for sources and
+/// licences). `mono` marks a single dark colour the client inverts on dark
+/// themes; `color` tints the icon's plate.
+pub struct Brand {
+    pub name: &'static str,
+    pub color: &'static str,
+    pub mono: bool,
+    svg: &'static [u8],
+}
+
+macro_rules! brand {
+    ($name:literal, $color:literal) => {
+        brand!($name, $color, false)
+    };
+    ($name:literal, $color:literal, $mono:literal) => {
+        Brand {
+            name: $name,
+            color: $color,
+            mono: $mono,
+            svg: include_bytes!(concat!("brand/", $name, ".svg")),
+        }
+    };
+}
+
+pub const BRANDS: &[Brand] = &[
+    brand!("adguard-home", "#5fb36b"),
+    brand!("beszel", "#747bff"),
+    brand!("bookmark", "#8b5cf6"),
+    brand!("caddy", "#1f88c0"),
+    brand!("clock", "#6366f1"),
+    brand!("docker", "#2396ed"),
+    brand!("dockge", "#74c2ff"),
+    brand!("dozzle", "#f2a51a"),
+    brand!("duplicati", "#336697"),
+    brand!("gitea", "#609926"),
+    brand!("github", "#6e7681", true),
+    brand!("glances", "#4cb860"),
+    brand!("grafana", "#f05a28"),
+    brand!("home-assistant", "#18a8e0"),
+    brand!("http", "#64748b"),
+    brand!("immich", "#4250af"),
+    brand!("jellyfin", "#9b5bd0"),
+    brand!("jellyseerr", "#7c4ddb"),
+    brand!("mailpit", "#00b786"),
+    brand!("mariadb", "#c49a6c"),
+    brand!("markdown", "#64748b"),
+    brand!("minio", "#f05a28"),
+    brand!("mongodb", "#10aa50"),
+    brand!("mysql", "#00618a"),
+    brand!("network", "#0ea5e9"),
+    brand!("nextcloud", "#2f7fc8"),
+    brand!("nginx-proxy-manager", "#f15933"),
+    brand!("nginx", "#019639"),
+    brand!("nodejs", "#3e863d"),
+    brand!("odoo", "#714b67"),
+    brand!("open-meteo", "#f59e0b"),
+    brand!("paperless-ngx", "#2e8b3c"),
+    brand!("pi-hole", "#e0382b"),
+    brand!("plex", "#e5a00d"),
+    brand!("postgres", "#336791"),
+    brand!("prometheus", "#e6522c"),
+    brand!("prowlarr", "#d4541e"),
+    brand!("proxmox", "#e57000"),
+    brand!("qbittorrent", "#3a72c4"),
+    brand!("radarr", "#e8b322"),
+    brand!("redis", "#c6302b"),
+    brand!("rss", "#f97316"),
+    brand!("sabnzbd", "#f2a900"),
+    brand!("sonarr", "#2fb6e6"),
+    brand!("ssl", "#16a34a"),
+    brand!("syncthing", "#0b8ac9"),
+    brand!("tailscale", "#6b7280", true),
+    brand!("technitium", "#4a7fe8"),
+    brand!("traefik", "#24a1c1"),
+    brand!("transmission", "#c0392b"),
+    brand!("truenas", "#0095d5"),
+    brand!("uptime-kuma", "#3cc07a"),
+    brand!("wireguard", "#b0262b"),
+];
+
+/// The vendored icon of this name, if any.
+pub fn brand(name: &str) -> Option<&'static Brand> {
+    BRANDS.iter().find(|brand| brand.name == name)
+}
+
+/// Cache lifetime of a vendored icon: it changes only with a release.
+pub const BRAND_CACHE: &str = "public, max-age=2592000";
+
 /// Image substring → (dashboard-icons name, built-in fallback glyph).
+/// The first match wins, so longer names come before their prefixes.
 const AUTO: &[(&str, &str, &str)] = &[
+    ("nginx-proxy-manager", "nginx-proxy-manager", "globe"),
+    ("pihole", "pi-hole", "shield"),
+    ("adguard", "adguard-home", "shield"),
+    ("technitium", "technitium", "globe"),
+    ("jellyseerr", "jellyseerr", "film"),
+    ("overseerr", "jellyseerr", "film"),
+    ("jellyfin", "jellyfin", "film"),
+    ("plex", "plex", "film"),
+    ("sonarr", "sonarr", "film"),
+    ("radarr", "radarr", "film"),
+    ("prowlarr", "prowlarr", "search"),
+    ("qbittorrent", "qbittorrent", "download"),
+    ("transmission", "transmission", "download"),
+    ("sabnzbd", "sabnzbd", "download"),
+    ("immich", "immich", "image"),
+    ("home-assistant", "home-assistant", "home"),
+    ("homeassistant", "home-assistant", "home"),
+    ("nextcloud", "nextcloud", "storage"),
+    ("syncthing", "syncthing", "storage"),
+    ("duplicati", "duplicati", "storage"),
+    ("uptime-kuma", "uptime-kuma", "chart"),
+    ("glances", "glances", "chart"),
+    ("paperless", "paperless-ngx", "storage"),
+    ("gitea", "gitea", "box"),
+    ("wg-easy", "wireguard", "globe"),
+    ("wireguard", "wireguard", "globe"),
+    ("tailscale", "tailscale", "globe"),
     ("pgvector", "postgres", "database"),
     ("postgres", "postgres", "database"),
     ("pgbouncer", "postgres", "database"),
@@ -49,14 +166,15 @@ const AUTO: &[(&str, &str, &str)] = &[
 ];
 
 /// Guess an icon name for a container image, e.g. `postgres:16-alpine`.
-/// Returns a dashboard-icons name or `builtin:<glyph>`.
+/// Returns a dashboard-icons name or `builtin:<glyph>`. A vendored brand
+/// icon needs no remote fetch, so it is returned either way.
 pub fn auto_icon(image: &str, remote: bool) -> Option<String> {
     let img = image.to_ascii_lowercase();
     let repo = img.rsplit('/').next().unwrap_or(&img);
     let repo = repo.split([':', '@']).next().unwrap_or(repo);
     for (needle, di, glyph) in AUTO {
         if repo.contains(needle) || img.contains(needle) {
-            if !di.is_empty() && remote {
+            if !di.is_empty() && (remote || brand(di).is_some()) {
                 return Some(di.to_string());
             }
             return Some(format!("builtin:{glyph}"));
@@ -98,6 +216,9 @@ pub async fn dashboard_icon(state: &AppState, file: &str, letter: Option<char>) 
     };
     if !is_safe_name(name) || name.contains('.') {
         return text(StatusCode::BAD_REQUEST, "bad icon name\n");
+    }
+    if let Some(brand) = brand(name) {
+        return svg_response(brand.svg, BRAND_CACHE);
     }
     let path = cached_path(&state.env.data_dir, name);
     if let Ok(b) = std::fs::read(&path) {
@@ -152,7 +273,7 @@ fn avatar_svg(seed: &str, letter: char) -> String {
     )
 }
 
-fn svg_response(body: Vec<u8>, cache: &str) -> Response<Body> {
+fn svg_response(body: impl Into<bytes::Bytes>, cache: &str) -> Response<Body> {
     let mut r = full(StatusCode::OK, body);
     set(&mut r, hyper::header::CONTENT_TYPE, "image/svg+xml");
     set(&mut r, hyper::header::CACHE_CONTROL, cache);
@@ -228,7 +349,11 @@ mod tests {
     fn auto_icons() {
         assert_eq!(
             auto_icon("postgres:16-alpine", false).as_deref(),
-            Some("builtin:database")
+            Some("postgres")
+        );
+        assert_eq!(
+            auto_icon("ghcr.io/gethomepage/homepage:v1", false).as_deref(),
+            Some("builtin:globe")
         );
         assert_eq!(
             auto_icon("postgres:16-alpine", true).as_deref(),
@@ -236,12 +361,48 @@ mod tests {
         );
         assert_eq!(
             auto_icon("axllent/mailpit:v1.31.6", false).as_deref(),
-            Some("builtin:mail")
+            Some("mailpit")
         );
         assert_eq!(
             auto_icon("henrygd/beszel-agent:latest", true).as_deref(),
             Some("beszel")
         );
         assert_eq!(auto_icon("webshop-platform:dev", true), None);
+        // Vendored icons need no remote fetch.
+        assert_eq!(
+            auto_icon("jc21/nginx-proxy-manager:latest", false).as_deref(),
+            Some("nginx-proxy-manager")
+        );
+        assert_eq!(
+            auto_icon("pihole/pihole:2025.11.0", false).as_deref(),
+            Some("pi-hole")
+        );
+    }
+
+    #[test]
+    fn vendored_icons_are_small_safe_svgs_with_unique_names() {
+        let mut names = std::collections::HashSet::new();
+        let mut total = 0;
+        for brand in BRANDS {
+            assert!(names.insert(brand.name) && valid_slug(brand.name));
+            let svg = std::str::from_utf8(brand.svg).unwrap();
+            assert!(svg.starts_with("<svg") && svg.ends_with("</svg>"));
+            assert!(
+                !svg.contains("<script") && !svg.contains("javascript:") && !svg.contains(" on")
+            );
+            assert!(brand.svg.len() <= 10 * 1024, "{} is too large", brand.name);
+            let color = brand.color.strip_prefix('#').unwrap();
+            assert!(color.len() == 6 && color.bytes().all(|b| b.is_ascii_hexdigit()));
+            total += brand.svg.len();
+        }
+        assert!(total <= 100 * 1024);
+        for (_, di, _) in AUTO {
+            assert!(di.is_empty() || brand(di).is_some() || ["homepage"].contains(di));
+        }
+        // Every provider's icon is vendored, in the provider's own colour.
+        for provider in crate::providers::REGISTRY {
+            let brand = brand(provider.icon).expect(provider.icon);
+            assert_eq!(brand.color, provider.color, "{}", provider.id);
+        }
     }
 }

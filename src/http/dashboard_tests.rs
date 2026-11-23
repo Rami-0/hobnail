@@ -403,7 +403,7 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
     assert_eq!(bootstrap["remote_icons"], false);
     assert_api_error(
         &viewer
-            .call("GET", "/api/v1/icons/postgres", Value::Null)
+            .call("GET", "/api/v1/icons/homepage", Value::Null)
             .await,
         404,
         "not_found",
@@ -1030,14 +1030,14 @@ async fn dashboard_icons_use_the_authenticated_existing_cache() {
     let dir = st.env.data_dir.join("icons/di");
     std::fs::create_dir_all(&dir).unwrap();
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><title>cached icon</title></svg>"#;
-    std::fs::write(dir.join("postgres.svg"), svg).unwrap();
+    std::fs::write(dir.join("homepage.svg"), svg).unwrap();
     let owner = Client::owner(start(st).await).await;
     let bootstrap = owner
         .json("GET", "/api/v1/bootstrap", Value::Null, 200)
         .await;
     assert_eq!(bootstrap["remote_icons"], true);
     let r = owner
-        .call("GET", "/api/v1/icons/postgres", Value::Null)
+        .call("GET", "/api/v1/icons/homepage", Value::Null)
         .await;
     assert_eq!(r.status, 200);
     assert_eq!(r.body, svg);

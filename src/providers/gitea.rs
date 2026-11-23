@@ -9,6 +9,7 @@ pub const GITEA: Provider = Provider {
     name: "Gitea / Forgejo",
     category: "Development",
     icon: "gitea",
+    color: "#609926",
     description: "Show accessible repositories, open issues and pull requests, and Actions status.",
     docs: "https://docs.gitea.com/api/",
     public_internet: false,
@@ -18,7 +19,7 @@ pub const GITEA: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(TOKEN, "Access token", Kind::Secret, "Use a personal access token with read:user and read:repository scopes and access to the selected repositories.")
+            ..Field::new(TOKEN, "Access token", Kind::Secret, "Create it in Settings → Applications → Generate new token, with read:user and read:repository scopes and access to the selected repositories.")
         },
         ENABLED,
     ],
@@ -28,6 +29,9 @@ pub const GITEA: Provider = Provider {
         name: "Repository activity",
         description: "Visible repository count, with issues, pull requests and Actions for selected repositories.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Repositories","42"],["Open issues","17"],["Open pull requests","3"]]}"#,
         fields: &[REPOSITORIES, REFRESH],
         fetch: overview,
         validate: repositories::validate_options,

@@ -5,6 +5,16 @@ export type Values = Record<string, unknown>;
 
 export const hasEndpoint = (fields: Field[]) => fields.some((field) => field.id === "base_url");
 
+/** The fields to show for these values: a field with `when` only while the
+ * field it names (or that field's default) has the given value. */
+export function visibleFields(fields: Field[], values: Values): Field[] {
+  return fields.filter(({ when }) => {
+    if (!when) return true;
+    const value = values[when.field] ?? fields.find((field) => field.id === when.field)?.default;
+    return String(value ?? "") === when.equals;
+  });
+}
+
 export function initial(fields: Field[]): Values {
   return Object.fromEntries(fields.flatMap((f) => f.default === null ? [] : [[
     f.id, ["bool", "list"].includes(f.kind) ? JSON.parse(f.default) : f.default,

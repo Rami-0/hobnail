@@ -8,6 +8,7 @@ pub const PAPERLESS: Provider = Provider {
     name: "Paperless-ngx",
     category: "Files",
     icon: "paperless-ngx",
+    color: "#2e8b3c",
     description: "Show the total document count and inbox.",
     docs: "https://paperless-ngx-docs.readthedocs.io/en/latest/api.html",
     public_internet: false,
@@ -17,7 +18,7 @@ pub const PAPERLESS: Provider = Provider {
         Field {
             required: true,
             max_length: Some(4096),
-            ..Field::new(TOKEN, "API token", Kind::Secret, "Create a token for the Paperless-ngx account that can view the documents and inbox tags.")
+            ..Field::new(TOKEN, "API token", Kind::Secret, "In Paperless-ngx open My profile (top right) and generate the API auth token, for an account that can view documents and inbox tags.")
         },
         ENABLED,
     ],
@@ -27,6 +28,9 @@ pub const PAPERLESS: Provider = Provider {
         name: "Documents and inbox",
         description: "Total visible documents and documents assigned to inbox tags.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Documents","3,412"],["Inbox","6"],["Tags","48"],["Correspondents","120"]]}"#,
         fields: &[REFRESH],
         fetch: overview,
         validate: no_widget_options,

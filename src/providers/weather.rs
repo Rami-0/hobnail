@@ -31,6 +31,7 @@ pub(super) const WEATHER: Provider = Provider {
     name: "Weather (Open-Meteo)",
     category: "Utilities",
     icon: "open-meteo",
+    color: "#f59e0b",
     description: "Show the current weather and daily highs and lows for coordinates you enter.",
     docs: "https://open-meteo.com/en/docs",
     public_internet: true,
@@ -45,6 +46,9 @@ pub(super) const WEATHER: Provider = Provider {
         name: "Weather forecast",
         description: "Current temperature, conditions and today's high and low, with an optional three-day outlook.",
         recommended: true,
+        default_size: size(4, 2),
+        min_size: size(3, 2),
+        sample: r#"{"kind":"stat_grid","rows":[["Now","14 °C · Partly cloudy"],["Today","9–16 °C"],["Wind","12 km/h"],["Rain","20%"]]}"#,
         fields: &[
             Field { default: Some("°C"), choices: &["°C", "°F"], ..Field::new("units", "Temperature units", Kind::Select, "") },
             Field { default: Some("false"), ..Field::new("outlook", "Three-day forecast", Kind::Bool, "") },

@@ -387,7 +387,17 @@ async fn route(state: Arc<AppState>, req: Request<Incoming>) -> Response<Body> {
     if let Some(session) = session {
         crate::auth::refresh_cookie(&state, &session, secure, &mut response);
         if dashboard_icon && response.status().is_success() {
-            set(&mut response, CACHE_CONTROL, "private, max-age=86400");
+            // A vendored icon changes only with a release; cached ones may be replaced.
+            let vendored = response
+                .headers()
+                .get(CACHE_CONTROL)
+                .is_some_and(|value| value == crate::http::icons::BRAND_CACHE);
+            let cache = if vendored {
+                "private, max-age=2592000"
+            } else {
+                "private, max-age=86400"
+            };
+            set(&mut response, CACHE_CONTROL, cache);
             set(&mut response, hyper::header::VARY, "Cookie");
         } else {
             set(&mut response, CACHE_CONTROL, "no-store");

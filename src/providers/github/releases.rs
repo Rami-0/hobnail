@@ -19,6 +19,9 @@ pub(super) const WATCHER: Widget = Widget {
     name: "GitHub releases watcher",
     description: "See whether GitHub has a newer release for the apps you run.",
     recommended: false,
+    default_size: size(4, 4),
+    min_size: size(3, 3),
+    sample: r#"{"kind":"item_list","items":[{"title":"example/app v2.4.1","secondary":"Released 2 days ago","link":null,"time":null},{"title":"example/tool v1.9.0","secondary":"Released last week","link":null,"time":null}]}"#,
     fields: &[
         TRACKED,
         Field {

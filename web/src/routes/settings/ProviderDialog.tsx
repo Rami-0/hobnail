@@ -7,7 +7,7 @@ import type { Provider } from "../../api/gen/Provider.ts";
 import { api } from "../../api/session.ts";
 import { origin } from "../../boards/document.ts";
 import { SchemaForm, pinField } from "../../configuration/SchemaForm.tsx";
-import { connectionValues, hasEndpoint, initial, schemaValues, type Values } from "../../configuration/schema.ts";
+import { connectionValues, hasEndpoint, initial, schemaValues, visibleFields, type Values } from "../../configuration/schema.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Dialog } from "../../ui/Dialog.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -15,12 +15,15 @@ import { Note } from "../../ui/Note.tsx";
 import { Select } from "../../ui/Select.tsx";
 import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
 import { Switch } from "../../ui/Switch.tsx";
-import { Badge } from "../../ui/Badge.tsx";
 import { CardButton } from "../../ui/CardButton.tsx";
 import { Steps } from "../../ui/Steps.tsx";
-import { ArrowRightIcon, ZapIcon } from "lucide-react";
+import { brandColor } from "../../ui/brand.ts";
+import { WidgetPreview } from "../../ui/WidgetPreview.tsx";
+import { ArrowRightIcon, BookOpenIcon, LayoutGridIcon, ZapIcon } from "lucide-react";
+import type { CSSProperties } from "react";
 import { matchesConnectionTest, type ConnectionTest } from "./connection-test.ts";
 
+const brand = (color: string) => ({ "--brand": brandColor(color) }) as CSSProperties;
 const advanced = (field: { id: string; kind: string }) => field.kind === "bool" || field.id === "fingerprint";
 
 export default function ProviderDialog({ providers, item, preferredBoard, icons, internet, onClose, onSaved }: {
@@ -123,7 +126,7 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
 
   async function submit(test: boolean) {
     if (!provider || busy || (choosing && board && loadingWidgets)) return;
-    const { errors: connectionErrors, ...connection } = connectionValues(provider.fields, config, bound, cleared);
+    const { errors: connectionErrors, ...connection } = connectionValues(visibleFields(provider.fields, config), config, bound, cleared);
     const fingerprint = String(config.fingerprint ?? "").trim();
     if (fingerprint && (!/^[0-9a-f]{64}$/i.test(fingerprint) || !connection.base_url.startsWith("https://"))) {
       connectionErrors.fingerprint = "Use HTTPS and enter 64 hexadecimal digits.";
@@ -186,12 +189,13 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
   const step = !provider ? 0 : choosing ? 2 : 1;
   const categories = [...new Set(providers.map((p) => p.category))].toSorted();
   const listed = providers.filter((p) => (!category || p.category === category) && `${p.name} ${p.category} ${p.description}`.toLowerCase().includes(query.trim().toLowerCase()));
-  const schema = provider ? hasEndpoint(provider.fields) ? [...provider.fields, pinField] : provider.fields : [];
+  const shown = provider ? visibleFields(provider.fields, config) : [];
+  const schema = provider && hasEndpoint(provider.fields) ? [...shown, pinField] : shown;
   const formProps = { values: config, errors, onChange: change, bound, cleared, onClear: item ? (key: string) => {
     change(key, "");
     setCleared({ ...cleared, [key]: !cleared[key] });
   } : undefined };
-  return <Dialog open wide title={choosing ? "Add to a board" : item ? "Edit integration" : provider ? `Connect ${provider.name}` : "Add integration"}
+  return <Dialog open wide className="integration-dialog" title={choosing ? "Add to a board" : item ? "Edit integration" : provider ? `Connect ${provider.name}` : "Add integration"}
     onClose={() => { if (!busy) onClose(); }} testId="integration-form" footer={<>
       <Button onClick={() => choosing ? setChoosing(false) : provider && !item ? setProvider(undefined) : onClose()} disabled={busy}>
         {choosing || provider && !item ? "Back" : "Cancel"}
@@ -209,28 +213,32 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
           {["", ...categories].map((entry) => <Button key={entry || "all"} size="sm" aria-pressed={category === entry} onClick={() => setCategory(entry)}>{entry || "All"}</Button>)}
         </div>
         {listed.length ? <div className="catalog-grid">{listed.map((p) => (
-          <CardButton key={p.id} className="catalog-card" onClick={() => choose(p)}>
+          <CardButton key={p.id} className="catalog-card" style={brand(p.color)} onClick={() => choose(p)}>
             <ServiceIcon tint name={p.icon} title={p.name} enabled={icons} />
             <small>{p.category}</small><strong><span className="sr">Choose </span>{p.name}</strong>
             <p>{p.description}</p>
+            <span className="catalog-count"><LayoutGridIcon aria-hidden="true" />{p.widgets.length === 1 ? "1 widget" : `${p.widgets.length} widgets`}</span>
             {p.public_internet && !internet && <p className="catalog-warn">Needs internet access, which is off.</p>}
           </CardButton>
         ))}</div> : <p className="muted">No integration matches “{query}”. The Generic HTTP integration can read most JSON APIs.</p>}
       </div> : choosing ? <>
         <Select label="Board" value={board} options={[{ value: "", label: "Save connection only" }, ...boards.map((b) => ({ value: b.id, label: b.name }))]} onChange={(next) => { setLoadedBoard(""); setBoard(next); }} />
         {board && loadingWidgets && <p className="muted">Loading widgets…</p>}
-        {board && !loadingWidgets && rows.map(({ widget, id, label, options }) => <div key={id} className="widget-choice" data-on={selected[id] ? "" : undefined}>
-          <div className="widget-choice-head"><Switch checked={!!selected[id]} label={label} onChange={(checked) => setSelected({
-            ...selected, [id]: checked ? options : undefined,
-          })} />{widget.recommended && <Badge variant="secondary">Recommended</Badge>}</div>
-          <p>{widget.description}</p>
-          {selected[id] && <SchemaForm id={id} schema={widget.fields} values={selected[id] ?? {}} errors={widgetErrors[id]}
-            onChange={(key, value) => setSelected({ ...selected, [id]: { ...selected[id], [key]: value } })} />}
-        </div>)}
+        {board && !loadingWidgets && <div className="widget-gallery" data-testid="widget-gallery">{rows.map(({ widget, id, label, options }) =>
+          <WidgetPreview key={id} widget={widget} icon={provider.icon} color={provider.color} title={provider.name}>
+            <div className="widget-choice" data-on={selected[id] ? "" : undefined}>
+              <Switch checked={!!selected[id]} label={`Add ${label}`} onChange={(checked) => setSelected({
+                ...selected, [id]: checked ? options : undefined,
+              })} />
+              {selected[id] && <SchemaForm id={id} schema={widget.fields} values={selected[id] ?? {}} errors={widgetErrors[id]}
+                onChange={(key, value) => setSelected({ ...selected, [id]: { ...selected[id], [key]: value } })} />}
+            </div>
+          </WidgetPreview>)}</div>}
       </> : <>
-        <div className="provider-head"><ServiceIcon tint name={provider.icon} title={provider.name} enabled={icons} />
-          <div><strong>{provider.name}</strong><p>{provider.description}</p></div>
-          {!item && <a href={provider.docs} target="_blank" rel="noreferrer">Setup guide ↗</a>}</div>
+        <div className="provider-head" style={brand(provider.color)}><ServiceIcon tint name={provider.icon} title={provider.name} enabled={icons} />
+          <div><small>{provider.category}</small><strong>{provider.name}</strong><p>{provider.description}</p></div>
+          <a href={provider.docs} target="_blank" rel="noreferrer"><BookOpenIcon aria-hidden="true" />Setup guide<span className="sr"> (opens in a new tab)</span></a></div>
+        <div className="provider-connect" data-aside={item ? undefined : ""}><div className="provider-settings">
         <Field label="Name" id="integration-name" error={errors.name} hint="How it is labelled on boards."><TextInput name="name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Field>
         {item && <Field label="Icon name" id="integration-icon" error={errors.icon}><TextInput name="icon" value={icon} onChange={(e) => setIcon(e.target.value)} /></Field>}
         <SchemaForm id="integration" schema={schema.filter((field) => !advanced(field))} {...formProps} />
@@ -246,6 +254,13 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
               if (tested && matchesConnectionTest(tested.key, connectionKey())) change("fingerprint", verdict.fingerprint ?? "");
             }}>Confirm and pin fingerprint</Button></>}
         </Note></div>}
+        </div>
+        {!item && <aside className="provider-widgets" aria-labelledby="provider-widgets-title">
+          <h3 id="provider-widgets-title">Widgets you can add</h3>
+          <p className="muted">Previews use example data. You choose widgets after connecting.</p>
+          {provider.widgets.map((widget) => <WidgetPreview compact key={widget.id} widget={widget} icon={provider.icon} color={provider.color} title={provider.name} />)}
+        </aside>}
+        </div>
       </>}
       {errors.form && <Note kind="bad">{errors.form}</Note>}
     </form>
