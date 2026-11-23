@@ -1,5 +1,5 @@
 use super::*;
-use widgets::{BodyItem, StructuredBody};
+use widgets::{BodyRow, Glyph, Health, StatTile, StructuredBody};
 
 const TOKEN: &str = "token";
 const SECTIONS: &str = "library/sections";
@@ -11,7 +11,7 @@ pub const PLEX: Provider = Provider {
     category: "Media",
     icon: "plex",
     color: "#e5a00d",
-    description: "Show active streams, library item counts and recently added media.",
+    description: "Show what is playing now, library item counts and recently added media.",
     docs: "https://developer.plex.tv/pms/",
     public_internet: false,
     contacts: "Your configured Plex Media Server. Hobnail uses its local server API.",
@@ -24,7 +24,7 @@ pub const PLEX: Provider = Provider {
                 TOKEN,
                 "Plex server token",
                 Kind::Secret,
-                "Use the access token for this Plex Media Server.",
+                "Use your X-Plex-Token: in Plex Web open any item's ⋯ menu → Get Info → View XML, and copy the X-Plex-Token value from the address.",
             )
         },
         ENABLED,
@@ -33,12 +33,12 @@ pub const PLEX: Provider = Provider {
     widgets: &[
         Widget {
             id: "streams",
-            name: "Active streams",
-            description: "Current playback count and titles.",
+            name: "Now playing",
+            description: "Who is watching or listening, on which player, with playback progress.",
             recommended: true,
             default_size: size(4, 3),
             min_size: size(3, 2),
-            sample: r#"{"kind":"stat_grid","rows":[["Active streams","1"],["The Example Movie","Living room · Direct play"]]}"#,
+            sample: r#"{"kind":"rows","rows":[{"title":"The Example Movie","secondary":"alex · Living room TV","value":"1h 2m left","status":"up","progress":44},{"title":"Example Show · S01E03","secondary":"sam · Plex Web","value":"Paused","status":"warn","progress":12}]}"#,
             fields: &[REFRESH],
             fetch: streams,
             validate: no_widget_options,
@@ -46,11 +46,11 @@ pub const PLEX: Provider = Provider {
         Widget {
             id: "library",
             name: "Library counts",
-            description: "Number of libraries and item counts for up to five libraries.",
+            description: "Item counts for up to six libraries.",
             recommended: false,
             default_size: size(4, 2),
             min_size: size(3, 2),
-            sample: r#"{"kind":"stat_grid","rows":[["Movies","640"],["TV shows","71"],["Music","182"]]}"#,
+            sample: r#"{"kind":"tiles","tiles":[{"label":"Movies","value":"640","glyph":"film"},{"label":"TV Shows","value":"71","glyph":"tv"},{"label":"Music","value":"182","glyph":"music"}]}"#,
             fields: &[REFRESH],
             fetch: libraries,
             validate: no_widget_options,
@@ -62,7 +62,7 @@ pub const PLEX: Provider = Provider {
             recommended: false,
             default_size: size(4, 4),
             min_size: size(3, 3),
-            sample: r#"{"kind":"item_list","items":[{"title":"The Example Movie","secondary":"Movies","link":null,"time":null},{"title":"Pilot","secondary":"TV shows","link":null,"time":null},{"title":"Sample Album","secondary":"Music","link":null,"time":null}]}"#,
+            sample: r#"{"kind":"rows","rows":[{"title":"The Example Movie","secondary":"Movies","value":"2026"},{"title":"Example Show · S01E04","secondary":"The Sample Episode","value":"2025"},{"title":"Sample Album","secondary":"Example Artist","value":"2024"}]}"#,
             fields: &[REFRESH],
             fetch: recent,
             validate: no_widget_options,
@@ -78,7 +78,6 @@ struct Envelope<T> {
 
 #[derive(Deserialize)]
 struct Sections {
-    size: u64,
     #[serde(default, rename = "Directory")]
     libraries: Vec<Library>,
 }
@@ -87,6 +86,8 @@ struct Sections {
 struct Library {
     key: String,
     title: String,
+    #[serde(rename = "type")]
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,16 +99,58 @@ struct Count {
 
 #[derive(Deserialize)]
 struct Media {
-    size: u64,
     #[serde(default, rename = "Metadata")]
     items: Vec<MediaItem>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct MediaItem {
     title: String,
     #[serde(rename = "type")]
     kind: Option<String>,
+    grandparent_title: Option<String>,
+    parent_title: Option<String>,
+    parent_index: Option<u32>,
+    index: Option<u32>,
+    year: Option<u32>,
+    library_section_title: Option<String>,
+    /// Milliseconds.
+    duration: Option<u64>,
+    view_offset: Option<u64>,
+    #[serde(rename = "User")]
+    user: Option<Named>,
+    #[serde(rename = "Player")]
+    player: Option<Player>,
+}
+
+#[derive(Deserialize)]
+struct Named {
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Player {
+    title: Option<String>,
+    product: Option<String>,
+    state: Option<String>,
+}
+
+impl MediaItem {
+    /// "Show · S01E02" for an episode, "Artist · Track" for a track.
+    fn heading(&self, conn: &Conn<'_>) -> String {
+        let text = match (self.kind.as_deref(), &self.grandparent_title) {
+            (Some("episode"), Some(show)) => match self.parent_index.zip(self.index) {
+                Some((season, episode)) => format!("{show} · S{season:02}E{episode:02}"),
+                None => format!("{show} · {}", self.title),
+            },
+            (Some("track"), Some(artist)) => format!("{artist} · {}", self.title),
+            _ => self.title.clone(),
+        };
+        let sources = [Some(self.title.as_str()), self.grandparent_title.as_deref()];
+        let sources = sources.into_iter().flatten().collect::<Vec<_>>();
+        display_text(conn, conn.output_redactor().transformed(&sources, text))
+    }
 }
 
 async fn get(
@@ -167,14 +210,44 @@ fn streams<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         let Some(media) = within_response_limit(media(conn, "status/sessions", None).await)? else {
             return Ok(unavailable("Active streams exceed the response limit."));
         };
-        let mut rows = vec![("Active streams".into(), media.size.to_string())];
-        rows.extend(media.items.into_iter().take(10).map(|item| {
-            (
-                display_text(conn, item.title),
-                display_text(conn, item.kind.unwrap_or_default()),
-            )
-        }));
-        Ok(StructuredBody::StatGrid { rows })
+        if media.items.is_empty() {
+            return Ok(unavailable("Nothing is playing."));
+        }
+        let rows = media
+            .items
+            .into_iter()
+            .take(10)
+            .map(|item| {
+                let player = item.player.as_ref();
+                let state = player.and_then(|player| player.state.as_deref());
+                let (progress, left) =
+                    super::jellyfin::playback(item.view_offset, item.duration, 1000);
+                let who = [
+                    item.user.as_ref().and_then(|user| user.title.clone()),
+                    player.and_then(|player| player.title.clone().or(player.product.clone())),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|part| display_text(conn, part))
+                .collect::<Vec<_>>();
+                BodyRow {
+                    title: item.heading(conn),
+                    secondary: (!who.is_empty()).then(|| who.join(" · ")),
+                    value: match state {
+                        Some("paused") => Some("Paused".into()),
+                        Some("buffering") => Some("Buffering".into()),
+                        _ => left,
+                    },
+                    status: Some(match state {
+                        Some("paused" | "buffering") => Health::Warn,
+                        _ => Health::Up,
+                    }),
+                    progress,
+                    bars: Vec::new(),
+                }
+            })
+            .collect();
+        Ok(StructuredBody::Rows { rows })
     })
 }
 
@@ -183,15 +256,28 @@ fn libraries<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
         let Some(sections) = within_response_limit(sections(conn).await)? else {
             return Ok(unavailable("The library list exceeds the response limit."));
         };
-        let mut rows = vec![("Libraries".into(), sections.size.to_string())];
-        for library in sections.libraries.into_iter().take(5) {
-            let count = within_response_limit(item_count(conn, &library.key).await)?.flatten();
-            rows.push((
-                display_text(conn, library.title),
-                count.map_or_else(|| "Unavailable".into(), |count| count.to_string()),
-            ));
+        if sections.libraries.is_empty() {
+            return Ok(unavailable("This server has no libraries."));
         }
-        Ok(StructuredBody::StatGrid { rows })
+        let mut tiles = Vec::new();
+        for library in sections.libraries.into_iter().take(6) {
+            let count = within_response_limit(item_count(conn, &library.key).await)?.flatten();
+            tiles.push(StatTile {
+                label: display_text(conn, library.title),
+                value: count.map_or_else(|| "Unavailable".into(), super::jellyfin::grouped),
+                glyph: match library.kind.as_deref() {
+                    Some("movie") => Some(Glyph::Film),
+                    Some("show") => Some(Glyph::Tv),
+                    Some("artist") => Some(Glyph::Music),
+                    Some("photo") => Some(Glyph::Image),
+                    _ => None,
+                },
+                delta: None,
+                tone: None,
+                series: Vec::new(),
+            });
+        }
+        Ok(StructuredBody::Tiles { tiles })
     })
 }
 
@@ -205,21 +291,27 @@ fn recent<'a>(conn: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
             ));
         };
         if media.items.is_empty() {
-            return Ok(StructuredBody::Stat {
-                value: "No recently added items".into(),
-            });
+            return Ok(unavailable("No recently added items."));
         }
-        Ok(StructuredBody::ItemList {
-            items: media
+        Ok(StructuredBody::Rows {
+            rows: media
                 .items
                 .into_iter()
                 .take(10)
-                .map(|item| BodyItem {
-                    icon: None,
-                    title: display_text(conn, item.title),
-                    secondary: item.kind.map(|kind| display_text(conn, kind)),
-                    link: None,
-                    time: None,
+                .map(|item| BodyRow {
+                    title: item.heading(conn),
+                    secondary: match item.kind.as_deref() {
+                        Some("episode") => Some(item.title.clone()),
+                        Some("album") => item.parent_title.clone(),
+                        _ => None,
+                    }
+                    .or_else(|| item.library_section_title.clone())
+                    .map(|text| display_text(conn, text)),
+                    value: item
+                        .year
+                        .filter(|&year| year > 0)
+                        .map(|year| year.to_string()),
+                    ..BodyRow::default()
                 })
                 .collect(),
         })
@@ -241,31 +333,45 @@ mod tests {
     #[tokio::test]
     async fn requests_json_and_preserves_other_library_counts_after_an_oversized_page() {
         const PROBE: &str = "GET /prefix/library/sections HTTP/1.1";
-        const SECTIONS_BODY: &str = r#"{"MediaContainer":{"size":2,"Directory":[{"key":"2","title":"Movies"},{"key":"3","title":"Series"}]}}"#;
+        const SECTIONS_BODY: &str = r#"{"MediaContainer":{"size":2,"Directory":[{"key":"2","title":"Movies","type":"movie"},{"key":"3","title":"Series","type":"show"}]}}"#;
         let oversized = format!(r#"{{"padding":"{}"}}"#, "x".repeat(MAX_RESPONSE));
         exercise(&PLEX, &[(TOKEN, "fake-plex-token")], Values::new(), &[
             Exchange { request: PROBE, status: 200, body: SECTIONS_BODY },
-            Exchange { request: "GET /prefix/status/sessions HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":1,"Metadata":[{"title":"Example","type":"movie"}]}}"# },
+            Exchange { request: "GET /prefix/status/sessions HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":2,"Metadata":[{"title":"Example","type":"movie","duration":7200000,"viewOffset":1800000,"User":{"title":"alex"},"Player":{"title":"Living room","product":"Plex for TV","state":"playing"}},{"title":"Pilot","type":"episode","grandparentTitle":"Sample show","parentIndex":1,"index":2,"Player":{"product":"Plex Web","state":"paused"}}]}}"# },
+            Exchange { request: "GET /prefix/status/sessions HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":0}}"# },
+            Exchange { request: "GET /prefix/status/sessions HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"Metadata":"one"}}"# },
             Exchange { request: PROBE, status: 200, body: SECTIONS_BODY },
             Exchange { request: "GET /prefix/library/sections/2/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1 HTTP/1.1", status: 200, body: &oversized },
             Exchange { request: "GET /prefix/library/sections/3/all?X-Plex-Container-Start=0&X-Plex-Container-Size=1 HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":1}}"# },
-            Exchange { request: "GET /prefix/library/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=10 HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":1,"Metadata":[{"title":"New episode","type":"episode"}]}}"# },
+            Exchange { request: "GET /prefix/library/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=10 HTTP/1.1", status: 200, body: r#"{"MediaContainer":{"size":2,"Metadata":[{"title":"New episode","type":"episode","grandparentTitle":"Sample show","parentIndex":2,"index":5,"year":2025},{"title":"Sample album","type":"album","parentTitle":"Example artist","librarySectionTitle":"Music"}]}}"# },
             Exchange { request: PROBE, status: 401, body: "" },
             Exchange { request: PROBE, status: 200, body: "{}" },
         ], |index, wire| {
             assert_header(wire, "x-plex-token: fake-plex-token", "fake-plex-token");
             assert!(wire.contains("\r\naccept: application/json\r\n"));
             assert_eq!(wire.lines().filter(|line| line.starts_with("accept:")).count(), 1);
-            if index == 4 { "X-Plex-Container-Total-Size: 18\r\n" } else { "" }
+            if index == 6 { "X-Plex-Container-Total-Size: 18\r\n" } else { "" }
         }, async |conn| {
             conn.run(test(conn)).await.unwrap();
             let fetch = async |index: usize| {
                 let body = super::super::fetch(conn, &PLEX.widgets[index], &Values::new()).await.unwrap();
                 serde_json::to_value(body).unwrap()
             };
-            assert_eq!(fetch(0).await["rows"], json!([["Active streams","1"], ["Example","movie"]]));
-            assert_eq!(fetch(1).await["rows"], json!([["Libraries","2"], ["Movies","Unavailable"], ["Series","18"]]));
-            assert_eq!(fetch(2).await["items"][0]["title"], "New episode");
+            assert_eq!(fetch(0).await["rows"], json!([
+                {"title":"Example","secondary":"alex · Living room","value":"1h 30m left","status":"up","progress":25},
+                {"title":"Sample show · S01E02","secondary":"Plex Web","value":"Paused","status":"warn"}
+            ]));
+            assert_eq!(fetch(0).await["message"], "Nothing is playing.");
+            let fault = super::super::fetch(conn, &PLEX.widgets[0], &Values::new()).await.unwrap_err();
+            assert_eq!(fault.class.message(), Class::Protocol.message());
+            assert_eq!(fetch(1).await["tiles"], json!([
+                {"label":"Movies","value":"Unavailable","glyph":"film"},
+                {"label":"Series","value":"18","glyph":"tv"}
+            ]));
+            assert_eq!(fetch(2).await["rows"], json!([
+                {"title":"Sample show · S02E05","secondary":"New episode","value":"2025"},
+                {"title":"Sample album","secondary":"Example artist"}
+            ]));
             assert_test_fault(conn, &PLEX, Class::Auth).await;
             assert_test_fault(conn, &PLEX, Class::Protocol).await;
         }).await;
