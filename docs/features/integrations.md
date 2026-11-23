@@ -3,18 +3,28 @@
 Open **Settings → Integrations → Add integration**, or choose **Add
 integration** on a board. Search the catalog by service, category or
 description. The catalog lists registered providers with working connection
-tests and widgets. With `[icons] remote` enabled, Hobnail uses its existing
-dashboard-icons cache. Otherwise the catalog shows monograms.
+tests and widgets: each card shows the service's logo on a faint tint of its
+brand colour, its category and how many widgets it offers. The logos are
+built into Hobnail (see [Icons](#icons)), so they show without internet
+access.
 
-Choose a provider, give the instance a name, and enter its connection fields.
+Choose a provider to open its settings page: the logo and description, a
+**Setup guide** link to the service's own documentation, the connection
+fields with a hint on where to find each credential, and only the fields
+that apply to the chosen API version (the Pi-hole v5 token appears only for
+v5). Beside the form, **Widgets you can add** previews every widget. Give
+the instance a name and enter its connection fields.
 Use **Test connection** to test from the Hobnail server. The test reports
 problems with DNS, connectivity, TLS, credentials, timeout or the response
 format. You can correct inputs and retry in the same dialog or save the
 connection to test later. A saved link or untested connection has no health
 evidence.
 
-After a successful test, choose a board and review the recommended widgets.
-Each selected widget has its own options and refresh interval. Use **Edit** on
+After a successful test, choose a board. The **Add to board** gallery draws
+each widget with the real renderer from example data (marked "Example"),
+with its name, description, default board size (columns × rows) and a
+**Recommended** badge on the one most people want; that one starts switched
+on. Each selected widget has its own options and refresh interval. Use **Edit** on
 a saved integration to test changes, configure its widgets, or place them on
 another board. Each placement stores its own widget options and refresh
 interval. Placements share the saved connection. Open boards with identical
@@ -52,6 +62,26 @@ These are accepted pending owner sign-off at merge.
   public providers also have a ten-minute refresh floor.
 - **Embed and extension widgets are not built** and are out of scope for
   this release.
+
+## Icons
+
+Hobnail ships optimised SVG logos for every provider and for common
+container images (PostgreSQL, Redis, nginx, Grafana and others), about 94 KB
+in all, and serves them from `/api/v1/icons/<name>` with a 30-day cache. They
+need no internet access, so they show with the default `[icons] remote =
+false`; other dashboard-icons names still need `[icons] remote = true`. A
+container without an icon picks a built-in logo from its image name (for
+example `pihole/pihole` or `jc21/nginx-proxy-manager`). Each logo sits on a
+plate tinted with the brand colour, and single-colour dark logos (GitHub,
+Tailscale) invert on dark themes. Widgets of a provider use its colour for
+their bars, glyphs, sparklines and the rule under the tile header.
+
+Logos come from [homarr-labs/dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+(Apache License 2.0); brandless providers (Generic HTTP, Bookmarks, Clock,
+Markdown note, Reachability, Weather, RSS, SSL expiry) use
+[Lucide](https://lucide.dev) glyphs (ISC). Product names and logos are
+trademarks of their owners, used for identification only. Sources and
+licences are listed in [`src/http/brand/NOTICE.md`](../../src/http/brand/NOTICE.md).
 
 ## Generic HTTP
 
@@ -946,10 +976,26 @@ issuer, validity in Unix seconds, SANs, SHA-256 fingerprint, and certificate
 verification verdict even when normal trust or pin verification rejects the
 leaf. A certificate inspection does not relax verification on HTTP requests.
 
+Give the provider a brand `color` (`#rrggbb`, the logo's main colour) and an
+`icon` slug; add the logo to `src/http/brand/` (optimised, under 10 KiB, with
+its source and licence in `NOTICE.md`) and to `BRANDS` in
+`src/http/icons.rs` with the same colour. A field can declare `when` to apply
+only for one value of another field, such as an API version.
+
+Each widget declares a `description`, `default_size` and `min_size` in board
+grid units (12 columns, rows of about 80 px; summaries are usually 4 × 2 and
+lists 4 × 4) and a `sample`: a small, static, fictional `StructuredBody` in
+JSON for the gallery, in the same shape the widget returns. Mark exactly one
+widget per provider `recommended`. The registry test checks all of these.
+
 Return a typed `Fault`. Keep raw responses, credentials and sessions out of
 errors and logs. A widget returns a `StructuredBody` with display data. Choose
 among a stat, stat grid, status list, item list, meter, table, clock, rich text
-or unavailable message. The React client renders these shapes from the schema and registry.
+or unavailable message, or the richer meters (labelled bars), tiles (a value
+with a generic glyph, a delta, a tone and an optional sparkline series), rows
+(status dot, secondary text, trailing value, progress and recent status
+bars) and agenda (dated entries the client groups by day). The React client
+renders every shape generically, with no code per provider.
 The shared output boundary redacts credentials and known sessions, including
 textual escapes and standard or URL-safe Base64. Redact JSON before truncating
 or formatting it so an encoded credential cannot survive as a partial display

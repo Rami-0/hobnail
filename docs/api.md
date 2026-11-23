@@ -120,7 +120,28 @@ Provider catalog and installation:
 
 - `GET /api/v1/providers` returns implemented provider descriptors, typed
   connection fields and per-widget option schemas. The `public_internet` and
-  `contacts` fields describe the provider's outbound behavior.
+  `contacts` fields describe the provider's outbound behavior. `color` is the
+  provider's brand colour (`#rrggbb`) for subtle accents. A field with
+  `when: {field, equals}` applies only while that other field has that value
+  (for example the Pi-hole v5 token); clients hide and omit it otherwise.
+  Each widget has `default_size` and `min_size` (`{w, h}` in board grid
+  units: 12 columns, rows of about 80 px) and a `sample` structured body:
+  static, fictional example data for previews, never upstream data. Exactly
+  one widget per provider is `recommended`.
+- Structured bodies (`structured` on widget views, `sample` on descriptors)
+  are one of `stat`, `stat_grid`, `status_list`, `item_list`, `clock`,
+  `rich_text`, `meter`, `table`, `unavailable`, `meters` (`rows` of
+  `{label, percent, detail?}`), `tiles` (`{label, value, glyph?, delta?,
+  tone?, series?}`, `series` oldest first, at most 48 points), `rows`
+  (`{title, secondary?, value?, status?, progress?, bars?}`, `bars` at most
+  48 recent checks) and `agenda` (`entries` of `{time, title, secondary?,
+  all_day?, status?}`, `time` in Unix seconds). `glyph` is one of a fixed
+  generic set (see `web/src/api/gen/Glyph.ts`); `status`, `tone` and `bars`
+  use `up`, `warn` and `down`.
+- `GET /api/v1/icons/<name>` serves the server's vendored brand icons (the
+  bootstrap's `brand_icons`: `{name, color, mono}`) whatever `[icons] remote`
+  says, with `private, max-age=2592000`. Other names need `[icons] remote =
+  true` and use the on-disk cache, with `private, max-age=86400`.
 - `POST /api/v1/providers/test` accepts `{integration, integration_id?}`.
   The draft connection uses the integration input below. Supplying an existing
   ID lets the test reuse its saved credentials for the same origin. The
