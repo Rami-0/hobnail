@@ -7,6 +7,7 @@ pub const SONARR: Provider = Provider {
     category: "Media",
     icon: "sonarr",
     color: "#2fb6e6",
+    detect: super::detect(&["sonarr"], 8989),
     description: "Show upcoming episodes, the download queue, missing episodes and health.",
     docs: "https://github.com/Sonarr/Sonarr/blob/v4.0.17.2952/src/Sonarr.Api.V3/openapi.json",
     public_internet: false,

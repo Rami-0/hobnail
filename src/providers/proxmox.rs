@@ -12,6 +12,7 @@ pub const PROXMOX: Provider = Provider {
     category: "Infrastructure",
     icon: "proxmox",
     color: "#e57000",
+    detect: None,
     description:
         "Show cluster nodes, node CPU, memory and disk, guests and their state, and storage use.",
     docs: "https://pve.proxmox.com/pve-docs/api-viewer/index.html",

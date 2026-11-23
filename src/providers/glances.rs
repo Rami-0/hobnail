@@ -8,6 +8,7 @@ pub const GLANCES: Provider = Provider {
     category: "System",
     icon: "glances",
     color: "#4cb860",
+    detect: super::detect(&["glances"], 61208),
     description:
         "Show CPU, memory, swap and disk meters, trends and load, top processes and sensors.",
     docs: "https://glances.readthedocs.io/en/latest/api/restful.html",

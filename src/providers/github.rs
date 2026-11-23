@@ -19,6 +19,7 @@ pub const GITHUB: Provider = Provider {
     category: "Development",
     icon: "github",
     color: "#6e7681",
+    detect: None,
     description: "Show repository activity and watch releases for apps you run.",
     docs: "https://docs.github.com/en/rest",
     public_internet: true,

@@ -286,6 +286,7 @@ pub enum Handler {
     BoardDelete,
     BoardSuggestions,
     BoardLinkTest,
+    ProviderDetected,
     BoardDraft,
     BoardDraftSave,
     BoardDraftDelete,
@@ -459,6 +460,12 @@ pub const ROUTES: &[Route] = &[
         pattern: "/api/v1/providers/test",
         access: Access::Admin,
         handler: Handler::ProviderTest,
+    },
+    Route {
+        method: "GET",
+        pattern: "/api/v1/providers/detected",
+        access: Access::Admin,
+        handler: Handler::ProviderDetected,
     },
     Route {
         method: "GET",
@@ -935,7 +942,9 @@ mod tests {
                     route.method.to_string(),
                     route.pattern.to_string(),
                     match route.handler {
-                        Handler::BoardLinkTest => "Unscoped Admin or Owner".to_owned(),
+                        Handler::BoardLinkTest | Handler::ProviderDetected => {
+                            "Unscoped Admin or Owner".to_owned()
+                        }
                         _ => format!("{:?}", route.access),
                     },
                 )

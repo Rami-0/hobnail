@@ -7,6 +7,7 @@ pub(super) const SSL_EXPIRY: Provider = Provider {
     category: "Network",
     icon: "ssl",
     color: "#16a34a",
+    detect: None,
     description: "Inspect the certificate presented by a TLS server, including expired and untrusted certificates.",
     docs: "https://www.rfc-editor.org/rfc/rfc9525.html",
     public_internet: false,

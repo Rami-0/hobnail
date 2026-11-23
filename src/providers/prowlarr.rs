@@ -8,6 +8,7 @@ pub const PROWLARR: Provider = Provider {
     category: "Media",
     icon: "prowlarr",
     color: "#d4541e",
+    detect: super::detect(&["prowlarr"], 9696),
     description: "Show indexer queries, grabs and failures, and blocked indexers.",
     docs: "https://prowlarr.com/docs/api/",
     public_internet: false,

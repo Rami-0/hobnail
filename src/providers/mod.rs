@@ -140,6 +140,8 @@ pub struct Provider {
     pub icon: &'static str,
     /// Brand colour (`#rrggbb`) for subtle accents: icon tint, widget header.
     pub color: &'static str,
+    /// How to recognise a local container running this service.
+    pub detect: Option<Detect>,
     pub description: &'static str,
     pub docs: &'static str,
     pub public_internet: bool,
@@ -184,6 +186,24 @@ pub struct Widget {
     #[serde(skip)]
     #[cfg_attr(test, ts(skip))]
     pub validate: fn(&Values) -> Result<(), &'static str>,
+}
+
+/// Container auto-detection hint: image (or container name) substrings that
+/// identify the service and the port its API listens on inside the
+/// container. Detection only proposes a URL; nothing is contacted until the
+/// user tests the connection.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct Detect {
+    /// Lower-case substrings of the image repository, e.g. `sonarr` for
+    /// `lscr.io/linuxserver/sonarr:latest`. Longer, more specific needles win.
+    pub images: &'static [&'static str],
+    /// The API port inside the container.
+    pub port: u16,
+}
+
+pub const fn detect(images: &'static [&'static str], port: u16) -> Option<Detect> {
+    Some(Detect { images, port })
 }
 
 /// A widget's size in board grid units.

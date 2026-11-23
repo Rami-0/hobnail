@@ -7,6 +7,7 @@ pub const RADARR: Provider = Provider {
     category: "Media",
     icon: "radarr",
     color: "#e8b322",
+    detect: super::detect(&["radarr"], 7878),
     description: "Show upcoming releases, the download queue, missing movies and health.",
     docs: "https://radarr.video/docs/api/",
     public_internet: false,

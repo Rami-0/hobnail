@@ -12,6 +12,7 @@ pub const IMMICH: Provider = Provider {
     category: "Media",
     icon: "immich",
     color: "#4250af",
+    detect: super::detect(&["immich-server", "immich"], 2283),
     description: "Show photo and video totals, disk usage and background jobs.",
     docs: "https://api.immich.app/",
     public_internet: false,

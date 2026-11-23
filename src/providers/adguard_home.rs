@@ -11,6 +11,7 @@ pub const ADGUARD_HOME: Provider = Provider {
     category: "DNS",
     icon: "adguard-home",
     color: "#5fb36b",
+    detect: super::detect(&["adguardhome", "adguard-home", "adguard"], 80),
     description: "Show DNS queries, blocked queries, protection status and the top domains and clients.",
     docs: "https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.73/openapi/openapi.yaml",
     public_internet: false,

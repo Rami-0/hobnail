@@ -12,6 +12,7 @@ pub const TECHNITIUM: Provider = Provider {
     category: "DNS",
     icon: "technitium",
     color: "#4a7fe8",
+    detect: super::detect(&["technitium"], 5380),
     description: "Show DNS queries, blocks, cache hits and clients for the past hour, and the top domains and clients.",
     docs: "https://github.com/TechnitiumSoftware/DnsServer/blob/v14.3.0/APIDOCS.md",
     public_internet: false,

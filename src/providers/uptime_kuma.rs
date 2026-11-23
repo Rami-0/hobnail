@@ -9,6 +9,7 @@ pub const UPTIME_KUMA: Provider = Provider {
     category: "Monitoring",
     icon: "uptime-kuma",
     color: "#3cc07a",
+    detect: super::detect(&["uptime-kuma", "uptime_kuma"], 3001),
     description: "Show monitor health, 24-hour uptime and the pinned incident from a status page.",
     docs: "https://github.com/louislam/uptime-kuma/wiki",
     public_internet: false,

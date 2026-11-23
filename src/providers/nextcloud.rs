@@ -10,6 +10,7 @@ pub const NEXTCLOUD: Provider = Provider {
     category: "Files",
     icon: "nextcloud",
     color: "#2f7fc8",
+    detect: super::detect(&["nextcloud"], 80),
     description: "Show free storage, users, recent activity counts and shares.",
     docs: "https://github.com/nextcloud/serverinfo",
     public_internet: false,

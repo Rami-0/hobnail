@@ -15,6 +15,7 @@ pub(super) const FEED: Provider = Provider {
     category: "Utilities",
     icon: "rss",
     color: "#f97316",
+    detect: None,
     description: "Read titles, links, dates and optional summaries from a feed.",
     docs: "https://www.rssboard.org/rss-specification",
     public_internet: false,

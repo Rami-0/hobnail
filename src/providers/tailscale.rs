@@ -15,6 +15,7 @@ pub const TAILSCALE: Provider = Provider {
     category: "Network",
     icon: "tailscale",
     color: "#6b7280",
+    detect: None,
     description: "Show tailnet devices, last seen times and upcoming device key expirations.",
     docs: "https://tailscale.com/docs/reference/tailscale-api",
     public_internet: true,

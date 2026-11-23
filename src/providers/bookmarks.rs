@@ -20,6 +20,7 @@ pub(super) const BOOKMARKS: Provider = Provider {
     category: "Utilities",
     icon: "bookmark",
     color: "#8b5cf6",
+    detect: None,
     description: "Create named groups of links to the sites you use.",
     docs: "https://github.com/Rami-0/hobnail/blob/main/docs/features/integrations.md#bookmarks",
     public_internet: false,

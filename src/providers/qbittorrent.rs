@@ -13,6 +13,7 @@ pub const QBITTORRENT: Provider = Provider {
     category: "Downloads",
     icon: "qbittorrent",
     color: "#3a72c4",
+    detect: super::detect(&["qbittorrent"], 8080),
     description:
         "Show transfer speeds, torrent counts, free space and torrents with their progress.",
     docs: "https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-5.0)",

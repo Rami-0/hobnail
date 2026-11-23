@@ -20,6 +20,7 @@ pub const HOME_ASSISTANT: Provider = Provider {
     category: "Home automation",
     icon: "home-assistant",
     color: "#18a8e0",
+    detect: super::detect(&["home-assistant", "homeassistant"], 8123),
     description: "Show selected entity states, sensor readings and on/off counts.",
     docs: "https://contributors.home-assistant.io/core/internals/rest-api/",
     public_internet: false,

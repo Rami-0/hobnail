@@ -7,6 +7,7 @@ pub const HTTP: Provider = Provider {
     category: "Utilities",
     icon: "http",
     color: "#64748b",
+    detect: None,
     description: "Display values from a JSON endpoint you configure.",
     docs: "https://github.com/Rami-0/hobnail/blob/main/docs/features/integrations.md",
     public_internet: false,

@@ -11,6 +11,7 @@ pub const SYNCTHING: Provider = Provider {
     category: "Files",
     icon: "syncthing",
     color: "#0b8ac9",
+    detect: super::detect(&["syncthing"], 8384),
     description: "Show folder sync status and completion, and connected devices.",
     docs: "https://docs.syncthing.net/dev/rest.html",
     public_internet: false,

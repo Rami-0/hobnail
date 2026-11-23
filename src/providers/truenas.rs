@@ -15,6 +15,7 @@ pub const TRUENAS: Provider = Provider {
     category: "Storage",
     icon: "truenas",
     color: "#0095d5",
+    detect: None,
     description:
         "Show pool status and use, active alerts and recent disk self-test results (REST v2.0).",
     docs: "https://www.truenas.com/docs/scale/24.10/api/",

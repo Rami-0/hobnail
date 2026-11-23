@@ -13,6 +13,7 @@ pub const WG_EASY: Provider = Provider {
     category: "Network",
     icon: "wireguard",
     color: "#b0262b",
+    detect: super::detect(&["wg-easy"], 51821),
     description: "Show WireGuard peers, last handshakes and transfer counters.",
     docs: "https://wg-easy.github.io/wg-easy/",
     public_internet: false,

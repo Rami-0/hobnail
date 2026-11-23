@@ -14,6 +14,7 @@ pub const DUPLICATI: Provider = Provider {
     category: "Backups",
     icon: "duplicati",
     color: "#336697",
+    detect: super::detect(&["duplicati"], 8200),
     description: "Show recent backup completion times and source sizes.",
     docs: "https://docs.duplicati.com/",
     public_internet: false,

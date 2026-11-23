@@ -36,6 +36,55 @@ board revision). Deleting an
 integration deletes its credentials and widgets and leaves missing targets in
 existing layouts.
 
+## Detected on this host
+
+Integrations are API connections: a provider, a URL and credentials. A
+Docker container is never an integration by itself; containers stay
+plain status tiles. Hobnail does read the container list it already has
+and suggests the integrations it recognises, as **Detected on this host**
+cards in the board **Add** picker, the **Add integration** dialog and
+**Settings → Integrations** (`GET /api/v1/providers/detected`, unscoped
+admins and the owner only).
+
+A running container matches a provider by, strongest first:
+
+1. a `hobnail.integration=<provider id>` label (e.g. `radarr`);
+2. its image repository, without registry host and tag, containing one of
+   the provider's `detect.images` needles (`lscr.io/linuxserver/sonarr` →
+   Sonarr, `pihole/pihole` → Pi-hole, `jellyfin/jellyfin` → Jellyfin,
+   `ghcr.io/home-assistant/home-assistant` → Home Assistant);
+3. its container or compose service name containing a needle
+   (`my-sonarr` running a custom image).
+
+The longest needle wins, so `jellyseerr` is not taken for `jellyfin`.
+Plain services such as `postgres` or `redis` match nothing. Hobnail's own
+container and containers you hid are skipped.
+
+The proposed URL is one the Hobnail server can reach, first usable wins:
+
+1. the published host port of the provider's `detect.port` (or of the
+   container's only published TCP port): on the address it is bound to,
+   or on the host you opened Hobnail with when it is bound to all
+   interfaces. Loopback-only ports are skipped;
+2. the container's IP on a Docker network Hobnail's own container is on;
+3. `http://<container name>:<port>` on a shared user-defined network.
+
+Every proposal passes the connection policy without being contacted: no
+restricted address (loopback, link-local, metadata), and no public address
+while provider internet access is off. Names are resolved and checked when
+you press **Test connection**. Nothing is contacted, and no credential is
+used, until then; detection never saves anything.
+
+**Connect** opens the provider's connect step with the name and URL filled
+in and the focus on the API-key field, whose hint says where to find the
+key. Test, choose widgets from the gallery and add them to a board as
+usual. A suggestion disappears once an integration of that provider points
+at it (same URL, the container's name, or one of its published host
+ports). **Dismiss** hides a suggestion in this browser.
+
+To add detection to a provider, set `detect: detect(&["needle"], port)` in
+its `Provider`.
+
 ## Accepted limitations
 
 These are accepted pending owner sign-off at merge.

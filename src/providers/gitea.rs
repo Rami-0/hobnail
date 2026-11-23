@@ -10,6 +10,7 @@ pub const GITEA: Provider = Provider {
     category: "Development",
     icon: "gitea",
     color: "#609926",
+    detect: super::detect(&["gitea", "forgejo"], 3000),
     description: "Show accessible repositories, open issues and pull requests, and Actions status.",
     docs: "https://docs.gitea.com/api/",
     public_internet: false,

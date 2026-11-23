@@ -11,6 +11,7 @@ pub const TRANSMISSION: Provider = Provider {
     category: "Downloads",
     icon: "transmission",
     color: "#c0392b",
+    detect: super::detect(&["transmission"], 9091),
     description: "Show transfer speeds, torrent counts and torrents with their progress.",
     docs: "https://github.com/transmission/transmission/blob/4.0.6/docs/rpc-spec.md",
     public_internet: false,

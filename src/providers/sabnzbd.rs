@@ -10,6 +10,7 @@ pub const SABNZBD: Provider = Provider {
     category: "Downloads",
     icon: "sabnzbd",
     color: "#f2a900",
+    detect: super::detect(&["sabnzbd"], 8080),
     description: "Show download speed, the queue with progress, recent history and free space.",
     docs: "https://sabnzbd.org/wiki/advanced/api",
     public_internet: false,

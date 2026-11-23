@@ -11,6 +11,7 @@ pub const PLEX: Provider = Provider {
     category: "Media",
     icon: "plex",
     color: "#e5a00d",
+    detect: super::detect(&["pms-docker", "plex"], 32400),
     description: "Show what is playing now, library item counts and recently added media.",
     docs: "https://developer.plex.tv/pms/",
     public_internet: false,

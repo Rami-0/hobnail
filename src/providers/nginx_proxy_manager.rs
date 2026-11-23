@@ -10,6 +10,7 @@ pub const NGINX_PROXY_MANAGER: Provider = Provider {
     category: "Network",
     icon: "nginx-proxy-manager",
     color: "#f15933",
+    detect: super::detect(&["nginx-proxy-manager"], 81),
     description: "Show the number of visible proxy hosts and certificate expiration dates.",
     docs:
         "https://github.com/NginxProxyManager/nginx-proxy-manager/tree/v2.12.3/backend/schema/paths",

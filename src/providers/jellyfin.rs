@@ -7,6 +7,7 @@ pub const JELLYFIN: Provider = Provider {
     category: "Media",
     icon: "jellyfin",
     color: "#9b5bd0",
+    detect: super::detect(&["jellyfin"], 8096),
     description: "Show what is playing now, library counts and recently added media.",
     docs: "https://api.jellyfin.org/",
     public_internet: false,

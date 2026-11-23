@@ -21,6 +21,7 @@ pub mod container_facts;
 mod container_tabs;
 pub mod containers;
 mod dashboard_settings;
+mod detect;
 pub mod error;
 mod history;
 mod history_window;
@@ -59,6 +60,10 @@ pub(crate) async fn route(
     let query = req.uri().query().unwrap_or("");
     match m.route.handler {
         Handler::ProviderCatalog => json(StatusCode::OK, &crate::providers::REGISTRY),
+        Handler::ProviderDetected => {
+            detect::route(state, &req, &principal.expect("provider gate").account)
+                .unwrap_or_else(ApiError::response)
+        }
         Handler::ProviderTest | Handler::ProviderInstall | Handler::ProviderWidgetOptions => {
             provider_widgets::route(
                 state,

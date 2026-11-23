@@ -331,6 +331,25 @@ fn local_ip(ip: IpAddr) -> bool {
     }
 }
 
+/// Whether a proposed provider URL passes the connection policy without
+/// contacting it: a valid origin whose IP literal (if any) is neither
+/// restricted nor, with provider internet access off, public. Names are
+/// resolved and checked again when the user tests the connection.
+pub(crate) fn proposal_allowed(url: &str, internet: bool) -> bool {
+    let Some(origin) = origin(url) else {
+        return false;
+    };
+    let Ok(uri) = origin.parse::<hyper::Uri>() else {
+        return false;
+    };
+    let host = uri.host().unwrap_or_default();
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    match host.parse::<IpAddr>() {
+        Ok(ip) => !restricted_integration_ip(ip) && (internet || local_ip(ip)),
+        Err(_) => !host.eq_ignore_ascii_case("localhost"),
+    }
+}
+
 /// Record whether a provider destination resolved to a public address, so
 /// its scheduler can apply the public refresh floor.
 pub(crate) fn note_public(addresses: &[SocketAddr], flag: &AtomicBool) {

@@ -15,6 +15,7 @@ pub(super) const CLOCK: Provider = Provider {
     category: "Utilities",
     icon: "clock",
     color: "#6366f1",
+    detect: None,
     description: "Show local times for multiple zones and an optional month calendar.",
     docs: "https://www.iana.org/time-zones",
     public_internet: false,

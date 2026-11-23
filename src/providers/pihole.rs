@@ -9,6 +9,7 @@ pub const PI_HOLE: Provider = Provider {
     category: "Network",
     icon: "pi-hole",
     color: "#e0382b",
+    detect: super::detect(&["pihole", "pi-hole"], 80),
     description: "Show DNS query counts, blocking status, and top domains and clients.",
     docs: "https://docs.pi-hole.net/api/auth/",
     public_internet: false,

@@ -3063,3 +3063,92 @@ async fn renaming_and_deleting_an_integration_hide_legacy_widget_titles() {
         );
     }
 }
+
+#[tokio::test]
+async fn detected_services_from_the_fake_docker_snapshot() {
+    use crate::model::{Container, NetworkAddr, PortMapping};
+    let ctr = |name: &str, image: &str, port: Option<(&str, u16, u16)>| Container {
+        id: format!("{name:0<64}"),
+        name: name.into(),
+        image: image.into(),
+        state: "running".into(),
+        ports: port
+            .map(|(host_ip, host_port, container_port)| PortMapping {
+                host_ip: host_ip.into(),
+                host_port,
+                container_port,
+                proto: "tcp".into(),
+            })
+            .into_iter()
+            .collect(),
+        networks: vec![NetworkAddr {
+            name: "media".into(),
+            ip: "172.20.0.9".into(),
+        }],
+        ..Default::default()
+    };
+    let st = crate::testutil::state_with(
+        vec![
+            ctr(
+                "sonarr",
+                "lscr.io/linuxserver/sonarr:latest",
+                Some(("192.168.1.20", 8989, 8989)),
+            ),
+            ctr(
+                "pihole",
+                "pihole/pihole:latest",
+                Some(("192.168.1.20", 8053, 80)),
+            ),
+            ctr(
+                "postgres",
+                "postgres:16-alpine",
+                Some(("192.168.1.20", 5432, 5432)),
+            ),
+        ],
+        "",
+    );
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let found = owner
+        .json("GET", "/api/v1/providers/detected", Value::Null, 200)
+        .await;
+    assert_eq!(
+        found,
+        json!([
+            {"provider":"pihole","container":"pihole","image":"pihole/pihole:latest","matched":"image","port":80,
+             "candidates":[{"url":"http://192.168.1.20:8053","via":"published"}]},
+            {"provider":"sonarr","container":"sonarr","image":"lscr.io/linuxserver/sonarr:latest","matched":"image","port":8989,
+             "candidates":[{"url":"http://192.168.1.20:8989","via":"published"}]},
+        ])
+    );
+    // Connecting Sonarr hides its suggestion; nothing was contacted to find it.
+    owner
+        .json(
+            "POST",
+            "/api/v1/integrations",
+            json!({"name":"Sonarr","kind":"sonarr","base_url":"http://192.168.1.20:8989","enabled":true,"credentials":{"api_key":"k"}}),
+            201,
+        )
+        .await;
+    let found = owner
+        .json("GET", "/api/v1/providers/detected", Value::Null, 200)
+        .await;
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["provider"], "pihole");
+    // A scoped admin cannot connect new integrations, so sees no detection.
+    let board = owner.board("Scoped").await;
+    let admin = owner
+        .guest(
+            "scoped-admin",
+            "admin",
+            json!({"boards":[board],"integrations":[]}),
+        )
+        .await;
+    assert_eq!(
+        admin
+            .call("GET", "/api/v1/providers/detected", Value::Null)
+            .await
+            .status,
+        403
+    );
+}

@@ -22,6 +22,7 @@ pub(super) const MARKDOWN_NOTE: Provider = Provider {
     category: "Utilities",
     icon: "markdown",
     color: "#64748b",
+    detect: None,
     description: "Keep formatted notes and links on your dashboard.",
     docs: "https://github.com/Rami-0/hobnail/blob/main/docs/features/integrations.md#markdown-note",
     public_internet: false,

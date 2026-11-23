@@ -32,6 +32,7 @@ pub(super) const WEATHER: Provider = Provider {
     category: "Utilities",
     icon: "open-meteo",
     color: "#f59e0b",
+    detect: None,
     description: "Show the current weather and daily highs and lows for coordinates you enter.",
     docs: "https://open-meteo.com/en/docs",
     public_internet: true,

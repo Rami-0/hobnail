@@ -8,6 +8,7 @@ pub(super) const REACHABILITY: Provider = Provider {
     category: "Network",
     icon: "network",
     color: "#0ea5e9",
+    detect: None,
     description: "Check an endpoint with TCP, HTTP or DNS. TCP connect replaces ICMP ping.",
     docs: "https://www.rfc-editor.org/rfc/rfc9293.html",
     public_internet: false,

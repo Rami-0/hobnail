@@ -7,6 +7,7 @@ pub const JELLYSEERR: Provider = Provider {
     category: "Media",
     icon: "jellyseerr",
     color: "#7c4ddb",
+    detect: super::detect(&["jellyseerr", "overseerr"], 5055),
     description: "Show media requests by status and reported issues.",
     docs: "https://api-docs.overseerr.dev/",
     public_internet: false,

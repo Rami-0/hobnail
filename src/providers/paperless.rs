@@ -9,6 +9,7 @@ pub const PAPERLESS: Provider = Provider {
     category: "Files",
     icon: "paperless-ngx",
     color: "#2e8b3c",
+    detect: super::detect(&["paperless-ngx", "paperless"], 8000),
     description: "Show the total document count and inbox.",
     docs: "https://paperless-ngx-docs.readthedocs.io/en/latest/api.html",
     public_internet: false,
