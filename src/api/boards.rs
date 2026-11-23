@@ -594,7 +594,7 @@ fn link_key(link: &str) -> Option<String> {
     Some(format!("{scheme}://{authority}{slash}{suffix}"))
 }
 
-fn safe_link(link: &str, field: &str) -> Result<(), ApiError> {
+pub(super) fn safe_link(link: &str, field: &str) -> Result<(), ApiError> {
     if link_key(link).is_none() {
         return Err(ApiError::bad_request(
             "enter an absolute HTTP or HTTPS URL without user information",
@@ -1546,7 +1546,8 @@ pub(super) async fn route(
                     [id],
                 )?;
                 c.execute(
-                    "DELETE FROM settings WHERE key='default_board' AND json_extract(value,'$')=?1",
+                    "DELETE FROM settings WHERE key IN ('default_board','home_board')
+                     AND json_extract(value,'$')=?1",
                     [id],
                 )?;
                 c.execute("DELETE FROM drafts WHERE key=?1", [draft_key])?;

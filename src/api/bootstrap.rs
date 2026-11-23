@@ -15,7 +15,10 @@ pub struct Bootstrap {
     pub role: Role,
     pub scoped: bool,
     pub boards: Vec<BoardNavigation>,
+    /// The board `/app` opens.
     pub default_board: Option<String>,
+    /// The board the Home page (the sidebar's first entry) shows.
+    pub home_board: Option<String>,
     pub remote_icons: bool,
     /// Icons built into the server, available whatever `remote_icons` says.
     pub brand_icons: Vec<BrandIcon>,
@@ -98,6 +101,7 @@ fn bootstrap(state: &AppState, user: &Principal, now: i64) -> Result<Bootstrap, 
         scoped: user.is_scoped(),
         boards,
         default_board: settings.default_board,
+        home_board: settings.home_board,
         remote_icons: cfg.icons.remote,
         brand_icons: crate::http::icons::BRANDS
             .iter()

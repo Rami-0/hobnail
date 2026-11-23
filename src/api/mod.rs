@@ -25,6 +25,7 @@ mod detect;
 pub mod error;
 mod history;
 mod history_window;
+pub mod home;
 mod host;
 pub(crate) mod integrations;
 mod logs;

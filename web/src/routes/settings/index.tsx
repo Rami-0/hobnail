@@ -90,7 +90,7 @@ export default function SettingsPage() {
 }
 function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   const [boards, setBoards] = useState<BoardSummary[]>([]);
-  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null, default_theme: null, provider_internet: false });
+  const [settings, setSettings] = useState<DashboardSettings>({ default_board: null, home_board: null, default_theme: null, provider_internet: false });
   const [editing, setEditing] = useState<BoardSummary | "new" | null>(null);
   const [deleting, setDeleting] = useState<BoardSummary | null>(null);
   const [error, setError] = useState("");
@@ -115,10 +115,16 @@ function Boards({ admin, manage }: { admin: boolean; manage: boolean }) {
   };
   return <section className="settings-section" data-testid="settings-boards"><header className="board-heading"><div><h2>Boards</h2><p className="muted">Choose what appears on each board. New boards start empty.</p></div>{manage && <Button variant="default" data-testid="board-create" onClick={() => { setFields({}); setEditing("new"); }}>Create board</Button>}</header>
     {error && <Note kind="bad">{error}</Note>}
-    {manage && <Select label="Default board" value={settings.default_board ?? ""} options={[{ value: "", label: "Home" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} onChange={async (value) => {
-      const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { default_board: value || null } });
-      if (result.kind === "ok") { setSettings(result.data); await fetchBootstrap(); } else setError(result.message);
-    }} />}
+    {manage && <div className="settings-pair">
+      <Select label="Home page" value={settings.home_board ?? ""} options={[{ value: "", label: "None" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} onChange={async (value) => {
+        const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { home_board: value || null } });
+        if (result.kind === "ok") { setSettings(result.data); await fetchBootstrap(); } else setError(result.message);
+      }} />
+      <Select label="Default board" value={settings.default_board ?? ""} options={[{ value: "", label: "Home" }, ...boards.map((board) => ({ value: board.id, label: board.name }))]} onChange={async (value) => {
+        const result = await api.request<DashboardSettings>("PATCH", "/api/v1/settings", { body: { default_board: value || null } });
+        if (result.kind === "ok") { setSettings(result.data); await fetchBootstrap(); } else setError(result.message);
+      }} />
+    </div>}
     {!boards.length && <EmptyState level={3} icon={<span>◇</span>} title="No boards yet">Create an empty board, then add the services and links you want.</EmptyState>}
     <div className="settings-list">{boards.map((board, index) => <div key={board.id} className="settings-row"><a href={`/app/boards/${board.id}`}>{board.name}</a>{admin && <div className="settings-actions">
       <Button variant="ghost" size="icon" aria-label={`Move ${board.name} up`} disabled={busy || index === 0} onClick={() => { void move(board, boards[index - 1]); }}>↑</Button>

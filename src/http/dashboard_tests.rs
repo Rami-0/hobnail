@@ -390,7 +390,7 @@ async fn dashboard_route_and_stream_scopes_and_settings() {
         .await;
     assert_eq!(
         viewer.json("GET", settings, Value::Null, 200).await,
-        json!({"default_board":null,"default_theme":null,"provider_internet":false})
+        json!({"default_board":null,"home_board":null,"default_theme":null,"provider_internet":false})
     );
     let bootstrap = viewer
         .json("GET", "/api/v1/bootstrap", Value::Null, 200)
@@ -3250,4 +3250,208 @@ async fn hobnail_widgets_install_into_a_chosen_section() {
         .unwrap()
         .iter()
         .any(|s| s["payload"]["kind"] == "integration"));
+}
+
+#[tokio::test]
+async fn the_home_board_is_seeded_once_and_respects_existing_boards() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let seeded = st.clone();
+    let owner = Client::owner(start(st).await).await;
+    // An older guided setup's "Home" board, already the default.
+    let older = owner.board("Home").await;
+    owner
+        .json(
+            "PATCH",
+            "/api/v1/settings",
+            json!({"default_board":older}),
+            200,
+        )
+        .await;
+    crate::api::home::seed(&seeded);
+    let boot = owner
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    let home = boot["home_board"]
+        .as_str()
+        .expect("a Home board")
+        .to_owned();
+    assert_ne!(home, older);
+    assert_eq!(boot["default_board"], older, "the chosen default stays");
+    let names: Vec<_> = boot["boards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["id"].as_str().unwrap().to_owned(), b["name"].clone()))
+        .collect();
+    assert!(
+        names.contains(&(older.clone(), json!("Home"))),
+        "the older board keeps its name"
+    );
+    assert!(names.contains(&(home.clone(), json!("Overview"))));
+    let older_doc = owner
+        .json("GET", &format!("/api/v1/boards/{older}"), Value::Null, 200)
+        .await;
+    assert_eq!(older_doc["document"]["sections"], json!([]), "untouched");
+    let view = owner
+        .json("GET", &format!("/api/v1/boards/{home}"), Value::Null, 200)
+        .await;
+    let titles: Vec<_> = view["document"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(titles, ["This host", "Containers", "Last 24 hours"]);
+    assert!(view["resolved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["missing"] == false && r["widget"].is_object()));
+    let views: Vec<_> = view["document"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["items"].as_array().unwrap())
+        .map(|i| {
+            i["payload"]["title"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        views,
+        [
+            "Host",
+            "Needs attention",
+            "Top containers",
+            "Stacks",
+            "Recent events",
+            "CPU",
+            "Memory"
+        ]
+    );
+    // Idempotent: a second start adds nothing; a deleted Home board stays deleted.
+    crate::api::home::seed(&seeded);
+    let boards = |boot: &Value| boot["boards"].as_array().unwrap().len();
+    assert_eq!(
+        boards(
+            &owner
+                .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+                .await
+        ),
+        2
+    );
+    owner
+        .json(
+            "PATCH",
+            "/api/v1/settings",
+            json!({"home_board":older}),
+            200,
+        )
+        .await;
+    owner
+        .json("PATCH", "/api/v1/settings", json!({"home_board":home}), 200)
+        .await;
+    let scoped = owner
+        .guest("scoped", "viewer", json!({"boards":[older]}))
+        .await;
+    let scoped_boot = scoped
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(
+        scoped_boot["home_board"],
+        Value::Null,
+        "only a visible Home board"
+    );
+    let viewer = owner.guest("viewer", "viewer", Value::Null).await;
+    assert_eq!(
+        viewer
+            .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+            .await["home_board"],
+        home
+    );
+    let gone = owner
+        .call("DELETE", &format!("/api/v1/boards/{home}"), Value::Null)
+        .await;
+    assert_eq!(gone.status, 204, "{}", gone.body);
+    crate::api::home::seed(&seeded);
+    let boot = owner
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(boot["home_board"], Value::Null);
+    assert_eq!(boards(&boot), 1);
+}
+
+#[tokio::test]
+async fn a_fresh_home_board_is_named_home_and_becomes_the_default() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    crate::api::home::seed(&st);
+    let owner = Client::owner(start(st).await).await;
+    let boot = owner
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(boot["boards"][0]["name"], "Home");
+    assert_eq!(boot["default_board"], boot["home_board"]);
+    assert_eq!(boot["boards"][0]["id"], boot["home_board"]);
+}
+
+#[tokio::test]
+async fn guided_setup_adds_the_chosen_services_to_the_home_board() {
+    let st = state();
+    crate::api::home::seed(&st);
+    let owner = browser_owner(start(st).await).await;
+    let home = owner
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await["home_board"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let items = json!([{
+        "id":format!("{:032x}", 1),"included":true,"name":"Wiki","group":"Apps",
+        "target":{"kind":"board","payload":{"kind":"link","title":"","url":"https://wiki.example.test/"}}
+    }]);
+    owner
+        .json(
+            "PUT",
+            SETUP_DRAFT,
+            json!({"revision":0,"document":{"step":"review","items":items},"credentials":[]}),
+            200,
+        )
+        .await;
+    let result = owner
+        .json("POST", SETUP_COMMIT, json!({"revision":1}), 200)
+        .await;
+    assert_eq!(result["board_id"], home, "no second board");
+    let doc = owner
+        .json("GET", &format!("/api/v1/boards/{home}"), Value::Null, 200)
+        .await["document"]
+        .clone();
+    let sections: Vec<_> = doc["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["title"].as_str().unwrap().to_owned(),
+                s["items"].as_array().unwrap().len(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        sections,
+        [
+            ("This host".to_owned(), 2),
+            ("Apps".to_owned(), 1),
+            ("Containers".to_owned(), 3),
+            ("Last 24 hours".to_owned(), 2)
+        ]
+    );
+    let boot = owner
+        .json("GET", "/api/v1/bootstrap", Value::Null, 200)
+        .await;
+    assert_eq!(boot["default_board"], home);
+    assert_eq!(boot["boards"].as_array().unwrap().len(), 1);
 }

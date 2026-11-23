@@ -10,7 +10,10 @@ use crate::{config::Config, http::server::Body, state::AppState};
 #[derive(Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct DashboardSettings {
+    /// The board `/app` opens.
     pub default_board: Option<String>,
+    /// The board the Home page shows (seeded with Hobnail's widgets).
+    pub home_board: Option<String>,
     pub default_theme: Option<String>,
     pub provider_internet: bool,
 }
@@ -20,6 +23,8 @@ pub struct DashboardSettings {
 struct SettingsPatch {
     #[serde(default, deserialize_with = "present")]
     default_board: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    home_board: Option<Option<String>>,
     #[serde(default, deserialize_with = "present")]
     default_theme: Option<Option<String>>,
     provider_internet: Option<bool>,
@@ -39,8 +44,10 @@ pub(super) fn get(conn: &Connection, user: &Principal) -> Result<DashboardSettin
         )
         .optional()?
         .filter(|id| user.can_see_board(id));
+    let home_board = super::home::board(conn, |id| user.can_see_board(id))?;
     Ok(DashboardSettings {
         default_board,
+        home_board,
         default_theme: stored_theme(conn)?,
         provider_internet: internet(conn)?,
     })
@@ -97,7 +104,7 @@ pub(super) fn set_default_board(conn: &Connection, id: Option<&str>) -> Result<(
     set(conn, "default_board", id)
 }
 
-fn set(conn: &Connection, key: &str, value: Option<&str>) -> Result<(), ApiError> {
+pub(super) fn set(conn: &Connection, key: &str, value: Option<&str>) -> Result<(), ApiError> {
     if let Some(value) = value {
         conn.execute(
             "INSERT INTO settings (key,value) VALUES (?1,json_quote(?2))
@@ -119,6 +126,7 @@ pub(super) async fn route(
         let input: SettingsPatch = super::read_json(req, 8192).await?;
         let saved = state.db.dashboard(|conn| -> Result<_, ApiError> {
             if input.default_board.is_none()
+                && input.home_board.is_none()
                 && input.default_theme.is_none()
                 && input.provider_internet.is_none()
             {
@@ -134,6 +142,17 @@ pub(super) async fn route(
                     }
                 }
                 set_default_board(conn, id.as_deref())?;
+            }
+            if let Some(id) = input.home_board {
+                if let Some(id) = id.as_deref() {
+                    if !user.can_see_board(id) || !board_exists(conn, id)? {
+                        return Err(ApiError::bad_request(
+                            "select a visible board",
+                            Some("home_board"),
+                        ));
+                    }
+                }
+                set(conn, super::home::HOME_BOARD, id.as_deref())?;
             }
             if let Some(theme) = input.default_theme {
                 set_theme(conn, theme.as_deref())?;

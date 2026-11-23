@@ -274,13 +274,26 @@ landing page.
   reachable (`ok: true`) with the status in the message; a saved link is
   never shown as healthy. Test URLs must use
   HTTP or HTTPS and omit query strings and fragments.
-- POST `revision` to `/onboarding/commit` from Review. A single transaction creates
-  the board and any new integrations, sets the default board and optional theme,
-  clears staged credentials and records the resulting `board_id`. Repeated
-  commits return that ID. A stale save, test, or first commit returns 409.
-- Dashboard settings accept `default_board`, `default_theme`, and `provider_internet`,
-  in a PATCH. Null clears the corresponding setting. A cleared theme falls
-  back to `[page].theme` in the configuration file.
+- POST `revision` to `/onboarding/commit` from Review. A single transaction adds
+  the selected services to the Home board (as sections under its first one;
+  without a Home board it creates one named Home), saves any new
+  integrations, sets the default board when none is set and the optional
+  theme, clears staged credentials and records the resulting `board_id`.
+  Repeated commits return that ID. A stale save, test, or first commit
+  returns 409.
+- Dashboard settings accept `default_board`, `home_board`, `default_theme`, and
+  `provider_internet`, in a PATCH. Null clears the corresponding setting. A
+  cleared theme falls back to `[page].theme` in the configuration file.
+  `default_board` is the board `/app` opens; `home_board` is the board the
+  Home page shows. Both must be boards the caller can see, and both are
+  returned (and in the bootstrap) only when visible to the caller.
+- The Home board is created once per install at server start (setting
+  `home_seeded`): Hobnail widgets (Host, Needs attention, Top containers,
+  Stacks, Recent events, CPU and memory over 24 h) in the built-in `hobnail`
+  integration, then the `[[widgets]]` and `[[bookmarks]]` of the configuration
+  file. It is named Home, or Overview when a board is already named Home (that
+  board is left as it is), and becomes the default board only when no default
+  is set. Deleting it clears `home_board`; it is not created again.
 
 ## Kept legacy routes
 

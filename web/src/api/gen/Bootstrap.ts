@@ -5,7 +5,15 @@ import type { Features } from "./Features.ts";
 import type { Refresh } from "./Refresh.ts";
 import type { Role } from "./Role.ts";
 
-export type Bootstrap = { role: Role, scoped: boolean, boards: Array<BoardNavigation>, default_board: string | null, remote_icons: boolean,
+export type Bootstrap = { role: Role, scoped: boolean, boards: Array<BoardNavigation>,
+/**
+ * The board `/app` opens.
+ */
+default_board: string | null,
+/**
+ * The board the Home page (the sidebar's first entry) shows.
+ */
+home_board: string | null, remote_icons: boolean,
 /**
  * Icons built into the server, available whatever `remote_icons` says.
  */

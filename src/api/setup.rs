@@ -791,16 +791,44 @@ fn commit(
         validator.validate(&payload, None).map_err(local)?;
         sections[index].append(payload);
     }
-    let doc = BoardDocument {
-        version: 0,
-        name: None,
-        icon: None,
-        appearance: Default::default(),
-        sections,
+    // The chosen services join the Home board, under its host section;
+    // without one (deleted) they make a new board, which becomes Home.
+    let board = match super::home::board(conn, |_| true)? {
+        Some(id) => {
+            let board = boards::get(conn, &id)?;
+            let mut doc = boards::document(conn, &board)?;
+            if doc.sections.len() + sections.len() > 64 {
+                return Err(ApiError::bad_request(
+                    "A board supports up to 64 sections.",
+                    Some("group"),
+                ));
+            }
+            let at = doc.sections.len().min(1);
+            doc.sections.splice(at..at, sections);
+            for (position, section) in doc.sections.iter_mut().enumerate() {
+                section.position = position as u32;
+            }
+            boards::store(conn, &board.id, doc, now)?;
+            if dashboard_settings::get(conn, user)?.default_board.is_none() {
+                dashboard_settings::set_default_board(conn, Some(&board.id))?;
+            }
+            board
+        }
+        None => {
+            let doc = BoardDocument {
+                version: 0,
+                name: None,
+                icon: None,
+                appearance: Default::default(),
+                sections,
+            };
+            let board = boards::create(conn, "Home", None, now)?;
+            boards::store(conn, &board.id, doc, now)?;
+            dashboard_settings::set_default_board(conn, Some(&board.id))?;
+            dashboard_settings::set(conn, super::home::HOME_BOARD, Some(&board.id))?;
+            board
+        }
     };
-    let board = boards::create(conn, "Home", None, now)?;
-    boards::store(conn, &board.id, doc, now)?;
-    dashboard_settings::set_default_board(conn, Some(&board.id))?;
     if let Some(theme) = saved.document.theme.as_deref() {
         dashboard_settings::set_theme(conn, Some(theme))?;
     }

@@ -122,6 +122,8 @@ async fn serve() -> i32 {
         tokio::spawn(async move { auth::calibrate_floor(&s).await });
     }
 
+    api::home::seed(&st);
+
     st.db.record_event(
         util::unix_now() as i64,
         "app.start",
