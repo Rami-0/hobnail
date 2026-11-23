@@ -9,9 +9,20 @@ separate discovered inventory, filtered by account scopes.
 A board has a name, icon and position. Sections have a title and ordered items.
 Item kinds are container, link, widget and integration. Container targets use
 Compose project/service where available, otherwise the container name. Widget
-items show an existing configured widget's structured read model. Integration
-tiles show connection metadata and the outcome of a manual connection test. A deleted or missing
-target remains visible as missing instead of silently vanishing.
+items show an existing configured widget's structured read model, or a provider
+widget's data. Provider widgets are placed from an integration's "Choose
+widgets" dialog (or the guided setup), and each placement keeps its own widget options
+and refresh interval while sharing the saved connection; switching a placed
+widget off in that dialog removes it from the board in the same board revision.
+Integration tiles show connection metadata and the outcome of a manual
+connection test. A deleted or missing target remains visible as missing
+instead of silently vanishing.
+
+A reader who can see the board but not an integration on it gets placeholders:
+that integration's provider widgets read "Widget unavailable" and its
+integration tile reads "Integration unavailable", with neither the integration
+ID nor its custom title in the response. A scoped editor's save maps the
+placeholders back, so saving the board keeps those items.
 
 Responsive spans are columns, not pixels: mobile 1–4, tablet 1–8, desktop 1–12,
 rows 1–12. Edit mode offers move/resize controls and pointer dragging; Alt+arrows
