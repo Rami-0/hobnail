@@ -50,7 +50,7 @@ function titleOf(r: Route): string {
       return "Home";
     case "logs": case "container_logs": case "stack_logs": return "Logs";
     case "alerts": return "Alerts";
-    case "overview": return "Overview";
+    case "overview": return "Home";
     case "host": return "Host";
     case "history": return "History";
     case "board": return "Board";
@@ -138,7 +138,7 @@ export function App() {
   const Page = (pages as Partial<Record<Route["name"], ComponentType<PageProps>>>)[route.name];
   const key = route.name === "settings" ? route.tab
     : route.name === "board" ? route.id : route.name === "container" ? route.ctr : undefined;
-  const page = Page ? <Page key={key} /> : route.name === "home" ? <Home /> : <NotFound path={pathname} />;
+  const page = Page ? <Page key={key} /> : route.name === "home" ? <Home /> : route.name === "overview" ? <Home home /> : <NotFound path={pathname} />;
   return (
     <Shell title={titleOf(route)}>
       <LoadBoundary key={route.name.endsWith("logs") ? "logs" : pathname} fallback={<Loading />}>{page}</LoadBoundary>

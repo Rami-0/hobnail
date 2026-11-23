@@ -16,7 +16,6 @@ export const routePages = {
   container_logs: loadLogsPage,
   stack_logs: loadLogsPage,
   alerts: routePage(() => import("../routes/alerts/index.tsx")),
-  overview: routePage(() => import("../routes/overview/index.tsx")),
   host: routePage(() => import("../routes/host/index.tsx")),
   history: routePage(() => import("../routes/history/index.tsx")),
   account: routePage(() => import("../routes/account/index.tsx")),

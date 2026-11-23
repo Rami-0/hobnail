@@ -18,7 +18,7 @@ import {
   FunnelIcon,
   HistoryIcon,
   KeyboardIcon,
-  LayoutGridIcon,
+  HouseIcon,
   PanelLeftIcon,
   ScrollTextIcon,
   ServerIcon,
@@ -28,6 +28,7 @@ import {
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
 
 import { useSession } from "../api/session.ts";
+import { homeHref } from "./home.ts";
 import { useBootstrap, useContainers, useStrips } from "../live/index.ts";
 import { ServiceIcon } from "../ui/ServiceIcon.tsx";
 import { HealthStrip } from "../ui/Sparkline.tsx";
@@ -361,6 +362,8 @@ export function Sidebar({
 }: SidebarProps) {
   const b = useBootstrap();
   const s = useSession();
+  // Home has its own entry; the list holds the other boards.
+  const boards = b?.boards.filter((board) => board.id !== b.home_board);
   const active = r.name === "container" || r.name === "container_logs" ? r.ctr : null;
   const firing = useAlertCount();
   const build = s.session?.build;
@@ -390,7 +393,7 @@ export function Sidebar({
         </Button>
       </div>
       <nav className="nav" aria-label="Main" data-testid="sidebar">
-        {b && !b.scoped && <NavLink href="/app/overview" label="Overview" current={r.name === "overview" || (r.name === "home" && !b.default_board)} icon={<LayoutGridIcon aria-hidden="true" />} />}
+        {b && (!b.scoped || b.home_board) && <NavLink href={homeHref(b)} label="Home" current={r.name === "overview" || (r.name === "board" && r.id === b.home_board)} icon={<HouseIcon aria-hidden="true" />} />}
         <NavLink
           href={appHref("/containers")}
           label="Containers"
@@ -417,9 +420,9 @@ export function Sidebar({
         />
         </>}
         {b && b.role !== "viewer" && <NavLink href={`/app${settingsHref(local(), b.role === "owner", b.scoped)}`} label="Settings" icon={<SlidersHorizontalIcon aria-hidden="true" />} current={r.name === "settings"} />}
-        {!!b?.boards.length && <span className="nav-sep label">Boards</span>}
-        {b?.boards.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
-          icon={<ServiceIcon name={board.icon} title={board.name} enabled={b.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
+        {!!boards?.length && <span className="nav-sep label">Boards</span>}
+        {boards?.map((board) => <NavLink key={board.id} href={`/app/boards/${board.id}`} label={board.name}
+          icon={<ServiceIcon name={board.icon} title={board.name} enabled={!!b?.remote_icons} />} current={r.name === "board" && r.id === board.id} />)}
         <Button variant="ghost" type="button" className="nav-item rail-only" data-rtip="Stacks" onClick={onStacks}>
           <FunnelIcon aria-hidden="true" />
           <span className="nav-label">Stacks and containers</span>

@@ -31,7 +31,7 @@ export function Shortcuts({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <Dialog open={open} title="Keyboard shortcuts" onClose={onClose} testId="shortcuts" className="keys">
       <dl className="keys-l">
-        {!scoped && <Row k={["g", "o"]}>Overview</Row>}
+        {!scoped && <Row k={["g", "o"]}>Home</Row>}
         <Row k={["g", "c"]}>Containers</Row>
         <Row k={["g", "l"]}>Logs</Row>
         {!scoped && <>

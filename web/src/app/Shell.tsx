@@ -8,7 +8,7 @@
 // goes into it and back to the opener; a closed drawer is out of the tab
 // order. `<html data-side="rail">` and `<html class="side-open">` drive the
 // CSS.
-import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, LayoutGridIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
+import { BoxIcon, BellIcon, ChevronRightIcon, EllipsisIcon, HouseIcon, RefreshCwIcon, ScrollTextIcon, SearchIcon } from "lucide-react";
 import { lazy, useCallback, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { useSession } from "../api/session.ts";
@@ -22,6 +22,7 @@ import { StalePill } from "./Live.tsx";
 import { interceptedPath, logsHref } from "./paths.ts";
 import { settingsHref, local, readRail, writeRail } from "./prefs.ts";
 import { appHref, navigate, useRoute } from "./router.ts";
+import { homeHref } from "./home.ts";
 import { pageFilter } from "./page-filter.ts";
 import { openDialogs, subscribeDialogs } from "../ui/layers.ts";
 import { getToasts, subscribeToasts } from "../ui/toast.ts";
@@ -445,9 +446,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         </div>
       </div>
       <nav className="bbar" aria-label="Quick navigation" inert={overPage}>
-        <a className="bb-i" href={!b?.scoped ? "/app/overview" : "/app"} aria-current={r === "overview" || r === "home" ? "page" : undefined}>
-          <LayoutGridIcon aria-hidden="true" />
-          <span>Overview</span>
+        <a className="bb-i" href={homeHref(b)} aria-current={r === "overview" || r === "home" || (loc.route.name === "board" && loc.route.id === b?.home_board) ? "page" : undefined}>
+          <HouseIcon aria-hidden="true" />
+          <span>Home</span>
         </a>
         <a className="bb-i" href={appHref("/containers")} aria-current={r === "containers" || r === "container" ? "page" : undefined}>
           <BoxIcon aria-hidden="true" />

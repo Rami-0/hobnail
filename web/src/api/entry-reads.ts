@@ -2,7 +2,6 @@
 import { prefetchPage } from "../app/route-pages.ts";
 import { matchRoute } from "../app/paths.ts";
 import { apiQuery, parseWindow } from "../routes/container/range.ts";
-import { overviewPath, readSeen } from "../routes/overview/request.ts";
 import { historyWindow } from "../routes/history/window.ts";
 import { createClient } from "./client.ts";
 import type { Session } from "./gen/Session.ts";
@@ -46,12 +45,6 @@ void entrySession.then((reply) => {
       break;
     case "history": if (session.user.role === "owner") prefetchEntryRead(`/api/v1/history?${historyWindow(new URLSearchParams(search)).query}`); break;
     case "host": if (session.user.role === "owner") prefetchEntryRead("/api/v1/host"); break;
-    case "overview":
-      if (session.user.role !== "owner") break;
-      prefetchEntryRead(overviewPath(readSeen(), true));
-      prefetchEntryRead("/api/v1/widgets");
-      prefetchEntryRead("/api/v1/bookmarks");
-      break;
     case "alerts": {
       if (session.user.role !== "owner") break;
       const filters = new URLSearchParams(search);
