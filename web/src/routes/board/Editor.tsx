@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type KeyboardEvent } from "react";
 import { AppWindowIcon, ArrowDownIcon, ArrowUpIcon, BoxIcon, ChevronDownIcon, GripVerticalIcon, LayoutDashboardIcon, Link2Icon, PaletteIcon, PlugIcon, PlusIcon, Redo2Icon, SlidersHorizontalIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import type { Provider } from "../../api/gen/Provider.ts";
+import type { Widget } from "../../api/gen/Widget.ts";
+import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
+import { WidgetPreview } from "../../ui/WidgetPreview.tsx";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import { DetectedCards, useDetected } from "../../integrations/Detected.tsx";
 import type { Prefill } from "../../integrations/detected.ts";
@@ -28,21 +31,24 @@ import { canvasVars, cellVars } from "./look.ts";
 
 const ProviderDialog = lazy(() => import("../settings/ProviderDialog.tsx"));
 
-/** The Add picker's tabs: web apps detected on this host (branded links),
- * integrations (API connections), plain container status tiles, links, and
- * local widgets. */
+/** The Add picker's tabs: Hobnail's own widgets first (live data Hobnail
+ * already has, plus clock, notes, bookmarks…), web apps detected on this
+ * host (branded links), integrations (API connections), plain container
+ * status tiles, and links. */
 type PickerTab = "apps" | "integrations" | "containers" | "links" | "widgets";
 const TABS: { id: PickerTab; label: string; icon: typeof PlugIcon }[] = [
+  { id: "widgets", label: "Hobnail widgets", icon: LayoutDashboardIcon },
   { id: "apps", label: "Apps", icon: AppWindowIcon },
   { id: "integrations", label: "Integrations", icon: PlugIcon },
   { id: "containers", label: "Containers", icon: BoxIcon },
   { id: "links", label: "Links", icon: Link2Icon },
-  { id: "widgets", label: "Widgets", icon: LayoutDashboardIcon },
 ];
+/** The built-in provider whose widgets draw Hobnail's own data. */
+const NATIVE = "hobnail";
 const TAB_OF: Record<BoardPayload["kind"], PickerTab> = { integration: "integrations", container: "containers", link: "links", widget: "widgets" };
 /** A detected web app is a link, but it belongs on the Apps tab. */
 const tabOf = (suggestion: BoardSuggestion): PickerTab => suggestion.detected ? "apps" : TAB_OF[suggestion.payload.kind];
-const SEARCH_HINT: Record<PickerTab, string> = { apps: "Dozzle, Beszel…", integrations: "Sonarr, Pi-hole…", containers: "Container name…", links: "Bookmark…", widgets: "Clock, weather, notes…" };
+const SEARCH_HINT: Record<PickerTab, string> = { apps: "Dozzle, Beszel…", integrations: "Sonarr, Pi-hole…", containers: "Container name…", links: "Bookmark…", widgets: "Host, containers, logs, clock…" };
 /** A provider with a service URL is an integration; one without is a local widget. */
 const hasUrl = (provider: Provider) => provider.fields.some((field) => field.id === "base_url");
 type Connect = { prefill?: Prefill; widgets?: boolean; tab: PickerTab };
@@ -102,11 +108,12 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const root = useRef<HTMLDivElement>(null);
   const linkTitle = useRef<HTMLInputElement>(null);
   const search = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<PickerTab>(initialPicker === "discover" ? "containers" : "apps");
+  const [tab, setTab] = useState<PickerTab>(initialPicker === "discover" ? "containers" : "widgets");
   const [catalog, setCatalog] = useState<{ providers: Provider[]; internet: boolean } | null>(null);
   const [connect, setConnect] = useState<Connect | null>(null);
   const [lastPicker, setLastPicker] = useState(0);
   const [scan, setScan] = useState(0);
+  const [adding, setAdding] = useState("");
   const detection = useDetected(!scoped && picker !== null, scan);
   const boot = useBootstrap();
   const live = useContainers();
@@ -320,7 +327,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   };
 
   // ---- picker ----
-  const openPicker = (section: number, start: PickerTab = "apps") => { setPicker(section); setQuery(""); setLink(""); setTab(start); };
+  const openPicker = (section: number, start: PickerTab = "widgets") => { setPicker(section); setQuery(""); setLink(""); setTab(start); };
   const addWhere = () => panel?.kind === "tile" ? panel.s : 0;
   const addFromBar = () => { if (!doc.sections.length) change({ type: "section", title: "Services" }, "Section added"); openPicker(doc.sections.length ? addWhere() : 0); };
   useEffect(() => {
@@ -363,7 +370,9 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const shown = matching.filter((suggestion) => tabOf(suggestion) === tab);
   const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => tabOf(x) === id).length])) as Record<PickerTab, number>;
   const apps = fresh.filter((suggestion) => suggestion.detected);
-  const localWidgets = (catalog?.providers ?? []).filter((provider) => !hasUrl(provider) && provider.widgets.length > 0 && `${provider.name} ${provider.description}`.toLowerCase().includes(needle));
+  const native = catalog?.providers.find((provider) => provider.id === NATIVE) ?? null;
+  const nativeWidgets = (native?.widgets ?? []).filter((widget) => `${widget.name} ${widget.description}`.toLowerCase().includes(needle));
+  const localWidgets = (catalog?.providers ?? []).filter((provider) => provider.id !== NATIVE && !hasUrl(provider) && provider.widgets.length > 0 && `${provider.name} ${provider.description}`.toLowerCase().includes(needle));
   const integrationProviders = (catalog?.providers ?? []).filter(hasUrl);
   const liveRows = new Map(live.data?.groups.flatMap((group) => group.containers).map((row) => [row.name, row]) ?? []);
   const suggestionRow = (payload: BoardPayload) => payload.kind === "container" ? liveRows.get(payload.target.by === "name" ? payload.target.name : "") ?? [...liveRows.values()].find((row) => payload.target.by === "compose" && row.stack === payload.target.project && row.title === payload.target.service) : undefined;
@@ -381,14 +390,22 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     for (const suggestion of list) change({ type: "add", section: picker, payload: suggestion.payload }, `${list.length} apps added`, merge);
     setAdded(`${picker}:${at}`); focusItem(picker, at); setPicker(null);
   };
-  // The picker opens on Apps; with none detected, Integrations comes first.
-  const opened = useRef(false);
-  useEffect(() => {
-    if (picker === null) { opened.current = false; return; }
-    if (opened.current || !suggestions.length) return;
-    opened.current = true;
-    if (tab === "apps" && !suggestions.some((suggestion) => suggestion.detected)) setTab("integrations");
-  }, [picker, suggestions, tab]);
+  /** Add one of Hobnail's own widgets straight to this section: the built-in
+   * integration is created the first time, then reused. */
+  const addNative = async (widget: Widget) => {
+    if (picker === null || operation.current) return;
+    setAdding(widget.id);
+    const existing = await api.get<IntegrationView[]>("/api/v1/integrations");
+    const id = existing.kind === "ok" ? existing.data.find((entry) => entry.kind === NATIVE)?.id : undefined;
+    const result = await api.post("/api/v1/providers/install", {
+      integration: { kind: NATIVE, name: "Hobnail", base_url: "", enabled: true, options: {}, credentials: {} },
+      integration_id: id, board_id: view.board.id, widgets: [{ id: widget.id, options: {} }],
+    });
+    setAdding("");
+    if (result.kind !== "ok") { setError(result.message); return; }
+    setPicker(null);
+    await pull(`${widget.name} added. Review it and choose Save.`);
+  };
   useEffect(() => { if (!added) return; const t = setTimeout(() => setAdded(null), 900); return () => clearTimeout(t); }, [added]);
 
   const tilePanel = panel?.kind === "tile" ? panel : null;
@@ -510,6 +527,13 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
           <p className="picker-note"><AppWindowIcon aria-hidden="true" />Web apps running on this host, as link tiles with their logos. Addresses are the ones your browser reached Hobnail on.</p>
           {apps.length > 1 && !query && <Button size="sm" data-testid="picker-add-all" icon={<PlusIcon aria-hidden="true" />} onClick={() => addAll(apps)}>Add all {apps.length}</Button>}
         </div>}
+        {tab === "widgets" && <p className="picker-note"><LayoutDashboardIcon aria-hidden="true" />Live widgets from what Hobnail already watches on this host. No service, URL or key needed.</p>}
+        {tab === "widgets" && native && nativeWidgets.length > 0 && <div className="native-gallery" data-testid="hobnail-widgets">
+          {nativeWidgets.map((widget) => <WidgetPreview compact key={widget.id} widget={widget} icon={native.icon} color={native.color} title={native.name}>
+            <Button size="sm" variant="default" data-testid="hobnail-add" data-widget={widget.id} busy={adding === widget.id} disabled={!!adding || scoped}
+              icon={<PlusIcon aria-hidden="true" />} aria-label={`Add ${widget.name}`} onClick={() => void addNative(widget)}>Add</Button>
+          </WidgetPreview>)}
+        </div>}
         {tab === "containers" && <p className="picker-note"><BoxIcon aria-hidden="true" />Status tiles for your Docker containers. To show a service's data, connect it under Integrations.</p>}
         {tab !== "links" && (shown.length > 0 || tab === "integrations" && !scoped || tab === "widgets" && localWidgets.length > 0) && <div className="suggestions" data-testid="picker-list">
           {shown.map((suggestion) => {
@@ -534,7 +558,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
             <PlusIcon aria-hidden="true" />
           </CardButton>}
         </div>}
-        {!shown.length && tab !== "links" && !(tab === "widgets" && localWidgets.length) && <p className="picker-empty">{
+        {!shown.length && tab !== "links" && !(tab === "widgets" && (localWidgets.length || nativeWidgets.length)) && <p className="picker-empty">{
           !suggestions.length ? "Looking for what Hobnail knows about…"
             : query ? `Nothing matches “${query}”.`
               : tab === "apps" ? "No other web apps found: containers need a published port your browser can reach. Add one under Links."

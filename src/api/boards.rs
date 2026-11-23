@@ -1314,6 +1314,9 @@ pub(super) fn suggestions(
         .collect();
     let integrations = integrations
         .into_iter()
+        // Hobnail's own widgets are added from their gallery, not as a
+        // connection status tile.
+        .filter(|(_, _, kind)| kind != "hobnail")
         .map(|(id, name, kind)| BoardSuggestion {
             icon: crate::providers::get(&kind).map(|p| p.icon.to_owned()),
             title: name,
