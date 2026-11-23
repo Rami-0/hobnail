@@ -1,11 +1,11 @@
-import { PageHeader } from "../../ui/PageHeader.tsx";
-import { startTransition, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type KeyboardEvent } from "react";
+import { startTransition, useEffect, useRef, useState, type PointerEvent, type KeyboardEvent } from "react";
+import { ArrowUpIcon, ArrowDownIcon, BoxIcon, ChevronLeftIcon, ChevronRightIcon, GripVerticalIcon, LayoutDashboardIcon, Link2Icon, PencilIcon, PlugIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import type { BoardPayload } from "../../api/gen/BoardPayload.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardView } from "../../api/gen/BoardView.ts";
 import type { BoardSuggestion } from "../../api/gen/BoardSuggestion.ts";
-import type { GridSpans } from "../../api/gen/GridSpans.ts";
 import { api } from "../../api/session.ts";
-import { dirty, freshSuggestions, payloadIdentity, rebase, recoveryBase, reduceDocument, type Action } from "../../boards/document.ts";
+import { dirty, freshSuggestions, payloadIdentity, rebase, recoveryBase, reduceDocument, stepSize, TILE_SIZES, tileSize, type Action, type TileSize } from "../../boards/document.ts";
 import { navigate } from "../../app/router.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Field, TextInput } from "../../ui/Field.tsx";
@@ -14,9 +14,16 @@ import { Dialog } from "../../ui/Dialog.tsx";
 import { Note } from "../../ui/Note.tsx";
 import { LinkTest } from "../../boards/LinkTest.tsx";
 import { LinkUrl } from "../../boards/LinkUrl.tsx";
-import { Tile } from "./index.tsx";
+import { ServiceIcon } from "../../ui/ServiceIcon.tsx";
+import { CardButton } from "../../ui/CardButton.tsx";
+import { useBootstrap, useContainers } from "../../live/index.ts";
+import { Tile, cellStyle } from "./Tile.tsx";
 
-const breakpoint = (): keyof GridSpans => window.innerWidth < 700 ? "mobile" : window.innerWidth < 1100 ? "tablet" : "desktop";
+type Kind = "all" | BoardPayload["kind"];
+const KIND_LABEL: Record<BoardPayload["kind"], string> = { container: "Container", widget: "Widget", integration: "Integration", link: "Link" };
+const KIND_ICON = { container: BoxIcon, widget: LayoutDashboardIcon, integration: PlugIcon, link: Link2Icon };
+const targetAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-section]");
+const SIZE_SHORT: Record<TileSize, string> = { small: "S", wide: "W", tall: "T", large: "L" };
 
 export default function Editor({ view, initial, initialPicker, scoped, changed, onSave, onCancel, onRebase }: {
   view: BoardView; initial: BoardDocument; initialPicker?: "add" | "discover"; scoped: boolean; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: () => void;
@@ -41,6 +48,11 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const root = useRef<HTMLDivElement>(null);
   const linkTitle = useRef<HTMLInputElement>(null);
   const [manual, setManual] = useState(initialPicker === "add");
+  const search = useRef<HTMLInputElement>(null);
+  const [kind, setKind] = useState<Kind>("all");
+  const [itemEditor, setItemEditor] = useState<{ s: number; i: number } | null>(null);
+  const boot = useBootstrap();
+  const live = useContainers();
   useEffect(() => { if (!initialPicker) root.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true }); }, [initialPicker]);
   const [toolCount, setToolCount] = useState(6);
   const itemCount = doc.sections.reduce((count, section) => count + section.items.length, 0);
@@ -120,28 +132,27 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       if (event.key === "ArrowLeft" && s > 0) move(s, i, s - 1, doc.sections[s - 1]?.items.length ?? 0);
       if (event.key === "ArrowRight" && s + 1 < doc.sections.length) move(s, i, s + 1, doc.sections[s + 1]?.items.length ?? 0);
     } else {
-      const dimension = event.key === "ArrowUp" || event.key === "ArrowDown" ? "rows" : breakpoint();
-      const delta = event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : 1;
-      change({ type: "resize", section: s, item: i, spans: { ...item.spans, [dimension]: item.spans[dimension] + delta } }, `Item resized: ${dimension}`);
+      const spans = stepSize(item.spans, event.key as "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown");
+      change({ type: "resize", section: s, item: i, spans }, `Item resized: ${TILE_SIZES[tileSize(spans)].label}`);
     }
   };
-  const drag = (event: PointerEvent<HTMLButtonElement>, s: number, i: number, resize: boolean) => {
+  const resize = (s: number, i: number, size: TileSize) => change({ type: "resize", section: s, item: i, spans: { ...TILE_SIZES[size].spans } }, `Item resized: ${TILE_SIZES[size].label}`);
+  const [dragging, setDragging] = useState<{ s: number; i: number } | null>(null);
+  const [drop, setDrop] = useState<string | null>(null);
+  const over = (e: globalThis.PointerEvent) => { const t = targetAt(e.clientX, e.clientY); setDrop(t?.dataset.item === undefined ? null : `${t.dataset.section}:${t.dataset.item}`); };
+  const drag = (event: PointerEvent<HTMLButtonElement>, s: number, i: number) => {
     if (event.button !== 0 || busy) return; event.preventDefault(); const button = event.currentTarget; button.setPointerCapture(event.pointerId);
-    const start = { x: event.clientX, y: event.clientY }; const item = doc.sections[s]?.items[i]; if (!item) return;
+    if (!doc.sections[s]?.items[i]) return;
+    setDragging({ s, i });
+    const finish = () => { button.removeEventListener("pointerup", up); button.removeEventListener("pointercancel", finish); button.removeEventListener("pointermove", over); setDragging(null); setDrop(null); };
     const up = (end: globalThis.PointerEvent) => {
-      button.removeEventListener("pointerup", up); button.removeEventListener("pointercancel", stop);
-      if (resize) {
-        const grid = button.closest(".board-grid")?.getBoundingClientRect(); const bp = breakpoint(); const columns = bp === "mobile" ? 4 : bp === "tablet" ? 8 : 12;
-        change({ type: "resize", section: s, item: i, spans: { ...item.spans, [bp]: item.spans[bp] + Math.round((end.clientX - start.x) / ((grid?.width ?? 400) / columns)), rows: item.spans.rows + Math.round((end.clientY - start.y) / 130) } }, "Item resized");
-      } else {
-        const target = document.elementFromPoint(end.clientX, end.clientY)?.closest<HTMLElement>("[data-section]");
-        if (target) { const targetSection = Number(target.dataset.section); move(s, i, targetSection, target.dataset.item === undefined ? doc.sections[targetSection]?.items.length ?? 0 : Number(target.dataset.item)); }
-      }
+      finish();
+      const target = targetAt(end.clientX, end.clientY);
+      if (target) { const targetSection = Number(target.dataset.section); move(s, i, targetSection, target.dataset.item === undefined ? doc.sections[targetSection]?.items.length ?? 0 : Number(target.dataset.item)); }
     };
-    const stop = () => { button.removeEventListener("pointerup", up); button.removeEventListener("pointercancel", stop); };
-    button.addEventListener("pointerup", up); button.addEventListener("pointercancel", stop);
+    button.addEventListener("pointerup", up); button.addEventListener("pointercancel", finish); button.addEventListener("pointermove", over);
   };
-  const openPicker = (section: number) => { setManual(false); setPicker(section); setQuery(""); setLink(""); };
+  const openPicker = (section: number) => { setManual(false); setPicker(section); setQuery(""); setLink(""); setKind("all"); };
   useEffect(() => {
     if (picker === null) return;
     const controller = new AbortController();
@@ -153,13 +164,22 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     return () => controller.abort();
   }, [path, picker]);
   const selectedTargets = new Set(doc.sections.flatMap(({ items }) => items.map(({ payload }) => payloadIdentity(payload))));
+  const fresh = freshSuggestions(suggestions, selectedTargets);
+  const matching = fresh.filter((suggestion) => suggestion.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const shown = matching.filter((suggestion) => kind === "all" || suggestion.payload.kind === kind);
+  const kinds = (["container", "widget", "integration"] as const).filter((k) => fresh.some((suggestion) => suggestion.payload.kind === k));
+  const rows = new Map(live.data?.groups.flatMap((group) => group.containers).map((row) => [row.name, row]) ?? []);
+  const suggestionRow = (payload: BoardPayload) => payload.kind === "container" ? rows.get(payload.target.by === "name" ? payload.target.name : "") ?? [...rows.values()].find((row) => payload.target.by === "compose" && row.stack === payload.target.project && row.title === payload.target.service) : undefined;
+  const editingItem = itemEditor ? doc.sections[itemEditor.s]?.items[itemEditor.i] : undefined;
+  const addSuggestion = (payload: BoardPayload, title: string) => { if (picker !== null) change({ type: "add", section: picker, payload }, `${title} added`); setPicker(null); };
   return <div ref={root} className="board-editor" data-testid="board-editor">
-    <PageHeader title={`Edit ${view.board.name}`}
-      description={<p role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p>}
-      actions={<><Button variant="outline" busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button>
-        <Button variant="default" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></>} />
-
-    <p className="muted">Drag Move onto an item or section; drag Resize to change size. On a focused item: Alt + arrows moves; Shift + arrows resizes at this screen width.</p>
+    <div className="editor-bar">
+      <div className="editor-bar-copy"><h1>Editing {view.board.name}</h1>
+        <p role="status" data-testid="draft-status">{draftState} · {modified ? "Unsaved changes" : "No changes"}</p></div>
+      <div className="page-actions"><Button variant="outline" busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button>
+        <Button variant="default" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></div>
+    </div>
+    <p className="editor-hint">Drag <GripVerticalIcon aria-label="the grip" width={14} height={14} /> to reorder or to move a tile to another section. On a focused grip, <kbd>Alt</kbd> + arrows moves and <kbd>Shift</kbd> + arrows resizes.</p>
     {(changed || conflict) && <Note kind="warn" testId="board-conflict">Another session saved this board. Your changes are kept here.
       {initial.version !== view.document.version && <p>A recovered draft keeps server additions. Review it before saving; you may need to apply removals again.</p>}
       <Button data-testid="board-rebase" disabled={busy} onClick={async () => { if (operation.current) return; operation.current = true; setBusy(true); await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }
@@ -168,44 +188,82 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     </Note>}
     {error && <Note kind="bad">{error}</Note>}<output className="sr" aria-live="polite">{announcement}</output>
     <fieldset className="editor-fields" disabled={busy}><legend className="sr">Board layout</legend>
-    {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section">
-      <div className="editor-section-head"><h2 className="sr">{section.title}</h2><Field id={`section-${s}`} label="Section title"><TextInput value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></Field>
-        <div className="settings-actions"><Button variant="ghost" size="icon" aria-label="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}>↑</Button><Button variant="ghost" size="icon" aria-label="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}>↓</Button><Button onClick={() => { change({ type: "delete-section", section: s }, "Section removed"); focusItem(Math.min(s, doc.sections.length - 2), 0); }}>Delete section</Button></div>
+    {doc.sections.map((section, s) => <section key={section.id ?? `section-${s}`} data-section={s} className="board-section editor-section">
+      <div className="editor-section-head"><h2 className="sr">{section.title}</h2>
+        <div className="section-title-input"><TextInput id={`section-${s}`} aria-label="Section title" value={section.title} required maxLength={80} onChange={(e) => change({ type: "rename", section: s, title: e.target.value }, "Section renamed")} /></div>
+        <span className="section-count" aria-label={`${section.items.length} items`}>{section.items.length}</span>
+        <div className="editor-section-tools"><Button variant="ghost" size="icon" aria-label="Move section up" title="Move section up" disabled={s === 0} onClick={() => change({ type: "move-section", section: s, to: s - 1 }, "Section moved up")}><ArrowUpIcon aria-hidden="true" /></Button><Button variant="ghost" size="icon" aria-label="Move section down" title="Move section down" disabled={s === doc.sections.length - 1} onClick={() => change({ type: "move-section", section: s, to: s + 1 }, "Section moved down")}><ArrowDownIcon aria-hidden="true" /></Button><Button variant="ghost" size="icon" aria-label={`Delete section ${section.title}`} title="Delete section" onClick={() => { change({ type: "delete-section", section: s }, "Section removed"); focusItem(Math.min(s, doc.sections.length - 2), 0); }}><Trash2Icon aria-hidden="true" /></Button></div>
       </div><div className="board-grid">{section.items.map((item, i) => {
         const showTools = itemIndex++ < toolCount;
-        return <div key={item.id ?? `item-${i}`} className="board-cell editor-cell" data-section={s} data-item={i}
-        style={{ "--mobile": item.spans.mobile, "--tablet": item.spans.tablet, "--desktop": item.spans.desktop, "--rows": item.spans.rows } as CSSProperties}>
+        const size = tileSize(item.spans);
+        const name = item.payload.kind === "link" ? item.payload.title : item.payload.title ?? view.resolved.find((r) => r.id === item.id)?.container?.title ?? KIND_LABEL[item.payload.kind];
+        return <div key={item.id ?? `item-${i}`} className="board-cell editor-cell" data-section={s} data-item={i} style={cellStyle(item)}
+          data-dragging={dragging?.s === s && dragging.i === i ? "" : undefined} data-drop={drop === `${s}:${i}` && !(dragging?.s === s && dragging.i === i) ? "" : undefined}>
         <Tile item={item} resolved={view.resolved.find((r) => r.id === item.id)} />
-        {showTools && <>
-        <div className="editor-tools"><Button variant="ghost" size="sm" className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => drag(e, s, i, false)} aria-label="Move item">Move</Button><Button variant="ghost" size="sm" className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => drag(e, s, i, true)} aria-label="Resize item">Resize</Button><Button variant="ghost" size="sm" onClick={() => { change({ type: "delete", section: s, item: i }, "Item removed"); focusItem(s, Math.max(0, i - 1)); }}>Remove</Button></div>
-        {doc.sections.length > 1 && <Select label="Move to section" value={String(s)} options={doc.sections.map((entry, index) => ({ value: String(index), label: entry.title }))} onChange={(value) => move(s, i, Number(value), doc.sections[Number(value)]?.items.length ?? 0)} />}
-        <div className="editor-spans">{(["mobile", "tablet", "desktop", "rows"] as const).map((dimension) => <Field key={dimension} id={`span-${s}-${i}-${dimension}`} label={dimension}><TextInput type="number" min={1} max={dimension === "mobile" ? 4 : dimension === "tablet" ? 8 : 12} value={item.spans[dimension]} onChange={(e) => change({ type: "resize", section: s, item: i, spans: { ...item.spans, [dimension]: Number(e.target.value) } }, `${dimension} resized`)} /></Field>)}</div>
-        {item.payload.kind === "container" && <div className="editor-custom">{(["title", "icon", "link"] as const).map((field) => <Field key={field} id={`custom-${s}-${i}-${field}`} label={`Custom ${field}`}><TextInput value={item.payload.kind === "container" ? item.payload[field] ?? "" : ""} onChange={(e) => { if (item.payload.kind === "container") change({ type: "payload", section: s, item: i, payload: { ...item.payload, [field]: e.target.value || null } }, `Custom ${field} updated`); }} /></Field>)}</div>}
-        {item.payload.kind !== "container" && <div className="editor-custom">
-          <Field id={`title-${s}-${i}`} label="Custom title"><TextInput value={item.payload.title ?? ""} maxLength={80}
+        {showTools && <div className="editor-tools">
+          <Button variant="ghost" size="icon" className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => drag(e, s, i)} aria-label={`Move ${name}`} title="Drag to move"><GripVerticalIcon aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" aria-label="Move earlier" title="Move earlier" disabled={i === 0 && s === 0} onClick={() => i > 0 ? move(s, i, s, i - 1) : move(s, i, s - 1, doc.sections[s - 1]?.items.length ?? 0)}><ChevronLeftIcon aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" aria-label="Move later" title="Move later" disabled={i === section.items.length - 1 && s === doc.sections.length - 1} onClick={() => i < section.items.length - 1 ? move(s, i, s, i + 1) : move(s, i, s + 1, 0)}><ChevronRightIcon aria-hidden="true" /></Button>
+          <span className="size-group" role="group" aria-label="Size">{(Object.keys(TILE_SIZES) as TileSize[]).map((option) =>
+            <Button key={option} variant="ghost" size="sm" aria-pressed={size === option} aria-label={TILE_SIZES[option].label} title={TILE_SIZES[option].label} onClick={() => resize(s, i, option)}>{SIZE_SHORT[option]}</Button>)}</span>
+          <span className="spacer" />
+          <Button variant="ghost" size="icon" aria-label={`Edit ${name}`} title="Edit" onClick={() => setItemEditor({ s, i })}><PencilIcon aria-hidden="true" /></Button>
+          <Button variant="ghost" size="icon" aria-label={`Remove ${name}`} title="Remove" onClick={() => { change({ type: "delete", section: s, item: i }, "Item removed"); focusItem(s, Math.max(0, i - 1)); }}><Trash2Icon aria-hidden="true" /></Button>
+        </div>}
+      </div>; })}
+        <div className="board-cell"><CardButton className="add-tile" data-testid="board-add-item" onClick={() => { void openPicker(s); }}><PlusIcon aria-hidden="true" />Add item</CardButton></div>
+      </div>
+    </section>)}
+    <Button className="add-section" data-testid="board-add-section" icon={<PlusIcon aria-hidden="true" />} disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
+
+    <Dialog open={picker !== null} wide title={`Add to ${doc.sections[picker ?? 0]?.title || "section"}`} description="Pick something Hobnail already knows about, or add a link."
+      initialFocus={manual ? linkTitle : search} onClose={() => setPicker(null)} testId="board-picker">
+      <div className="picker">
+        <Field id="suggestion-search" label="Search"><TextInput ref={search} type="search" value={query} placeholder="Containers, widgets, integrations…" onChange={(e) => setQuery(e.target.value)} /></Field>
+        {kinds.length > 1 && <div className="picker-filters" role="group" aria-label="Show">
+          {(["all", ...kinds] as Kind[]).map((option) => <Button key={option} size="sm" aria-pressed={kind === option} onClick={() => setKind(option)}>
+            {option === "all" ? "All" : `${KIND_LABEL[option]}s`} <span className="picker-count">{option === "all" ? matching.length : matching.filter((x) => x.payload.kind === option).length}</span></Button>)}
+        </div>}
+        {shown.length ? <div className="suggestions">{shown.map((suggestion) => {
+          const row = suggestionRow(suggestion.payload);
+          const Icon = KIND_ICON[suggestion.payload.kind];
+          return <CardButton className="suggestion" data-testid="board-suggestion" key={payloadIdentity(suggestion.payload)} onClick={() => addSuggestion(suggestion.payload, suggestion.title)}>
+            <ServiceIcon className="board-avatar" tint name={row?.icon ?? (suggestion.payload.kind === "container" ? suggestion.payload.icon : null)} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
+            <span className="suggestion-copy"><strong>{suggestion.title}</strong><span><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}{row && <> · <span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</>}</span></span>
+            <PlusIcon aria-hidden="true" />
+          </CardButton>; })}</div>
+          : <p className="picker-empty">{suggestions.length ? query ? `Nothing matches “${query}”. Add it as a link below.` : "Everything Hobnail found is already on this board." : "Looking for containers and widgets…"}</p>}
+        <form className="picker-link" data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); if (picker === null) return; const data = new FormData(e.currentTarget); change({ type: "add", section: picker, payload: { kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null } }, "Link added"); setPicker(null); }}>
+          <h3><Link2Icon aria-hidden="true" />Add a link</h3>
+          <div className="picker-link-fields"><Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} placeholder="Router" /></Field><LinkUrl id="link-url" value={link} onChange={setLink} /><Field id="link-icon" label="Icon name" hint="Optional, e.g. jellyfin"><TextInput name="icon" /></Field></div>
+          <div className="page-actions"><Button type="submit" variant="default" icon={<PlusIcon aria-hidden="true" />}>Add link</Button>{!scoped && <LinkTest url={link} />}</div>
+        </form>
+      </div>
+    </Dialog>
+    <Dialog open={!!editingItem} title="Edit tile" onClose={() => setItemEditor(null)} testId="board-item-editor" footer={<Button variant="default" onClick={() => setItemEditor(null)}>Done</Button>}>
+      {editingItem && itemEditor && <div className="item-form">
+        <div className="size-cards size-group" role="group" aria-label="Size">{(Object.keys(TILE_SIZES) as TileSize[]).map((option) =>
+          <Button key={option} variant="ghost" aria-pressed={tileSize(editingItem.spans) === option} onClick={() => resize(itemEditor.s, itemEditor.i, option)}>{TILE_SIZES[option].label}</Button>)}</div>
+        {doc.sections.length > 1 && <Select label="Section" value={String(itemEditor.s)} options={doc.sections.map((entry, index) => ({ value: String(index), label: entry.title || `Section ${index + 1}` }))}
+          onChange={(value) => { const target = Number(value); move(itemEditor.s, itemEditor.i, target, doc.sections[target]?.items.length ?? 0); setItemEditor({ s: target, i: Math.max(0, (doc.sections[target]?.items.length ?? 0) - (target === itemEditor.s ? 1 : 0)) }); }} />}
+        {editingItem.payload.kind === "container" ? (["title", "icon", "link"] as const).map((field) => <Field key={field} id={`custom-${field}`} label={`Custom ${field}`} hint={field === "icon" ? "A dashboard-icons name, e.g. jellyfin" : field === "link" ? "Where a click on the tile goes" : undefined}><TextInput value={editingItem.payload.kind === "container" ? editingItem.payload[field] ?? "" : ""} onChange={(e) => { if (editingItem.payload.kind === "container") change({ type: "payload", section: itemEditor.s, item: itemEditor.i, payload: { ...editingItem.payload, [field]: e.target.value || null } }, `Custom ${field} updated`); }} /></Field>)
+        : <>
+          <Field id="item-title" label={editingItem.payload.kind === "link" ? "Title" : "Custom title"}><TextInput value={editingItem.payload.title ?? ""} maxLength={80}
             onChange={(e) => {
-              if (item.payload.kind === "container") return;
-              const { title: _title, ...target } = item.payload;
+              if (editingItem.payload.kind === "container") return;
+              const { title: _title, ...target } = editingItem.payload;
               const title = e.target.value;
               const payload = title || target.kind === "link" ? { ...target, title } : target;
-              change({ type: "payload", section: s, item: i, payload }, "Custom title updated");
+              change({ type: "payload", section: itemEditor.s, item: itemEditor.i, payload }, "Title updated");
             }} /></Field>
-          {item.payload.kind === "link" && <>
-            <LinkUrl id={`url-${s}-${i}`} value={item.payload.url}
-              onChange={(url) => { if (item.payload.kind === "link") change({ type: "payload", section: s, item: i, payload: { ...item.payload, url } }, "URL updated"); }} />
-            {!scoped && <LinkTest url={item.payload.url} />}
+          {editingItem.payload.kind === "link" && <>
+            <LinkUrl id="item-url" value={editingItem.payload.url}
+              onChange={(url) => { if (editingItem.payload.kind === "link") change({ type: "payload", section: itemEditor.s, item: itemEditor.i, payload: { ...editingItem.payload, url } }, "URL updated"); }} />
+            <Field id="item-icon" label="Icon name"><TextInput value={editingItem.payload.icon ?? ""} onChange={(e) => { if (editingItem.payload.kind === "link") change({ type: "payload", section: itemEditor.s, item: itemEditor.i, payload: { ...editingItem.payload, icon: e.target.value || null } }, "Icon updated"); }} /></Field>
+            {!scoped && <LinkTest url={editingItem.payload.url} />}
           </>}
-        </div>}
-
         </>}
-      </div>; })}</div><Button data-testid="board-add-item" onClick={() => { void openPicker(s); }}>Add item</Button>
-    </section>)}
-    <Button data-testid="board-add-section" disabled={doc.sections.length >= 64} onClick={() => change({ type: "section", title: "New section" }, "Section added")}>Add section</Button></fieldset>
-    <Dialog open={picker !== null} title="Add item" initialFocus={manual ? linkTitle : undefined} onClose={() => setPicker(null)} testId="board-picker"><Field id="suggestion-search" label="Search suggestions" hint="Up to 256 suggestions are shown."><TextInput value={query} onChange={(e) => setQuery(e.target.value)} /></Field>
-      <div className="suggestions">{freshSuggestions(suggestions.filter((suggestion) => suggestion.title.toLowerCase().includes(query.toLowerCase())), selectedTargets).map((suggestion) => <Button variant="ghost" data-testid="board-suggestion" key={payloadIdentity(suggestion.payload)} onClick={() => { if (picker !== null) change({ type: "add", section: picker, payload: suggestion.payload }, "Item added"); setPicker(null); }}>{suggestion.title}</Button>)}</div>
-      <h3>Add a link</h3><form data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); if (picker === null) return; const data = new FormData(e.currentTarget); change({ type: "add", section: picker, payload: { kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null } }, "Link added"); setPicker(null); }}>
-        <Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} /></Field><LinkUrl id="link-url" value={link} onChange={setLink} />{!scoped && <LinkTest url={link} />}<Field id="link-icon" label="Icon name"><TextInput name="icon" /></Field><Button type="submit" variant="default">Add link</Button>
-      </form>
+      </div>}
     </Dialog>
     <Dialog testId="board-leave" open={pendingHref !== null} title="Leave this edit?" onClose={() => setPendingHref(null)} footer={<><Button onClick={() => setPendingHref(null)}>Keep editing</Button><Button variant="default" onClick={async () => { await settle(); const saved = await saveDraft(latest.current); if (!saved) { setPendingHref(null); setError("Could not preserve the draft. Keep editing and retry when the server is available."); return; } leaving.current = true; if (pendingHref) navigate(pendingHref); }}>Leave and keep draft</Button></>}><p>Your changes have not been saved to the board. Keep editing or leave with a server-side draft.</p></Dialog>
   </div>;
