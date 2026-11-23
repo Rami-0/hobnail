@@ -119,7 +119,7 @@ channel carries JSON events, with topics following mounted views.
 
 Responsive: at 1100 px and above the sidebar is open; from 700 to 1100 px it is
 the icon rail; below 700 px it is a drawer. Tables become stacked rows on a phone.
-No horizontal page scroll at 390 px.
+No horizontal page scroll at 360 px and up.
 
 Accessibility: everything reachable by keyboard, visible focus, real `<button>`
 and `<a>`, `aria-label` on icon buttons, status never conveyed by color alone (dot
@@ -221,7 +221,13 @@ table and scope gate in `src/api/access.rs` are enforced before dispatch.
 | Config secrets | New file references must resolve inside data/secrets. Secret-bearing destination/reference pairs must already exist in the host file. Preview uses the same guards. Inline channel fields are redacted from Settings, raw config, revisions and diffs; an invalid config must be repaired on the host before the raw editor can show it. |
 | Integration secrets | Write-only SQLite credentials bound to the normalized origin; sent only there. Changing origin requires a new credential or clearing it. Paths are not part of the binding. |
 | Viewer output | No configuration, credential values, integration paths, environment values, process commands or probe diagnostics; auth events are administrative. Streams recheck sessions and grants. |
-| Outbound requests | http.allow_hosts is host policy. Integration tests additionally reject restricted addresses unless explicitly allowed, stop at redirects and trust public certificate roots only. No pinning yet. |
+| Outbound requests | http.allow_hosts is host policy. Every provider request goes through one connection context (`Conn`, `src/providers/connection.rs`): origin-relative paths only, each credential bound to its origin per step, restricted addresses refused unless explicitly allowed, redirects not followed, 4 provider requests at once server-wide, one 5 s deadline per fetch, 128 KiB per buffered response (streamed bodies are scanned, not kept), cancellation when the integration's revision changes. Public-internet destinations are refused until the owner turns on Provider internet access (off by default; Tailscale's 100.64.0.0/10 counts as LAN). |
+| Certificates (D21) | Public certificate roots by default. An integration may pin its leaf certificate's SHA-256 fingerprint: a failed connection test shows the presented fingerprint, and the owner compares it with the service and confirms it before saving (trust on first use); rustls still verifies the handshake signature against the pinned key. Adding or changing a pin requires saved credentials to be entered again, as an origin change does. |
+| Provider credentials | Per field, as the provider's schema declares (token, username, password, API key). Write-only, bound to the origin, never returned or logged; output text passes one normalizing redactor before display. |
+| Provider session cache | Login sessions some providers need (for example a CSRF or session id) are kept in memory only: at most 16 entries of at most 1 KiB, keyed by integration and origin, and dropped when the integration's credentials, pin, URL or options change. |
+| Setup wizard draft | Guided setup saves its draft in SQLite (at most 512 KiB, 512 items) and commits it once, idempotently. Credentials staged in a draft are deleted by hourly maintenance once the draft has gone seven days without a save. |
+| JSON compression (D9) | JSON responses of 1 KiB to 256 KiB are gzipped (miniz_oxide) when the client accepts gzip, with `Vary: Accept-Encoding`; larger ones go uncompressed. The event stream (`/api/v1/stream`) and log streams are never compressed. |
+| Connection limits | 48 open connections (`RH_MAX_CONNECTIONS`, 8 to 4096) and 12 per peer (`RH_MAX_CONNECTIONS_PER_PEER`, IPv6 by /64, trusted proxies exempt, over the limit gets 503). Request head at most 16 KiB (larger gets 431); complete head within 10 s; whole body within 15 s (408); a response write that stalls 15 s closes the connection (5 s for status 400 and up), except signed-in event and log streams. Fixed socket buffers and a 64-entry backlog. Under 4 to 8 attacking addresses holding every slot, the container peaked at 15.9 MiB (`docs/measurements.md`). |
 
 ## 7. Module contract (so parallel work merges cleanly)
 
@@ -235,6 +241,15 @@ src/http/assets.rs  embedded raw/gzip client, cache and CSP headers
 src/db/             SQLite history, accounts, dashboard data and migrations
 src/auth.rs         argon2id, sessions, rate limits and recovery CLI
 src/settings/       lossless TOML editing, guards, revisions and legacy JSON API
+src/api/setup.rs    guided setup: draft, discovery suggestions, one idempotent commit
+src/providers/      provider registry (metadata, schema, test, widgets), one file per
+                    provider, connection.rs (the Conn context), json_scan.rs (a
+                    streaming JSON scanner for large bodies), feed/ and github/
+src/http/compression.rs  negotiated gzip for buffered JSON (D9)
+src/http/pin.rs     per-integration leaf fingerprint pinning (D21)
+src/http/probe.rs   credential-free DNS, TCP, TLS-leaf and HTTP-status probes
+src/http/proxy.rs   trusted-proxy forwarding headers (RH_TRUSTED_PROXIES)
+src/http/conn.rs    body deadline, write-stall timeout, per-peer connection limit
 ```
 
 `AppState` holds `pub db: Arc<db::Db>`. `db::Db` is a synchronous handle (internal
@@ -249,8 +264,14 @@ read models rather than rendering HTML templates.
 - Unit tests: rollups and retention, series downsampling, password hash and
   session expiry, rate limit, `toml_edit` patches that preserve comments, config
   validation refusing bad input, the `command` widget guard, CSRF rejection.
-- Visual check in a real browser (headless Chromium) at 1440, 900 and 390 px wide,
-  dark and light, with screenshots reviewed by a person, not only "no errors".
+- Browser check: `scripts/e2e-matrix.sh <image>` runs Chromium, Firefox and
+  WebKit (Playwright, pinned image) against throwaway instances on a fake
+  Docker: user flows at 390 px, tablet portrait and landscape, and 1440 px, and
+  a page sweep at 360, 390, 412, tablet, 1280, 1440, 1920 and 2560 px and 200%
+  zoom, light and dark, with and without reduced motion. It fails on console,
+  CSP or network errors, sideways scroll, clipped text, small targets, focus,
+  motion and axe problems ([web/e2e/matrix/README.md](../web/e2e/matrix/README.md)).
+  Real phones, tablets and screen readers are still checked by a person.
 - Measure again: idle RAM, RAM with a viewer, image size, DB size after 24 h,
   page load, and the cost of the 15 s sampler. Record in `docs/measurements.md`.
 
@@ -496,7 +517,9 @@ headings `--lh-tight` 1.2, uppercase labels `--track-label` 0.06em.
 `(pointer:coarse)` or below 700 px: `--ctl-h` 44, `--ctl-h-sm` 36, `--ia` 36,
 `--hit` 44, and small buttons, icon actions and the Settings row name link
 get a 44 px hit area through `::after` without changing their look (A11Y-18,
-A11Y-19). Shell: `--side-w` 240 px, `--top-h` 52 px.
+A11Y-19). This rule (44 px on coarse pointers and below 700 px, 24 px on a
+fine pointer at 700 px and up) is **accepted pending owner sign-off**: 44 px
+everywhere would redesign the desktop. Shell: `--side-w` 240 px, `--top-h` 52 px.
 
 **Radius**: `--r-xs` 4, `--r-sm` 6 (controls), `--r` 10 (panels, menus,
 toasts), `--r-lg` 14 (dialogs, sheets), `--r-pill`.
