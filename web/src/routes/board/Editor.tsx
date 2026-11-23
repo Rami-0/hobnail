@@ -437,7 +437,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
         {shown.length ? <div className="suggestions">{shown.map((suggestion) => {
           const row = suggestionRow(suggestion.payload);
           const Icon = KIND_ICON[suggestion.payload.kind];
-          return <CardButton className="suggestion" data-testid="board-suggestion" key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
+          return <CardButton className="suggestion" data-testid="board-suggestion" data-kind={suggestion.payload.kind} key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
             <ServiceIcon className="board-avatar" tint name={row?.icon ?? (suggestion.payload.kind === "container" ? suggestion.payload.icon : null)} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
             <span className="suggestion-copy"><strong>{suggestion.title}</strong><span><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}{row && <> · <span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</>}</span></span>
             <PlusIcon aria-hidden="true" />

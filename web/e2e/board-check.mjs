@@ -79,7 +79,7 @@ try {
   check(await tab.ev(`${at(1, "y")} === "1"`), "the moved tile pushes its neighbour down instead of overlapping it");
   await inp.key("z", { modifiers: 2 }); await wait(`${at(0, "w")} === "3"`, "Ctrl+Z undoes the resize");
   await inp.key("y", { modifiers: 2 }); await wait(`${at(0, "w")} === "4"`, "Ctrl+Y redoes it");
-  await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(".suggestions button")', "suggestions include discovered containers"); await inp.click('.suggestions button'); await wait(`!${visible("board-picker")}`);
+  await inp.click('[data-testid="board-add-item"]'); await wait('!!document.querySelector(\'.suggestions button[data-kind="container"]\')', "suggestions include discovered containers"); await inp.click('.suggestions button[data-kind="container"]'); await wait(`!${visible("board-picker")}`);
   await wait(`!!${cell(2)} && document.activeElement === document.querySelector('[data-section="0"][data-item="2"] .drag-handle')`, "an added tile lands in a free slot and takes focus");
   const tile = await inp.box('[data-section="0"][data-item="2"]');
   const canvas = await inp.box('[data-canvas="0"]');
