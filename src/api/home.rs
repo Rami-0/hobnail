@@ -32,7 +32,7 @@ fn none() -> Values {
     Values::new()
 }
 fn top_cpu() -> Values {
-    object(json!({"sort": "cpu", "count": 6}))
+    object(json!({"sort": "cpu", "count": 4}))
 }
 fn cpu_day() -> Values {
     object(json!({"metric": "cpu", "range": "24h"}))
@@ -50,8 +50,8 @@ const LAYOUT: &[(&str, &[Spec])] = &[
     (
         "This host",
         &[
-            ("host", "Host", none, [0, 0, 8, 4]),
-            ("attention", "Needs attention", none, [8, 0, 4, 4]),
+            ("host", "Host", none, [0, 0, 8, 3]),
+            ("attention", "Needs attention", none, [8, 0, 4, 3]),
         ],
     ),
     (
