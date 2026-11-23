@@ -10,7 +10,7 @@ const render = (body: StructuredBody) => renderToStaticMarkup(createElement(Stru
 test("renders the shared provider body vocabulary as text and semantic elements", () => {
   assert.match(render({ kind: "stat", value: "<42>" }), /&lt;42&gt;/);
   assert.match(render({ kind: "stat_grid", rows: [["Reading", "42"]] }), /<dt>Reading<\/dt><dd>42<\/dd>/);
-  assert.match(render({ kind: "status_list", rows: [["Router", "up"], ["Store", "down"], ["Disk", "warn"]] }), /Router · up.*Store · down.*Disk · warn/);
+  assert.match(render({ kind: "status_list", rows: [["Router", "up"], ["Store", "down"], ["Disk", "warn"]] }), /Router<\/span><span class="sw-health sw-up">up<\/span>.*Store.*sw-down.*Disk.*sw-warn/);
   assert.match(render({ kind: "meter", label: "Used", percent: 42 }), /<progress aria-label="Used" value="42" max="100">/);
   assert.match(render({ kind: "table", headings: ["Disk", "Used"], rows: [["Data", "42%"]] }), /<th scope="col">Disk<\/th>.*<td>Data<\/td><td>42%<\/td>/);
   assert.match(render({ kind: "unavailable", message: "No reading" }), /No reading/);
@@ -21,8 +21,8 @@ test("item list preserves safe navigation and text while refusing unsafe links",
     { title: "Reading", secondary: "42 units", link: "https://fixture.test/updates", time: 1 },
     { title: "<unsafe>", secondary: null, link: "javascript:void(0)", time: null },
   ] });
-  assert.match(markup, /<a href="https:\/\/fixture.test\/updates">Reading<\/a> · 42 units<time dateTime="1970-01-01T00:00:01.000Z">/);
-  assert.match(markup, /<li>&lt;unsafe&gt;<\/li>/);
+  assert.match(markup, /<a href="https:\/\/fixture.test\/updates">Reading<\/a><\/span><span class="sw-secondary">42 units<\/span><time dateTime="1970-01-01T00:00:01.000Z"/);
+  assert.match(markup, /<span class="sw-label">&lt;unsafe&gt;<\/span><\/li>/);
   assert.equal(markup.includes("javascript:"), false);
 });
 
