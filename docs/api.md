@@ -78,7 +78,7 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | GET | `/api/v1/containers/<name>/top` | Admin | Container top. |
 | GET | `/api/v1/alarm` | Viewer | Alarm. |
 | GET | `/api/v1/strips` | Viewer | Strips. |
-| GET | `/api/v1/history` | Viewer | History. |
+| GET | `/api/v1/history` | Viewer | History. `metric=<key>` returns that series only, without events; `metric=none` returns events only. |
 | GET | `/api/v1/bookmarks` | Viewer | Bookmarks. |
 | GET | `/api/v1/widgets` | Viewer | Widgets. |
 | GET | `/api/v1/alerts` | Viewer | Alerts. |

@@ -2253,6 +2253,20 @@ async fn viewer_cannot_read_administrative_details() {
     assert_eq!(history["metrics"].as_array().unwrap().len(), 8);
     assert!(history["metrics"][0]["yesterday"].is_array());
     assert!(!history.to_string().contains("auth.login_failed"));
+    // One series for a board widget: no events, no restart counts.
+    let one = req(addr, "GET", "/api/v1/history?range=1h&metric=mem", &h, "").await;
+    let one = json_of(&one, "one metric");
+    assert_eq!(one["metrics"].as_array().unwrap().len(), 1);
+    assert_eq!(one["metrics"][0]["key"], "mem");
+    assert!(one["events"].as_array().unwrap().is_empty());
+    assert!(one["starts_per_day"].as_object().unwrap().is_empty());
+    let events = req(addr, "GET", "/api/v1/history?range=1h&metric=none", &h, "").await;
+    assert!(json_of(&events, "events only")["metrics"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let unknown = req(addr, "GET", "/api/v1/history?metric=nope", &h, "").await;
+    assert_eq!(unknown.status, 400);
     let bad = req(addr, "GET", "/api/v1/history?from=1", &h, "").await;
     assert_eq!(bad.status, 400);
     assert_eq!(

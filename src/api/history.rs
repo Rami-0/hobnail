@@ -88,6 +88,12 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
     if !matches!(level, "all" | "incidents" | "info" | "warn" | "error") {
         return Err(ApiError::bad_request("unknown event level", Some("level")));
     }
+    // `metric=<key>`: that series only, without events (a board widget);
+    // `metric=none`: events only.
+    let only = query_get(&query, "metric");
+    if only.is_some_and(|key| key != "none" && !METRICS.iter().any(|m| m.as_str() == key)) {
+        return Err(ApiError::bad_request("unknown metric", Some("metric")));
+    }
     let db = &state.db;
     let clip = |series: Series, shift| {
         series
@@ -99,6 +105,7 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
     };
     let metrics = METRICS
         .into_iter()
+        .filter(|metric| only.is_none_or(|key| key == metric.as_str()))
         .map(|metric| {
             let series = db.system_series(metric, range, to);
             HistoryMetric {
@@ -112,19 +119,37 @@ fn read(state: &AppState, query: &str, now: i64, role: Role) -> Result<HistoryVi
             }
         })
         .collect();
+    if only.is_some_and(|key| key != "none") {
+        return Ok(HistoryView {
+            from,
+            to,
+            now,
+            range: range.as_str().into(),
+            recording: db.is_enabled(),
+            metrics,
+            starts_per_day: Default::default(),
+            events: Vec::new(),
+            markers: Vec::new(),
+            older: None,
+        });
+    }
     let config = state.config.current();
     let snap = state.snapshot();
     let hidden = |name: &str| super::containers::excluded_subject(&config, &snap, name);
-    let starts_per_day = restarts_per_day(
-        (1..=7)
-            .map(|day| {
-                db.restart_counts(now - day * 86_400)
-                    .into_iter()
-                    .filter(|(name, _)| !hidden(name))
-                    .collect()
-            })
-            .collect(),
-    );
+    let starts_per_day = if only.is_some() {
+        Default::default()
+    } else {
+        restarts_per_day(
+            (1..=7)
+                .map(|day| {
+                    db.restart_counts(now - day * 86_400)
+                        .into_iter()
+                        .filter(|(name, _)| !hidden(name))
+                        .collect()
+                })
+                .collect(),
+        )
+    };
     let filter = EventFilter {
         since: Some(from),
         until: Some(to),
