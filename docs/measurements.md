@@ -5,6 +5,113 @@ The older tables below are historical and refer to deleted UI paths and tools.
 Do not use `scripts/measure.sh` against a running production instance for this
 method; use a throwaway instance on ports 3395–3399.
 
+## Finish-hobnail final gate (M7, 2026-11-23)
+
+Measured on the final code (image `hobnail-m7:5572231`, content hash
+`d7de495d707f17d37455e85f34fa16f9fe557a929e17ec9e5971045165ec5ad1`; the later
+commits change documentation only and leave the content hash unchanged). Raw
+summaries, compressed samples and the scripts are in
+[react-port-raw/finish-m7/](plans/react-port-raw/finish-m7/).
+
+**Checks.** Web check, 155 web tests, build and bundle budgets pass; Rust
+fmt, Clippy (all targets, warnings denied) and 562 Rust tests pass,
+including the API reference and generated TypeScript drift tests. The same
+checks pass inside the production image build.
+
+| Gate | Limit | Final | Result |
+|---|---:|---:|---|
+| Whole dist raw (B) | 1,350,000 | 1,349,701 | pass (299 B headroom) |
+| Whole dist gzip (B) | 450,000 | 444,720 | pass |
+| First route gzip (B) | 180,000 | 136,454 | pass |
+| Docker image, `scripts/check-image-size.py` (B) | 13,500,000 | **13,548,510** | **fail (48,510 B over)** |
+
+The image gate already failed at `2257256`, before M7 (the same
+13,548,510 B). The executable grew from 7,775,384 B (M5 gate image) to
+7,873,688 B with the final-review fixes; BusyBox is unchanged at 1,038,696 B.
+`scripts/deploy.sh` runs the gate and stops when it fails.
+
+**Memory, full workload (one current figure).** The M5 workload (fresh owner
+and sign-in, guided setup, 13 providers polled against fakes with 18 widgets,
+150 fake containers, 175 MB seeded history, 1/10/25 dashboards, 40
+full-history reads, log streams, configuration writes) re-run on the final
+image. MiB, cgroup v2, median / sampled maximum; peak is `memory.peak`.
+
+| Run | Idle | 25 clients | Full history | Lifetime peak | Errors |
+|---|---:|---:|---:|---:|---|
+| No limit, defaults | 4.32 / 7.18 | 7.25 / 8.15 | 8.12 / 11.67 | **12.44** | 676 in the 25-client phase (below) |
+| 20 MiB limit, no swap, defaults | 4.00 / 5.93 | 7.35 / 7.95 | 7.93 / 11.95 | **12.39** | same; 0 OOM |
+| No limit, `RH_MAX_CONNECTIONS=64` | 4.39 / 6.09 | 7.21 / 7.68 | 7.88 / 12.21 | **12.39** | 0 |
+
+This replaces the earlier pair of capped figures: 12.24 MiB was the M5 full
+workload under the 20 MiB limit, and 11.7 to 11.8 MiB came from a shorter
+workload (25 clients for 12 s, 40 History reads, 12 log streams) used to
+compare the size-optimized image, so the two were never comparable. The
+current figure for the full workload is **12.4 MiB** with or without the
+20 MiB limit: under the 20 MiB budget, over the preferred 10 MiB (set by the
+40 full-history reads; the 25-dashboard phase stays at or under 8.15 MiB).
+The bench client opens all connections from one address, so the per-peer
+limit was turned off for it (`RH_MAX_CONNECTIONS_PER_PEER=0`).
+
+With the default cap of 48 connections, each of the workload's 25 dashboards
+holds an event stream and a keep-alive request connection: 50 sockets. Two
+dashboards' connections waited in the kernel backlog until their `/app`
+request timed out (8 s), and the bench client then failed its remaining 674
+requests on those two connections. With the cap at 64 the same phase had no
+errors. Many browser dashboards open at once can therefore queue at the
+default cap (see the connection-cap row in the
+[decisions status table](plans/react-port-decisions.md#finish-hobnail-status-2026-11-23)).
+
+**Memory under connection attack** (M6 bench at `2257256`, the same server
+code; 25 signed-in clients plus attackers holding every slot, one container
+per scenario): peak 15.89 MiB with 8 addresses pipelining requests they never
+read, 15.09 MiB with 4, 14.86 MiB for a mixed attack from 5 addresses,
+11.1 to 12.3 MiB for single-address header, body, no-read and pipelining
+attacks, and 9.1 to 11.1 MiB for 25 clients alone (from 5 or 25 addresses).
+At a 64-connection cap the 8-address attack reached 18.1 to 18.9 MiB.
+Raw: [react-port-raw/finish-m6-bench/](plans/react-port-raw/finish-m6-bench/).
+
+**Legacy sign-in.** The first sign-in of an account with a legacy 19 MiB
+hash peaked at about 20.5 MiB in M5 (not re-measured; the hashing code is
+unchanged since). It is refused under a memory limit below 36 MiB.
+
+**Browser budgets after the gate** (the M5 gate procedure: `perf-check`,
+containers table and History, two runs, 1440 × 900 desktop at 1× CPU and
+390 × 844 phone at 4×; ms, run 1 / run 2):
+
+| Budget | Cap | Final | Result |
+|---|---:|---:|---|
+| Desktop table LCP | 400 | 492 / 496 | miss |
+| Desktop History LCP | 400 | 584 / 448 | miss |
+| Phone table LCP | 1,200 | 1,456 / 1,196 | miss in one run |
+| Phone History LCP | 1,200 | 980 / 968 | pass |
+| Phone table load (trace / observer) | 200 | 194 / 159.5; 229 / 207 | trace pass, observer miss |
+| Phone History load (trace) | 200 | 253.3 / 343.3 | miss |
+| Desktop table live update | 50 | 58.6 / 58.3 | miss |
+| Phone History live update | 50 | 62.4 / 54.2 | miss |
+| Phone table and desktop History live | 50 | 34.2 / 28.1; 20.9 / 27.2 | pass |
+| INP (all measured) | 200 | at most 200 | pass |
+| CLS | 0.1 | at most 0.0177 | pass |
+
+Raw: [react-port-raw/finish-m7/](plans/react-port-raw/finish-m7/). The
+all-route phone LCP (1,772 ms, container Logs) and phone Settings load
+(230 ms) from the M5 second pass were not re-measured.
+
+**Cross-browser matrix** (`scripts/e2e-matrix.sh hobnail-m7:5572231`):
+RESULT: PASS. 78 of 78 units on Chromium, Firefox and WebKit; 330 flow runs
+(321 pass, 9 not applicable to the profile, 0 fail); 2,883 page states with
+0 console, page, CSP, network, sideways-scroll, clipped, target, focus,
+motion, axe, tour or heading problems; the board-tour position check ran 20
+times per engine. 47 engine messages were set aside by the runner's rules:
+22 cancelled loads on a page being left (WebKit and Firefox) and 25 Chromium
+`ERR_NETWORK_CHANGED` loads during host Docker network changes, each page
+loaded again. About 80 minutes. Summary:
+[react-port-raw/finish-m7/matrix-summary.txt](plans/react-port-raw/finish-m7/matrix-summary.txt).
+
+**arm64** (`scripts/build-arm64.sh`, cross-compiled; see
+[install.md](install.md#arm64-64-bit-arm)): executable 6,831,000 B, BusyBox
+1,116,408 B; Docker lists the loaded non-native image at 4,649,989 B, which
+is not comparable with the amd64 gate metric. No memory measured on arm64.
+
 ## Finish-hobnail M5 server memory
 
 The uncapped, warm-cache release workload peaked at **13,049,856 B (12.45 MiB)**,

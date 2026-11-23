@@ -1,0 +1,347 @@
+engine     unit   profile   theme  motion        flow                         result  states problems
+chromium   flows  1440      light  no-preference onboarding: every step       pass        12        0
+chromium   flows  1440      light  no-preference tour stays closed            pass         4        0
+chromium   flows  1440      light  no-preference login and logout             pass         4        0
+chromium   flows  1440      light  no-preference overview                     pass         3        0
+chromium   flows  1440      light  no-preference containers                   pass         7        0
+chromium   flows  1440      light  no-preference logs                         pass         5        0
+chromium   flows  1440      light  no-preference history charts               pass         3        0
+chromium   flows  1440      light  no-preference boards                       pass         5        0
+chromium   flows  1440      light  no-preference catalog to widget            pass         8        0
+chromium   flows  1440      light  no-preference settings                     pass        14        0
+chromium   flows  1440      light  no-preference users and invites            pass         6        0
+chromium   flows  1440      light  no-preference command palette              pass         3        0
+chromium   flows  1440      light  no-preference keyboard only                pass         5        0
+chromium   flows  1440      light  no-preference touch                        n/a          0        0
+chromium   flows  1440      light  no-preference sse reconnect                pass         2        0
+chromium   flows  1440      light  no-preference tablet rotation              n/a          0        0
+chromium   flows  390       dark   reduce        onboarding: every step       pass        12        0
+chromium   flows  390       dark   reduce        tour stays closed            pass         4        0
+chromium   flows  390       dark   reduce        login and logout             pass         4        0
+chromium   flows  390       dark   reduce        overview                     pass         3        0
+chromium   flows  390       dark   reduce        containers                   pass         7        0
+chromium   flows  390       dark   reduce        logs                         pass         5        0
+chromium   flows  390       dark   reduce        history charts               pass         3        0
+chromium   flows  390       dark   reduce        boards                       pass         5        0
+chromium   flows  390       dark   reduce        catalog to widget            pass         8        0
+chromium   flows  390       dark   reduce        settings                     pass        14        0
+chromium   flows  390       dark   reduce        users and invites            pass         6        0
+chromium   flows  390       dark   reduce        command palette              pass         3        0
+chromium   flows  390       dark   reduce        keyboard only                pass         5        0
+chromium   flows  390       dark   reduce        touch                        pass         3        0
+chromium   flows  390       dark   reduce        sse reconnect                pass         2        0
+chromium   flows  390       dark   reduce        tablet rotation              n/a          0        0
+chromium   flows  tablet-l  dark   no-preference onboarding: every step       pass        12        0
+chromium   flows  tablet-l  dark   no-preference tour stays closed            pass         4        0
+chromium   flows  tablet-l  dark   no-preference login and logout             pass         4        0
+chromium   flows  tablet-l  dark   no-preference overview                     pass         3        0
+chromium   flows  tablet-l  dark   no-preference containers                   pass         7        0
+chromium   flows  tablet-l  dark   no-preference logs                         pass         5        0
+chromium   flows  tablet-l  dark   no-preference history charts               pass         3        0
+chromium   flows  tablet-l  dark   no-preference boards                       pass         5        0
+chromium   flows  tablet-l  dark   no-preference catalog to widget            pass         8        0
+chromium   flows  tablet-l  dark   no-preference settings                     pass        14        0
+chromium   flows  tablet-l  dark   no-preference users and invites            pass         6        0
+chromium   flows  tablet-l  dark   no-preference command palette              pass         3        0
+chromium   flows  tablet-l  dark   no-preference keyboard only                pass         5        0
+chromium   flows  tablet-l  dark   no-preference touch                        pass         2        0
+chromium   flows  tablet-l  dark   no-preference sse reconnect                pass         2        0
+chromium   flows  tablet-l  dark   no-preference tablet rotation              pass         7        0
+chromium   flows  tablet-p  light  no-preference onboarding: every step       pass        12        0
+chromium   flows  tablet-p  light  no-preference tour stays closed            pass         4        0
+chromium   flows  tablet-p  light  no-preference login and logout             pass         4        0
+chromium   flows  tablet-p  light  no-preference overview                     pass         3        0
+chromium   flows  tablet-p  light  no-preference containers                   pass         7        0
+chromium   flows  tablet-p  light  no-preference logs                         pass         5        0
+chromium   flows  tablet-p  light  no-preference history charts               pass         3        0
+chromium   flows  tablet-p  light  no-preference boards                       pass         5        0
+chromium   flows  tablet-p  light  no-preference catalog to widget            pass         8        0
+chromium   flows  tablet-p  light  no-preference settings                     pass        14        0
+chromium   flows  tablet-p  light  no-preference users and invites            pass         6        0
+chromium   flows  tablet-p  light  no-preference command palette              pass         3        0
+chromium   flows  tablet-p  light  no-preference keyboard only                pass         5        0
+chromium   flows  tablet-p  light  no-preference touch                        pass         2        0
+chromium   flows  tablet-p  light  no-preference sse reconnect                pass         2        0
+chromium   flows  tablet-p  light  no-preference tablet rotation              pass         7        0
+chromium   skip   1440      dark   no-preference onboarding: skip             pass        10        0
+chromium   skip   1440      dark   no-preference tour stays closed            pass         4        0
+chromium   skip   1440      dark   no-preference login and logout             pass         4        0
+chromium   skip   390       light  no-preference onboarding: skip             pass        10        0
+chromium   skip   390       light  no-preference tour stays closed            pass         4        0
+chromium   skip   390       light  no-preference login and logout             pass         4        0
+chromium   sweep  1280      dark   reduce        page sweep                   pass        28        0
+chromium   sweep  1280      dark   reduce        login page                   pass         1        0
+chromium   sweep  1280      light  no-preference page sweep                   pass        28        0
+chromium   sweep  1280      light  no-preference login page                   pass         1        0
+chromium   sweep  1440      dark   reduce        page sweep                   pass        28        0
+chromium   sweep  1440      dark   reduce        login page                   pass         1        0
+chromium   sweep  1440      light  no-preference page sweep                   pass        28        0
+chromium   sweep  1440      light  no-preference login page                   pass         1        0
+chromium   sweep  1920      dark   reduce        page sweep                   pass        28        0
+chromium   sweep  1920      dark   reduce        login page                   pass         1        0
+chromium   sweep  1920      light  no-preference page sweep                   pass        28        0
+chromium   sweep  1920      light  no-preference login page                   pass         1        0
+chromium   sweep  2560      dark   no-preference page sweep                   pass        28        0
+chromium   sweep  2560      dark   no-preference login page                   pass         1        0
+chromium   sweep  2560      light  no-preference page sweep                   pass        28        0
+chromium   sweep  2560      light  no-preference login page                   pass         1        0
+chromium   sweep  360       dark   reduce        page sweep                   pass        28        0
+chromium   sweep  360       dark   reduce        login page                   pass         1        0
+chromium   sweep  360       light  no-preference page sweep                   pass        28        0
+chromium   sweep  360       light  no-preference login page                   pass         1        0
+chromium   sweep  390       dark   reduce        page sweep                   pass        28        0
+chromium   sweep  390       dark   reduce        login page                   pass         1        0
+chromium   sweep  390       light  no-preference page sweep                   pass        28        0
+chromium   sweep  390       light  no-preference login page                   pass         1        0
+chromium   sweep  412       dark   reduce        page sweep                   pass        28        0
+chromium   sweep  412       dark   reduce        login page                   pass         1        0
+chromium   sweep  412       light  no-preference page sweep                   pass        28        0
+chromium   sweep  412       light  no-preference login page                   pass         1        0
+chromium   sweep  tablet-l  dark   reduce        page sweep                   pass        28        0
+chromium   sweep  tablet-l  dark   reduce        login page                   pass         1        0
+chromium   sweep  tablet-l  light  no-preference page sweep                   pass        28        0
+chromium   sweep  tablet-l  light  no-preference login page                   pass         1        0
+chromium   sweep  tablet-p  dark   reduce        page sweep                   pass        28        0
+chromium   sweep  tablet-p  dark   reduce        login page                   pass         1        0
+chromium   sweep  tablet-p  light  no-preference page sweep                   pass        28        0
+chromium   sweep  tablet-p  light  no-preference login page                   pass         1        0
+chromium   sweep  zoom200   dark   reduce        page sweep                   pass        28        0
+chromium   sweep  zoom200   dark   reduce        login page                   pass         1        0
+chromium   sweep  zoom200   light  no-preference page sweep                   pass        28        0
+chromium   sweep  zoom200   light  no-preference login page                   pass         1        0
+firefox    flows  1440      light  no-preference onboarding: every step       pass        12        0
+firefox    flows  1440      light  no-preference tour stays closed            pass         4        0
+firefox    flows  1440      light  no-preference login and logout             pass         4        0
+firefox    flows  1440      light  no-preference overview                     pass         3        0
+firefox    flows  1440      light  no-preference containers                   pass         7        0
+firefox    flows  1440      light  no-preference logs                         pass         5        0
+firefox    flows  1440      light  no-preference history charts               pass         3        0
+firefox    flows  1440      light  no-preference boards                       pass         5        0
+firefox    flows  1440      light  no-preference catalog to widget            pass         8        0
+firefox    flows  1440      light  no-preference settings                     pass        14        0
+firefox    flows  1440      light  no-preference users and invites            pass         6        0
+firefox    flows  1440      light  no-preference command palette              pass         3        0
+firefox    flows  1440      light  no-preference keyboard only                pass         5        0
+firefox    flows  1440      light  no-preference touch                        n/a          0        0
+firefox    flows  1440      light  no-preference sse reconnect                pass         2        0
+firefox    flows  1440      light  no-preference tablet rotation              n/a          0        0
+firefox    flows  390       dark   reduce        onboarding: every step       pass        12        0
+firefox    flows  390       dark   reduce        tour stays closed            pass         4        0
+firefox    flows  390       dark   reduce        login and logout             pass         4        0
+firefox    flows  390       dark   reduce        overview                     pass         3        0
+firefox    flows  390       dark   reduce        containers                   pass         7        0
+firefox    flows  390       dark   reduce        logs                         pass         5        0
+firefox    flows  390       dark   reduce        history charts               pass         3        0
+firefox    flows  390       dark   reduce        boards                       pass         5        0
+firefox    flows  390       dark   reduce        catalog to widget            pass         8        0
+firefox    flows  390       dark   reduce        settings                     pass        14        0
+firefox    flows  390       dark   reduce        users and invites            pass         6        0
+firefox    flows  390       dark   reduce        command palette              pass         3        0
+firefox    flows  390       dark   reduce        keyboard only                pass         5        0
+firefox    flows  390       dark   reduce        touch                        pass         3        0
+firefox    flows  390       dark   reduce        sse reconnect                pass         2        0
+firefox    flows  390       dark   reduce        tablet rotation              n/a          0        0
+firefox    flows  tablet-l  dark   no-preference onboarding: every step       pass        12        0
+firefox    flows  tablet-l  dark   no-preference tour stays closed            pass         4        0
+firefox    flows  tablet-l  dark   no-preference login and logout             pass         4        0
+firefox    flows  tablet-l  dark   no-preference overview                     pass         3        0
+firefox    flows  tablet-l  dark   no-preference containers                   pass         7        0
+firefox    flows  tablet-l  dark   no-preference logs                         pass         5        0
+firefox    flows  tablet-l  dark   no-preference history charts               pass         3        0
+firefox    flows  tablet-l  dark   no-preference boards                       pass         5        0
+firefox    flows  tablet-l  dark   no-preference catalog to widget            pass         8        0
+firefox    flows  tablet-l  dark   no-preference settings                     pass        14        0
+firefox    flows  tablet-l  dark   no-preference users and invites            pass         6        0
+firefox    flows  tablet-l  dark   no-preference command palette              pass         3        0
+firefox    flows  tablet-l  dark   no-preference keyboard only                pass         5        0
+firefox    flows  tablet-l  dark   no-preference touch                        pass         2        0
+firefox    flows  tablet-l  dark   no-preference sse reconnect                pass         2        0
+firefox    flows  tablet-l  dark   no-preference tablet rotation              pass         7        0
+firefox    flows  tablet-p  light  no-preference onboarding: every step       pass        12        0
+firefox    flows  tablet-p  light  no-preference tour stays closed            pass         4        0
+firefox    flows  tablet-p  light  no-preference login and logout             pass         4        0
+firefox    flows  tablet-p  light  no-preference overview                     pass         3        0
+firefox    flows  tablet-p  light  no-preference containers                   pass         7        0
+firefox    flows  tablet-p  light  no-preference logs                         pass         5        0
+firefox    flows  tablet-p  light  no-preference history charts               pass         3        0
+firefox    flows  tablet-p  light  no-preference boards                       pass         5        0
+firefox    flows  tablet-p  light  no-preference catalog to widget            pass         8        0
+firefox    flows  tablet-p  light  no-preference settings                     pass        14        0
+firefox    flows  tablet-p  light  no-preference users and invites            pass         6        0
+firefox    flows  tablet-p  light  no-preference command palette              pass         3        0
+firefox    flows  tablet-p  light  no-preference keyboard only                pass         5        0
+firefox    flows  tablet-p  light  no-preference touch                        pass         2        0
+firefox    flows  tablet-p  light  no-preference sse reconnect                pass         2        0
+firefox    flows  tablet-p  light  no-preference tablet rotation              pass         7        0
+firefox    skip   1440      dark   no-preference onboarding: skip             pass        10        0
+firefox    skip   1440      dark   no-preference tour stays closed            pass         4        0
+firefox    skip   1440      dark   no-preference login and logout             pass         4        0
+firefox    skip   390       light  no-preference onboarding: skip             pass        10        0
+firefox    skip   390       light  no-preference tour stays closed            pass         4        0
+firefox    skip   390       light  no-preference login and logout             pass         4        0
+firefox    sweep  1280      dark   reduce        page sweep                   pass        28        0
+firefox    sweep  1280      dark   reduce        login page                   pass         1        0
+firefox    sweep  1280      light  no-preference page sweep                   pass        28        0
+firefox    sweep  1280      light  no-preference login page                   pass         1        0
+firefox    sweep  1440      dark   reduce        page sweep                   pass        28        0
+firefox    sweep  1440      dark   reduce        login page                   pass         1        0
+firefox    sweep  1440      light  no-preference page sweep                   pass        28        0
+firefox    sweep  1440      light  no-preference login page                   pass         1        0
+firefox    sweep  1920      dark   reduce        page sweep                   pass        28        0
+firefox    sweep  1920      dark   reduce        login page                   pass         1        0
+firefox    sweep  1920      light  no-preference page sweep                   pass        28        0
+firefox    sweep  1920      light  no-preference login page                   pass         1        0
+firefox    sweep  2560      dark   no-preference page sweep                   pass        28        0
+firefox    sweep  2560      dark   no-preference login page                   pass         1        0
+firefox    sweep  2560      light  no-preference page sweep                   pass        28        0
+firefox    sweep  2560      light  no-preference login page                   pass         1        0
+firefox    sweep  360       dark   reduce        page sweep                   pass        28        0
+firefox    sweep  360       dark   reduce        login page                   pass         1        0
+firefox    sweep  360       light  no-preference page sweep                   pass        28        0
+firefox    sweep  360       light  no-preference login page                   pass         1        0
+firefox    sweep  390       dark   reduce        page sweep                   pass        28        0
+firefox    sweep  390       dark   reduce        login page                   pass         1        0
+firefox    sweep  390       light  no-preference page sweep                   pass        28        0
+firefox    sweep  390       light  no-preference login page                   pass         1        0
+firefox    sweep  412       dark   reduce        page sweep                   pass        28        0
+firefox    sweep  412       dark   reduce        login page                   pass         1        0
+firefox    sweep  412       light  no-preference page sweep                   pass        28        0
+firefox    sweep  412       light  no-preference login page                   pass         1        0
+firefox    sweep  tablet-l  dark   reduce        page sweep                   pass        28        0
+firefox    sweep  tablet-l  dark   reduce        login page                   pass         1        0
+firefox    sweep  tablet-l  light  no-preference page sweep                   pass        28        0
+firefox    sweep  tablet-l  light  no-preference login page                   pass         1        0
+firefox    sweep  tablet-p  dark   reduce        page sweep                   pass        28        0
+firefox    sweep  tablet-p  dark   reduce        login page                   pass         1        0
+firefox    sweep  tablet-p  light  no-preference page sweep                   pass        28        0
+firefox    sweep  tablet-p  light  no-preference login page                   pass         1        0
+firefox    sweep  zoom200   dark   reduce        page sweep                   pass        28        0
+firefox    sweep  zoom200   dark   reduce        login page                   pass         1        0
+firefox    sweep  zoom200   light  no-preference page sweep                   pass        28        0
+firefox    sweep  zoom200   light  no-preference login page                   pass         1        0
+webkit     flows  1440      light  no-preference onboarding: every step       pass        12        0
+webkit     flows  1440      light  no-preference tour stays closed            pass         4        0
+webkit     flows  1440      light  no-preference login and logout             pass         4        0
+webkit     flows  1440      light  no-preference overview                     pass         3        0
+webkit     flows  1440      light  no-preference containers                   pass         7        0
+webkit     flows  1440      light  no-preference logs                         pass         5        0
+webkit     flows  1440      light  no-preference history charts               pass         3        0
+webkit     flows  1440      light  no-preference boards                       pass         5        0
+webkit     flows  1440      light  no-preference catalog to widget            pass         8        0
+webkit     flows  1440      light  no-preference settings                     pass        14        0
+webkit     flows  1440      light  no-preference users and invites            pass         6        0
+webkit     flows  1440      light  no-preference command palette              pass         3        0
+webkit     flows  1440      light  no-preference keyboard only                pass         5        0
+webkit     flows  1440      light  no-preference touch                        n/a          0        0
+webkit     flows  1440      light  no-preference sse reconnect                pass         2        0
+webkit     flows  1440      light  no-preference tablet rotation              n/a          0        0
+webkit     flows  390       dark   reduce        onboarding: every step       pass        12        0
+webkit     flows  390       dark   reduce        tour stays closed            pass         4        0
+webkit     flows  390       dark   reduce        login and logout             pass         4        0
+webkit     flows  390       dark   reduce        overview                     pass         3        0
+webkit     flows  390       dark   reduce        containers                   pass         7        0
+webkit     flows  390       dark   reduce        logs                         pass         5        0
+webkit     flows  390       dark   reduce        history charts               pass         3        0
+webkit     flows  390       dark   reduce        boards                       pass         5        0
+webkit     flows  390       dark   reduce        catalog to widget            pass         8        0
+webkit     flows  390       dark   reduce        settings                     pass        14        0
+webkit     flows  390       dark   reduce        users and invites            pass         6        0
+webkit     flows  390       dark   reduce        command palette              pass         3        0
+webkit     flows  390       dark   reduce        keyboard only                pass         5        0
+webkit     flows  390       dark   reduce        touch                        pass         3        0
+webkit     flows  390       dark   reduce        sse reconnect                pass         2        0
+webkit     flows  390       dark   reduce        tablet rotation              n/a          0        0
+webkit     flows  tablet-l  dark   no-preference onboarding: every step       pass        12        0
+webkit     flows  tablet-l  dark   no-preference tour stays closed            pass         4        0
+webkit     flows  tablet-l  dark   no-preference login and logout             pass         4        0
+webkit     flows  tablet-l  dark   no-preference overview                     pass         3        0
+webkit     flows  tablet-l  dark   no-preference containers                   pass         7        0
+webkit     flows  tablet-l  dark   no-preference logs                         pass         5        0
+webkit     flows  tablet-l  dark   no-preference history charts               pass         3        0
+webkit     flows  tablet-l  dark   no-preference boards                       pass         5        0
+webkit     flows  tablet-l  dark   no-preference catalog to widget            pass         8        0
+webkit     flows  tablet-l  dark   no-preference settings                     pass        14        0
+webkit     flows  tablet-l  dark   no-preference users and invites            pass         6        0
+webkit     flows  tablet-l  dark   no-preference command palette              pass         3        0
+webkit     flows  tablet-l  dark   no-preference keyboard only                pass         5        0
+webkit     flows  tablet-l  dark   no-preference touch                        pass         2        0
+webkit     flows  tablet-l  dark   no-preference sse reconnect                pass         2        0
+webkit     flows  tablet-l  dark   no-preference tablet rotation              pass         7        0
+webkit     flows  tablet-p  light  no-preference onboarding: every step       pass        12        0
+webkit     flows  tablet-p  light  no-preference tour stays closed            pass         4        0
+webkit     flows  tablet-p  light  no-preference login and logout             pass         4        0
+webkit     flows  tablet-p  light  no-preference overview                     pass         3        0
+webkit     flows  tablet-p  light  no-preference containers                   pass         7        0
+webkit     flows  tablet-p  light  no-preference logs                         pass         5        0
+webkit     flows  tablet-p  light  no-preference history charts               pass         3        0
+webkit     flows  tablet-p  light  no-preference boards                       pass         5        0
+webkit     flows  tablet-p  light  no-preference catalog to widget            pass         8        0
+webkit     flows  tablet-p  light  no-preference settings                     pass        14        0
+webkit     flows  tablet-p  light  no-preference users and invites            pass         6        0
+webkit     flows  tablet-p  light  no-preference command palette              pass         3        0
+webkit     flows  tablet-p  light  no-preference keyboard only                pass         5        0
+webkit     flows  tablet-p  light  no-preference touch                        pass         2        0
+webkit     flows  tablet-p  light  no-preference sse reconnect                pass         2        0
+webkit     flows  tablet-p  light  no-preference tablet rotation              pass         7        0
+webkit     skip   1440      dark   no-preference onboarding: skip             pass        10        0
+webkit     skip   1440      dark   no-preference tour stays closed            pass         4        0
+webkit     skip   1440      dark   no-preference login and logout             pass         4        0
+webkit     skip   390       light  no-preference onboarding: skip             pass        10        0
+webkit     skip   390       light  no-preference tour stays closed            pass         4        0
+webkit     skip   390       light  no-preference login and logout             pass         4        0
+webkit     sweep  1280      dark   reduce        page sweep                   pass        28        0
+webkit     sweep  1280      dark   reduce        login page                   pass         1        0
+webkit     sweep  1280      light  no-preference page sweep                   pass        28        0
+webkit     sweep  1280      light  no-preference login page                   pass         1        0
+webkit     sweep  1440      dark   reduce        page sweep                   pass        28        0
+webkit     sweep  1440      dark   reduce        login page                   pass         1        0
+webkit     sweep  1440      light  no-preference page sweep                   pass        28        0
+webkit     sweep  1440      light  no-preference login page                   pass         1        0
+webkit     sweep  1920      dark   reduce        page sweep                   pass        28        0
+webkit     sweep  1920      dark   reduce        login page                   pass         1        0
+webkit     sweep  1920      light  no-preference page sweep                   pass        28        0
+webkit     sweep  1920      light  no-preference login page                   pass         1        0
+webkit     sweep  2560      dark   no-preference page sweep                   pass        28        0
+webkit     sweep  2560      dark   no-preference login page                   pass         1        0
+webkit     sweep  2560      light  no-preference page sweep                   pass        28        0
+webkit     sweep  2560      light  no-preference login page                   pass         1        0
+webkit     sweep  360       dark   reduce        page sweep                   pass        28        0
+webkit     sweep  360       dark   reduce        login page                   pass         1        0
+webkit     sweep  360       light  no-preference page sweep                   pass        28        0
+webkit     sweep  360       light  no-preference login page                   pass         1        0
+webkit     sweep  390       dark   reduce        page sweep                   pass        28        0
+webkit     sweep  390       dark   reduce        login page                   pass         1        0
+webkit     sweep  390       light  no-preference page sweep                   pass        28        0
+webkit     sweep  390       light  no-preference login page                   pass         1        0
+webkit     sweep  412       dark   reduce        page sweep                   pass        28        0
+webkit     sweep  412       dark   reduce        login page                   pass         1        0
+webkit     sweep  412       light  no-preference page sweep                   pass        28        0
+webkit     sweep  412       light  no-preference login page                   pass         1        0
+webkit     sweep  tablet-l  dark   reduce        page sweep                   pass        28        0
+webkit     sweep  tablet-l  dark   reduce        login page                   pass         1        0
+webkit     sweep  tablet-l  light  no-preference page sweep                   pass        28        0
+webkit     sweep  tablet-l  light  no-preference login page                   pass         1        0
+webkit     sweep  tablet-p  dark   reduce        page sweep                   pass        28        0
+webkit     sweep  tablet-p  dark   reduce        login page                   pass         1        0
+webkit     sweep  tablet-p  light  no-preference page sweep                   pass        28        0
+webkit     sweep  tablet-p  light  no-preference login page                   pass         1        0
+webkit     sweep  zoom200   dark   reduce        page sweep                   pass        28        0
+webkit     sweep  zoom200   dark   reduce        login page                   pass         1        0
+webkit     sweep  zoom200   light  no-preference page sweep                   pass        28        0
+webkit     sweep  zoom200   light  no-preference login page                   pass         1        0
+
+runs 78 of 78 expected, flows 330 (330 pass, 0 fail), states checked 2883
+problems by kind: {}
+check "tour position": chromium 20, firefox 20, webkit 20
+check "tour position inside an offset size container": chromium 20, firefox 20, webkit 20
+
+distinct problems:
+
+excluded engine messages: 47
+  10  host network change (Chromium) (1 units): Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/9wk_b6W3.js [network disconnect host -1360 ms, con | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/BPKTJBnH.js [network disconnect host -1361 ms, con | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/6a20yEWN.js [network disconnect host -1361 ms, con | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/5qstupi0.js [network disconnect host -1361 ms, con | Failed to load resource: net::ERR_NETWORK_CHANGED @ /api/v1/overview?since=1795425899&probes=1 [network discon | Failed to load resource: net::ERR_NETWORK_CHANGED @ /api/v1/widgets [network disconnect host -1361 ms, contain
+  15  load cut by a host network change, page loaded again (Chromium) (2 units): Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/index-#.css | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/O27fVuUm.js | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/hy_UT4wB.js | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/Bs-zEUVa.js | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/DJIyCRb3.js | Failed to load resource: net::ERR_NETWORK_CHANGED @ /assets/CAz_gaZh.js
+  22  load cancelled by leaving the page (5 units): Error [Error: Unable to preload CSS for http://127.0.0.1:#/assets/RechartsUsage-#.css] @ debugger eval code:3 | EventSource cannot load http: /127.0.0.1:#/api/v1/stream?topics=containers,stats,system,widget,alerts due to a | Fetch API cannot load http://127.0.0.1:#/api/settings/general due to access control checks.
+    at fetch (http | EventSource cannot load http: /127.0.0.1:#/api/v1/stream?topics=containers,stats,system,alerts due to access c | Fetch API cannot load http://127.0.0.1:#/api/v1/strips due to access control checks.
+    at fetch (http://127.
+
+RESULT: PASS
