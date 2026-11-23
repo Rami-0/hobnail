@@ -7,7 +7,6 @@ import { assertSweepTarget, sweepFixture } from './sweep-fixture.mjs';
 const EXPECTED_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const base = new URL(process.argv[2] || 'http://127.0.0.1:3396');
 const charts = {
-  '/app/overview': { key: 'cpu', api: '/api/v1/overview', metrics: 'hour' },
   '/app/containers/svc001?tab=overview': { key: 'cpu', api: '/api/v1/containers/svc001?range=6h' },
   '/app/containers/svc001?tab=metrics': { key: 'cpu', api: '/api/v1/containers/svc001?range=6h' },
   '/app/host': { key: 'cpu.user', api: '/api/v1/host/history?range=1h', metrics: 'metrics' },

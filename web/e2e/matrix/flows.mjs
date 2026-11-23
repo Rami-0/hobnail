@@ -7,6 +7,8 @@ import { focusWalk, guardNetwork, harness } from "./lib.mjs";
 
 const tid = (id) => `[data-testid="${id}"]`;
 const dialog = '[role="dialog"][data-open]';
+// The Home page is the Home board; it is ready when Needs attention has read.
+const HOME = `${tid("board")} ${tid("hobnail-attention")}`;
 
 /** Open `route` and wait for `ready`. Once: a navigation or load that a
  * host network change cut (lib.mjs navigationCut, setAsideCutLoad) is
@@ -112,8 +114,8 @@ export async function tourStaysClosed(h, f) {
   await page.locator(tid("board-save")).click();
   await page.locator(tid("board-editor")).waitFor({ state: "detached" });
   await noTour(h, "board saved");
-  await navigate(h, "/app/overview");
-  await page.locator(tid("overview")).waitFor();
+  await navigate(h, "/app/containers");
+  await page.locator(tid("row")).first().waitFor();
   await navigate(h, f.board);
   await page.locator(tid("board")).waitFor();
   await noTour(h, "board via navigation");
@@ -187,6 +189,8 @@ export const onboarding = {
     await page.locator(tid("board")).waitFor();
     assert.ok(new URL(page.url()).pathname.startsWith("/app/boards/"), "created board opens");
     await finishTour(h);
+    // The selection joins the Home board, under its host widgets.
+    await page.locator(HOME).waitFor();
     await page.locator(tid("board-tile")).first().waitFor();
     assert.ok(await page.locator(tid("board-tile")).count() >= 2, "board has the selected service and the provider");
     await h.state("new home board");
@@ -210,8 +214,10 @@ export const onboarding = {
     await page.locator(tid("setup-create")).click();
     await page.locator(tid("board")).waitFor();
     await finishTour(h);
-    await page.locator(tid("board-empty-add")).waitFor();
-    await h.state("empty home board");
+    // Nothing selected: Home opens with its Hobnail widgets only.
+    await page.locator(HOME).waitFor();
+    assert.equal(await page.locator(tid("board-tile")).count(), await page.locator(`${tid("board-tile")} .hobnail-widget`).count(), "only Hobnail widgets");
+    await h.state("home board (skip)");
     f.board = new URL(page.url()).pathname;
   },
 };
@@ -243,10 +249,20 @@ export const flows = {
     await signIn(h);
     await h.state("signed in again");
   },
-  async overview(h, f) {
+  async home(h, f) {
     const { page } = h;
-    await go(h, f, "/app/overview", `${tid("overview")} .overview-counts`);
-    await h.state("overview");
+    // The old Overview URL opens the Home board, and the Home entry is current.
+    await go(h, f, "/app/overview", HOME);
+    const home = new URL(page.url()).pathname;
+    assert.match(home, /^\/app\/boards\/[0-9a-f]{32}$/, "/app/overview opens the Home board");
+    for (const view of ["host", "attention", "containers", "stacks", "events", "history"]) {
+      await page.locator(`${tid("board")} .hobnail-widget[data-view="${view}"]`).first().waitFor();
+    }
+    await page.locator(`${tid("hobnail-attention")} .hw-count strong`).first().waitFor();
+    await h.state("home");
+    if (h.profile.width >= 700) {
+      assert.equal(await page.locator(`nav a[href="${home}"][aria-current="page"]`).first().textContent(), "Home", "the Home entry is current");
+    }
     // Each stack's fold toggle says what it does and is not named like the
     // stack's own link.
     const toggles = await page.$$eval(`${tid("tree-stack")} .sh`, (rows) => rows.map((r) => ({ tg: r.querySelector(".tg")?.getAttribute("aria-label"), open: r.querySelector(".tg")?.getAttribute("aria-expanded"), link: r.querySelector(".stack-name")?.textContent.trim() })));
@@ -512,7 +528,7 @@ export const flows = {
   },
   async "command palette"(h, f) {
     const { page } = h;
-    await go(h, f, "/app/overview", tid("overview"));
+    await go(h, f, "/app/overview", HOME);
     if (h.profile.touch) await page.locator(tid("palette-open")).click();
     else await page.keyboard.press("Control+k");
     const palette = page.locator(tid("palette"));
@@ -532,7 +548,7 @@ export const flows = {
   },
   async "keyboard only"(h, f) {
     const { page } = h;
-    await go(h, f, "/app/overview", tid("overview"));
+    await go(h, f, "/app/overview", HOME);
     await page.evaluate(() => { document.activeElement?.blur(); });
     await page.keyboard.press("Tab");
     const skip = await page.evaluate(() => document.activeElement?.classList.contains("skip"));
@@ -577,7 +593,7 @@ export const flows = {
   async touch(h, f) {
     const { page } = h;
     if (!h.profile.touch) return "skipped: not a touch profile";
-    await go(h, f, "/app/overview", tid("overview"));
+    await go(h, f, "/app/overview", HOME);
     const drawer = page.locator(`${tid("drawer-open")}:visible`);
     if (await drawer.count()) {
       await drawer.first().tap();

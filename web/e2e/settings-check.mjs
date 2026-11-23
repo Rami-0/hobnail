@@ -207,7 +207,7 @@ try {
       assert.equal(after[0].note, "bookmarks: reordered");
       assert.equal(after[1].id, beforeRevision, "one Save creates exactly one revision");
       console.log(`ok ${label}: three arrow clicks and Cancel save no revisions, Save order creates one`);
-      await go("/app/overview?add=widget", present(editor));
+      await go("/app/settings/widgets?add=widget", present(editor));
       await inp.key("Escape");
       await go("/app/alerts?add=channel", present(editor));
       await wait(text(dialog, "Secret source"), "Alerts shares the channel editor");
@@ -311,7 +311,12 @@ try {
         await go("/app/settings/widgets", text('.settings-row', `browser-order-${width}`));
         await inp.click(`button[aria-label=${q(`Move browser-order-${width} up`)}]`);
         await wait(`[...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(`browser-order-${width}`)}) < [...document.querySelectorAll('[data-testid="settings-widget-list"] h3')].findIndex(e=>e.textContent===${q(widget)})`, "widget order is saved");
-        await go("/app/overview", text(`#w-${widget}`, "Owner exists: true"));
+        // Config widgets show on boards (the Home board replaced Overview).
+        const home = ok(await call("/api/v1/bootstrap", "GET", undefined, owner), "read bootstrap").home_board;
+        const { document: homeDoc } = ok(await call(`/api/v1/boards/${home}`, "GET", undefined, owner), "read the Home board");
+        homeDoc.sections.push({ title: `Settings check ${width}`, position: homeDoc.sections.length, collapsed: false, items: [{ x: 0, y: 0, w: 4, h: 2, payload: { kind: "widget", widget_id: widget } }] });
+        ok(await call(`/api/v1/boards/${home}`, "PUT", homeDoc, owner), "place the widget on Home");
+        await go(`/app/boards/${home}`, text('[data-testid="board-tile"]', "Owner exists: true"));
         const notifications = ok(await call("/api/settings/notifications", "GET", undefined, owner), "read notification fixtures");
         const channel = `browser-refused-${width}`;
         const addedChannel = ok(await call("/api/settings/channels", "POST", { base_hash: notifications.hash, action: "add", item: { name: channel, type: "webhook", url: "http://127.0.0.1:1/refused", timeout: "1s" } }, owner), "seed refused channel");

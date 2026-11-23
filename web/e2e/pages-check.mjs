@@ -61,6 +61,18 @@ let browser;
 const failures = [];
 try {
   await api("/api/settings/config", { base_hash: initial.hash, text: fixture });
+  // The Home board (the old Overview) was seeded before this config: put
+  // the bookmark and the config widget on it, as a person would.
+  const homeBoard = (await api("/api/v1/bootstrap")).home_board;
+  assert.ok(homeBoard, "the instance has a Home board");
+  const homePath = `/app/boards/${homeBoard}`;
+  const { document: homeDoc } = await api(`/api/v1/boards/${homeBoard}`);
+  homeDoc.sections.push({ title: "Browser check", position: homeDoc.sections.length, collapsed: false, items: [
+    { x: 0, y: 0, w: 3, h: 1, payload: { kind: "link", title: "Browser check bookmark", url: "https://example.com" } },
+    { x: 3, y: 0, w: 4, h: 2, payload: { kind: "widget", widget_id: "pages-health" } },
+  ] });
+  const put = await fetch(new URL(`/api/v1/boards/${homeBoard}`, base), { method: "PUT", headers, body: JSON.stringify(homeDoc) });
+  assert.ok(put.ok, `PUT Home board HTTP ${put.status}: ${await put.text()}`);
   browser = await launch();
   const sizes = (process.env.WIDTHS || "1440x900 390x844").split(/\s+/);
   const schemes = (process.env.SCHEMES || "dark light").split(/\s+/);
@@ -89,11 +101,12 @@ try {
       await tab.send("Emulation.setTouchEmulationEnabled", { enabled: inp.touch, maxTouchPoints: 5 });
       await tab.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
 
-      await load("/app/overview", "[data-testid=overview] .overview-counts");
-      await wait(exists(".mm .mm-a"), "memory treemap renders links after the first sample", 30000);
-      await wait('document.querySelector("[data-testid=overview]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
-      await wait('document.querySelector("#w-pages-health")?.textContent.includes("Health check: ok")', "widget renders a structured body");
-      await tab.shot(path.join(out, `${label}-overview.png`));
+      await load(homePath, '[data-testid=board] [data-testid="hobnail-attention"] .hw-count');
+      await wait(exists('.hobnail-widget[data-view="host"] .sw-tiles'), "Home draws the host after the first sample", 30000);
+      await wait(exists('.hobnail-widget[data-view="containers"] .sw-rich-row'), "Home lists the busiest containers", 30000);
+      await wait('document.querySelector("[data-testid=board]")?.textContent.includes("Browser check bookmark")', "bookmark renders");
+      await wait('[...document.querySelectorAll("[data-testid=board-tile]")].some((t) => t.textContent.includes("Health check: ok"))', "widget renders a structured body");
+      await tab.shot(path.join(out, `${label}-home.png`));
 
       if (size === sizes[0] && scheme === schemes[0]) {
         const alarmConfig = await api("/api/settings/config");
@@ -158,7 +171,7 @@ try {
         await wait(`!!document.querySelector(${q(palette)})?.getAttribute('aria-activedescendant')`, `palette ${key} selects a result`);
       }
       await inp.key("Escape");
-      for (const [key,route] of [["o","overview"],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
+      for (const [key,route] of [["o",homePath.slice(5)],["c","containers"],["l","logs"],["h","host"],["y","history"],["a","alerts"],["s","settings/general"]]) {
         await tab.ev('document.activeElement?.blur()');
         await inp.key('g'); await inp.key(key);
         await wait(key === 's' ? `location.pathname === '/app/settings' || location.pathname === '/app/settings/general'` : `location.pathname === ${q('/app/'+route)}`, `g ${key} opens ${route}`);
@@ -169,7 +182,6 @@ try {
       await inp.key("g");
       await inp.key("a");
       await wait('location.pathname === "/app/alerts"', "g a opens Alerts");
-      await wait('Number(localStorage.getItem("rh-seen")) > 0', "leaving Overview remembers the visit");
 
       await load("/app/containers", '[data-testid="row"]');
       await inp.key('/'); await wait(`document.activeElement?.matches('[data-testid="filter"]')`, "slash focuses the table filter");

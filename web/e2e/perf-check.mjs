@@ -81,9 +81,10 @@ if (TARGETS.includes("board")) {
   const saved = await fetch(`${base}/api/v1/boards/${boardId}`, { method: "PUT", headers, body: JSON.stringify(document) });
   if (!saved.ok) throw new Error(`Board fixture: ${saved.status} ${await saved.text()}`);
 }
-// Overview and Host are usable before scrolling to their history plots.
+// Home (the Overview URL) and Host are usable before scrolling to their history plots.
 const T = {
-  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="overview"] .overview-counts strong')`, rows: '.overview-counts', live: ["stats"], interaction: '.overview-counts a' },
+  // The old Overview URL opens the Home board of Hobnail widgets.
+  overview: { path: "/app/overview", ready: `!!document.querySelector('[data-testid="hobnail-attention"] .hw-count strong') && !!document.querySelector('.hobnail-widget[data-view="host"] .sw-tiles')`, rows: '[data-testid="board-tile"]', live: ["stats"], interaction: '.hw-count' },
   history: { path: "/app/history", ready: `!!document.querySelector('[data-testid="history"] .history-controls button') && !document.querySelector('.ch-wait')`, rows: 'figure.chart', live: ["config"], interaction: '.history-controls button' },
   host: { path: "/app/host", ready: `!!document.querySelector('[data-testid="host-sample"]')`, rows: '[data-testid="host-disclosure"]', live: ["host"], interaction: '[data-testid="host-disclosure"] summary' },
   board: { path: `/app/boards/${boardId}`, ready: `document.querySelectorAll('[data-testid="board-tile"]').length === 40`, rows: '[data-testid="board-tile"]', live: ["boards"], interaction: '[data-testid="board-edit"]' },

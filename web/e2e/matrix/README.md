@@ -50,18 +50,21 @@ takes 5-7 minutes, each sweep 2-3.
   instance; onboarding skipping every step, then "tour stays closed" and
   login and logout), and
   `sweep` (owner and a board created through the API, then every route of
-  `../sweep-fixture.mjs` (27 pages: overview, containers, the five container
+  `../sweep-fixture.mjs` (27 pages: Home (`/app/overview`), containers, the five container
   tabs, host, history, alerts, four logs views, a board, the 12 settings
   tabs, account) plus the login page).
 
 ### Flows (`flows.mjs`)
 
 onboarding (every step / skip, including the board tour, which must
-appear on the first board visit and be saved as seen) · tour stays closed
-(straight after onboarding: revisit the board, save an edit, leave and come
-back in the app, reload; the tour must not open again) · login and logout
+appear on the first board visit and be saved as seen; both end on the Home
+board: with the selection under its host widgets, or with those widgets only) · tour stays closed
+(straight after onboarding: revisit the board, save an edit, leave for
+Containers and come back in the app, reload; the tour must not open again) · login and logout
 (the account button names its visible initials, wrong password, the
-rate-limit pause, sign in again) · overview, host, alerts (each stack's
+rate-limit pause, sign in again) · home (`/app/overview` opens the Home
+board with every seeded Hobnail widget and the Home entry current), host,
+alerts (each stack's
 fold toggle says "Fold" or "Show" and its stack; the process table is a
 named region) · containers (filter, open a container, all five detail tabs) · logs
 (live tail, search filter, download — opening "Filters" on phones — picker,
