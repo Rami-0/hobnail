@@ -139,31 +139,39 @@ pub(super) async fn latest(
     deadline: tokio::time::Instant,
 ) -> Result<StructuredBody, Fault> {
     let repos = tracked(options).map_err(|_| Class::Protocol)?;
-    let mut items = Vec::with_capacity(repos.len());
-    let mut expired = false;
-    for (repo, current) in repos {
-        let not_reached = || (format!("Current {current} · {NOT_REACHED}"), None);
-        let (secondary, link) = if expired {
-            not_reached()
-        } else if let Ok(result) =
+    let key = Rotation::key(conn, "releases", repos.iter().map(|(repo, _)| repo));
+    let start = limits.rotation.start(key, repos.len());
+    let mut results = vec![None; repos.len()];
+    let mut reached = 0;
+    for index in rotated(start, repos.len()) {
+        let (repo, current) = repos[index];
+        let Ok(result) =
             tokio::time::timeout_at(deadline, release(conn, limits, repo, current)).await
-        {
-            result?
-        } else {
-            expired = true;
-            if items.is_empty() {
-                return Err(Class::Timeout.into());
-            }
-            not_reached()
+        else {
+            break;
         };
-        items.push(BodyItem {
-            title: repo.into(),
-            secondary: Some(secondary),
-            link,
-            icon: None,
-            time: None,
-        });
+        results[index] = Some(result?);
+        reached += 1;
     }
+    limits.rotation.advance(key, start, reached, repos.len());
+    if reached == 0 && !repos.is_empty() {
+        return Err(Class::Timeout.into());
+    }
+    let items = repos
+        .into_iter()
+        .zip(results)
+        .map(|((repo, current), result)| {
+            let (secondary, link) =
+                result.unwrap_or_else(|| (format!("Current {current} · {NOT_REACHED}"), None));
+            BodyItem {
+                title: repo.into(),
+                secondary: Some(secondary),
+                link,
+                icon: None,
+                time: None,
+            }
+        })
+        .collect();
     Ok(StructuredBody::ItemList { items })
 }
 

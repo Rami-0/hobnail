@@ -81,6 +81,63 @@ struct Cooldowns {
 #[derive(Default)]
 struct RateLimits {
     cooldowns: Mutex<Cooldowns>,
+    rotation: Rotation,
+}
+
+/// Lists remembered for [`Rotation`]; past it the oldest is forgotten and
+/// starts again from its first repository.
+const MAX_ROTATIONS: usize = 64;
+
+/// Where each repository list's next refresh starts. A refresh cut short by
+/// its deadline checks only a prefix of the list; the next one starts at
+/// the first repository not reached, so on a slow link every repository is
+/// checked in turn instead of the same trailing ones never. Rows keep their
+/// configured order. Bounded and deterministic: one entry per credential
+/// and list, at most [`MAX_ROTATIONS`].
+#[derive(Default)]
+struct Rotation {
+    starts: Mutex<std::collections::VecDeque<(u64, usize)>>,
+}
+
+impl Rotation {
+    fn key(conn: &Conn<'_>, kind: &str, repos: impl Iterator<Item = impl std::hash::Hash>) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        (kind, conn.credential_revision_hash(TOKEN)).hash(&mut hasher);
+        repos.for_each(|repo| repo.hash(&mut hasher));
+        hasher.finish()
+    }
+
+    /// The index this refresh starts at, below `len`.
+    fn start(&self, key: u64, len: usize) -> usize {
+        let starts = self.starts.lock().unwrap();
+        starts
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map_or(0, |(_, start)| start % len.max(1))
+    }
+
+    /// `reached` repositories from `start` were checked this refresh.
+    fn advance(&self, key: u64, start: usize, reached: usize, len: usize) {
+        let next = (start + reached) % len.max(1);
+        let mut starts = self.starts.lock().unwrap();
+        if let Some(entry) = starts.iter_mut().find(|(k, _)| *k == key) {
+            entry.1 = next;
+            return;
+        }
+        if next == 0 {
+            return;
+        }
+        if starts.len() == MAX_ROTATIONS {
+            starts.pop_front();
+        }
+        starts.push_back((key, next));
+    }
+}
+
+/// Indices of a list of `len` in refresh order, from `start` round to it.
+fn rotated(start: usize, len: usize) -> impl Iterator<Item = usize> {
+    (start..len).chain(0..start.min(len))
 }
 
 static LIMITS: std::sync::LazyLock<RateLimits> = std::sync::LazyLock::new(RateLimits::default);
@@ -388,24 +445,28 @@ async fn activity(
     deadline: tokio::time::Instant,
 ) -> Result<StructuredBody, Fault> {
     let names = repositories::names(options).map_err(|_| Class::Protocol)?;
-    let mut rows = Vec::with_capacity(names.len());
-    let mut expired = false;
-    for name in names {
-        let value = if expired {
-            NOT_REACHED.into()
-        } else if let Ok(value) =
-            tokio::time::timeout_at(deadline, repository(conn, limits, name)).await
-        {
-            value?
-        } else {
-            expired = true;
-            NOT_REACHED.into()
+    let key = Rotation::key(conn, "activity", names.iter());
+    let start = limits.rotation.start(key, names.len());
+    let mut values = vec![None; names.len()];
+    let mut reached = 0;
+    for index in rotated(start, names.len()) {
+        let Ok(value) =
+            tokio::time::timeout_at(deadline, repository(conn, limits, names[index])).await
+        else {
+            break;
         };
-        rows.push((name.into(), value));
+        values[index] = Some(value?);
+        reached += 1;
     }
-    if rows.first().is_some_and(|(_, value)| value == NOT_REACHED) {
+    limits.rotation.advance(key, start, reached, names.len());
+    if reached == 0 && !names.is_empty() {
         return Err(Class::Timeout.into());
     }
+    let rows = names
+        .into_iter()
+        .zip(values)
+        .map(|(name, value)| (name.into(), value.unwrap_or_else(|| NOT_REACHED.into())))
+        .collect();
     Ok(StructuredBody::StatGrid { rows })
 }
 
@@ -571,6 +632,115 @@ mod tests {
             },
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn a_cut_short_refresh_resumes_at_the_first_repository_not_reached() {
+        let ok = |request, body| Exchange {
+            request,
+            status: 200,
+            body,
+        };
+        let repo = |name: &'static str| {
+            [
+                ok(
+                    match name {
+                        "a" => "GET /prefix/repos/o/a HTTP/1.1",
+                        "b" => "GET /prefix/repos/o/b HTTP/1.1",
+                        _ => "GET /prefix/repos/o/c HTTP/1.1",
+                    },
+                    r#"{"stargazers_count":1,"open_issues_count":0}"#,
+                ),
+                ok(
+                    match name {
+                        "a" => "GET /prefix/repos/o/a/pulls?state=open&per_page=1 HTTP/1.1",
+                        "b" => "GET /prefix/repos/o/b/pulls?state=open&per_page=1 HTTP/1.1",
+                        _ => "GET /prefix/repos/o/c/pulls?state=open&per_page=1 HTTP/1.1",
+                    },
+                    "[]",
+                ),
+                ok(
+                    match name {
+                        "a" => "GET /prefix/repos/o/a/actions/runs?per_page=1 HTTP/1.1",
+                        "b" => "GET /prefix/repos/o/b/actions/runs?per_page=1 HTTP/1.1",
+                        _ => "GET /prefix/repos/o/c/actions/runs?per_page=1 HTTP/1.1",
+                    },
+                    r#"{"workflow_runs":[]}"#,
+                ),
+            ]
+        };
+        const DONE: &str = "1 stars · 0 issues · 0 PRs · No workflow runs";
+        let limits = RateLimits::default();
+        let options = Values::from_iter([("repositories".into(), json!(["o/a", "o/b", "o/c"]))]);
+        // Each refresh's fake answers one repository and leaves the next
+        // unanswered; the refresh after starts where the last one stopped.
+        let mut refreshes = vec![];
+        for (answered, rows) in [
+            (repo("a"), [DONE, NOT_REACHED, NOT_REACHED]),
+            (repo("b"), [NOT_REACHED, DONE, NOT_REACHED]),
+            (repo("c"), [NOT_REACHED, NOT_REACHED, DONE]),
+            (repo("a"), [DONE, NOT_REACHED, NOT_REACHED]),
+        ] {
+            exercise(
+                &GITHUB,
+                &[],
+                Values::new(),
+                &answered,
+                |_, _| "",
+                async |conn| {
+                    let soon = tokio::time::Instant::now() + Duration::from_millis(400);
+                    let body = activity(conn, &limits, &options, soon).await.unwrap();
+                    let got = serde_json::to_value(body).unwrap()["rows"].clone();
+                    refreshes.push(got);
+                    let want: Vec<_> = ["o/a", "o/b", "o/c"].into_iter().zip(rows).collect();
+                    assert_eq!(refreshes.last().unwrap(), &json!(want));
+                },
+            )
+            .await;
+        }
+        // Releases rotate the same way, under their own key.
+        let tracked = Values::from_iter([("tracked".into(), json!(["o/a | 1", "o/b | 2"]))]);
+        let not_reached = |current| format!("Current {current} · {NOT_REACHED}");
+        for (request, first, second) in [
+            (
+                "GET /prefix/repos/o/a/releases/latest HTTP/1.1",
+                "Current 1 · Latest v1 · Up to date".to_owned(),
+                not_reached(2),
+            ),
+            (
+                "GET /prefix/repos/o/b/releases/latest HTTP/1.1",
+                not_reached(1),
+                "Current 2 · Latest v1 · Current version is ahead".to_owned(),
+            ),
+        ] {
+            let answered = [ok(request, r#"{"tag_name":"v1"}"#)];
+            exercise(
+                &GITHUB,
+                &[],
+                Values::new(),
+                &answered,
+                |_, _| "",
+                async |conn| {
+                    let soon = tokio::time::Instant::now() + Duration::from_millis(400);
+                    let body = releases::latest(conn, &limits, &tracked, soon)
+                        .await
+                        .unwrap();
+                    let body = serde_json::to_value(body).unwrap();
+                    assert_eq!(body["items"][0]["secondary"], first);
+                    assert_eq!(body["items"][1]["secondary"], second);
+                },
+            )
+            .await;
+        }
+        // The table is bounded: the oldest list is forgotten past the cap.
+        let rotation = Rotation::default();
+        for key in 0..=MAX_ROTATIONS as u64 {
+            rotation.advance(key, 0, 1, 3);
+        }
+        assert_eq!(rotation.start(0, 3), 0, "evicted");
+        assert_eq!(rotation.start(MAX_ROTATIONS as u64, 3), 1);
+        assert_eq!(rotation.starts.lock().unwrap().len(), MAX_ROTATIONS);
+        assert_eq!(rotated(2, 3).collect::<Vec<_>>(), [2, 0, 1]);
     }
 
     #[tokio::test]
