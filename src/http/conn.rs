@@ -170,6 +170,27 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for Timed<T> {
     }
 }
 
+/// Fixes a connection's kernel send and receive buffers at `send` and
+/// `receive` bytes (Linux doubles each for bookkeeping). Left alone, Linux
+/// grows them per socket, and the container is charged for what they hold.
+pub(crate) fn bound_buffers(stream: &tokio::net::TcpStream, send: usize, receive: usize) {
+    use std::os::fd::AsRawFd;
+    for (option, bytes) in [(libc::SO_SNDBUF, send), (libc::SO_RCVBUF, receive)] {
+        let value = libc::c_int::try_from(bytes).unwrap_or(libc::c_int::MAX);
+        // SAFETY: a valid socket descriptor, and a pointer to a c_int with
+        // its size, as setsockopt expects. A failure keeps the default.
+        unsafe {
+            libc::setsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                option,
+                (&value as *const libc::c_int).cast(),
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+        }
+    }
+}
+
 /// Open connections per peer. IPv4 peers count by address; IPv6 peers by
 /// their /64, since one host usually holds a whole /64.
 pub(crate) struct PeerSlots {
@@ -270,6 +291,34 @@ mod tests {
         assert!(exempt_from_stall(&streaming));
         *streaming.status_mut() = hyper::StatusCode::UNAUTHORIZED;
         assert!(!exempt_from_stall(&streaming), "a refusal keeps the timer");
+    }
+
+    #[tokio::test]
+    async fn connection_buffers_are_fixed_instead_of_autotuned() {
+        use std::os::fd::AsRawFd;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let _client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        bound_buffers(&stream, 32 * 1024, 8 * 1024);
+        for (option, want) in [(libc::SO_SNDBUF, 64 * 1024), (libc::SO_RCVBUF, 16 * 1024)] {
+            let mut value: libc::c_int = 0;
+            let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+            // SAFETY: a valid socket and an out pointer of the given size.
+            let rc = unsafe {
+                libc::getsockopt(
+                    stream.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    option,
+                    (&mut value as *mut libc::c_int).cast(),
+                    &mut len,
+                )
+            };
+            assert_eq!(rc, 0);
+            // Linux reports twice the requested size.
+            assert_eq!(value, want, "option {option}");
+        }
     }
 
     #[test]

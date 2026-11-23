@@ -62,6 +62,15 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   the connection is refused, not queued: a queued connection would hold
 ///   a global slot (one peer could then fill the cap by waiting) or, held
 ///   outside the cap, an unbounded number of sockets.
+/// - `send_buffer` and `receive_buffer` fix each connection's kernel
+///   socket buffers (Linux doubles them: 64 KiB and 16 KiB), which the
+///   container's memory is charged for. Autotuned, 128 connections that
+///   pipelined requests and stopped reading peaked at 46 MiB in the 15 s
+///   before the stall timer closed them; fixed, at 26 MiB (16 MiB of it
+///   socket memory: a socket may queue one 64 KiB segment past its limit,
+///   so halving the send buffer saved only 3 MiB more). 64 KiB in flight
+///   still sends the 450 KB client in a few round trips; requests are
+///   small, so the receive buffer only paces large uploads.
 #[derive(Clone, Copy)]
 pub(crate) struct Limits {
     pub connections: usize,
@@ -70,6 +79,8 @@ pub(crate) struct Limits {
     pub body_timeout: Duration,
     pub write_timeout: Duration,
     pub per_peer: usize,
+    pub send_buffer: usize,
+    pub receive_buffer: usize,
 }
 
 pub(crate) const LIMITS: Limits = Limits {
@@ -79,6 +90,8 @@ pub(crate) const LIMITS: Limits = Limits {
     body_timeout: Duration::from_secs(15),
     write_timeout: Duration::from_secs(15),
     per_peer: 32,
+    send_buffer: 32 * 1024,
+    receive_buffer: 8 * 1024,
 };
 
 /// Accept loop on an already-bound listener (tests bind 127.0.0.1:0).
@@ -125,6 +138,7 @@ pub(crate) async fn serve_limited(
             }
         };
         let _ = stream.set_nodelay(true);
+        super::conn::bound_buffers(&stream, limits.send_buffer, limits.receive_buffer);
         let st = state.clone();
         tokio::spawn(async move {
             let _permit = permit;
