@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type KeyboardEvent } from "react";
 import { ArrowDownIcon, ArrowUpIcon, BoxIcon, ChevronDownIcon, GripVerticalIcon, LayoutDashboardIcon, Link2Icon, PaletteIcon, PlugIcon, PlusIcon, Redo2Icon, SlidersHorizontalIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import type { Provider } from "../../api/gen/Provider.ts";
+import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
+import { DetectedCards, useDetected } from "../../integrations/Detected.tsx";
+import type { Prefill } from "../../integrations/detected.ts";
+import { brandColor } from "../../ui/brand.ts";
 import type { BoardPayload } from "../../api/gen/BoardPayload.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
 import type { BoardView } from "../../api/gen/BoardView.ts";
@@ -21,7 +26,22 @@ import { Tile } from "./Tile.tsx";
 import { BoardPanel, TilePanel } from "./Inspector.tsx";
 import { canvasVars, cellVars } from "./look.ts";
 
-type Kind = "all" | BoardPayload["kind"];
+const ProviderDialog = lazy(() => import("../settings/ProviderDialog.tsx"));
+
+/** The Add picker's tabs: integrations (API connections) first, then plain
+ * container status tiles, links, and local widgets. */
+type PickerTab = "integrations" | "containers" | "links" | "widgets";
+const TABS: { id: PickerTab; label: string; icon: typeof PlugIcon }[] = [
+  { id: "integrations", label: "Integrations", icon: PlugIcon },
+  { id: "containers", label: "Containers", icon: BoxIcon },
+  { id: "links", label: "Links", icon: Link2Icon },
+  { id: "widgets", label: "Widgets", icon: LayoutDashboardIcon },
+];
+const TAB_OF: Record<BoardPayload["kind"], PickerTab> = { integration: "integrations", container: "containers", link: "links", widget: "widgets" };
+const SEARCH_HINT: Record<PickerTab, string> = { integrations: "Sonarr, Pi-hole…", containers: "Container name…", links: "Bookmark…", widgets: "Clock, weather, notes…" };
+/** A provider with a service URL is an integration; one without is a local widget. */
+const hasUrl = (provider: Provider) => provider.fields.some((field) => field.id === "base_url");
+type Connect = { prefill?: Prefill; widgets?: boolean; tab: PickerTab };
 const KIND_LABEL: Record<BoardPayload["kind"], string> = { container: "Container", widget: "Widget", integration: "Integration", link: "Link" };
 const KIND_ICON = { container: BoxIcon, widget: LayoutDashboardIcon, integration: PlugIcon, link: Link2Icon };
 const LONG_PRESS = 350;
@@ -51,7 +71,7 @@ function metrics(canvas: HTMLElement) {
 }
 
 export default function Editor({ view, initial, initialPicker, scoped, changed, onSave, onCancel, onRebase }: {
-  view: BoardView; initial: BoardDocument; initialPicker?: "add" | "discover"; scoped: boolean; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: () => void;
+  view: BoardView; initial: BoardDocument; initialPicker?: "add" | "discover"; scoped: boolean; changed: boolean; onSave: (view: BoardView) => void; onCancel: () => void; onRebase: (version: number) => void;
 }) {
   const [base, setBase] = useState(() => initial.version === view.document.version ? view.document : recoveryBase(initial, view.document));
   const [history, setHistory] = useState<History>({ past: [], doc: initial, future: [] });
@@ -77,9 +97,13 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const coalesce = useRef<{ key: string; at: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const linkTitle = useRef<HTMLInputElement>(null);
-  const [manual, setManual] = useState(initialPicker === "add");
   const search = useRef<HTMLInputElement>(null);
-  const [kind, setKind] = useState<Kind>("all");
+  const [tab, setTab] = useState<PickerTab>(initialPicker === "discover" ? "containers" : "integrations");
+  const [catalog, setCatalog] = useState<{ providers: Provider[]; internet: boolean } | null>(null);
+  const [connect, setConnect] = useState<Connect | null>(null);
+  const [lastPicker, setLastPicker] = useState(0);
+  const [scan, setScan] = useState(0);
+  const detection = useDetected(!scoped && picker !== null, scan);
   const boot = useBootstrap();
   const live = useContainers();
   useEffect(() => { if (!initialPicker) root.current?.querySelector<HTMLButtonElement>(".editor-fields button")?.focus({ preventScroll: true }); }, [initialPicker]);
@@ -292,7 +316,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   };
 
   // ---- picker ----
-  const openPicker = (section: number) => { setManual(false); setPicker(section); setQuery(""); setLink(""); setKind("all"); };
+  const openPicker = (section: number, start: PickerTab = "integrations") => { setPicker(section); setQuery(""); setLink(""); setTab(start); };
   const addWhere = () => panel?.kind === "tile" ? panel.s : 0;
   const addFromBar = () => { if (!doc.sections.length) change({ type: "section", title: "Services" }, "Section added"); openPicker(doc.sections.length ? addWhere() : 0); };
   useEffect(() => {
@@ -305,11 +329,37 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     });
     return () => controller.abort();
   }, [path, picker]);
+  const wantCatalog = picker !== null && !scoped && !catalog;
+  useEffect(() => {
+    if (!wantCatalog) return;
+    const controller = new AbortController();
+    void Promise.all([api.get<Provider[]>("/api/v1/providers", { signal: controller.signal }), api.get<DashboardSettings>("/api/v1/settings", { signal: controller.signal })]).then(([providers, settings]) => {
+      if (!controller.signal.aborted && providers.kind === "ok") setCatalog({ providers: providers.data, internet: settings.kind === "ok" && settings.data.provider_internet });
+    });
+    return () => controller.abort();
+  }, [wantCatalog]);
+  /** Fold server-side additions (widgets a connect step installed) into this
+   * edit, keeping the user's own changes. */
+  const pull = async (message: string) => {
+    if (operation.current) return; operation.current = true; setBusy(true); await settle();
+    const result = await api.get<BoardView>(path);
+    if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }
+    const next = rebase(base, latest.current, result.data.document); setBase(result.data.document); setHistory({ past: [], doc: next, future: [] }); setConflict(false); onRebase(result.data.document.version); setError(""); setAnnouncement(message); operation.current = false; setBusy(false);
+  };
+  const startConnect = (next: Connect) => { setLastPicker(picker ?? 0); setPicker(null); setConnect(next); };
+  const endConnect = (saved: boolean) => {
+    const was = connect; setConnect(null);
+    if (saved) { setScan((n) => n + 1); void pull("Integration connected. Its widgets are on the board; review them and choose Save."); }
+    else if (was) openPicker(lastPicker, was.tab);
+  };
   const selectedTargets = new Set(doc.sections.flatMap(({ items }) => items.map(({ payload }) => payloadIdentity(payload))));
   const fresh = freshSuggestions(suggestions, selectedTargets);
-  const matching = fresh.filter((suggestion) => suggestion.title.toLowerCase().includes(query.trim().toLowerCase()));
-  const shown = matching.filter((suggestion) => kind === "all" || suggestion.payload.kind === kind);
-  const kinds = (["container", "widget", "integration"] as const).filter((k) => fresh.some((suggestion) => suggestion.payload.kind === k));
+  const needle = query.trim().toLowerCase();
+  const matching = fresh.filter((suggestion) => suggestion.title.toLowerCase().includes(needle));
+  const shown = matching.filter((suggestion) => TAB_OF[suggestion.payload.kind] === tab);
+  const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => TAB_OF[x.payload.kind] === id).length])) as Record<PickerTab, number>;
+  const localWidgets = (catalog?.providers ?? []).filter((provider) => !hasUrl(provider) && provider.widgets.length > 0 && `${provider.name} ${provider.description}`.toLowerCase().includes(needle));
+  const integrationProviders = (catalog?.providers ?? []).filter(hasUrl);
   const liveRows = new Map(live.data?.groups.flatMap((group) => group.containers).map((row) => [row.name, row]) ?? []);
   const suggestionRow = (payload: BoardPayload) => payload.kind === "container" ? liveRows.get(payload.target.by === "name" ? payload.target.name : "") ?? [...liveRows.values()].find((row) => payload.target.by === "compose" && row.stack === payload.target.project && row.title === payload.target.service) : undefined;
   const add = (payload: BoardPayload, message: string) => {
@@ -350,7 +400,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     {(changed || conflict) && <Note kind="warn" testId="board-conflict">Another session saved this board. Your changes are kept here.
       {initial.version !== view.document.version && <p>A recovered draft keeps server additions. Review it before saving; you may need to apply removals again.</p>}
       <Button data-testid="board-rebase" disabled={busy} onClick={async () => { if (operation.current) return; operation.current = true; setBusy(true); await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }
-        const next = rebase(base, doc, result.data.document); setBase(result.data.document); setHistory({ past: [], doc: next, future: [] }); setConflict(false); onRebase(); setError(""); setAnnouncement("Changes rebased. Review them and choose Save."); operation.current = false; setBusy(false);
+        const next = rebase(base, doc, result.data.document); setBase(result.data.document); setHistory({ past: [], doc: next, future: [] }); setConflict(false); onRebase(result.data.document.version); setError(""); setAnnouncement("Changes rebased. Review them and choose Save."); operation.current = false; setBusy(false);
       }}>Reload and keep my changes</Button><Button onClick={() => { void cancel(); }}>Discard mine</Button>
     </Note>}
     {error && <Note kind="bad">{error}</Note>}<output className="sr" aria-live="polite">{announcement}</output>
@@ -426,30 +476,61 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       onClose={closePanel} />}
     </div>
 
-    <Dialog open={picker !== null} wide title={`Add to ${doc.sections[picker ?? 0]?.title || "section"}`} description="Pick something Hobnail already knows about, or add a link. It goes in the first free spot; drag it from there."
-      initialFocus={manual ? linkTitle : search} onClose={() => setPicker(null)} testId="board-picker">
-      <div className="picker">
-        <Field id="suggestion-search" label="Search"><TextInput ref={search} type="search" value={query} placeholder="Containers, widgets, integrations…" onChange={(e) => setQuery(e.target.value)} /></Field>
-        {kinds.length > 1 && <div className="picker-filters" role="group" aria-label="Show">
-          {(["all", ...kinds] as Kind[]).map((option) => <Button key={option} size="sm" aria-pressed={kind === option} onClick={() => setKind(option)}>
-            {option === "all" ? "All" : `${KIND_LABEL[option]}s`} <span className="picker-count">{option === "all" ? matching.length : matching.filter((x) => x.payload.kind === option).length}</span></Button>)}
-        </div>}
-        {shown.length ? <div className="suggestions">{shown.map((suggestion) => {
-          const row = suggestionRow(suggestion.payload);
-          const Icon = KIND_ICON[suggestion.payload.kind];
-          return <CardButton className="suggestion" data-testid="board-suggestion" data-kind={suggestion.payload.kind} key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
-            <ServiceIcon className="board-avatar" tint name={row?.icon ?? (suggestion.payload.kind === "container" ? suggestion.payload.icon : null)} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
-            <span className="suggestion-copy"><strong>{suggestion.title}</strong><span><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}{row && <> · <span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</>}</span></span>
+    <Dialog open={picker !== null} wide title={`Add to ${doc.sections[picker ?? 0]?.title || "section"}`} description="Integrations show live data from a service's API; containers show their status. New tiles go in the first free spot; drag them from there."
+      initialFocus={tab === "links" ? linkTitle : search} onClose={() => setPicker(null)} testId="board-picker">
+      <div className="picker" data-tab={tab}>
+        <div className="picker-tabs" role="group" aria-label="What to add">
+          {TABS.map(({ id, label, icon: Icon }) => <Button key={id} size="sm" variant="ghost" data-testid={`picker-tab-${id}`} aria-pressed={tab === id} icon={<Icon aria-hidden="true" />}
+            onClick={() => setTab(id)}>{label}{counts[id] > 0 && <span className="picker-count">{counts[id]}</span>}</Button>)}
+        </div>
+        {tab !== "links" && <Field id="suggestion-search" label="Search"><TextInput ref={search} type="search" value={query} placeholder={SEARCH_HINT[tab]} onChange={(e) => setQuery(e.target.value)} /></Field>}
+        {tab === "integrations" && !scoped && catalog && <DetectedCards compact detection={detection} providers={integrationProviders} onConnect={(prefill) => startConnect({ prefill, tab })} />}
+        {tab === "containers" && <p className="picker-note"><BoxIcon aria-hidden="true" />Status tiles for your Docker containers. To show a service's data, connect it under Integrations.</p>}
+        {tab !== "links" && (shown.length > 0 || tab === "integrations" && !scoped || tab === "widgets" && localWidgets.length > 0) && <div className="suggestions" data-testid="picker-list">
+          {shown.map((suggestion) => {
+            const row = suggestionRow(suggestion.payload);
+            const Icon = KIND_ICON[suggestion.payload.kind];
+            const icon = suggestion.icon ?? row?.icon ?? (suggestion.payload.kind === "container" || suggestion.payload.kind === "link" ? suggestion.payload.icon : null);
+            return <CardButton className="suggestion" data-testid="board-suggestion" data-kind={suggestion.payload.kind} key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
+              <ServiceIcon className="board-avatar" tint name={icon} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
+              <span className="suggestion-copy"><strong>{suggestion.title}</strong>
+                <span>{row ? <><span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</> : <><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}</>}</span></span>
+              <PlusIcon aria-hidden="true" />
+            </CardButton>; })}
+          {tab === "widgets" && localWidgets.map((provider) => <CardButton key={provider.id} className="suggestion suggestion-brand" data-testid="picker-widget-provider" style={{ "--brand": brandColor(provider.color) } as CSSProperties}
+            onClick={() => startConnect({ prefill: { provider: provider.id, url: "", name: provider.name }, widgets: true, tab })}>
+            <ServiceIcon className="board-avatar" tint name={provider.icon} title={provider.name} enabled={false} />
+            <span className="suggestion-copy"><strong>{provider.name}</strong><span><LayoutDashboardIcon aria-hidden="true" />{provider.widgets.length === 1 ? "1 widget" : `${provider.widgets.length} widgets`}</span></span>
             <PlusIcon aria-hidden="true" />
-          </CardButton>; })}</div>
-          : <p className="picker-empty">{suggestions.length ? query ? `Nothing matches “${query}”. Add it as a link below.` : "Everything Hobnail found is already on this board." : "Looking for containers and widgets…"}</p>}
-        <form className="picker-link" data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); add({ kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null }, "Link added"); }}>
-          <h3><Link2Icon aria-hidden="true" />Add a link</h3>
-          <div className="picker-link-fields"><Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} placeholder="Router" /></Field><LinkUrl id="link-url" value={link} onChange={setLink} /><Field id="link-icon" label="Icon name" hint="Optional, e.g. jellyfin"><TextInput name="icon" /></Field></div>
-          <div className="page-actions"><Button type="submit" variant="default" icon={<PlusIcon aria-hidden="true" />}>Add link</Button>{!scoped && <LinkTest url={link} />}</div>
-        </form>
+          </CardButton>)}
+          {tab === "integrations" && !scoped && <CardButton className="suggestion suggestion-new" data-testid="picker-connect" disabled={!catalog} onClick={() => startConnect({ tab })}>
+            <span className="board-avatar suggestion-new-icon" aria-hidden="true"><PlugIcon /></span>
+            <span className="suggestion-copy"><strong>Connect a service</strong><span>{integrationProviders.length ? `${integrationProviders.length} services with live widgets` : "Pi-hole, Sonarr, Jellyfin…"}</span></span>
+            <PlusIcon aria-hidden="true" />
+          </CardButton>}
+        </div>}
+        {!shown.length && tab !== "links" && !(tab === "widgets" && localWidgets.length) && <p className="picker-empty">{
+          !suggestions.length ? "Looking for what Hobnail knows about…"
+            : query ? `Nothing matches “${query}”.`
+              : tab === "integrations" ? (scoped ? "No integrations are shared with you." : "No connected integrations yet. Connect a service to add its widgets.")
+                : tab === "containers" ? "Every container Hobnail found is already on this board."
+                  : "No widgets to add."}</p>}
+        {tab === "links" && <>
+          {shown.length > 0 && <div className="suggestions">{shown.map((suggestion) => <CardButton className="suggestion" data-testid="board-suggestion" data-kind="link" key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
+            <ServiceIcon className="board-avatar" tint name={suggestion.payload.kind === "link" ? suggestion.payload.icon : null} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
+            <span className="suggestion-copy"><strong>{suggestion.title}</strong><span><Link2Icon aria-hidden="true" />Bookmark</span></span><PlusIcon aria-hidden="true" />
+          </CardButton>)}</div>}
+          <form className="picker-link" data-testid="board-link-form" onSubmit={(e) => { e.preventDefault(); const data = new FormData(e.currentTarget); add({ kind: "link", title: String(data.get("title")), url: String(data.get("url")), icon: String(data.get("icon")) || null }, "Link added"); }}>
+            <h3><Link2Icon aria-hidden="true" />Add a link</h3>
+            <div className="picker-link-fields"><Field id="link-title" label="Title"><TextInput ref={linkTitle} name="title" required maxLength={80} placeholder="Router" /></Field><LinkUrl id="link-url" value={link} onChange={setLink} /><Field id="link-icon" label="Icon name" hint="Optional, e.g. jellyfin"><TextInput name="icon" /></Field></div>
+            <div className="page-actions"><Button type="submit" variant="default" icon={<PlusIcon aria-hidden="true" />}>Add link</Button>{!scoped && <LinkTest url={link} />}</div>
+          </form>
+        </>}
       </div>
     </Dialog>
+    {connect && catalog && <Suspense fallback={null}><ProviderDialog providers={connect.widgets ? catalog.providers.filter((p) => !hasUrl(p)) : integrationProviders} item={null} preferredBoard={view.board.id}
+      prefill={connect.prefill} detect={!connect.widgets} title={connect.widgets ? "Add a widget" : "Connect a service"} icons={boot?.remote_icons ?? false} internet={catalog.internet}
+      onClose={() => endConnect(false)} onSaved={() => endConnect(true)} /></Suspense>}
     <Dialog testId="board-leave" open={pendingHref !== null} title="Leave this edit?" onClose={() => setPendingHref(null)} footer={<><Button onClick={() => setPendingHref(null)}>Keep editing</Button><Button variant="default" onClick={async () => { await settle(); const saved = await saveDraft(latest.current); if (!saved) { setPendingHref(null); setError("Could not preserve the draft. Keep editing and retry when the server is available."); return; } leaving.current = true; if (pendingHref) navigate(pendingHref); }}>Leave and keep draft</Button></>}><p>Your changes have not been saved to the board. Keep editing or leave with a server-side draft.</p></Dialog>
   </div>;
 }

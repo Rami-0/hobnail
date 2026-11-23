@@ -132,7 +132,7 @@ export default function BoardPage() {
   const itemCount = view ? countItems(view.document) : 0;
   if (missing) return <NotFound path={`/app/boards/${id}`} />;
   if (!view) return <div className="page">{error || "Loading board…"}</div>;
-  if (editing) return <div className="page board-page board-editing" {...boardLook(editing.appearance)}><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
+  if (editing) return <div className="page board-page board-editing" {...boardLook(editing.appearance)}><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={(version) => { setChanged(false); setEditing((current) => current && { ...current, version }); }} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
   return <div className="page board-page" data-testid="board" {...boardLook(view.document.appearance)}>
     <PageHeader title={view.board.name} icon={<ServiceIcon tint name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
       description={itemCount > 0 && <p className="muted">{itemCount} {itemCount === 1 ? "tile" : "tiles"} in {view.document.sections.length} {view.document.sections.length === 1 ? "section" : "sections"}</p>}

@@ -220,6 +220,17 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .picker-filters{display:flex;flex-wrap:wrap;gap:var(--s-1)}
 .picker-filters .btn[aria-pressed="true"]{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
 .picker-count{opacity:.7;font-size:var(--fs-xs)}
+.picker-tabs{display:flex;gap:2px;padding:3px;border-radius:var(--r-lg);background:var(--muted);overflow-x:auto;scrollbar-width:none}
+.picker-tabs .btn{flex:1 0 auto;justify-content:center;gap:6px}
+.picker-tabs .btn[aria-pressed="true"]{background:var(--card);color:var(--foreground);box-shadow:var(--shadow-sm)}
+.picker-tabs .picker-count{min-width:1.4em;padding:0 5px;border-radius:999px;background:color-mix(in srgb,var(--foreground) 9%,transparent);opacity:1;font-variant-numeric:tabular-nums}
+.picker-note{display:flex;align-items:center;gap:var(--s-2);font-size:var(--fs-xs);color:var(--muted-foreground)}
+.picker-note svg{width:14px;height:14px;flex:none}
+.suggestion-brand{--brand-c:var(--brand,var(--border));border-color:color-mix(in oklab,var(--brand-c) 26%,var(--border));background:linear-gradient(150deg,color-mix(in oklab,var(--brand-c) 9%,var(--card)),var(--card) 60%)}
+.suggestion-new{border-style:dashed;background:transparent}
+.suggestion-new:disabled{opacity:.6;cursor:progress}
+.suggestion-new-icon{background:color-mix(in oklab,var(--primary) 14%,var(--card))!important;color:var(--primary)!important}
+.suggestion-new-icon svg{width:16px;height:16px}
 .suggestions{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,200px),1fr));gap:var(--s-2);max-height:min(320px,40dvh);overflow:auto;padding:2px}
 .suggestion{display:flex;align-items:center;gap:var(--s-3);min-width:0;width:100%;min-height:56px;padding:var(--s-2) var(--s-3);border:1px solid var(--border);border-radius:var(--r);background:var(--card);color:inherit;font:inherit;text-align:start;cursor:pointer;transition:border-color var(--dur-2) var(--ease),background-color var(--dur-2) var(--ease)}
 .suggestion:hover{border-color:var(--ring);background:color-mix(in srgb,var(--foreground) 4%,var(--card))}

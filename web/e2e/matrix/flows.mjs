@@ -345,6 +345,7 @@ export const flows = {
     await h.state("editing");
     await page.locator(tid("board-add-section")).click();
     await page.locator(tid("board-add-item")).last().click();
+    await page.locator(tid("picker-tab-links")).click();
     await page.locator(tid("board-link-form")).waitFor();
     await h.state("picker");
     await fill(h, `${tid("board-link-form")} input[name="title"]`, "Matrix link");
