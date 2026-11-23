@@ -384,6 +384,19 @@ http.createServer(async (req, res) => {
       return json(res, 200, { queries: { total: 1234, blocked: 321, percent_blocked: 26 } });
     }
     if (req.method === "GET" && req.url.endsWith("/dns/blocking")) return json(res, 200, { blocking: "enabled" });
+    // Top lists and history for the ranked and trend widgets.
+    if (req.method === "GET" && req.url.includes("/stats/top_domains")) {
+      const blocked = req.url.includes("blocked=true");
+      const names = blocked ? ["ads.tracker.example", "telemetry.example", "metrics.adnet.example", "pixel.example"] : ["api.github.com", "updates.example", "cdn.example", "time.example"];
+      return json(res, 200, { domains: names.map((domain, i) => ({ domain, count: 412 - i * 87 })) });
+    }
+    if (req.method === "GET" && req.url.includes("/stats/top_clients")) {
+      return json(res, 200, { clients: [["laptop", "192.168.1.20", 534], ["", "192.168.1.31", 301], ["tv", "192.168.1.40", 188]].map(([name, ip, count]) => ({ name, ip, count })) });
+    }
+    if (req.method === "GET" && req.url.endsWith("/history")) {
+      const now = Math.floor(Date.now() / 1000);
+      return json(res, 200, { history: Array.from({ length: 144 }, (_, i) => ({ timestamp: now - (143 - i) * 600, total: 30 + Math.round(25 * (1 + Math.sin(i / 9))) })) });
+    }
   }
   if (req.url === "/fixture/health") return res.end("ok");
   if (req.url === "/fixture/session") {
