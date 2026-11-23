@@ -82,6 +82,8 @@ pub struct IntegrationDetails {
     fingerprint: Option<String>,
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     options: providers::Values,
+    /// Widgets of this integration placed on boards.
+    widgets: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -145,7 +147,8 @@ impl CheckSlot {
 }
 
 const SELECT: &str = "SELECT id, name, kind, origin, config,
-    (SELECT json_group_object(field, origin) FROM integration_credentials WHERE integration_id=integrations.id)
+    (SELECT json_group_object(field, origin) FROM integration_credentials WHERE integration_id=integrations.id),
+    (SELECT count(*) FROM provider_widgets WHERE integration_id=integrations.id)
     FROM integrations";
 
 fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationView> {
@@ -178,6 +181,7 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
             credentials,
             fingerprint: config.fingerprint,
             options: config.options,
+            widgets: row.get(6)?,
         }),
     })
 }
