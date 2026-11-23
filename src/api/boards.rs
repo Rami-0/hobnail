@@ -657,7 +657,7 @@ pub(super) fn validate(
     }
     let validator = PayloadValidator::new(user, conn, config)?;
     for section in &doc.sections {
-        layout(section)?;
+        layout(&mut section.rects())?;
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
             return Err(ApiError::bad_request(
                 "unknown or duplicate section ID",
@@ -694,11 +694,12 @@ pub(super) fn validate(
 }
 
 /// Every item inside the canvas and none on top of another.
-fn layout(section: &BoardSection) -> Result<(), ApiError> {
-    board_grid::compact(&mut section.rects()).map_err(|invalid| {
+/// Compacts `rects` in place (once: validation and storing share it).
+fn layout(rects: &mut [board_grid::Rect]) -> Result<(), ApiError> {
+    board_grid::compact(rects).map_err(|invalid| {
         let message = match invalid {
             board_grid::Invalid::Bounds(_) => {
-                "Items must fit the 12-column grid (width 1-12, height 1-16)."
+                "Items must fit the 12-column grid (width 1-12, height 1-16, at most 8192 rows)."
             }
             board_grid::Invalid::Overlap(_) => "Board items must not overlap.",
         };
@@ -866,8 +867,7 @@ pub(super) fn store(
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
         let mut rects = section.rects();
-        layout(&section)?;
-        board_grid::compact(&mut rects).expect("validated layout");
+        layout(&mut rects)?;
         let section_id = next_id(conn, section.id)?;
         for (mut item, rect) in section.items.into_iter().zip(rects) {
             let item_id = next_id(conn, item.id)?;
@@ -1720,6 +1720,12 @@ mod tests {
             item.h = 17;
             assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
             board.sections[0].items[0].h = 1;
+            board.sections[0].items[0].y = u16::MAX;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
+            board.sections[0].items[0].y = 3;
+            board.sections[0].items[0].x = u16::MAX - 2;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
+            board.sections[0].items[0].x = 0;
             board.sections[0].items[1].look.as_mut().unwrap().link = Some("javascript:x".into());
             assert_eq!(
                 check(&board).unwrap_err().field.as_deref(),

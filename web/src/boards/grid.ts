@@ -27,15 +27,16 @@ export function readingOrder(rects: readonly Rect[]): number[] {
   return key.toSorted((a, b) => a.y - b.y || a.x - b.x || a.i - b.i).map((k) => k.i);
 }
 
-/** Move every item up as far as it goes, in reading order. Overlapping
- * input is resolved first by pushing the later item below. */
+/** Move every item up as far as it goes, in reading order: each lands
+ * directly below the lowest placed item sharing a column with it (the
+ * server's rule, src/board_grid.rs). Overlapping input, from a merge, is
+ * resolved the same way: the later item ends up below. */
 export function compact(rects: readonly Rect[]): Rect[] {
   const out = rects.map((r) => ({ ...r }));
   const placed: Rect[] = [];
   for (const i of readingOrder(out)) {
     const r = out[i]; if (!r) continue;
-    for (let hit = placed.find((p) => collides(p, r)); hit; hit = placed.find((p) => collides(p, r))) r.y = hit.y + hit.h;
-    while (r.y > 0 && !placed.some((p) => collides(p, { ...r, y: r.y - 1 }))) r.y--;
+    r.y = placed.reduce((y, p) => p.x < r.x + r.w && r.x < p.x + p.w ? Math.max(y, p.y + p.h) : y, 0);
     placed.push(r);
   }
   return out;

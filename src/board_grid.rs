@@ -8,9 +8,16 @@
 pub const COLUMNS: u16 = 12;
 /// Tallest item, in rows.
 pub const MAX_H: u16 = 16;
-/// Rows a section may extend to (512 items of one row each fit easily).
-pub const MAX_ROWS: u16 = 4096;
+/// Items a board may hold (validated in the API).
+pub const MAX_ITEMS: u16 = 512;
+/// Rows a section may extend to: every item of a full board stacked at
+/// its tallest. A compacted layout never needs more, so anything beyond is
+/// refused before any work proportional to `y` could happen.
+pub const MAX_ROWS: u16 = MAX_ITEMS * MAX_H;
 
+/// All sums are taken in `u32`: `u16` fields straight from a request may be
+/// near `u16::MAX`, and an overflow would panic (debug) or wrap past a
+/// bounds check (release).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
     pub x: u16,
@@ -20,18 +27,31 @@ pub struct Rect {
 }
 
 impl Rect {
+    pub fn right(&self) -> u32 {
+        u32::from(self.x) + u32::from(self.w)
+    }
+
+    pub fn bottom(&self) -> u32 {
+        u32::from(self.y) + u32::from(self.h)
+    }
+
+    /// Whether the two share any column.
+    pub fn spans_with(&self, other: &Rect) -> bool {
+        u32::from(self.x) < other.right() && u32::from(other.x) < self.right()
+    }
+
     pub fn collides(&self, other: &Rect) -> bool {
-        self.x < other.x + other.w
-            && other.x < self.x + self.w
-            && self.y < other.y + other.h
-            && other.y < self.y + self.h
+        self.spans_with(other)
+            && u32::from(self.y) < other.bottom()
+            && u32::from(other.y) < self.bottom()
     }
 
     pub fn in_bounds(&self) -> bool {
-        (1..=COLUMNS).contains(&self.w)
+        self.x < COLUMNS
+            && (1..=COLUMNS).contains(&self.w)
             && (1..=MAX_H).contains(&self.h)
-            && self.x + self.w <= COLUMNS
-            && u32::from(self.y) + u32::from(self.h) <= u32::from(MAX_ROWS)
+            && self.right() <= u32::from(COLUMNS)
+            && self.bottom() <= u32::from(MAX_ROWS)
     }
 }
 
@@ -59,30 +79,43 @@ pub fn legacy_size(kind: &str, desktop: u16, rows: u16) -> (u16, u16) {
 
 /// The top-most, then left-most, free slot of `w` × `h` among `placed`.
 /// Such a slot starts at 0 or where a placed item ends, in both axes.
+/// Past `MAX_ROWS` (more items than a board may hold) it returns the last
+/// row, which validation then refuses as overlapping.
 pub fn first_free(placed: &[Rect], w: u16, h: u16) -> Rect {
     let w = w.clamp(1, COLUMNS);
     let h = h.clamp(1, MAX_H);
-    let mut ys: Vec<u16> = placed.iter().map(|p| p.y + p.h).collect();
+    let last = u32::from(MAX_ROWS - h);
+    let mut ys: Vec<u32> = placed
+        .iter()
+        .map(Rect::bottom)
+        .filter(|&y| y <= last)
+        .collect();
     ys.push(0);
     ys.sort_unstable();
     ys.dedup();
-    let mut xs: Vec<u16> = placed
+    let mut xs: Vec<u32> = placed
         .iter()
-        .map(|p| p.x + p.w)
-        .filter(|&x| x + w <= COLUMNS)
+        .map(Rect::right)
+        .filter(|&x| x + u32::from(w) <= u32::from(COLUMNS))
         .collect();
     xs.push(0);
     xs.sort_unstable();
     xs.dedup();
+    let at = |x: u32, y: u32| Rect {
+        x: x as u16,
+        y: y as u16,
+        w,
+        h,
+    };
     for &y in &ys {
         for &x in &xs {
-            let candidate = Rect { x, y, w, h };
+            let candidate = at(x, y);
             if !placed.iter().any(|p| p.collides(&candidate)) {
                 return candidate;
             }
         }
     }
-    unreachable!("the row below every placed item is free")
+    at(0, last)
 }
 
 /// Place items in order, each in the first free slot: the old dense
@@ -104,7 +137,9 @@ pub enum Invalid {
 }
 
 /// Check bounds and overlap, then move every item up as far as it goes
-/// (in `y`, then `x` order), exactly like the client's compaction.
+/// (in `y`, then `x` order), exactly like the client's compaction. Each
+/// item lands directly below the lowest already-placed item sharing a
+/// column with it, so the cost is O(n²) whatever the `y` values.
 pub fn compact(rects: &mut [Rect]) -> Result<(), Invalid> {
     if let Some(i) = rects.iter().position(|r| !r.in_bounds()) {
         return Err(Invalid::Bounds(i));
@@ -119,16 +154,16 @@ pub fn compact(rects: &mut [Rect]) -> Result<(), Invalid> {
     let mut placed: Vec<Rect> = Vec::with_capacity(rects.len());
     for i in order {
         let mut rect = rects[i];
-        while rect.y > 0 {
-            let up = Rect {
-                y: rect.y - 1,
-                ..rect
-            };
-            if placed.iter().any(|p| p.collides(&up)) {
-                break;
-            }
-            rect = up;
-        }
+        // Every placed item started at or above this one without
+        // overlapping it and only moved up, so each one sharing a column
+        // ends at or above `rect.y`: the landing row is the lowest end.
+        let landing = placed
+            .iter()
+            .filter(|p| p.spans_with(&rect))
+            .map(Rect::bottom)
+            .max()
+            .unwrap_or(0);
+        rect.y = landing as u16;
         rects[i] = rect;
         placed.push(rect);
     }
@@ -184,5 +219,47 @@ mod tests {
         assert_eq!(compact(&mut wide), Err(Invalid::Bounds(0)));
         let mut flat = [r(0, 0, 4, 0)];
         assert_eq!(compact(&mut flat), Err(Invalid::Bounds(0)));
+    }
+
+    #[test]
+    fn extreme_values_are_refused_without_overflow() {
+        let max = u16::MAX;
+        for rect in [
+            r(max, 0, 1, 1),
+            r(11, 0, max, 1),
+            r(max - 3, 0, 4, 1),
+            r(0, max, 4, 1),
+            r(0, max - 1, 4, 16),
+            r(0, MAX_ROWS, 4, 1),
+            r(0, 0, 4, max),
+            r(12, 0, 1, 1),
+        ] {
+            assert!(!rect.in_bounds(), "{rect:?}");
+            assert_eq!(compact(&mut [rect]), Err(Invalid::Bounds(0)));
+        }
+        assert!(r(0, MAX_ROWS - 16, 12, 16).in_bounds());
+        // Collision maths on unvalidated input never overflows.
+        assert!(r(max, max, max, max).collides(&r(max, max, max, max)));
+        assert!(!r(0, 0, 1, 1).collides(&r(max, max, max, max)));
+        let free = first_free(&[r(max, max, max, max)], 4, 2);
+        assert_eq!((free.x, free.y), (0, 0));
+    }
+
+    #[test]
+    fn compaction_cost_does_not_grow_with_y() {
+        // The deepest allowed items, many of them: landing rows are computed
+        // directly, so this is instant rather than y × n² steps.
+        let mut rects: Vec<Rect> = (0..512u16)
+            .map(|i| r(i % 12, MAX_ROWS - 16 - (i / 12) * 16, 1, 16))
+            .collect();
+        let started = std::time::Instant::now();
+        compact(&mut rects).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(rects
+            .iter()
+            .all(|rect| rect.y % 16 == 0 && rect.y < 16 * 43));
+        let mut stacked = [r(0, 8000, 4, 2), r(2, 8100, 4, 1)];
+        compact(&mut stacked).unwrap();
+        assert_eq!(stacked, [r(0, 0, 4, 2), r(2, 2, 4, 1)]);
     }
 }
