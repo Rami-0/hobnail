@@ -216,7 +216,8 @@ export const onboarding = {
     await finishTour(h);
     // Nothing selected: Home opens with its Hobnail widgets only.
     await page.locator(HOME).waitFor();
-    assert.equal(await page.locator(tid("board-tile")).count(), await page.locator(`${tid("board-tile")} .hobnail-widget`).count(), "only Hobnail widgets");
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="board-tile"] .hobnail-widget').length === 7);
+    assert.equal(await page.locator(tid("board-tile")).count(), 7, "only the seven seeded Hobnail widgets");
     await h.state("home board (skip)");
     f.board = new URL(page.url()).pathname;
   },
