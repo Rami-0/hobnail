@@ -87,6 +87,7 @@ try {
   await wait(`${at(2, "x")} === "0" && ${at(2, "y")} === "0"`, "pointer drag drops the tile at the top-left cell");
   check(await tab.ev(`(() => { const r = [...document.querySelectorAll('[data-section="0"] .canvas-item')].map((c) => ["x", "y", "w", "h"].map((k) => Number(c.style.getPropertyValue("--" + k))));
     return r.every((a, i) => r.every((b, j) => i === j || a[0] + a[2] <= b[0] || b[0] + b[2] <= a[0] || a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1])); })()`), "tiles never overlap after a drop");
+  await sleep(500); // the dropped tile animates to its cell
   const handle = await inp.box('[data-section="0"][data-item="2"] .resize-handle', false);
   const before3 = await tab.ev(at(2, "w"));
   await inp.drag(handle.x - 2, handle.y - 2, handle.x + canvas.width / 6, handle.y + 4, 10);
