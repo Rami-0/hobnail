@@ -104,7 +104,7 @@ pub(crate) async fn serve_limited(
                 continue;
             }
         };
-        let peer_slot = if state.env.trusted_proxies.contains(&peer.ip()) {
+        let peer_slot = if is_trusted_proxy(&state.env, peer.ip()) {
             None
         } else {
             match peers.take(peer.ip()) {
@@ -150,6 +150,13 @@ pub(crate) async fn serve_limited(
                 .await;
         });
     }
+}
+
+/// Whether `ip` is in `RH_TRUSTED_PROXIES`. On a dual-stack IPv6 listener an
+/// IPv4 proxy arrives as `::ffff:a.b.c.d`; the list holds canonical
+/// addresses, as the forwarding-header checks in `proxy.rs` compare.
+fn is_trusted_proxy(env: &crate::state::Env, ip: std::net::IpAddr) -> bool {
+    env.trusted_proxies.contains(&ip.to_canonical())
 }
 
 /// Host part of the request's Host header (no port), for the allowlist.
@@ -449,6 +456,18 @@ mod tests {
     }
 
     #[test]
+    fn a_mapped_ipv4_proxy_is_trusted_like_its_ipv4_address() {
+        let mut e = env();
+        e.trusted_proxies = vec!["192.0.2.7".parse().unwrap()];
+        assert!(is_trusted_proxy(&e, "192.0.2.7".parse().unwrap()));
+        assert!(is_trusted_proxy(&e, "::ffff:192.0.2.7".parse().unwrap()));
+        assert!(!is_trusted_proxy(&e, "::ffff:192.0.2.8".parse().unwrap()));
+        e.trusted_proxies = vec!["2001:db8::7".parse().unwrap()];
+        assert!(is_trusted_proxy(&e, "2001:db8::7".parse().unwrap()));
+        assert!(!is_trusted_proxy(&e, "2001:db8::8".parse().unwrap()));
+    }
+
+    #[test]
     fn host_allowlist() {
         let e = env();
         assert!(host_allowed("100.64.0.10", &e));
@@ -690,6 +709,36 @@ mod tests {
                 );
                 flood.abort();
             }
+        }
+
+        #[tokio::test]
+        async fn a_trusted_ipv4_proxy_is_exempt_on_a_dual_stack_listener() {
+            // An IPv4 peer on an IPv6 dual-stack socket is ::ffff:127.0.0.1.
+            let Ok(l) = TcpListener::bind("[::]:0").await else {
+                return; // no IPv6 in this sandbox
+            };
+            let port = l.local_addr().unwrap().port();
+            let mut env = crate::testutil::state_with(vec![], "").env.clone();
+            env.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+            let limits = Limits {
+                per_peer: 1,
+                ..LIMITS
+            };
+            tokio::spawn(serve_limited(crate::state::AppState::new(env), l, limits));
+            let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+            let Ok(_held) = TcpStream::connect(addr).await else {
+                return; // the socket is IPv6-only here
+            };
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            s.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            let out = drain(&mut s, Duration::from_secs(3)).await.unwrap();
+            assert!(
+                out.starts_with(b"HTTP/1.1 200"),
+                "{:?}",
+                String::from_utf8_lossy(&out)
+            );
         }
 
         async fn futures_join(addr: SocketAddr, n: usize) -> Vec<TcpStream> {
