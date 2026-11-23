@@ -20,9 +20,38 @@ another board. Each placement stores its own widget options and refresh
 interval. Placements share the saved connection. Open boards with identical
 fetch options share one cached result, even when their refresh intervals
 differ. Create a separate integration for different URLs or credentials.
-Remove a widget from a board in its board editor. Deleting an
+Remove a widget from a board in its board editor, or switch it off in the
+integration's **Choose widgets** dialog (the removal and any additions are one
+board revision). Deleting an
 integration deletes its credentials and widgets and leaves missing targets in
 existing layouts.
+
+## Accepted limitations
+
+These are accepted pending owner sign-off at merge.
+
+- **No provider has been checked against a real instance.** Every provider
+  is tested against fake servers built from the public documentation and
+  source named in its "Verified from" line; "UNVERIFIED" lines list what
+  those sources could not settle. Check each provider against your own
+  service before relying on it.
+- **Reachability uses TCP connect, not ICMP ping.** Ping would need extra
+  container privileges; TCP connect reports reachability and connect time.
+- **The GitHub releases watcher compares against a version you enter.** It
+  does not read running container image tags.
+- **TrueNAS 26 is not supported.** It removed the REST API; the provider
+  is built from the TrueNAS SCALE 24.10 REST v2.0 API (25.x, where REST is
+  deprecated, is unverified).
+- **Duplicati shows no per-job result**, because its backup metadata has no
+  authoritative per-run result.
+- **Nextcloud shows activity counts only**, not an event feed.
+- **Credentials are stored in plaintext in SQLite** (unchanged from before
+  this release). They are write-only through the API and bound to their
+  origin; protect the data volume and its backups.
+- **Public services need Provider internet access**, which is off by default;
+  public providers also have a ten-minute refresh floor.
+- **Embed and extension widgets are not built** and are out of scope for
+  this release.
 
 ## Generic HTTP
 
