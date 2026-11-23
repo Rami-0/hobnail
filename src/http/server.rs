@@ -49,9 +49,10 @@ pub async fn serve(state: Arc<AppState>, addr: SocketAddr) -> Result<(), String>
 ///   every handler that reads a body; past it the request gets 408. Bodies a
 ///   handler does not read are not waited for (hyper closes the read side).
 /// - `write_timeout` fails a connection whose response write makes no
-///   progress for that long (a client that stopped reading). Event streams
-///   and log downloads are exempt: they stream for as long as the client
-///   stays and have their own keepalive.
+///   progress for that long (a client that stopped reading). Only a signed-in
+///   event stream, log stream or log download (a 200 its handler marked) is
+///   exempt: it streams for as long as the client stays and has its own
+///   keepalive and send deadline.
 /// - `per_peer` caps one peer's connections below `connections`, so a single
 ///   host cannot take every slot. IPv6 peers count by /64. Peers listed in
 ///   `RH_TRUSTED_PROXIES` are exempt, since every client arrives through
@@ -123,15 +124,22 @@ pub(crate) async fn serve_limited(
             let io = super::conn::Timed::new(stream, limits.write_timeout, exempt.clone());
             let svc = hyper::service::service_fn(move |mut req: Request<Incoming>| {
                 let st = st.clone();
-                exempt.store(
-                    super::conn::streams(req.uri().path()),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                let exempt = exempt.clone();
+                // Decided by the response, not the path: a refused request
+                // to a streaming path keeps the stall timer.
+                exempt.store(false, std::sync::atomic::Ordering::Relaxed);
                 req.extensions_mut().insert(Peer(peer));
                 req.extensions_mut().insert(super::conn::BodyDeadline(
                     tokio::time::Instant::now() + limits.body_timeout,
                 ));
-                async move { Ok::<_, Infallible>(respond(st, req).await) }
+                async move {
+                    let response = respond(st, req).await;
+                    exempt.store(
+                        super::conn::exempt_from_stall(&response),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    Ok::<_, Infallible>(response)
+                }
             });
             let _ = hyper::server::conn::http1::Builder::new()
                 .timer(TokioTimer::new())
@@ -626,6 +634,62 @@ mod tests {
                 .await
                 .unwrap()
                 .starts_with(b"HTTP/1.1 200"));
+        }
+
+        /// Polls with fresh connections until one gets `200` for /healthz.
+        async fn served_within(addr: SocketAddr, within: Duration) -> bool {
+            let until = tokio::time::Instant::now() + within;
+            while tokio::time::Instant::now() < until {
+                let mut s = TcpStream::connect(addr).await.unwrap();
+                let _ = s
+                    .write_all(
+                        b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+                if drain(&mut s, Duration::from_secs(2))
+                    .await
+                    .is_some_and(|out| out.starts_with(b"HTTP/1.1 200"))
+                {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            false
+        }
+
+        #[tokio::test]
+        async fn refused_stream_requests_that_are_never_read_free_their_slot() {
+            // The attack: pipeline requests to streaming paths with no
+            // session and never read. The 401/405 answers do not stream, so
+            // the stall timer must close the connection.
+            let limits = Limits {
+                per_peer: 1,
+                write_timeout: Duration::from_millis(300),
+                ..LIMITS
+            };
+            let addr = start(limits).await;
+            for path in ["/api/v1/stream", "/api/logs/stream", "/api/logs/download"] {
+                let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                socket.set_recv_buffer_size(4096).unwrap();
+                let (_unread, mut write) = socket.connect(addr).await.unwrap().into_split();
+                let flood = tokio::spawn(async move {
+                    let reqs =
+                        format!("POST {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").repeat(64);
+                    while write.write_all(reqs.as_bytes()).await.is_ok() {}
+                });
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                let mut probe = TcpStream::connect(addr).await.unwrap();
+                let out = drain(&mut probe, Duration::from_secs(3)).await.unwrap();
+                assert!(
+                    out.starts_with(b"HTTP/1.1 503"),
+                    "{path}: the attacker holds the slot"
+                );
+                assert!(
+                    served_within(addr, Duration::from_secs(10)).await,
+                    "{path}: the stalled connection is closed and its slot freed"
+                );
+                flood.abort();
+            }
         }
 
         async fn futures_join(addr: SocketAddr, n: usize) -> Vec<TcpStream> {

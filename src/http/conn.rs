@@ -49,13 +49,33 @@ pub(crate) async fn collect_body(
     }
 }
 
-/// Paths whose responses stream for as long as the client stays: they keep
-/// their own keepalive and liveness, so writes to them may stall.
+/// Paths whose responses may stream, so runtime gzip leaves them alone.
+/// Only the response decides the write-stall exemption ([`Streaming`]).
 pub(crate) fn streams(path: &str) -> bool {
     matches!(
         path,
         "/api/v1/stream" | "/api/logs/stream" | "/api/logs/download"
     )
+}
+
+/// Response extension set by a handler that returns a body streaming for as
+/// long as the client stays (a signed-in event stream, log stream or log
+/// download). Such a body keeps its own keepalive and send deadline, so its
+/// writes may stall. Every other response, including a 401 or 405 on the
+/// same path, keeps the stall timer: an exemption taken from the request
+/// path let a client that never reads pin its connection forever.
+#[derive(Clone, Copy)]
+pub(crate) struct Streaming;
+
+/// Marks `response` as streaming (see [`Streaming`]).
+pub(crate) fn mark_streaming<B>(response: &mut hyper::Response<B>) {
+    response.extensions_mut().insert(Streaming);
+}
+
+/// Whether the write-stall timer is off for this response: only a 200 that a
+/// streaming handler marked.
+pub(crate) fn exempt_from_stall<B>(response: &hyper::Response<B>) -> bool {
+    response.status() == hyper::StatusCode::OK && response.extensions().get::<Streaming>().is_some()
 }
 
 /// A socket whose writes fail after `limit` without progress, unless the
@@ -240,6 +260,16 @@ mod tests {
                 .is_err(),
             "an exempt write waits for the reader"
         );
+    }
+
+    #[test]
+    fn only_a_marked_200_is_exempt_from_the_stall_timer() {
+        let mut streaming = hyper::Response::new(());
+        assert!(!exempt_from_stall(&streaming), "unmarked");
+        mark_streaming(&mut streaming);
+        assert!(exempt_from_stall(&streaming));
+        *streaming.status_mut() = hyper::StatusCode::UNAUTHORIZED;
+        assert!(!exempt_from_stall(&streaming), "a refusal keeps the timer");
     }
 
     #[test]

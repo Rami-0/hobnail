@@ -152,8 +152,9 @@ budget and stop a few peers from holding every connection:
 - A request body must arrive in full within 15 s of its head, or the request
   gets `408 Request Timeout`.
 - A response write that makes no progress for 15 s (a client that stopped
-  reading) closes the connection. Event streams and log streams and
-  downloads are exempt.
+  reading) closes the connection. Only a signed-in event stream, log
+  stream or log download that is being served is exempt; a refused request
+  to one of those paths is not.
 - At most 128 connections are open at once, event streams included; further
   connections wait until one closes.
 - One peer may hold at most 32 of them (IPv6 peers count by /64); more get

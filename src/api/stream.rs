@@ -512,13 +512,15 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String)
             .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
             .map(str::to_owned);
         tokio::spawn(run(state.clone(), topics, session_hash, board, sub, tx));
-        Response::new(
+        let mut r = Response::new(
             StreamBody {
                 rx,
                 state: state.clone(),
             }
             .boxed_unsync(),
-        )
+        );
+        crate::http::conn::mark_streaming(&mut r);
+        r
     };
     set(&mut r, CONTENT_TYPE, "text/event-stream");
     set(&mut r, CACHE_CONTROL, "no-store");

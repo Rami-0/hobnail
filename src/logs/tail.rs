@@ -303,6 +303,7 @@ pub fn sse(
         }
     });
     let mut r = Response::new(ChanBody { rx }.boxed_unsync());
+    crate::http::conn::mark_streaming(&mut r);
     set(&mut r, CONTENT_TYPE, "text/event-stream");
     set(&mut r, CACHE_CONTROL, "no-cache");
     // Tell reverse proxies not to buffer the stream.
@@ -380,6 +381,7 @@ pub fn download(
         }
     });
     let mut r = Response::new(ChanBody { rx }.boxed_unsync());
+    crate::http::conn::mark_streaming(&mut r);
     set(&mut r, CONTENT_TYPE, "text/plain; charset=utf-8");
     set(&mut r, CACHE_CONTROL, "no-store");
     set(
