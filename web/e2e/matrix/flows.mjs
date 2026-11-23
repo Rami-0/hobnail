@@ -32,6 +32,31 @@ async function navigate(h, href) {
   } else await link.click();
   await h.page.waitForURL((u) => u.pathname === href);
 }
+/** The tour card is position:fixed inside .page, a size container
+ * (container-type:inline-size). Tour.tsx sets its top and left in viewport
+ * pixels, so its box must be exactly there: an engine that made the
+ * container its containing block would offset it by the container's
+ * position. Counted in results.checks; returns a problem or null. */
+async function tourPlacement(h) {
+  const got = await h.page.evaluate(() => {
+    const card = document.querySelector('[data-testid="board-tour"]');
+    const box = card.getBoundingClientRect();
+    let size = card.parentElement;
+    while (size && getComputedStyle(size).containerType === "normal") size = size.parentElement;
+    const at = size?.getBoundingClientRect();
+    return { position: getComputedStyle(card).position, top: box.top, left: box.left, bottom: box.bottom, right: box.right,
+      want: { top: parseFloat(card.style.top), left: parseFloat(card.style.left) },
+      width: document.documentElement.clientWidth, height: innerHeight, container: at ? { top: at.top, left: at.left } : null };
+  });
+  const checks = (h.results.checks ??= {});
+  const offset = got.container && (Math.abs(got.container.top) >= 1 || Math.abs(got.container.left) >= 1);
+  checks["tour position"] = (checks["tour position"] || 0) + 1;
+  if (offset) checks["tour position inside an offset size container"] = (checks["tour position inside an offset size container"] || 0) + 1;
+  const off = Math.max(Math.abs(got.top - got.want.top), Math.abs(got.left - got.want.left));
+  if (got.position !== "fixed" || !(off <= 1) || got.top < 0 || got.left < 0 || got.bottom > got.height || got.right > got.width)
+    return `tour card at ${Math.round(got.left)},${Math.round(got.top)} (${got.position}), intended ${got.want.left},${got.want.top} in a ${got.width}x${got.height} viewport; size container at ${got.container ? `${Math.round(got.container.left)},${Math.round(got.container.top)}` : "none"}`;
+  return null;
+}
 /** Walk the board tour that a new owner's first board visit opens, then
  * require the server to have recorded it as seen. */
 async function finishTour(h) {
@@ -40,7 +65,9 @@ async function finishTour(h) {
   await tour.waitFor({ timeout: 10000 });
   let steps = 0;
   for (; steps < 10 && await tour.isVisible().catch(() => false); steps++) {
-    await h.state(`tour step ${steps + 1}`);
+    const record = await h.state(`tour step ${steps + 1}`);
+    const misplaced = await tourPlacement(h);
+    if (misplaced) record.problems.push({ kind: "tour-position", detail: misplaced });
     await page.locator(tid("tour-next")).click();
     await page.waitForTimeout(150);
   }

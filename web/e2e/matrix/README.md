@@ -98,6 +98,7 @@ Chromium (measured: the status stayed "live" for 20 s), hence the restart.
 | reduced motion | under `prefers-reduced-motion: reduce`, no running transition or animation |
 | axe | `axe.run(document)` with axe-core's default rules (WCAG 2.0-2.2 A/AA and best practice): zero violations |
 | tour | once onboarding has finished the board tour, it is not open on any later state (a `?tour=1` replay excepted) |
+| tour-position | on every board-tour step: the card is `position:fixed` and its box is where `Tour.tsx` put it in viewport pixels (within 1 px) and inside the viewport, although it sits in `.page`, a size container (`container-type:inline-size`). Counted as the `tour position` check in the summary, with how many ran inside an offset container |
 | heading | an empty state's title is deeper than its section's own heading |
 
 ### Profiles and modes

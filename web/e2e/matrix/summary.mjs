@@ -36,6 +36,10 @@ for (const r of runs) {
 const excluded = runs.flatMap((r) => (r.excluded || []).map((x) => ({ ...x, where: `${r.engine}/${r.profile}/${r.unit}` })));
 console.log(`\nruns ${runs.length}${expected ? ` of ${expected.length} expected` : ""}, flows ${flowsOk + flowsFail} (${flowsOk} pass, ${flowsFail} fail), states checked ${states}`);
 console.log("problems by kind:", JSON.stringify(kinds));
+// Named checks a flow counts itself (results.checks), summed per engine.
+const checks = {};
+for (const r of runs) for (const [k, n] of Object.entries(r.checks || {})) (checks[k] ??= {})[r.engine] = (checks[k][r.engine] || 0) + n;
+for (const [k, by] of Object.entries(checks)) console.log(`check "${k}": ${Object.entries(by).map(([e, n]) => `${e} ${n}`).join(", ")}`);
 console.log("\ndistinct problems:");
 for (const [k, d] of [...distinct].sort((a, b) => b[1].n - a[1].n)) console.log(`${String(d.n).padStart(5)}  ${k}  [${[...d.where].slice(0, 6).join(" ")}${d.where.size > 6 ? " …" : ""}]`);
 // Engine messages set aside by lib.mjs (screenshotProbe, leftPage), by reason.
