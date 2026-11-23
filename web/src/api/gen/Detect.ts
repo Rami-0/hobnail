@@ -13,6 +13,11 @@ export type Detect = {
  */
 images: Array<string>,
 /**
+ * Substrings that rule a match out, e.g. `beszel-agent` (no web API)
+ * for the Beszel hub.
+ */
+not: Array<string>,
+/**
  * The API port inside the container.
  */
 port: number, };

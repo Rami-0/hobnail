@@ -36,6 +36,7 @@ use crate::{
 
 mod adguard_home;
 mod arr;
+mod beszel;
 mod bookmarks;
 mod clock;
 mod connection;
@@ -100,6 +101,7 @@ pub const REGISTRY: &[Provider] = &[
     wg_easy::WG_EASY,
     nginx_proxy_manager::NGINX_PROXY_MANAGER,
     glances::GLANCES,
+    beszel::BESZEL,
     plex::PLEX,
     immich::IMMICH,
     transmission::TRANSMISSION,
@@ -198,12 +200,27 @@ pub struct Detect {
     /// Lower-case substrings of the image repository, e.g. `sonarr` for
     /// `lscr.io/linuxserver/sonarr:latest`. Longer, more specific needles win.
     pub images: &'static [&'static str],
+    /// Substrings that rule a match out, e.g. `beszel-agent` (no web API)
+    /// for the Beszel hub.
+    pub not: &'static [&'static str],
     /// The API port inside the container.
     pub port: u16,
 }
 
 pub const fn detect(images: &'static [&'static str], port: u16) -> Option<Detect> {
-    Some(Detect { images, port })
+    Some(Detect {
+        images,
+        not: &[],
+        port,
+    })
+}
+
+pub const fn detect_except(
+    images: &'static [&'static str],
+    not: &'static [&'static str],
+    port: u16,
+) -> Option<Detect> {
+    Some(Detect { images, not, port })
 }
 
 /// A widget's size in board grid units.

@@ -63,7 +63,7 @@ service instance.
 ## Monitoring and uptime
 
 - [x] Uptime Kuma: monitor states, uptime %, incidents. **S**
-- [ ] Beszel: host and container metrics. **M**
+- [x] Beszel: systems with CPU, memory and disk, fleet summary. **M**
 - [ ] Netdata: key metrics, alarms. **M**
 - [ ] Prometheus: arbitrary instant query as a number or sparkline. **M**
 - [ ] Grafana: alert state, dashboard link health. **M**

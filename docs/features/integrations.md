@@ -601,6 +601,40 @@ plugins and live reverse proxies; v3 history and process list (v3 has no
 processes busiest first (Hobnail sorts the ten it receives by CPU); sensor
 unit codes other than `C` and `R`.
 
+## Beszel
+
+Enter the Beszel hub URL (port 8090 by default) and the email and password
+of a Beszel user; a read-only user sees the systems shared with it.
+Hobnail exchanges them for a PocketBase auth token
+(`POST /api/collections/users/auth-with-password` with `identity` and
+`password`), sends the token as the bare `Authorization` value PocketBase
+documents, and signs in again once when it is rejected. A wrong email or
+password (PocketBase answers 400) reads as an authentication failure. The
+connection test signs in and lists the systems. The hub is detected from
+the `henrygd/beszel` image; the agent image is not a hub and is skipped.
+
+Widgets read `GET /api/collections/systems/records` (up to 50 systems,
+sorted by name, only `name`, `status` and `info`):
+
+- **Systems** (recommended, 4x3): up to twelve systems with a status dot
+  (up, down, paused or pending), "CPU · RAM · Disk" percentages, uptime,
+  and a bar for the fullest of the three.
+- **System resources** (4x3): CPU (with cores), memory and disk meters for
+  up to four systems that are up; one system's rows are just CPU, Memory
+  and Disk.
+- **Fleet summary** (4x2): systems up, down and paused, and the average CPU
+  of those up.
+
+Verified from:
+
+- [PocketBase records API](https://pocketbase.io/docs/api-records/) (auth with password, list records, `Authorization: TOKEN`)
+- [Beszel `system.Info`](https://github.com/henrygd/beszel/blob/main/internal/entities/system/system.go) (`u`, `cpu`, `mp`, `dp`, `c`)
+- [Beszel hub system records](https://github.com/henrygd/beszel/blob/main/internal/hub/systems/system.go) (`status`, `info`, `name`)
+
+UNVERIFIED: live hubs, releases before the `info` keys above, users with
+multi-factor authentication or OAuth-only sign-in, and API tokens (tokens
+expire, so Hobnail signs in with the password instead).
+
 ## Plex
 
 Enter your Plex Media Server URL and a Plex access token for that server
