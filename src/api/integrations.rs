@@ -208,17 +208,18 @@ pub(super) fn suggestion_targets(
     conn: &Connection,
     user: &Principal,
     include_local: bool,
-) -> Result<Vec<(String, String)>, ApiError> {
-    let mut stmt = conn
-        .prepare("SELECT id, name FROM integrations WHERE ?1 OR origin <> '' ORDER BY name, id")?;
+) -> Result<Vec<(String, String, String)>, ApiError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, kind FROM integrations WHERE ?1 OR origin <> '' ORDER BY name, id",
+    )?;
     let rows = stmt.query_map([include_local], |row| {
-        Ok((row.get::<_, String>(0)?, row.get(1)?))
+        Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?))
     })?;
     let mut visible = Vec::new();
     for row in rows {
-        let (id, name) = row?;
+        let (id, name, kind) = row?;
         if user.can_see_integration(&id) {
-            visible.push((id, name));
+            visible.push((id, name, kind));
         }
     }
     Ok(visible)

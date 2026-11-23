@@ -370,6 +370,10 @@ pub struct ResolvedItem {
 pub struct BoardSuggestion {
     pub title: String,
     pub payload: BoardPayload,
+    /// Display only, never saved with the item: the provider's logo for an
+    /// integration, the container's icon (brand logo from its image) for a
+    /// container.
+    pub icon: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1268,7 +1272,7 @@ pub(super) const SUGGESTION_LIMIT: usize = 256;
 pub(super) fn suggestions(
     state: &AppState,
     doc: Option<&BoardDocument>,
-    integrations: Vec<(String, String)>,
+    integrations: Vec<(String, String, String)>,
     container_targets: Option<HashSet<ContainerMatch>>,
 ) -> Vec<BoardSuggestion> {
     let cfg = state.config.current();
@@ -1280,17 +1284,21 @@ pub(super) fn suggestions(
         .flat_map(|section| &section.items)
         .map(|item| identity(&item.payload))
         .collect();
-    let integrations = integrations.into_iter().map(|(id, name)| BoardSuggestion {
-        title: name,
-        payload: BoardPayload::Integration {
-            integration_id: id,
-            title: None,
-        },
-    });
+    let integrations = integrations
+        .into_iter()
+        .map(|(id, name, kind)| BoardSuggestion {
+            icon: crate::providers::get(&kind).map(|p| p.icon.to_owned()),
+            title: name,
+            payload: BoardPayload::Integration {
+                integration_id: id,
+                title: None,
+            },
+        });
     let widgets = cfg.widgets.iter().filter(|_| !scoped).filter_map(|widget| {
         let title = widget.title.as_deref().unwrap_or(&widget.id);
         super::validate_label(title, "title").ok()?;
         Some(BoardSuggestion {
+            icon: None,
             title: title.to_owned(),
             payload: BoardPayload::Widget {
                 widget_id: widget.id.clone(),
@@ -1306,6 +1314,7 @@ pub(super) fn suggestions(
             safe_link(&bookmark.url, "url").ok()?;
             super::validate_label(&bookmark.name, "title").ok()?;
             Some(BoardSuggestion {
+                icon: None,
                 title: bookmark.name.clone(),
                 payload: BoardPayload::Link {
                     title: bookmark.name.clone(),
@@ -1336,6 +1345,7 @@ pub(super) fn suggestions(
             return None;
         }
         Some(BoardSuggestion {
+            icon: crate::read_model::container_icon(&cfg, container),
             title: title.to_owned(),
             payload: BoardPayload::Container {
                 target,

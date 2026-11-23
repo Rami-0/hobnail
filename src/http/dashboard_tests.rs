@@ -3135,6 +3135,28 @@ async fn detected_services_from_the_fake_docker_snapshot() {
         .await;
     assert_eq!(found.as_array().unwrap().len(), 1);
     assert_eq!(found[0]["provider"], "pihole");
+    // The Add picker shows logos: the provider's for an integration, the
+    // image's brand logo for a container.
+    let board = owner.board("Picker").await;
+    let suggestions = owner
+        .json(
+            "GET",
+            &format!("/api/v1/boards/{board}/suggestions"),
+            Value::Null,
+            200,
+        )
+        .await;
+    let icon = |title: &str| {
+        suggestions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["title"] == title)
+            .map(|s| s["icon"].clone())
+    };
+    assert_eq!(icon("Sonarr"), Some(json!("sonarr")));
+    assert_eq!(icon("pihole"), Some(json!("pi-hole")));
+    assert_eq!(icon("postgres"), Some(json!("postgres")));
     // A scoped admin cannot connect new integrations, so sees no detection.
     let board = owner.board("Scoped").await;
     let admin = owner

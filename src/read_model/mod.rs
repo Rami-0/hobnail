@@ -243,6 +243,23 @@ pub fn build_groups(cfg: &Config, snap: &Snapshot, stats: &StatsMap, host: &str)
     out
 }
 
+/// A container's icon: the override, the `hobnail.icon` label, else one
+/// guessed from its image (a vendored brand logo, a dashboard-icons name
+/// when remote icons are on, or a built-in glyph) unless auto icons are off.
+pub fn container_icon(cfg: &Config, c: &Container) -> Option<String> {
+    cfg.containers
+        .get(&c.name)
+        .and_then(|o| o.icon.clone())
+        .filter(|s| !s.is_empty())
+        .or_else(|| label(c, LABEL_ICON).map(str::to_string))
+        .or_else(|| {
+            cfg.icons
+                .auto
+                .then(|| crate::http::icons::auto_icon(&c.image, cfg.icons.remote))
+                .flatten()
+        })
+}
+
 fn label<'a>(c: &'a Container, key: &str) -> Option<&'a str> {
     c.labels
         .get(key)
@@ -332,16 +349,7 @@ fn container_card(
             })
         })
         .filter(|s| !s.is_empty());
-    let icon = ov
-        .and_then(|o| o.icon.clone())
-        .filter(|s| !s.is_empty())
-        .or_else(|| label(c, LABEL_ICON).map(str::to_string))
-        .or_else(|| {
-            cfg.icons
-                .auto
-                .then(|| crate::http::icons::auto_icon(&c.image, cfg.icons.remote))
-                .flatten()
-        });
+    let icon = container_icon(cfg, c);
     let ports = port_views(&c.ports, host);
     let url = ov
         .and_then(|o| o.url.clone())
