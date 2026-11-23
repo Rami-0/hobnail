@@ -210,7 +210,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     const x0 = event.clientX; const y0 = event.clientY;
     const grab = { x: x0 - box.left, y: y0 - box.top };
     const pointer = event.pointerId;
-    let started = false; let frame = 0; let current: Drag | null = null;
+    let started = false; let frame = 0; let current: Drag | null = null; let last = { x: x0, y: y0 };
     let press: ReturnType<typeof setTimeout> | null = null;
     const block = (e: TouchEvent) => { if (started) e.preventDefault(); };
     const compute = (cx: number, cy: number): Drag | null => {
@@ -240,6 +240,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       return { mode, s, i, origin, target, preview, placeholder: preview.at(-1) ?? origin, source, dx, dy };
     };
     const update = (cx: number, cy: number) => {
+      last = { x: cx, y: cy };
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => { current = compute(cx, cy); setDrag(current); });
     };
@@ -255,7 +256,9 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", abort);
       window.removeEventListener("keydown", escape, true); document.removeEventListener("touchmove", block);
-      const result = current; setDrag(null);
+      // The last move may still be waiting for its frame: place the drop
+      // where the pointer was released.
+      const result = drop && started ? compute(last.x, last.y) : current; setDrag(null);
       if (!drop || !started || !result) { if (started) setAnnouncement("Move cancelled"); return; }
       const label = titleOf(s, i);
       if (result.mode === "resize") commitLayout(s, result.preview, `${label} resized to ${result.placeholder.w} by ${result.placeholder.h}`);
@@ -275,7 +278,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       }
       update(e.clientX, e.clientY);
     };
-    const up = (e: PointerEvent) => { if (e.pointerId === pointer) finish(true); };
+    const up = (e: PointerEvent) => { if (e.pointerId !== pointer) return; if (started) last = { x: e.clientX, y: e.clientY }; finish(true); };
     const abort = (e: PointerEvent) => { if (e.pointerId === pointer) finish(false); };
     const escape = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); } };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", abort);
@@ -342,7 +345,8 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       <div className="page-actions"><Button variant="outline" busy={busy} data-testid="board-cancel" onClick={() => { void cancel(); }}>Cancel</Button>
         <Button variant="default" busy={busy} disabled={conflict} data-testid="board-save" onClick={() => { void save(); }}>Save</Button></div>
     </div>
-    <p className="editor-hint">Drag a tile anywhere; drag its corner to resize{" "}(on touch, press and hold first). On a focused <GripVerticalIcon aria-label="grip" width={14} height={14} />, arrows move and <kbd>Shift</kbd> + arrows resize.</p>
+    <p className="editor-hint"><span className="hint-wide">Drag a tile anywhere; drag its corner to resize (on touch, press and hold first). On a focused <GripVerticalIcon aria-label="grip" width={14} height={14} />, arrows move and <kbd>Shift</kbd> + arrows resize.</span>
+      <span className="hint-phone">Reorder tiles with the arrows on each one. Resize and place them freely on a wider screen.</span></p>
     {(changed || conflict) && <Note kind="warn" testId="board-conflict">Another session saved this board. Your changes are kept here.
       {initial.version !== view.document.version && <p>A recovered draft keeps server additions. Review it before saving; you may need to apply removals again.</p>}
       <Button data-testid="board-rebase" disabled={busy} onClick={async () => { if (operation.current) return; operation.current = true; setBusy(true); await settle(); const result = await api.get<BoardView>(path); if (result.kind !== "ok") { setError(result.message); operation.current = false; setBusy(false); return; }

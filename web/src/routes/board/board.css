@@ -11,7 +11,7 @@
 .board-page[data-surface="glass"] .board-tile{background:color-mix(in srgb,var(--card) 62%,transparent);-webkit-backdrop-filter:blur(16px) saturate(1.4);backdrop-filter:blur(16px) saturate(1.4);border-color:color-mix(in srgb,var(--foreground) 10%,transparent);box-shadow:0 1px 0 0 color-mix(in srgb,#fff 14%,transparent) inset,var(--shadow-sm)}
 .board-page[data-surface="outline"] .board-tile{background:transparent;box-shadow:none;border-color:color-mix(in srgb,var(--foreground) 16%,var(--border))}
 .board-page[data-surface="outline"] .board-tile .sw-cell{background:transparent;border:1px solid var(--border)}
-main:has(>.board-page[data-bg]){background-attachment:fixed;background-color:var(--background)}
+main:has(>.board-page[data-bg]){background-color:var(--background);background-repeat:no-repeat;background-size:100% min(100%,1400px)}
 main:has(>.board-page[data-bg="dawn"]){background-image:radial-gradient(60% 50% at 8% 0%,color-mix(in srgb,#f59e0b 20%,transparent),transparent 70%),radial-gradient(50% 45% at 92% 6%,color-mix(in srgb,#ec4899 16%,transparent),transparent 70%)}
 main:has(>.board-page[data-bg="dusk"]){background-image:radial-gradient(60% 55% at 12% 0%,color-mix(in srgb,#6366f1 22%,transparent),transparent 70%),radial-gradient(55% 50% at 95% 15%,color-mix(in srgb,#a855f7 18%,transparent),transparent 70%),radial-gradient(50% 40% at 50% 100%,color-mix(in srgb,#f43f5e 10%,transparent),transparent 70%)}
 main:has(>.board-page[data-bg="aurora"]){background-image:radial-gradient(55% 50% at 0% 0%,color-mix(in srgb,#14b8a6 22%,transparent),transparent 70%),radial-gradient(45% 45% at 70% 0%,color-mix(in srgb,#22c55e 14%,transparent),transparent 70%),radial-gradient(60% 50% at 100% 60%,color-mix(in srgb,#8b5cf6 16%,transparent),transparent 70%)}
@@ -109,7 +109,7 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .editor-section-head{display:flex;align-items:center;gap:var(--s-2);flex-wrap:wrap;min-width:0}
 .editor-section-head .section-toggle{margin:0}
 .editor-section-head .section-toggle::before{display:none}
-.section-title-input{flex:0 1 320px;min-width:min(100%,140px)}
+.section-title-input{flex:0 1 320px;min-width:0}
 .section-title-input .in{font-weight:600;background:transparent;border-color:transparent}
 .section-title-input .in:hover{border-color:var(--border)}
 .section-title-input .in:focus{background:var(--card);border-color:var(--input)}
@@ -129,6 +129,7 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .canvas-item.editable .board-tile .tile-details{display:none}
 .canvas-item.editable:hover .board-tile{border-color:color-mix(in srgb,var(--board-accent) 45%,var(--border))}
 .canvas-item.editable[data-selected] .board-tile,.canvas-item.editable:focus-within .board-tile{border-color:var(--board-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--board-accent) 22%,transparent),var(--shadow-sm)}
+.canvas-item[data-moving] :is(.tile-tools,.drag-handle,.resize-handle){visibility:hidden}
 .canvas-item[data-moving]{z-index:5;transition:none;transform:translate(var(--dx),var(--dy));pointer-events:none}
 .canvas-item[data-moving] .board-tile{transform:rotate(-.6deg) scale(1.02);box-shadow:var(--shadow-3);border-color:var(--board-accent);transition:transform var(--dur-2) var(--ease-out)}
 .canvas-item[data-resizing]{z-index:4;transition:none}
@@ -164,6 +165,9 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 @media (hover:none){.drag-handle.btn,.tile-tools,.resize-handle{opacity:1;transform:none}}
 @container board (max-width:559px){
   .tile-tools .phone-only{display:inline-flex}
+  .canvas-item.editable{padding-top:40px;border-radius:var(--r-lg);background:color-mix(in srgb,var(--muted) 45%,transparent)}
+  .canvas-item.editable .drag-handle.btn{top:4px;left:4px}
+  .canvas-item.editable .tile-tools{top:4px;right:4px;border:0;box-shadow:none;background:transparent}
   .drag-handle.btn,.tile-tools{opacity:1;transform:none}
   .canvas.editing{background-image:none;outline:0}
   .canvas-empty{position:relative}
@@ -254,4 +258,28 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
  .board-page>.page-header .page-actions>.btn{flex:1}
  .board-page>.page-header .page-heading-copy{min-width:min(100%,180px)}
  .board-tile{padding:var(--s-3)}
+}
+
+.hint-phone{display:none}
+@media (max-width:700px){
+  .hint-wide{display:none}.hint-phone{display:inline}
+  .editor-bar{padding:var(--s-2) var(--s-2) var(--s-2) var(--s-3)}
+  .editor-bar-copy{flex-basis:100%}
+  .editor-bar-tools{flex:1}
+  .editor-section{padding:var(--s-2) var(--s-3) var(--s-3)}
+  .editor-section-head .section-title-input{flex:1 1 0}
+  .editor-section-tools{flex-basis:100%;justify-content:flex-end;margin-top:calc(-1 * var(--s-1))}
+}
+
+/* ---- narrow tiles: the status pill moves under the name, metrics drop to two ---- */
+.canvas-item{container:tile/inline-size}
+@container tile (max-width:250px){
+  .board-tile-head{flex-wrap:wrap;row-gap:var(--s-1)}
+  .board-tile-head>.status-pill{order:3;margin-inline-start:calc(40px + var(--s-3))}
+  .tile-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tile-metrics>div:nth-child(3){display:none}
+}
+@container tile (max-width:170px){
+  .board-tile-head>.board-avatar{display:none}
+  .board-tile-head>.status-pill{margin-inline-start:0}
 }
