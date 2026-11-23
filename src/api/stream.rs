@@ -33,6 +33,27 @@ use crate::state::AppState;
 /// Messages queued per connection before the sender waits.
 const QUEUE: usize = 16;
 const PING: Duration = Duration::from_secs(25);
+/// How long a frame may wait for room in the queue. The queue is full only
+/// while the client reads nothing, so a client that has not taken a frame
+/// (pings included) for two ping periods has stopped reading: its stream
+/// ends and frees its connection and task.
+const SEND_DEADLINE: Duration = Duration::from_secs(2 * PING.as_secs());
+
+/// Queues `msg`; false once the client is gone or past [`SEND_DEADLINE`].
+async fn send(tx: &mpsc::Sender<Queued>, msg: Queued) -> bool {
+    matches!(
+        tokio::time::timeout(SEND_DEADLINE, tx.send(msg)).await,
+        Ok(Ok(()))
+    )
+}
+
+/// A queue slot within [`SEND_DEADLINE`], or None (end the stream).
+async fn reserve(tx: &mpsc::Sender<Queued>) -> Option<mpsc::Permit<'_, Queued>> {
+    tokio::time::timeout(SEND_DEADLINE, tx.reserve())
+        .await
+        .ok()?
+        .ok()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -330,7 +351,7 @@ async fn run(
     mut sub: broadcast::Receiver<Arc<str>>,
     tx: mpsc::Sender<Queued>,
 ) {
-    if tx.send(event("hello", &hello(&st)).into()).await.is_err() {
+    if !send(&tx, event("hello", &hello(&st)).into()).await {
         return;
     }
     let session_hash: Arc<str> = session_hash.into();
@@ -363,7 +384,7 @@ async fn run(
     provider_viewer.set(provider_targets(&principal));
     if let Some(board) = &board {
         for id in provider_viewer.ids() {
-            let Ok(permit) = tx.reserve().await else {
+            let Some(permit) = reserve(&tx).await else {
                 return;
             };
             let generation = st.db.provider_scope_generation();
@@ -383,10 +404,11 @@ async fn run(
             .iter()
             .filter(|w| visible_widget(&targets, &w.id))
         {
-            if tx
-                .send(event("widget", &super::widgets::view(&st, widget)).into())
-                .await
-                .is_err()
+            if !send(
+                &tx,
+                event("widget", &super::widgets::view(&st, widget)).into(),
+            )
+            .await
             {
                 return;
             }
@@ -394,7 +416,7 @@ async fn run(
     }
     if topics.system && !principal.is_scoped() {
         if let Some(s) = system_view(&st) {
-            if tx.send(event("system", &s).into()).await.is_err() {
+            if !send(&tx, event("system", &s).into()).await {
                 return;
             }
         }
@@ -442,7 +464,7 @@ async fn run(
                     }
                     raw if raw.starts_with("w-provider:") && provider_viewer.includes(&raw[2..]) => {
                         let Some(board) = &board else { continue };
-                        let Ok(permit) = tx.reserve().await else { break };
+                        let Some(permit) = reserve(&tx).await else { break };
                         let generation = st.db.provider_scope_generation();
                         let Some(account) = self::account(&st, &session_hash).await else { break };
                         if let Some(widget) = super::provider_widgets::view(&st, &account, board, &raw[2..]) {
@@ -493,7 +515,7 @@ async fn run(
             },
             _ = tx.closed() => break,
         };
-        if tx.send(msg.into()).await.is_err() {
+        if !send(&tx, msg.into()).await {
             break;
         }
     }
@@ -531,6 +553,28 @@ pub fn get(state: &Arc<AppState>, query: &str, head: bool, session_hash: String)
 mod tests {
     use super::*;
     use crate::db::accounts::{AccountChange, Scopes};
+
+    #[tokio::test(start_paused = true)]
+    async fn a_client_that_stops_reading_ends_its_stream() {
+        let state = crate::testutil::state_with(Vec::new(), "");
+        let now = crate::auth::now_s();
+        assert!(state.db.create_session("unread", now, now + 3600));
+        let (tx, mut rx) = mpsc::channel(QUEUE);
+        let sub = state.events.subscribe();
+        let topics = Topics::parse("topics=boards");
+        let stream = tokio::spawn(run(state.clone(), topics, "unread".into(), None, sub, tx));
+        // Hello and pings fill the queue; the next ping waits SEND_DEADLINE.
+        let ends = PING * (QUEUE as u32) + SEND_DEADLINE + Duration::from_secs(1);
+        tokio::time::timeout(ends, stream)
+            .await
+            .expect("the stream ends instead of waiting forever")
+            .unwrap();
+        let mut queued = 0;
+        while rx.try_recv().is_ok() {
+            queued += 1;
+        }
+        assert_eq!(queued, QUEUE, "it ended on a full queue");
+    }
 
     #[tokio::test]
     async fn revoking_a_scope_drops_queued_provider_frames() {

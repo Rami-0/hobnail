@@ -201,6 +201,35 @@ async fn stream_tails_and_stops_after_disconnect() {
     eprintln!("docker stream closed {took:?} after the viewer left");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_stream_the_client_stops_reading_ends_after_the_send_deadline() {
+    let fake = fake_docker("unread").await;
+    let st = state_on(&fake.path, "unread");
+    let hash = crate::auth::sha256_hex(b"unread");
+    let now = crate::auth::now_s();
+    assert!(st.db.create_session(&hash, now, now + 600));
+    let q = crate::http::query::parse_query("c=web&tail=10");
+    // The body is held but never polled: a client that stopped reading.
+    let _unread = super::tail::sse(&st, vec!["web".into()], super::stream_query(&q, 500), hash);
+    let t = Instant::now();
+    while fake.open.load(Ordering::SeqCst) == 0 && t.elapsed() < Duration::from_secs(5) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(fake.open.load(Ordering::SeqCst), 1, "the tail started");
+    let limit = super::tail::SEND_DEADLINE + Duration::from_secs(5);
+    while fake.open.load(Ordering::SeqCst) > 0 && t.elapsed() < limit {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        fake.closed.load(Ordering::SeqCst),
+        "the stream gave up on the full queue and closed the docker tail"
+    );
+    assert!(
+        t.elapsed() >= super::tail::SEND_DEADLINE,
+        "not before the deadline"
+    );
+}
+
 /// A closed window is read from its start (`tail=all` toward Docker) and
 /// cut by the server at the asked-for count; an open one keeps `tail`.
 #[test]

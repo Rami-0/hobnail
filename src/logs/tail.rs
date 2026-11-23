@@ -37,6 +37,20 @@ const LINE_QUEUE: usize = 8;
 /// How long a batch may wait for more lines before it is sent.
 const GATHER: Duration = Duration::from_millis(25);
 const BODY_QUEUE: usize = 4;
+/// How long a body chunk may wait for room in the queue. The queue is full
+/// only while the client reads nothing; after the same 15 s every other
+/// response gets for a stalled write, the stream or download ends and frees
+/// its connection and tasks. (Two of this stream's 2 s pings would cut off
+/// a client on a briefly stalled link.)
+pub(crate) const SEND_DEADLINE: Duration = crate::http::server::LIMITS.write_timeout;
+
+/// Queues `chunk`; false once the client is gone or past [`SEND_DEADLINE`].
+async fn send(tx: &mpsc::Sender<Bytes>, chunk: Bytes) -> bool {
+    matches!(
+        tokio::time::timeout(SEND_DEADLINE, tx.send(chunk)).await,
+        Ok(Ok(()))
+    )
+}
 
 /// A response body fed by a channel.
 pub struct ChanBody {
@@ -210,7 +224,7 @@ pub fn sse(
             tokio::spawn(reader(socket.clone(), i, n.clone(), q.clone(), ltx.clone()));
         }
         drop(ltx);
-        if tx.send(sse_event("hello", "")).await.is_err() {
+        if !send(&tx, sse_event("hello", "")).await {
             return;
         }
         let mut ping = tokio::time::interval(PING);
@@ -221,7 +235,7 @@ pub fn sse(
                 m = lrx.recv() => m,
                 _ = ping.tick() => {
                     if !session_can_read_logs(&state, &session_hash, &names)
-                        || tx.send(Bytes::from_static(b": p\n\n")).await.is_err() {
+                        || !send(&tx, Bytes::from_static(b": p\n\n")).await {
                         return;
                     }
                     continue;
@@ -232,7 +246,7 @@ pub fn sse(
                 return;
             }
             let Some(first) = first else {
-                let _ = tx.send(sse_event("done", "")).await;
+                let _ = send(&tx, sse_event("done", "")).await;
                 return;
             };
             // Gather what is already queued into one event.
@@ -269,13 +283,13 @@ pub fn sse(
                     // Keep order: flush the lines gathered so far first.
                     if n > 0 {
                         batch.push(']');
-                        if tx.send(sse_event("l", &batch)).await.is_err() {
+                        if !send(&tx, sse_event("l", &batch)).await {
                             return;
                         }
                         batch.clear();
                         n = 0;
                     }
-                    if tx.send(ev).await.is_err() {
+                    if !send(&tx, ev).await {
                         return;
                     }
                 }
@@ -293,7 +307,7 @@ pub fn sse(
             }
             if n > 0 {
                 batch.push(']');
-                if tx.send(sse_event("l", &batch)).await.is_err() {
+                if !send(&tx, sse_event("l", &batch)).await {
                     return;
                 }
             }
@@ -366,16 +380,11 @@ pub fn download(
                     _ => {}
                 }
                 let flush = chunk.len() >= 64 * 1024 || (lrx.is_empty() && !chunk.is_empty());
-                if flush
-                    && tx
-                        .send(Bytes::from(std::mem::take(&mut chunk)))
-                        .await
-                        .is_err()
-                {
+                if flush && !send(&tx, Bytes::from(std::mem::take(&mut chunk))).await {
                     return;
                 }
             }
-            if !chunk.is_empty() && tx.send(Bytes::from(chunk)).await.is_err() {
+            if !chunk.is_empty() && !send(&tx, Bytes::from(chunk)).await {
                 return;
             }
         }
