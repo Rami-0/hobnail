@@ -308,7 +308,7 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .status-info{background:var(--info-bg);color:var(--info);border-color:color-mix(in srgb,var(--info) 22%,transparent)}
 .status-off{color:var(--muted-foreground);border-color:var(--border)}
 .status-off .status-dot{background:none;box-shadow:inset 0 0 0 1.5px currentColor}
-.icon-tint{--tint-fg:light-dark(hsl(var(--hue) 55% 32%),hsl(var(--hue) 75% 78%));background:color-mix(in srgb,hsl(var(--hue) 65% 50%) 16%,var(--card))!important;color:var(--tint-fg)!important;box-shadow:inset 0 0 0 1px color-mix(in srgb,hsl(var(--hue) 65% 50%) 22%,transparent);letter-spacing:-.02em}
+.icon-tint{--tint-fg:light-dark(hsl(var(--hue) 60% 27%),hsl(var(--hue) 75% 78%));background:color-mix(in srgb,hsl(var(--hue) 65% 50%) 16%,var(--card))!important;color:var(--tint-fg)!important;box-shadow:inset 0 0 0 1px color-mix(in srgb,hsl(var(--hue) 65% 50%) 22%,transparent);letter-spacing:-.02em}
 .icon-tint-img{padding:5px;background:var(--muted)!important;box-shadow:inset 0 0 0 1px var(--border)}
 
 /* ---- structured widget bodies ---- */

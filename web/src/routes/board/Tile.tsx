@@ -51,7 +51,9 @@ function ContainerStats({ row }: { row: ContainerRow }) {
   </div>;
 }
 
-export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedItem }) {
+/** `inert` while editing: the tile is a picture of itself, its links and
+ * controls out of the tab order and the accessibility tree. */
+export function Tile({ item, resolved, inert }: { item: BoardItem; resolved?: ResolvedItem; inert?: boolean }) {
   const b = useBootstrap();
   const live = useContainers();
   const p = item.payload;
@@ -106,7 +108,7 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   if (look?.hide_status && !targetMissing && p.kind !== "link") pill = null;
   if (look?.hide_metrics && !targetMissing && (p.kind === "container" || p.kind === "integration")) body = null;
   const accent = look?.accent ? { "--tile-accent": ACCENTS[look.accent].color } as CSSProperties : undefined;
-  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined} data-accent={look?.accent} style={accent}>
+  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined} data-accent={look?.accent} style={accent} inert={inert}>
     <header className="board-tile-head">
       <ServiceIcon className="board-avatar" tint name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <div className="board-tile-id">

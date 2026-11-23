@@ -42,10 +42,11 @@ function BoardGroup({ section, view, updates }: { section: BoardSection; view: B
   const [open, setOpen] = useState(!section.collapsed);
   const rects = section.items.map(rectOf);
   const id = `section-${section.id}`;
-  return <section className="board-section" data-collapsed={open ? undefined : ""} aria-labelledby={`${id}-title`}>
+  // Not a landmark: two sections may share a title.
+  return <section className="board-section" data-collapsed={open ? undefined : ""}>
     <header className="board-section-head">
       <Button variant="ghost" size="sm" className="section-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
-        <ChevronDownIcon aria-hidden="true" className="section-chevron" /><h2 id={`${id}-title`}>{section.title}</h2>
+        <ChevronDownIcon aria-hidden="true" className="section-chevron" /><h2>{section.title}</h2>
       </Button>
       <span className="section-count" aria-label={`${section.items.length} items`}>{section.items.length}</span>
       <span className="section-summary">{sectionSummary(view, section.items.map((item) => item.id))}</span>

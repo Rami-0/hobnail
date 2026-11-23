@@ -397,7 +397,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
           return <div key={item.id ?? `item-${i}`} className="canvas-item editable" data-section={s} data-item={i} style={style}
             data-moving={moving ? "" : undefined} data-resizing={resizing ? "" : undefined} data-selected={selected ? "" : undefined} data-added={added === `${s}:${i}` ? "" : undefined}
             onPointerDown={(e) => grabTile(e, s, i)} onContextMenu={(e) => { if (drag) e.preventDefault(); }}>
-            <Tile item={item} resolved={view.resolved.find((r) => r.id === item.id)} />
+            <Tile inert item={item} resolved={view.resolved.find((r) => r.id === item.id)} />
             <Button variant="ghost" size="icon" className="drag-handle" onKeyDown={(e) => key(e, s, i)} onPointerDown={(e) => { e.stopPropagation(); begin(e, s, i, "move"); }}
               aria-label={`Move ${label}`} aria-describedby="board-move-help" title="Drag to move; arrows move, Shift+arrows resize"><GripVerticalIcon aria-hidden="true" /></Button>
             <div className="tile-tools">

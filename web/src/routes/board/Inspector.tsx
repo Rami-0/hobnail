@@ -1,4 +1,5 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { Dialog } from "../../ui/Dialog.tsx";
 import { MinusIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import type { Accent } from "../../api/gen/Accent.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
@@ -20,7 +21,20 @@ type Change = (action: Action, message: string, merge?: string) => void;
 
 /** A non-modal side panel: the canvas stays visible and live beside it.
  * Focus moves in on open; Escape or Close returns it to the opener. */
-function Side({ title, testId, onClose, children }: { title: string; testId: string; onClose: () => void; children: ReactNode }) {
+const WIDE = "(min-width: 1100px)";
+const subscribe = (change: () => void) => { const m = matchMedia(WIDE); m.addEventListener("change", change); return () => m.removeEventListener("change", change); };
+const wide = () => matchMedia(WIDE).matches;
+
+/** Beside the canvas on wide screens; below that there is no room beside
+ * it, so the same content is a modal dialog. */
+function Side(props: { title: string; testId: string; onClose: () => void; children: ReactNode }) {
+  const roomy = useSyncExternalStore(subscribe, wide, () => true);
+  if (!roomy) return <Dialog open title={props.title} testId={props.testId} onClose={props.onClose} footer={<Button variant="default" onClick={props.onClose}>Done</Button>}>
+    <div className="inspector-body inspector-dialog">{props.children}</div></Dialog>;
+  return <Aside {...props} />;
+}
+
+function Aside({ title, testId, onClose, children }: { title: string; testId: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLElement>(null);
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; });

@@ -378,7 +378,7 @@ export const flows = {
     await page.locator(tid("board-panel")).waitFor();
     await page.locator(`${tid("board-panel")} .bg-swatch[data-bg="aurora"]`).click();
     await h.state("board style panel");
-    await page.locator(`${tid("board-panel")} .inspector-close`).click();
+    await page.keyboard.press("Escape");
     await page.locator(tid("board-panel")).waitFor({ state: "detached" });
     await page.locator(tid("board-save")).click();
     await page.locator(tid("board-editor")).waitFor({ state: "detached" });
