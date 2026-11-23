@@ -1983,6 +1983,10 @@ async fn provider_widgets_poll_only_for_open_boards_and_share_scrubbed_data() {
     assert!(!first.to_string().contains(token));
     assert!(!second.to_string().contains(token));
     let path = format!("/api/v1/boards/{board}");
+    // The widget's declared default size (4 × 2), not the kind default (4 × 3).
+    let placed = owner.json("GET", &path, Value::Null, 200).await;
+    let tile = &placed["document"]["sections"][0]["items"][0];
+    assert_eq!((tile["w"].clone(), tile["h"].clone()), (json!(4), json!(2)));
     let view = owner.json("GET", &path, Value::Null, 200).await;
     assert_eq!(view["resolved"][0]["widget"]["status"], "waiting");
     assert!(

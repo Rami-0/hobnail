@@ -133,6 +133,9 @@ whole `document` as one revision (and `PUT …/draft` stores one privately):
   `solid`, `glass` or `outline`; optional `accent` `blue`, `violet`, `green`,
   `amber`, `rose`, `teal` or `slate`. There is no custom image or CSS: the
   page's CSP allows only same-origin images.
+- A provider widget placed from the integration dialog gets its widget's
+  `default_size` (else 4 × 3); board reads give such widgets a `min_size`,
+  below which the editor does not resize them.
 - `look` is optional per item: an accent, an icon name and link that override
   the target's, and whether to hide the status pill and metrics.
 - Reads always include `name` (and `icon` when set). A saved document with a

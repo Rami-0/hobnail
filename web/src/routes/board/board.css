@@ -84,7 +84,7 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 
 /* ---- tile accent ---- */
 .board-tile[data-accent]::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,var(--tile-accent),color-mix(in srgb,var(--tile-accent) 30%,transparent));pointer-events:none}
-.board-tile[data-accent] .board-avatar{box-shadow:0 0 0 1px color-mix(in srgb,var(--tile-accent) 45%,transparent);background:color-mix(in srgb,var(--tile-accent) 14%,var(--muted))}
+.board-tile[data-accent]:not([data-accent="brand"]) .board-avatar{box-shadow:0 0 0 1px color-mix(in srgb,var(--tile-accent) 45%,transparent);background:color-mix(in srgb,var(--tile-accent) 14%,var(--muted))}
 .board-tile{overflow:hidden}
 
 /* ---- the editor ---- */
@@ -288,3 +288,4 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 @media (pointer:coarse),(max-width:700px){
   .tile-tools .btn,.drag-handle.btn{width:var(--hit);height:var(--hit);min-width:var(--hit);min-height:var(--hit)}
 }
+.board-tile[data-accent="brand"]::before{height:2px;opacity:.75;background:linear-gradient(90deg,var(--tile-accent),transparent 70%)}

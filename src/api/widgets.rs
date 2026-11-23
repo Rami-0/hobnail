@@ -26,6 +26,11 @@ pub(super) struct WidgetView {
     #[cfg_attr(test, ts(type = "Record<string, unknown>"))]
     values: std::collections::BTreeMap<String, serde_json::Value>,
     error: Option<String>,
+    /// The smallest board tile the widget reads well at (provider widgets
+    /// that declare one); the canvas editor will not resize below it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    min_size: Option<crate::providers::GridSize>,
 }
 
 impl WidgetView {
@@ -95,6 +100,7 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
             })
             .collect(),
         error: error.map(crate::widgets::plain_error),
+        min_size: None,
     }
 }
 
@@ -109,6 +115,7 @@ pub(super) fn provider_view(
     title: String,
     icon: Option<String>,
     enabled: bool,
+    min_size: Option<crate::providers::GridSize>,
 ) -> WidgetView {
     let cache = state.widgets.lock().unwrap();
     let output = cache.get(cache_key).filter(|_| enabled);
@@ -142,6 +149,7 @@ pub(super) fn provider_view(
         body: None,
         values: Default::default(),
         error,
+        min_size,
     }
 }
 
@@ -183,7 +191,7 @@ mod tests {
     fn a_rebound_provider_widget_says_refreshing_then_shows_only_the_new_result() {
         let state = crate::testutil::state_with(vec![], "");
         let key = "provider-fetch:lan:key";
-        let view = || provider_view(&state, "w", key, "W".into(), None, true);
+        let view = || provider_view(&state, "w", key, "W".into(), None, true, None);
         let now = std::time::Instant::now();
         let record = |output: crate::widgets::WidgetOutput| {
             let mut cache = state.widgets.lock().unwrap();

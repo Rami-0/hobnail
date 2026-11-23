@@ -6,6 +6,7 @@ import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
 import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
 import { containerHref } from "../../app/router.ts";
 import { ACCENTS } from "./look.ts";
+import { brandColor, useBrand } from "../../ui/brand.ts";
 import { bytes, duration, imageLabel, pct, rowLink, viewerHost } from "../../format/index.ts";
 import { useBootstrap, useContainers, useNow, useStat, useStrips } from "../../live/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
@@ -107,8 +108,10 @@ export function Tile({ item, resolved, inert }: { item: BoardItem; resolved?: Re
 
   if (look?.hide_status && !targetMissing && p.kind !== "link") pill = null;
   if (look?.hide_metrics && !targetMissing && (p.kind === "container" || p.kind === "integration")) body = null;
-  const accent = look?.accent ? { "--tile-accent": ACCENTS[look.accent].color } as CSSProperties : undefined;
-  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined} data-accent={look?.accent} style={accent} inert={inert}>
+  // An explicit accent wins; otherwise the service's brand colour, softer.
+  const brand = brandColor(useBrand(icon)?.color);
+  const accent = look?.accent ? { "--tile-accent": ACCENTS[look.accent].color } as CSSProperties : brand ? { "--tile-accent": brand } as CSSProperties : undefined;
+  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined} data-accent={look?.accent ?? (brand ? "brand" : undefined)} style={accent} inert={inert}>
     <header className="board-tile-head">
       <ServiceIcon className="board-avatar" tint name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <div className="board-tile-id">

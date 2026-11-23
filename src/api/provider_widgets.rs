@@ -298,10 +298,20 @@ fn install(
                 (&widget_id, &integration.id, &id, widget, options_to_json(&options)),
             )?;
             placements.push(item_id);
-            section.append(boards::BoardPayload::Widget {
+            // The widget's own default size when it declares one.
+            let payload = boards::BoardPayload::Widget {
                 widget_id,
                 title: None,
-            });
+            };
+            match provider
+                .widgets
+                .iter()
+                .find(|w| w.id == widget)
+                .and_then(|w| w.default_size)
+            {
+                Some(size) => section.append_sized(payload, size.w.into(), size.h.into()),
+                None => section.append(payload),
+            }
         }
         if section.items.is_empty() && !removed {
             None
@@ -523,6 +533,7 @@ pub(super) fn view(
                 format!("{name} · {}", spec.name),
                 icon.or_else(|| Some(provider.icon.into())),
                 enabled,
+                spec.min_size,
             )))
         })
         .ok()
