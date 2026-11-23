@@ -3198,3 +3198,56 @@ async fn detected_services_from_the_fake_docker_snapshot() {
         403
     );
 }
+
+#[tokio::test]
+async fn hobnail_widgets_install_into_a_chosen_section() {
+    let st = state();
+    crate::auth::set_password_for_tests(&st.db, PW);
+    let owner = Client::owner(start(st).await).await;
+    let board = owner.board("Homelab").await;
+    let path = format!("/api/v1/boards/{board}");
+    let view = owner.json("GET", &path, Value::Null, 200).await;
+    let mut doc = view["document"].clone();
+    doc["sections"] = json!([
+        {"title":"Overview","position":0,"collapsed":false,"items":[]},
+        {"title":"Apps","position":1,"collapsed":false,"items":[]}
+    ]);
+    owner.json("PUT", &path, doc, 200).await;
+    let hobnail = json!({"name":"Hobnail","kind":"hobnail","base_url":"","enabled":true,"options":{},"credentials":{}});
+    let integration = owner
+        .json(
+            "POST",
+            "/api/v1/providers/install",
+            json!({"integration":hobnail,"board_id":board,"section":0,
+                   "widgets":[{"id":"host","options":{}},{"id":"history","options":{"metric":"mem","range":"24h"}}]}),
+            201,
+        )
+        .await;
+    let doc = owner.json("GET", &path, Value::Null, 200).await["document"].clone();
+    let sections = doc["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 2, "no extra Widgets section");
+    assert_eq!(sections[0]["title"], "Overview");
+    let items = sections[0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!((&items[0]["w"], &items[0]["h"]), (&json!(4), &json!(4)));
+    // The built-in integration is reused, and is not a status-tile suggestion.
+    owner
+        .json(
+            "POST",
+            "/api/v1/providers/install",
+            json!({"integration":hobnail,"integration_id":integration["id"],"board_id":board,"section":1,
+                   "widgets":[{"id":"stacks","options":{}}]}),
+            201,
+        )
+        .await;
+    let doc = owner.json("GET", &path, Value::Null, 200).await["document"].clone();
+    assert_eq!(doc["sections"][1]["items"].as_array().unwrap().len(), 1);
+    let suggestions = owner
+        .json("GET", &format!("{path}/suggestions"), Value::Null, 200)
+        .await;
+    assert!(!suggestions
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["payload"]["kind"] == "integration"));
+}

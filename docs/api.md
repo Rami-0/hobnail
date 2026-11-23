@@ -196,7 +196,9 @@ Provider catalog and installation:
   empty selection saves the connection alone. `remove` lists saved placement
   IDs of this integration on the board to take off it; removals and the
   selection land in the same board revision, and an ID that is not this
-  integration's placement on that board is refused.
+  integration's placement on that board is refused. `section` (an index
+  into the board's sections) adds new widgets to that section instead of
+  a new "Widgets" section.
 - `GET /api/v1/providers/widgets?integration=<id>&board=<id>` returns a map
   of widget descriptor IDs to arrays of placements `{id, options}`. Scoped
   admins can test or update a granted integration by supplying its ID. Reading

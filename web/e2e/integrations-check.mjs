@@ -116,9 +116,15 @@ try {
       await shot("picker-hobnail");
       if (scheme === "dark" && width === 1440) {
         // Adding one installs the built-in integration and lands it live in the edit.
+        const sections = await tab.ev(`document.querySelectorAll('[data-canvas]').length`);
         await inp.click('[data-testid="hobnail-add"][data-widget="host"]');
         await wait(`!document.querySelector('[data-testid="board-picker"][data-open]')`, "picker closes after Add");
-        await wait(`!!document.querySelector('.hobnail-widget[data-view="host"] .sw-tiles')`, "host overview draws live tiles", 20000);
+        await wait(`document.querySelectorAll('[data-canvas="0"] .canvas-item').length > 0 && document.querySelectorAll('[data-canvas]').length === ${sections}`, "added to the first section, no new section");
+        await inp.click('[data-testid="board-cancel"]');
+        await wait(`!!document.querySelector('.hobnail-widget[data-view="host"] .sw-tiles')`, "host overview draws live tiles", 30000);
+        await shot("board-hobnail-host");
+        await inp.click('[data-testid="board-edit"]');
+        await wait('!!document.querySelector(\'[data-testid="board-editor"]\')', "editor again");
         await inp.click('[data-testid="board-add-tile"]');
         await wait(`!!document.querySelector('[data-testid="board-picker"][data-open]')`, "picker reopens");
       }
@@ -154,6 +160,7 @@ try {
 
       // Connect a detected service: its connect step, URL filled in, credential focused.
       await inp.click('[data-testid="picker-tab-integrations"]');
+      if (width < 700) await inp.click('[data-testid="board-picker"] [data-testid="detected-more"]');
       await wait(`!!document.querySelector('[data-testid="detected-service"][data-provider="sonarr"] [data-testid="detected-connect"]')`, "Sonarr card");
       await inp.click('[data-testid="detected-service"][data-provider="sonarr"] [data-testid="detected-connect"]');
       await wait(`!!document.querySelector(${q(`${dialog} .provider-head`)})?.textContent.includes("Sonarr")`, "Sonarr connect step");
@@ -171,6 +178,7 @@ try {
       await wait(`!!document.querySelector('[data-testid="board-picker"][data-open]')`, "picker returns after cancel");
 
       // Dismiss hides a suggestion (per browser).
+      if (width < 700) { await tab.ev(`document.querySelector('[data-testid="board-picker"] [data-testid="detected-more"]')?.click()`); await frame(); }
       const before = await tab.ev(`document.querySelectorAll('[data-testid="board-picker"] [data-testid="detected-service"]').length`);
       await inp.click('[data-testid="board-picker"] [data-testid="detected-service"][data-provider="uptime-kuma"] [data-testid="detected-dismiss"]');
       await wait(`document.querySelectorAll('[data-testid="board-picker"] [data-testid="detected-service"]').length === ${before - 1}`, "dismissed");

@@ -399,7 +399,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     const id = existing.kind === "ok" ? existing.data.find((entry) => entry.kind === NATIVE)?.id : undefined;
     const result = await api.post("/api/v1/providers/install", {
       integration: { kind: NATIVE, name: "Hobnail", base_url: "", enabled: true, options: {}, credentials: {} },
-      integration_id: id, board_id: view.board.id, widgets: [{ id: widget.id, options: {} }],
+      integration_id: id, board_id: view.board.id, section: picker, widgets: [{ id: widget.id, options: {} }],
     });
     setAdding("");
     if (result.kind !== "ok") { setError(result.message); return; }

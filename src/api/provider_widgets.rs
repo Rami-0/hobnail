@@ -47,6 +47,10 @@ struct Install {
     /// board, in the same board revision as the selection.
     #[serde(default)]
     remove: Vec<String>,
+    /// Index of an existing section to add the new widgets to; without it
+    /// they go in a new "Widgets" section.
+    #[serde(default)]
+    section: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -256,7 +260,12 @@ fn install(
                 !gone
             });
         }
-        let mut section = boards::BoardSection::new("Widgets", doc.sections.len() as u32);
+        let target = input.section.filter(|index| *index < doc.sections.len());
+        let mut section = match target {
+            Some(index) => doc.sections.remove(index),
+            None => boards::BoardSection::new("Widgets", doc.sections.len() as u32),
+        };
+        let kept = section.items.len();
         let mut placements = Vec::new();
         let mut updated = HashSet::new();
         for (widget, placement, options) in options {
@@ -313,23 +322,17 @@ fn install(
                 None => section.append(payload),
             }
         }
-        if section.items.is_empty() && !removed {
+        let added = section.items.len() > kept;
+        let at = target.unwrap_or(doc.sections.len());
+        if target.is_some() || added {
+            doc.sections.insert(at, section);
+        }
+        if !added && !removed {
             None
         } else {
-            let added = !section.items.is_empty();
-            if added {
-                doc.sections.push(section);
-            }
             boards::validate(&doc, &previous, user, conn, &state.config.current())?;
             if added {
-                for (item, placement) in doc
-                    .sections
-                    .last_mut()
-                    .expect("new widget section")
-                    .items
-                    .iter_mut()
-                    .zip(placements)
-                {
+                for (item, placement) in doc.sections[at].items[kept..].iter_mut().zip(placements) {
                     item.id = Some(placement);
                 }
             }
