@@ -187,5 +187,6 @@ failed test. Save a credential explicitly to include it with the connection.
 Draft responses show the origin of each saved credential.
 
 Creating the board saves the reviewed selection once, even if the request is
-retried. The resulting Home board opens immediately. Its Add and Discover
-actions and first-use tour are described in [Boards](boards.md).
+retried: it joins the Home board under its host section (or makes a Home
+board when there is none), which opens immediately. Its Add and Discover
+actions and first-use tour are described in [Boards](boards.md#the-home-board).

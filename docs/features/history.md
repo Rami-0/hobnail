@@ -41,7 +41,7 @@ enabled = true            # samples; events are always recorded
 sample_interval = "15s"
 ```
 
-**Where it shows:** Overview charts and "Recent events", the vitals chips in the
+**Where it shows:** the Home board's History charts and Recent events, the vitals chips in the
 top bar, container detail and the Host page (1 h … 30 d), the History page
 (1 h … 30 d, container starts per day over 7 days, incident timeline), the
 Alerts log.
@@ -62,8 +62,7 @@ Alerts log.
   links its subject (a container, or what an alert was about) and has the
   container's logs at that moment.
 - **Markers** on the charts (crashes, OOM kills, failing health checks, fired
-  alerts) open their timeline row, highlighted; on the Overview they open
-  History an hour around the event. Under the crosshair the read-out says
+  alerts) open their timeline row, highlighted. Under the crosshair the read-out says
   what the marker is (touch has no tooltips).
 - The avg / max / yesterday legend toggles act on every chart and are
   remembered in the browser.

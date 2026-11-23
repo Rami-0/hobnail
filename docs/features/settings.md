@@ -5,8 +5,9 @@ General, Containers and groups, Bookmarks, Widgets, Notifications, Appearance,
 History and data, Config file, Security, Boards and Integrations; Users is
 Owner-only. Scoped Admins can edit granted boards and integrations only.
 The Settings link remembers this browser's last tab. Signed-out users see
-sign-in; Viewers receive no configuration. Bookmark/widget dialogs also open
-on Overview and notification dialogs on Alerts for unrestricted Admin/Owner.
+sign-in; Viewers receive no configuration. Notification dialogs also open on
+Alerts for unrestricted Admin/Owner; bookmarks and widgets are added to a
+board (such as Home) from the board editor's Add picker.
 Boards and integrations use SQLite, independently of TOML revisions; see
 [boards.md](boards.md) and [integrations.md](integrations.md).
 

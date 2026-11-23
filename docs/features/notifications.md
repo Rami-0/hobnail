@@ -51,7 +51,7 @@ failed deliveries and test sends are in the history database and on the
 Alerts page.
 
 **On the Alerts page.** Firing incidents and the alert log link to their
-subject (a container's page, the Host page, the widget on the Overview, or
+subject (a container's page, the Host page, the widget on its board, or
 the checked URL), name the rule that fired and show a clock time; rows about
 a container have its logs from that moment. The log is the newest 50 alert
 events. An incident held back by the cooldown is marked "cooldown" (it is

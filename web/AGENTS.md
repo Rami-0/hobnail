@@ -226,7 +226,7 @@ same-session conflicts use the original document for a three-way rebase.
 | `#ev-<id>` | Timeline row opened by a chart marker |
 | `[data-testid="palette-open"]` | Open the command palette |
 | `[data-testid="palette"] [role="combobox"]` | Palette query and active option |
-| `[data-testid="overview"]` | Overview page |
+| `[data-testid="hobnail-attention"]`, `.hobnail-widget[data-view="<view>"]` | Needs attention, and any Hobnail widget, on a board (the Home board replaced the Overview page; `/app/overview` opens it) |
 | `[data-testid="alerts"]` | Alerts read page |
 | `[data-testid="host-sample"][data-sampled-at]` | Timestamp of the current Host sample |
 | `[data-testid="host-disclosure"]` | A Host facts disclosure |

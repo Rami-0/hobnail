@@ -15,7 +15,7 @@ OS, the ◐ button overrides it per browser.
   that the toggle opens over the page (the page keeps its place under the
   scrim). The rail's "Stacks" item opens the sidebar with the filter focused.
   The foot has the live indicator, the shortcuts button and the version.
-- **Phones (under 700 px):** a bottom bar (Overview, Containers, Logs,
+- **Phones (under 700 px):** a bottom bar (Home, Containers, Logs,
   Alerts, More). "More" opens the drawer. "More" is marked current on Host, History and
   Settings. A closed drawer is out of the tab order; an open one makes the
   page behind inert, has a Close button, and Esc or Back closes it (Forward
@@ -36,25 +36,27 @@ OS, the ◐ button overrides it per browser.
   `http(s)://` address opens as it is). Home,
   End, Page Up and Page Down move in the list; on touch it has a close
   button.
-- **Overview:** "Needs attention" rows are whole-row links to the cause with
-  the reason inline (a container: its page and logs icon; "unhealthy for 41
-  min", never longer than the container has been running, plus the first
-  line of the failing health check for Admin/Owner; a firing alert
-  about the host, a widget or a URL: that subject and its rule). The probe
-  line is looked up for the first 5 unhealthy containers only (one `docker
-  inspect` each, Admin/Owner only); it is the check's output when the page
-  was loaded, kept through live updates while the same failing run goes on
-  and dropped when it ends or a new one starts (Viewer live updates never carry probe output). Admin/Owner see Bookmarks and Widgets with
-  "Add", which opens the Settings dialog on the page. The memory treemap folds tiles too small for a
-  name on a phone into "+N others", a link to the table sorted by memory; a
-  tile big enough (64 × 40 px, 88 × 56 px on touch) carries its logs icon.
-  "Needs attention" shows at most eight rows, then "N more on the
-  Containers page"; a name that repeats across stacks carries its stack.
-  The health strip's "problems" is the same count as the table's
-  "Problems" filter. Top CPU lists eight rows; a full bar is one whole core.
-  "Last 24 h" on a young instance says how much history it has ("running
-  100% of 30m"). A container that runs again after a problem in the last
-  hour stays listed as "recovered after: …".
+- **Home:** the sidebar's first entry (and the bottom bar's) is the Home
+  board, an ordinary board drawn by the board renderer, so it is edited,
+  restyled, rearranged or deleted like any other (Edit, Style, Add). Every
+  install gets one, created once at start: Host and Needs attention, then
+  Top containers, Stacks and Recent events, then CPU and memory over the
+  last 24 hours, and the config file's widgets and bookmarks
+  ([boards.md](boards.md#the-home-board)). `/app/overview` opens it; it is
+  not repeated in the sidebar's board list. `/app` opens the default board,
+  which is Home unless another board was chosen (Settings → Boards sets
+  both). Without a Home board the entry opens the default board.
+- **Needs attention** (a Hobnail widget): running, stopped, problem and
+  firing-alert counts, each a link to the filtered list; then the containers
+  that need you with the reason inline ("unhealthy for 41 min", never longer
+  than the container has been running, plus the first line of the failing
+  health check for Admin/Owner; restarting, exited, recovered after a
+  problem in the last hour) and the alerts firing about the host, a widget
+  or a URL. The probe line is looked up for the first 5 unhealthy
+  containers only (one `docker inspect` each, Admin/Owner only). It lists at
+  most eight rows, then "N more problems"; its foot links clean stops and
+  the alerts of the last 24 hours. "Problems" is the same count as the
+  table's "Problems" filter.
 - **Alerts:** firing incidents and the alert log link to their subject (the
   container, the Host page, the widget, the URL), name the rule and show a
   clock time ("since …" in one right-aligned column); rows about a container
@@ -67,8 +69,7 @@ OS, the ◐ button overrides it per browser.
 - **Caching:** configuration, sessions and probe JSON are `no-store`;
   the app document is `no-cache` without a session, and hashed assets are
   immutable. Authenticated responses are `no-store`.
-- **Pages:** Overview (health strip, host vitals with 1 h charts, needs
-  attention, widgets, top consumers, recent events, bookmarks), Containers
+- **Pages:** Home (the Home board), Containers
   (dense table: filter, sort, group by stack or flat; sort and grouping are
   remembered, filters are not; phones get stacked rows and a "Sort" select
   with a direction button in the toolbar; grouped and sorted by CPU or memory, the stacks
@@ -99,7 +100,7 @@ OS, the ◐ button overrides it per browser.
   failing time.
 - **Logs** one click from everywhere a container is named (see
   `docs/features/logs.md`); the Logs nav item is current on every logs page.
-- **Keyboard:** `g` then `o c h l y a s` jumps to a page (Overview,
+- **Keyboard:** `g` then `o c h l y a s` jumps to a page (Home,
   Containers, Host, Logs, History, Alerts, Settings), `j/k` moves in lists
   and Enter opens the row, `l` opens a container's logs, `/` filters the page
   where it has a filter (Containers, logs) and opens the palette elsewhere,
@@ -180,8 +181,8 @@ OS, the ◐ button overrides it per browser.
   fired yet"; not while Docker is unreachable, when container alerts cannot
   be evaluated) and errors. Docker unreachable is one banner on every page,
   with what to check and the raw error under "Details", that comes and goes
-  with the live updates; Overview then says the state is unknown instead of
-  "all clear". A failing widget says the cause in plain words ("Refused:
+  with the live updates; Needs attention then says the state is unknown
+  instead of "all clear". A failing widget says the cause in plain words ("Refused:
   nothing is listening there", "No answer in time") with the raw error under
   "Details".
 - **Controls:** every control has hover, pressed (shown at once), disabled
@@ -198,9 +199,10 @@ no card grid); `layout = "list"` makes the flat table the default view.
 
 - **Guided setup:** after the owner account is created, five steps
   (Appearance, Discover services, Select what to include, Configure
-  connections, Review dashboard) build the Home board. The draft is saved in
-  SQLite and resumes in another browser; Review lists incomplete items; one
-  commit creates the board. If setup cannot load or save, it offers Retry and
+  connections, Review dashboard) add the chosen services to the Home board,
+  under its host widgets. The draft is saved in SQLite and resumes in
+  another browser; Review lists incomplete items; one commit saves the
+  board. If setup cannot load or save, it offers Retry and
   Sign in. Details: [login.md](login.md#guided-setup).
 - **Board tour:** a short, skippable tour of the controls the account can use,
   offered on the first board; Replay board tour in Settings or Keyboard
@@ -228,8 +230,7 @@ no card grid); `layout = "list"` makes the flat table the default view.
 Strict type scale with tabular numbers and calm zeros; primary / secondary /
 ghost panels; **24 h health strips** per container and stack; charts with a
 shared crosshair, drag-to-zoom (History, Host), event markers, a "yesterday" line and
-legend toggles; memory treemap; ranked "Needs attention" and "since you last
-looked" on Overview. Themes: Dark, Light, Ember, High contrast (contrast-tested).
+legend toggles; ranked "Needs attention" on the Home board. Themes: Dark, Light, Ember, High contrast (contrast-tested).
 Keyboard: `Ctrl/⌘ K` palette, `g` then `o c h l y a s` for pages, `j/k` rows,
 `?` cheat sheet, `l` logs of the current container. The tab title and favicon
 show the number of problems. Installable as an app (manifest and icons; no

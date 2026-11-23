@@ -57,8 +57,9 @@ never silently overwrites another edit: reload or rebase and review. In-session
 conflicts use a three-way merge. A stale recovered draft has no historical base,
 so it preserves server additions and may need old removals applied again.
 
-Settings chooses a default board for the home route; without a usable default,
-the app shows Overview. A deleted board clears its default reference. The Owner
+Settings → Boards chooses the **Home page** board (what the sidebar's Home
+entry shows) and the **default board** (what `/app` opens); without a usable
+default, `/app` opens Home. A deleted board clears either reference. The Owner
 can grant access to individual boards and integrations. Viewers read; Admin and
 Owner edit. Scoped Admins edit granted documents but cannot create or delete
 boards or integrations. Scoped containers are the union of container targets
@@ -74,7 +75,8 @@ service, credential or extra server memory. They belong to the built-in
 
 | Widget | Shows | Data |
 |---|---|---|
-| Host overview (4x4) | CPU, memory and network tiles with live trends, load, uptime, the fullest disks as meters | the `system` stream |
+| Needs attention (4x4) | running, stopped, problem and firing-alert counts, the containers that need you and firing alerts, clean stops, alerts of the last 24 h | `/api/v1/overview` (refreshed on alerts and every 15 s) |
+| Host overview (4x4) | CPU, memory and network tiles with live trends, load, uptime, temperature when reported, the fullest disks as meters | the `system` stream |
 | Top containers (4x4) | the busiest running containers by CPU or memory (3–12) | the `containers` and `stats` streams |
 | Stack health (4x3) | each compose stack, running of total | the container list |
 | Recent events (4x3) | starts, stops, crashes and health changes of the last 24 h | `/api/v1/history?metric=none` |
@@ -88,11 +90,44 @@ role and scopes allow on the pages these widgets draw from.
 The clock, Markdown note, bookmarks, weather and RSS widgets sit on the
 same tab. Third-party integrations come after them.
 
+## The Home board
+
+The Overview page is now a board. Every install gets a **Home** board,
+created once when the server starts (new and upgraded installs alike):
+
+| Section | Tiles (12-column canvas) |
+|---|---|
+| This host | Host overview (8x3), Needs attention (4x3) |
+| Containers | Top 4 containers by CPU (4x4), Stacks (4x4), Recent events (4x4) |
+| Last 24 hours | History chart: CPU (6x3), memory (6x3) |
+| Widgets, Bookmarks | the config file's `[[widgets]]` and `[[bookmarks]]`, when there are any |
+
+On a phone each section reads left to right, top to bottom: the host, then
+what needs attention. The widgets belong to the built-in Hobnail
+integration (made if missing). A Log tail is not seeded: without a chosen
+container it follows whichever container is busiest, which is not a stable
+thing to look at first.
+
+- A board already named Home (made by an older guided setup) is left as it
+  is; the new board is then named Overview.
+- It becomes the default board only when none is set. An install whose
+  default is another board keeps it: `/app` opens that board and the Home
+  entry opens the Home board.
+- It is an ordinary board afterwards: edit, restyle, rename, share with a
+  scoped account or delete it. Deleting it clears the Home page setting and
+  it is not created again; choose another board as Home page in
+  Settings → Boards. A scoped account sees the Home entry only when the
+  board is granted to it.
+- `/app/overview` opens it.
+
 ## First board and tour
 
-[Guided setup](login.md#guided-setup) creates Home from the owner's selection
-and sets it as the landing page. If the owner selects nothing, Home opens
-with Add and Discover. Those actions open the standard board editor and picker.
+[Guided setup](login.md#guided-setup) adds the owner's selection to the Home
+board, as sections under its host section, and opens it. If the owner
+selects nothing, Home opens with its Hobnail widgets. Without a Home board
+setup creates one named Home from the selection, which then opens with Add
+and Discover when empty. Those actions open the standard board editor and
+picker.
 
 On the first visit to the default board (or the first accessible board if
 there is no default), Hobnail offers a short tour of the controls the account
