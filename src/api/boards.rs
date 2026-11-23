@@ -374,6 +374,12 @@ pub struct BoardSuggestion {
     /// integration, the container's icon (brand logo from its image) for a
     /// container.
     pub icon: Option<String>,
+    /// Display only: the container a detected web app link was found in.
+    /// Such links point at the app's published port on the address the
+    /// user browses from.
+    #[cfg_attr(test, ts(optional))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1274,10 +1280,32 @@ pub(super) fn suggestions(
     doc: Option<&BoardDocument>,
     integrations: Vec<(String, String, String)>,
     container_targets: Option<HashSet<ContainerMatch>>,
+    browser_host: Option<&str>,
 ) -> Vec<BoardSuggestion> {
     let cfg = state.config.current();
     let snap = state.snapshot();
     let scoped = container_targets.is_some();
+    let apps = browser_host
+        .filter(|_| !scoped && cfg.docker.enabled)
+        .map(|host| {
+            let own = super::detect::own_container(&snap.containers, &super::detect::hostname());
+            super::detect::apps(&cfg, &snap.containers, own, host)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|app| {
+            safe_link(&app.url, "url").is_ok() && super::validate_label(&app.title, "title").is_ok()
+        })
+        .map(|app| BoardSuggestion {
+            icon: app.icon.clone(),
+            title: app.title.clone(),
+            payload: BoardPayload::Link {
+                title: app.title,
+                url: app.url,
+                icon: app.icon,
+            },
+            detected: Some(app.container),
+        });
     let mut existing: HashSet<_> = doc
         .into_iter()
         .flat_map(|doc| &doc.sections)
@@ -1293,6 +1321,7 @@ pub(super) fn suggestions(
                 integration_id: id,
                 title: None,
             },
+            detected: None,
         });
     let widgets = cfg.widgets.iter().filter(|_| !scoped).filter_map(|widget| {
         let title = widget.title.as_deref().unwrap_or(&widget.id);
@@ -1304,6 +1333,7 @@ pub(super) fn suggestions(
                 widget_id: widget.id.clone(),
                 title: None,
             },
+            detected: None,
         })
     });
     let bookmarks = cfg
@@ -1325,6 +1355,7 @@ pub(super) fn suggestions(
                         .filter(|icon| super::validate_icon(Some(icon)).is_ok())
                         .cloned(),
                 },
+                detected: None,
             })
         });
     let containers = snap.containers.iter().filter_map(|container| {
@@ -1353,9 +1384,11 @@ pub(super) fn suggestions(
                 icon: None,
                 link: None,
             },
+            detected: None,
         })
     });
     integrations
+        .chain(apps)
         .chain(widgets)
         .chain(bookmarks)
         .chain(containers)
@@ -1428,7 +1461,13 @@ pub(super) async fn route(
             })?;
             super::json(
                 StatusCode::OK,
-                &suggestions(state, Some(&doc), integrations, targets),
+                &suggestions(
+                    state,
+                    Some(&doc),
+                    integrations,
+                    targets,
+                    Some(&crate::http::server::request_host(&req)),
+                ),
             )
         }
         Handler::BoardCreate => {

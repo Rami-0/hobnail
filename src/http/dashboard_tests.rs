@@ -1866,6 +1866,8 @@ async fn discovery_caps_suggestions_before_serializing_container_identity_rows()
             container.name = format!("discovery-{i}");
             container.project = None;
             container.service = None;
+            // Without a published web port, so no detected app links.
+            container.ports.clear();
             container
         })
         .collect();
@@ -3157,6 +3159,28 @@ async fn detected_services_from_the_fake_docker_snapshot() {
     assert_eq!(icon("Sonarr"), Some(json!("sonarr")));
     assert_eq!(icon("pihole"), Some(json!("pi-hole")));
     assert_eq!(icon("postgres"), Some(json!("postgres")));
+    // Web UIs are offered as branded links on their published address; the
+    // database is not.
+    let apps: Vec<_> = suggestions
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s.get("detected").is_some())
+        .map(|s| (s["detected"].clone(), s["payload"].clone()))
+        .collect();
+    assert_eq!(
+        apps,
+        [
+            (
+                json!("pihole"),
+                json!({"kind":"link","title":"Pi-hole","url":"http://192.168.1.20:8053","icon":"pi-hole"})
+            ),
+            (
+                json!("sonarr"),
+                json!({"kind":"link","title":"Sonarr","url":"http://192.168.1.20:8989","icon":"sonarr"})
+            ),
+        ]
+    );
     // A scoped admin cannot connect new integrations, so sees no detection.
     let board = owner.board("Scoped").await;
     let admin = owner

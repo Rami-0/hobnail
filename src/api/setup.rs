@@ -849,7 +849,7 @@ pub(super) async fn route(
             } else {
                 SetupDocker::Reachable
             };
-            let suggestions = boards::suggestions(state, None, integrations, None);
+            let suggestions = boards::suggestions(state, None, integrations, None, None);
             super::json(
                 StatusCode::OK,
                 &SetupDiscovery {

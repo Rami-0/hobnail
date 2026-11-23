@@ -17,4 +17,9 @@ port: number,
 /**
  * Proposed URLs, best first; empty when none is reachable from Hobnail.
  */
-candidates: Array<Candidate>, };
+candidates: Array<Candidate>,
+/**
+ * What connecting needs beyond the URL, for services that are not a
+ * local container (Tailscale: an API key and internet access).
+ */
+note?: string, };

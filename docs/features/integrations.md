@@ -82,8 +82,36 @@ usual. A suggestion disappears once an integration of that provider points
 at it (same URL, the container's name, or one of its published host
 ports). **Dismiss** hides a suggestion in this browser.
 
+**Tailscale** runs on the host, not in a container, so it is suggested
+when this host is on a tailnet: you opened Hobnail on a Tailscale address
+(100.64.0.0/10), a container publishes a port on one, or a host in
+`RH_ALLOWED_HOSTS` is a MagicDNS name (`*.ts.net`). The card's note says
+it needs an API access token from the Tailscale admin console and
+Provider internet access on, since it reads Tailscale's public API.
+
 To add detection to a provider, set `detect: detect(&["needle"], port)` in
-its `Provider`.
+its `Provider` (`detect_except(&["needle"], &["not"], port)` rules out
+images such as `beszel-agent`).
+
+### Web apps on this host
+
+Every running container with a published TCP port that serves a web UI is
+also offered as a branded **link** tile under **Apps** in the board Add
+picker (`detected` names the container in `GET /api/v1/boards/<id>/suggestions`).
+The URL is for your browser, not the server: the port's binding on the
+address you opened Hobnail with, else one bound to all interfaces on that
+address, else its other published address. Loopback-only ports are offered
+only when you browse from the host itself; otherwise such a container is a
+status tile only. A container override `url` wins. The logo is the
+container's icon (override, label, or the vendored brand logo of its
+image) and the title the override name, the known app (Beszel, Dozzle,
+Dockge, Homepage, Mailpit, MinIO, Odoo …) or the compose service, with
+the project used for generic service names such as `app`.
+
+Data stores (`postgres`, `mysql`, `mariadb`, `redis`, `mongo` …), ports
+that are not HTTP (SMTP, SSH, database ports), Hobnail itself and other
+Hobnail images, hidden containers and plumbing such as BuildKit are left
+out. Nothing is contacted.
 
 ## Accepted limitations
 

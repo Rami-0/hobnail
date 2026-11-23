@@ -7,4 +7,10 @@ export type BoardSuggestion = { title: string, payload: BoardPayload,
  * integration, the container's icon (brand logo from its image) for a
  * container.
  */
-icon: string | null, };
+icon: string | null,
+/**
+ * Display only: the container a detected web app link was found in.
+ * Such links point at the app's published port on the address the
+ * user browses from.
+ */
+detected?: string, };
