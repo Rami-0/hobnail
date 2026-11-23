@@ -43,7 +43,7 @@ function ContainerStats({ row }: { row: ContainerRow }) {
   const running = row.state === "running";
   return <div className="tile-stats">
     {running ? <dl className="tile-metrics">
-      <div><dt><CpuIcon aria-hidden="true" />CPU</dt><dd>{pct(cpu)}</dd>{cpu !== null && <Meter value={Math.min(cpu, 100)} max={100} label={`${row.title} CPU`} />}</div>
+      <div><dt><CpuIcon aria-hidden="true" />CPU</dt><dd>{pct(cpu)}{cpu !== null && <Meter value={Math.min(cpu, 100)} max={100} label={`${row.title} CPU`} />}</dd></div>
       <div><dt><MemoryStickIcon aria-hidden="true" />Memory</dt><dd>{mem === null ? "—" : bytes(mem)}</dd></div>
       <div><dt><ClockIcon aria-hidden="true" />Up</dt><dd>{up === null ? "—" : duration(up)}</dd></div>
     </dl> : <p className="tile-note">{row.exit_code ? `Exited with code ${row.exit_code}` : "Not running"}</p>}

@@ -364,7 +364,7 @@ body:has(.dlg[data-open]) .toasts{visibility:hidden}
 .provider-head .service-icon{width:40px;height:40px}
 .provider-head div{flex:1;min-width:0;display:grid;gap:2px}
 .provider-head p{font-size:var(--fs-xs);color:var(--muted-foreground)}
-.provider-head a{font-size:var(--fs-xs);white-space:nowrap}
+.provider-head a{display:inline-flex;align-items:center;min-height:var(--hit);font-size:var(--fs-xs);white-space:nowrap}
 .advanced{border:1px solid var(--border);border-radius:var(--r);padding:var(--s-2) var(--s-3)}
 .advanced summary{cursor:pointer;font-size:var(--fs-sm);font-weight:500;padding:var(--s-1) 0}
 .advanced[open]>summary{margin-bottom:var(--s-3)}

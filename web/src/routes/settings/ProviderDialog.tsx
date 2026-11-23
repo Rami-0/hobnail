@@ -209,9 +209,9 @@ export default function ProviderDialog({ providers, item, preferredBoard, icons,
           {["", ...categories].map((entry) => <Button key={entry || "all"} size="sm" aria-pressed={category === entry} onClick={() => setCategory(entry)}>{entry || "All"}</Button>)}
         </div>
         {listed.length ? <div className="catalog-grid">{listed.map((p) => (
-          <CardButton key={p.id} className="catalog-card" aria-label={`Choose ${p.name}`} onClick={() => choose(p)}>
+          <CardButton key={p.id} className="catalog-card" onClick={() => choose(p)}>
             <ServiceIcon tint name={p.icon} title={p.name} enabled={icons} />
-            <small>{p.category}</small><strong>{p.name}</strong>
+            <small>{p.category}</small><strong><span className="sr">Choose </span>{p.name}</strong>
             <p>{p.description}</p>
             {p.public_internet && !internet && <p className="catalog-warn">Needs internet access, which is off.</p>}
           </CardButton>
