@@ -113,7 +113,10 @@ sessions are discarded. Fresh databases use browser setup instead.
 Existing 19 MiB Argon2id hashes keep their original work factor until a
 successful sign-in rehashes each password at 7 MiB. Even an unsuccessful
 attempt against an old hash uses the original work factor. In M5 the first
-successful sign-in peaked at about 20.5 MiB.
+successful sign-in peaked at about 20.5 MiB. This is an **accepted budget
+exception, pending owner sign-off**: it happens once per legacy account, it
+is the only path above the 20 MiB budget, and it is refused under a memory
+limit below 36 MiB (next paragraph), so a capped container never runs it.
 
 If the server's memory limit is below 36 MiB, Hobnail does not verify
 legacy hashes at all. It reads cgroup v2 `/sys/fs/cgroup/memory.max`, or on
@@ -205,8 +208,36 @@ limit; to raise them, raise the container's memory limit too, by about
 0.2 MiB per connection above 48 (see
 [configuration.md](configuration.md#incoming-reverse-proxy)).
 
+## arm64 (64-bit ARM)
+
+`scripts/build-arm64.sh` builds a linux/arm64 image from
+`deploy/arm64.Dockerfile` on an amd64 machine and loads it as
+`hobnail:arm64-<sha>`. It only builds and tags; it deploys nothing, and the
+production `Dockerfile` is not used or changed by it. Rust is cross-compiled
+(clang and lld against the target's musl sysroot) because a fully emulated
+build takes hours; only `apk add` and the final version check run under
+emulation, inside a `docker-container` buildx builder (`RH_BUILDER`, created
+as `hobnail-arm64` if missing), so the host needs no binfmt setup. The web
+stage, release profile, link and SQLite flags, labels and image layout match
+the production build, and the build fails unless the arm64 binary reports the
+commit and content hash it was built from. fmt, clippy and the tests are not
+repeated: run the amd64 production build of the same commit for them. To run
+the image on an arm64 host, `docker save` it there or push it to a registry,
+then use it in place of `hobnail:latest` in the compose file.
+
+Results (2026-11-23, recipe at the final commit, about 10 minutes on a 4-core
+host): the arm64 executable is 6,831,000 B and BusyBox 1,116,408 B (amd64:
+7,775,384 B and 1,038,696 B); the image holds only those two files, the
+`/bin/sh` link and `/tmp`. An earlier cross build of the same recipe
+(`0c1d0f9`) passed a smoke run under user-mode QEMU: onboarding, sign-in and
+sign-out, Overview, a Pi-hole widget from the catalog and an event-stream
+reconnect in Chromium, plus SSE events without a browser; no arm64-specific
+problems were found. Not done: a native arm64 build of the production
+`Dockerfile` (multi-hour under emulation) and any run on real arm64 hardware,
+so arm64 memory figures are not measured.
+
 ## Not built yet
 
-The native systemd package, multi-architecture export target and installer
-described in the planning documents are not shipped by this Dockerfile. The
-container build above is the supported procedure verified in this milestone.
+The native systemd package and installer described in the planning documents
+are not shipped. The container build above is the supported procedure; the
+arm64 image is built by the separate recipe above.
