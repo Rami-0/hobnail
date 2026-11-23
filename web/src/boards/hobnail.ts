@@ -30,6 +30,7 @@ export function hostBody(system: SystemView, trends: Trends): { tiles: StatTile[
     { label: "Network", value: `↓ ${rate(system.net_rx_bps)}`, glyph: "activity", delta: `↑ ${rate(system.net_tx_bps)}`, series: newest(trends.net) },
     { label: "Load", value: system.load.map((n) => n.toFixed(2)).join(" · "), glyph: "server", delta: `up ${duration(system.uptime_secs)}` },
   ];
+  if (system.temp_c !== null) tiles.push({ label: "Temperature", value: `${Math.round(system.temp_c)} °C`, delta: "CPU package" });
   const meters = system.disks
     .filter((disk) => disk.total > 0)
     .map((disk) => ({ disk, used: (disk.used / disk.total) * 100 }))
@@ -125,4 +126,20 @@ export function thin(points: readonly (readonly [number, number])[], max = 120):
   const out: number[] = [];
   for (let i = points.length - 1; i >= 0; i -= step) out.push(points[i]?.[1] ?? 0);
   return out.toReversed();
+}
+
+export interface Counts { running: number; stopped: number; problems: number; firing: number; cleanStops: number }
+
+/** Needs attention: container counts from the live list when it is there
+ * (else the overview read), and the alerts firing now. */
+export function attentionCounts(groups: readonly GroupRow[] | null, view: { running: number; stopped: number; problems: number; firing: number }): Counts {
+  if (!groups) return { ...view, cleanStops: 0 };
+  const rows = groups.flatMap((group) => group.containers);
+  return {
+    running: groups.reduce((n, group) => n + group.running, 0),
+    stopped: groups.reduce((n, group) => n + group.stopped, 0),
+    problems: rows.filter((row) => row.attention !== null).length,
+    firing: view.firing,
+    cleanStops: rows.filter((row) => row.state !== "running" && row.attention === null).length,
+  };
 }

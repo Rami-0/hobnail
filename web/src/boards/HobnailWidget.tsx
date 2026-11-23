@@ -2,14 +2,17 @@
 // live host sample, the container list and stats, the history API and the
 // log download. Builders are in hobnail.ts; drawing is the shared renderer.
 import { useEffect, useState } from "react";
+import { CheckIcon } from "lucide-react";
+import type { OverviewView } from "../api/gen/OverviewView.ts";
+import { RelativeTime } from "../ui/RelativeTime.tsx";
 import type { HobnailOptions } from "../api/gen/HobnailOptions.ts";
 import type { HistoryView } from "../api/gen/HistoryView.ts";
 import type { ContainerRow } from "../api/gen/ContainerRow.ts";
-import { useContainers, useNow, useStatsMap, useSystem, useVitalsRings } from "../live/index.ts";
+import { useBootstrap, useContainers, useNow, useStatsMap, useSystem, useVitalsRings } from "../live/index.ts";
 import { useRead } from "../live/read.ts";
 import { StructuredWidget } from "../ui/StructuredWidget.ts";
 import { Sparkline } from "../ui/Sparkline.tsx";
-import { busiest, eventRows, hostBody, logLines, METRIC_LABEL, metricValue, percentMetric, stackRows, thin, topContainers, type Live } from "./hobnail.ts";
+import { attentionCounts, busiest, eventRows, hostBody, logLines, METRIC_LABEL, metricValue, percentMetric, stackRows, thin, topContainers, type Live } from "./hobnail.ts";
 
 const LOG_POLL = 20_000;
 const CHART_COLOR: Record<string, string> = { cpu: "cpu", mem: "mem", disk: "disk", load1: "load", net_rx: "rx", net_tx: "tx", temp: "temp", swap: "swap" };
@@ -116,9 +119,55 @@ function History({ options }: { options: HobnailOptions }) {
   </div>;
 }
 
+const DAY = 86_400;
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Container counts, what needs you now, and the alerts of the last day. */
+function Attention() {
+  const boot = useBootstrap();
+  const allowed = boot?.scoped === false;
+  const admin = allowed && boot.role !== "viewer";
+  // Fixed at mount: the read refreshes on alerts and every 15 s anyway.
+  const [since] = useState(() => Math.floor(Date.now() / 1000) - DAY);
+  const { data, error } = useRead<OverviewView>(allowed ? `/api/v1/overview?since=${since}${admin ? "&probes=1" : ""}` : null, "alerts", 15_000);
+  const { groups } = useRows();
+  if (boot?.scoped) return waiting("Needs attention is not available with board-scoped access.");
+  if (!data) return waiting(error || "Checking containers and alerts…");
+  const counts = attentionCounts(groups, data);
+  const total = counts.running + counts.stopped;
+  const cells = [
+    { n: counts.running, label: "running", href: "/app/containers?state=running", hot: false },
+    { n: counts.stopped, label: "stopped", href: "/app/containers?state=stopped", hot: false },
+    { n: counts.problems, label: "problems", href: "/app/containers?state=problem", hot: counts.problems > 0 },
+    { n: counts.firing, label: "alerts", href: "/app/alerts", hot: counts.firing > 0 },
+  ];
+  const extra = Math.max(0, counts.problems - data.attention.filter((item) => item.container).length);
+  return <div className="hw-attn" data-testid="hobnail-attention">
+    <ul className="hw-counts" aria-label="Containers and alerts">{cells.map(({ n, label, href, hot }) =>
+      <li key={label}><a href={href} className="hw-count" data-hot={hot ? "" : undefined} data-zero={n === 0 ? "" : undefined}>
+        <strong className="num">{n}</strong><span>{label}</span>
+      </a></li>)}
+    </ul>
+    {data.attention.length ? <ul className="hw-attn-list">{data.attention.map((item) =>
+      <li key={[item.name, item.reason, item.detail].join(":")}>
+        <span className={`dot ${item.severity}`} aria-hidden="true" />
+        <a className="hw-attn-name" href={item.href}>{item.title}</a>
+        <span className="hw-attn-why">{item.detail}{item.probe && ` · ${item.probe}`}</span>
+        {item.since !== null && <span className="hw-attn-when"><RelativeTime at={item.since} /></span>}
+      </li>)}
+    </ul> : <p className="hw-ok"><CheckIcon aria-hidden="true" />{total ? <>All clear <span>· {plural(total, "container", "containers")}, nothing needs you</span></> : "No containers yet"}</p>}
+    <p className="hw-attn-foot">
+      {extra > 0 && <a href="/app/containers?state=problem">{plural(extra, "more problem", "more problems")}</a>}
+      {counts.cleanStops > 0 && <a href="/app/containers?state=stopped">{plural(counts.cleanStops, "stopped cleanly", "stopped cleanly")}</a>}
+      <a href="/app/alerts">{data.alerts_since ? plural(data.alerts_since, "alert", "alerts") + " in 24 h" : "No alerts in 24 h"}</a>
+    </p>
+  </div>;
+}
+
 export function HobnailWidget({ view, options }: { view: string; options: HobnailOptions }) {
   return <div className="widget-content hobnail-widget" data-view={view}>{
-    view === "host" ? <Host />
+    view === "attention" ? <Attention />
+      : view === "host" ? <Host />
       : view === "containers" ? <Containers options={options} />
         : view === "stacks" ? <Stacks />
           : view === "events" ? <Events />

@@ -60,6 +60,18 @@ pub(super) const HOBNAIL: Provider = Provider {
     test: super::local_test,
     widgets: &[
         Widget {
+            id: "attention",
+            name: "Needs attention",
+            description: "Running, stopped and problem counts, the containers that need you (unhealthy, restarting, exited) and the alerts firing now.",
+            recommended: false,
+            default_size: size(4, 4),
+            min_size: size(3, 3),
+            sample: r#"{"kind":"rows","rows":[{"title":"database","secondary":"Unhealthy · health check failed","status":"down"},{"title":"worker","secondary":"Restarting · exited with code 1","status":"warn"},{"title":"Disk /srv","secondary":"Alert firing · disk above 90%","status":"down"}]}"#,
+            fields: &[],
+            fetch: attention,
+            validate: no_widget_options,
+        },
+        Widget {
             id: "host",
             name: "Host overview",
             description: "CPU, memory and network with live trends, load and uptime, and the fullest disks as meters.",
@@ -160,6 +172,10 @@ fn number(options: &Values, field: &Field) -> Option<u8> {
 fn view(view: &str, options: HobnailOptions) -> Job<'static, StructuredBody> {
     let view = view.to_owned();
     Box::pin(async move { Ok(StructuredBody::Hobnail { view, options }) })
+}
+
+fn attention<'a>(_: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {
+    view("attention", HobnailOptions::default())
 }
 
 fn host<'a>(_: &'a Conn<'_>, _: &'a Values) -> Job<'a, StructuredBody> {

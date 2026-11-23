@@ -260,7 +260,7 @@ pub enum StructuredBody {
     Agenda {
         entries: Vec<AgendaEntry>,
     },
-    /// One of Hobnail's own widgets (`view`: `host`, `containers`,
+    /// One of Hobnail's own widgets (`view`: `attention`, `host`, `containers`,
     /// `stacks`, `events`, `logs`, `history`), drawn by the client from the
     /// host, container, history and log data it already reads.
     Hobnail {

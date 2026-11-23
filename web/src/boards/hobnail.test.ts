@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { ContainerRow } from "../api/gen/ContainerRow.ts";
 import type { GroupRow } from "../api/gen/GroupRow.ts";
 import type { SystemView } from "../api/gen/SystemView.ts";
-import { busiest, eventRows, hostBody, logLines, metricValue, stackRows, thin, topContainers } from "./hobnail.ts";
+import { attentionCounts, busiest, eventRows, hostBody, logLines, metricValue, stackRows, thin, topContainers } from "./hobnail.ts";
 
 const GiB = 1024 ** 3;
 const row = (name: string, cpu: number | null, mem: number | null, state = "running"): ContainerRow => ({
@@ -49,4 +49,14 @@ test("events, logs and history values", () => {
   assert.equal(metricValue("cpu", null), "—");
   assert.deepEqual(thin([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]], 3), [1, 3, 5]);
   assert.deepEqual(thin([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]], 2), [2, 5]);
+});
+
+test("needs attention: live counts, problems and clean stops", () => {
+  const problem = { ...row("db", 1, 1, "exited"), attention: { reason: "exit", severity: "bad" } } as ContainerRow;
+  const clean = { ...row("job", null, null, "exited"), attention: null } as ContainerRow;
+  const ok = { ...row("web", 1, 1), attention: null } as ContainerRow;
+  const groups = [{ name: "lab", title: "lab", running: 1, stopped: 2, containers: [problem, clean, ok] } as GroupRow];
+  const view = { running: 9, stopped: 9, problems: 9, firing: 2 };
+  assert.deepEqual(attentionCounts(groups, view), { running: 1, stopped: 2, problems: 1, firing: 2, cleanStops: 1 });
+  assert.deepEqual(attentionCounts(null, view), { ...view, cleanStops: 0 });
 });
