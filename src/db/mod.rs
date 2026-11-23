@@ -241,6 +241,7 @@ pub struct DbStats {
 // ---------------------------------------------------------------------------
 // Implementation
 
+mod board_layout;
 pub mod maintain;
 mod schema;
 mod series;

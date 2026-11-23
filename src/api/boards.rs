@@ -11,7 +11,7 @@ use super::{
     error::ApiError,
     integrations::{self, IntegrationView},
 };
-use crate::{http::server::Body, model::Container, state::AppState};
+use crate::{board_grid, http::server::Body, model::Container, state::AppState};
 
 // A full document with the largest supported set of links must round-trip
 // after the server adds section and item IDs.
@@ -83,14 +83,94 @@ pub struct BoardCreate {
     icon: Option<String>,
 }
 
+/// A board's whole editable content. Save writes all of it as one revision:
+/// the name and icon, the appearance and every section and item. Reads
+/// always carry `name`; a saved document without one keeps the board's name
+/// and icon, and one with a `name` sets both (no `icon` clears it).
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardDocument {
     pub version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub appearance: BoardAppearance,
     pub sections: Vec<BoardSection>,
 }
 
+/// Board-level look. Every field is a closed preset, so the stored values
+/// can be rendered without any author-supplied CSS or URL.
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct BoardAppearance {
+    #[serde(default)]
+    pub background: BoardBackground,
+    #[serde(default)]
+    pub density: BoardDensity,
+    #[serde(default)]
+    pub surface: TileSurface,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub accent: Option<Accent>,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum BoardBackground {
+    #[default]
+    None,
+    Dawn,
+    Dusk,
+    Aurora,
+    Ocean,
+    Forest,
+    Graphite,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum BoardDensity {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum TileSurface {
+    #[default]
+    Solid,
+    Glass,
+    Outline,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename_all = "snake_case"))]
+pub enum Accent {
+    Blue,
+    Violet,
+    Green,
+    Amber,
+    Rose,
+    Teal,
+    Slate,
+}
+
+/// A titled group of items with its own 12-column canvas.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -99,38 +179,101 @@ pub struct BoardSection {
     pub id: Option<String>,
     pub title: String,
     pub position: u32,
+    /// Shown folded until a reader opens it.
+    #[serde(default)]
+    pub collapsed: bool,
     pub items: Vec<BoardItem>,
 }
 
+impl BoardSection {
+    pub fn new(title: impl Into<String>, position: u32) -> Self {
+        Self {
+            id: None,
+            title: title.into(),
+            position,
+            collapsed: false,
+            items: Vec::new(),
+        }
+    }
+
+    fn rects(&self) -> Vec<board_grid::Rect> {
+        self.items.iter().map(BoardItem::rect).collect()
+    }
+
+    /// Add an item of its kind's default size in the first free slot.
+    pub fn append(&mut self, payload: BoardPayload) {
+        let (w, h) = board_grid::default_size(payload.kind());
+        self.append_sized(payload, w, h);
+    }
+
+    /// Add an item of `w` × `h` cells in the first free slot.
+    pub fn append_sized(&mut self, payload: BoardPayload, w: u16, h: u16) {
+        let rect = board_grid::first_free(&self.rects(), w, h);
+        self.items.push(BoardItem {
+            id: None,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+            look: None,
+            payload,
+        });
+    }
+}
+
+/// One tile: a rectangle on its section's canvas (`x` 0–11, `w` 1–12,
+/// `h` 1–16 rows) and what it shows.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BoardItem {
     #[cfg_attr(test, ts(optional = nullable))]
     pub id: Option<String>,
-    pub position: u32,
-    pub spans: GridSpans,
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub look: Option<TileLook>,
     pub payload: BoardPayload,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-pub struct GridSpans {
-    mobile: u8,
-    tablet: u8,
-    desktop: u8,
-    rows: u8,
+impl BoardItem {
+    pub fn rect(&self) -> board_grid::Rect {
+        board_grid::Rect {
+            x: self.x,
+            y: self.y,
+            w: self.w,
+            h: self.h,
+        }
+    }
 }
 
-impl Default for GridSpans {
-    fn default() -> Self {
-        Self {
-            mobile: 4,
-            tablet: 4,
-            desktop: 4,
-            rows: 1,
-        }
+/// Per-tile presentation. `icon` and `link` override what the target
+/// supplies (container and link payloads keep their own fields too).
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct TileLook {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub accent: Option<Accent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub link: Option<String>,
+    #[serde(default)]
+    pub hide_status: bool,
+    #[serde(default)]
+    pub hide_metrics: bool,
+}
+
+impl TileLook {
+    fn is_plain(&self) -> bool {
+        *self == Self::default()
     }
 }
 
@@ -166,6 +309,17 @@ pub enum BoardPayload {
         #[cfg_attr(test, ts(optional))]
         title: Option<String>,
     },
+}
+
+impl BoardPayload {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Container { .. } => "container",
+            Self::Link { .. } => "link",
+            Self::Widget { .. } => "widget",
+            Self::Integration { .. } => "integration",
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
@@ -258,13 +412,20 @@ struct Section {
     legacy_provider_title: Option<String>,
     title: String,
     position: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    collapsed: bool,
 }
 
+// Stored in `board_items.layout`; the payload is in `config`.
 #[derive(Deserialize, Serialize)]
 struct Placement {
     section: String,
-    position: u32,
-    spans: GridSpans,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    look: Option<TileLook>,
 }
 
 const SUMMARY: &str = "id,name,icon,position,version,created,updated";
@@ -345,12 +506,19 @@ fn sections(conn: &Connection, board: &str) -> Result<Vec<Section>, ApiError> {
 }
 
 pub(super) fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardDocument, ApiError> {
+    let raw: String = conn.query_row(
+        "SELECT appearance FROM boards WHERE id=?1",
+        [&board.id],
+        |r| r.get(0),
+    )?;
+    let appearance = decode(&raw)?;
     let mut sections: Vec<_> = sections(conn, &board.id)?
         .into_iter()
         .map(|s| BoardSection {
             id: Some(s.id),
             title: s.title,
             position: s.position,
+            collapsed: s.collapsed,
             items: Vec::new(),
         })
         .collect();
@@ -365,17 +533,23 @@ pub(super) fn document(conn: &Connection, board: &BoardSummary) -> Result<BoardD
             .ok_or(rusqlite::Error::InvalidQuery)?;
         section.items.push(BoardItem {
             id: Some(row.get(0)?),
-            position: placement.position,
-            spans: placement.spans,
+            x: placement.x,
+            y: placement.y,
+            w: placement.w,
+            h: placement.h,
+            look: placement.look,
             payload: decode(&row.get::<_, String>(1)?)?,
         });
     }
     sections.sort_by_key(|s| s.position);
     for section in &mut sections {
-        section.items.sort_by_key(|i| i.position);
+        section.items.sort_by_key(|i| (i.y, i.x));
     }
     Ok(BoardDocument {
         version: board.version,
+        name: Some(board.name.clone()),
+        icon: board.icon.clone(),
+        appearance,
         sections,
     })
 }
@@ -472,8 +646,18 @@ pub(super) fn validate(
         })
         .map(|item| identity(&item.payload))
         .collect();
+    if let Some(name) = &doc.name {
+        super::validate_label(name, "name")?;
+        super::validate_icon(doc.icon.as_deref())?;
+    } else if doc.icon.is_some() {
+        return Err(ApiError::bad_request(
+            "an icon needs the board name",
+            Some("icon"),
+        ));
+    }
     let validator = PayloadValidator::new(user, conn, config)?;
     for section in &doc.sections {
+        layout(section)?;
         if section.id.as_deref().is_some_and(|id| !sections.remove(id)) {
             return Err(ApiError::bad_request(
                 "unknown or duplicate section ID",
@@ -488,21 +672,11 @@ pub(super) fn validate(
                 })?),
                 None => None,
             };
-            let GridSpans {
-                mobile,
-                tablet,
-                desktop,
-                rows,
-            } = item.spans;
-            if !(1..=4).contains(&mobile)
-                || !(1..=8).contains(&tablet)
-                || !(1..=12).contains(&desktop)
-                || !(1..=12).contains(&rows)
-            {
-                return Err(ApiError::bad_request(
-                    "invalid responsive grid spans",
-                    Some("spans"),
-                ));
+            if let Some(look) = &item.look {
+                super::validate_icon(look.icon.as_deref())?;
+                if let Some(link) = &look.link {
+                    safe_link(link, "look.link")?;
+                }
             }
             validator.validate(&item.payload, previous)?;
             if matches!(item.payload, BoardPayload::Link { .. })
@@ -517,6 +691,19 @@ pub(super) fn validate(
         }
     }
     Ok(())
+}
+
+/// Every item inside the canvas and none on top of another.
+fn layout(section: &BoardSection) -> Result<(), ApiError> {
+    board_grid::compact(&mut section.rects()).map_err(|invalid| {
+        let message = match invalid {
+            board_grid::Invalid::Bounds(_) => {
+                "Items must fit the 12-column grid (width 1-12, height 1-16)."
+            }
+            board_grid::Invalid::Overlap(_) => "Board items must not overlap.",
+        };
+        ApiError::bad_request(message, Some("layout"))
+    })
 }
 
 pub(super) struct PayloadValidator<'a> {
@@ -678,8 +865,11 @@ pub(super) fn store(
     conn.execute("DELETE FROM board_items WHERE board_id=?1", [id])?;
     let mut sections = Vec::with_capacity(doc.sections.len());
     for section in doc.sections {
+        let mut rects = section.rects();
+        layout(&section)?;
+        board_grid::compact(&mut rects).expect("validated layout");
         let section_id = next_id(conn, section.id)?;
-        for mut item in section.items {
+        for (mut item, rect) in section.items.into_iter().zip(rects) {
             let item_id = next_id(conn, item.id)?;
             if let BoardPayload::Widget { widget_id, .. } = &mut item.payload {
                 if let Some(source) = sources.get(widget_id) {
@@ -696,8 +886,11 @@ pub(super) fn store(
             };
             let placement = Placement {
                 section: section_id.clone(),
-                position: item.position,
-                spans: item.spans,
+                x: rect.x,
+                y: rect.y,
+                w: rect.w,
+                h: rect.h,
+                look: item.look.filter(|look| !look.is_plain()),
             };
             conn.execute(
                 "INSERT INTO board_items (id,board_id,integration_id,kind,config,layout)
@@ -720,12 +913,23 @@ pub(super) fn store(
             id: section_id,
             title: section.title,
             position: section.position,
+            collapsed: section.collapsed,
         });
     }
     crate::db::maintain::prune_provider_placements(conn, Some(id), now)?;
     conn.execute(
-        "UPDATE boards SET sections=?2,version=version+1,updated=?3 WHERE id=?1",
-        params![id, encode(&sections)?, now],
+        "UPDATE boards SET sections=?2,name=coalesce(?4,name),
+           icon=CASE WHEN ?4 IS NULL THEN icon ELSE ?5 END,appearance=?6,
+           version=version+1,updated=?3
+         WHERE id=?1",
+        params![
+            id,
+            encode(&sections)?,
+            now,
+            doc.name,
+            doc.icon,
+            encode(&doc.appearance)?
+        ],
     )?;
     Ok(())
 }
@@ -1381,12 +1585,10 @@ mod tests {
         let owner = state.db.accounts().unwrap().pop().unwrap();
         let mut document = BoardDocument {
             version: 0,
-            sections: vec![BoardSection {
-                id: None,
-                title: "Widgets".into(),
-                position: 0,
-                items: Vec::new(),
-            }],
+            name: None,
+            icon: None,
+            appearance: Default::default(),
+            sections: vec![BoardSection::new("Widgets", 0)],
         };
         let board = state.db.dashboard(|conn| -> rusqlite::Result<_> {
             conn.execute("INSERT INTO boards (id,name,created,updated) VALUES ('fixture','Board',0,0)", [])?;
@@ -1394,7 +1596,7 @@ mod tests {
                 "INSERT INTO integrations (id,name,kind,origin) VALUES ('clock','Fixture','clock','')",
                 [],
             )?;
-            for position in 0..512 {
+            for position in 0..512usize {
                 let id = format!("{position:032x}");
                 let widget_id = format!("provider:{id}");
                 conn.execute(
@@ -1408,8 +1610,11 @@ mod tests {
                 )?;
                 document.sections[0].items.push(BoardItem {
                     id: Some(id),
-                    position,
-                    spans: GridSpans::default(),
+                    x: (position % 3 * 4) as u16,
+                    y: (position / 3 * 3) as u16,
+                    w: 4,
+                    h: 3,
+                    look: None,
                     payload,
                 });
             }
@@ -1466,12 +1671,15 @@ mod tests {
     }
 
     #[test]
-    fn board_validation_checks_ids_links_spans_and_targets() {
+    fn board_validation_checks_ids_links_layout_and_targets() {
         let db = crate::db::Db::open_in_memory().unwrap();
         db.recover_owner(None, "test", 1).unwrap();
         let owner = db.accounts().unwrap().pop().unwrap();
         let original = BoardDocument {
             version: 0,
+            name: None,
+            icon: None,
+            appearance: Default::default(),
             sections: Vec::new(),
         };
         let mut board: BoardDocument = serde_json::from_value(serde_json::json!({
@@ -1480,9 +1688,12 @@ mod tests {
                 "title": "Links",
                 "position": 1,
                 "items": [{
-                    "position": 2,
-                    "spans": {"mobile": 4, "tablet": 8, "desktop": 12, "rows": 1},
+                    "x": 0, "y": 3, "w": 12, "h": 1,
                     "payload": {"kind": "link", "title": "Example", "url": "https://example.test"}
+                }, {
+                    "x": 0, "y": 0, "w": 4, "h": 2,
+                    "look": {"accent": "teal", "icon": "jellyfin", "link": "https://media.example.test"},
+                    "payload": {"kind": "link", "title": "Other", "url": "https://other.example.test"}
                 }]
             }]
         }))
@@ -1498,10 +1709,27 @@ mod tests {
             );
             board.sections[0].id = None;
             let item = &mut board.sections[0].items[0];
-            item.spans.desktop = 13;
-            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("spans"));
+            item.x = 1;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
             let item = &mut board.sections[0].items[0];
-            item.spans.desktop = 12;
+            item.x = 0;
+            item.y = 1;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
+            let item = &mut board.sections[0].items[0];
+            item.y = 3;
+            item.h = 17;
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("layout"));
+            board.sections[0].items[0].h = 1;
+            board.sections[0].items[1].look.as_mut().unwrap().link = Some("javascript:x".into());
+            assert_eq!(
+                check(&board).unwrap_err().field.as_deref(),
+                Some("look.link")
+            );
+            board.sections[0].items[1].look = None;
+            board.name = Some(String::new());
+            assert_eq!(check(&board).unwrap_err().field.as_deref(), Some("name"));
+            board.name = None;
+            let item = &mut board.sections[0].items[0];
             item.payload = BoardPayload::Link {
                 title: "Unsafe".into(),
                 url: "javascript:alert(1)".into(),

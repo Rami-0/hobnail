@@ -108,6 +108,40 @@ or expired wait returns `429 Too Many Requests` with `Retry-After: 1`.
 | DELETE | `/api/v1/account/sessions/<id>` | Viewer | Session revoke. |
 | DELETE | `/api/v1/account/sessions` | Viewer | Sessions revoke. |
 
+### Board documents
+
+`GET /api/v1/boards/<id>` returns `{board, document, resolved}`. `PUT` saves a
+whole `document` as one revision (and `PUT …/draft` stores one privately):
+
+```json
+{"version": 3, "name": "Home", "icon": "home",
+ "appearance": {"background": "aurora", "density": "compact", "surface": "glass", "accent": "teal"},
+ "sections": [{"id": "…", "title": "Media", "position": 0, "collapsed": false, "items": [
+   {"id": "…", "x": 0, "y": 0, "w": 4, "h": 2,
+    "look": {"accent": "rose", "icon": "jellyfin", "link": "https://media.example", "hide_status": false, "hide_metrics": true},
+    "payload": {"kind": "container", "target": {"by": "compose", "project": "media", "service": "jellyfin"}}}]}]}
+```
+
+- Each section is its own 12-column canvas. An item is the rectangle `x`
+  (0–11), `y`, `w` (1–12, `x + w` ≤ 12) and `h` (1–16 rows); items of one
+  section must not overlap, or the save is refused with field `layout`. The
+  server then moves every item up as far as it goes (in `y`, then `x` order),
+  the same compaction the editor applies, and returns the stored layout.
+  Items are listed in reading order (`y`, then `x`).
+- `appearance` presets: `background` `none`, `dawn`, `dusk`, `aurora`, `ocean`,
+  `forest`, `graphite`; `density` `comfortable` or `compact`; `surface`
+  `solid`, `glass` or `outline`; optional `accent` `blue`, `violet`, `green`,
+  `amber`, `rose`, `teal` or `slate`. There is no custom image or CSS: the
+  page's CSP allows only same-origin images.
+- `look` is optional per item: an accent, an icon name and link that override
+  the target's, and whether to hide the status pill and metrics.
+- Reads always include `name` (and `icon` when set). A saved document with a
+  `name` sets the board's name and icon (no `icon` clears it) in the same
+  revision; one without `name` keeps both.
+- Boards saved before the canvas were migrated in place: sections stayed,
+  and items kept their saved order, each flowed into the first free slot of
+  its old size (4, 8 or 12 columns; rows by kind and old height).
+
 ### Board freshness and tour
 
 Board reads and successful board updates return at most 4 MiB of JSON.

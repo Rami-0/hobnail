@@ -91,7 +91,10 @@ async fn board_save_is_atomic_and_drafts_are_private_and_pruned() {
     let path = format!("/api/v1/boards/{id}");
     let draft = format!("{path}/draft");
     let board = owner.json("GET", &path, Value::Null, 200).await;
-    assert_eq!(board["document"], json!({"version":0,"sections":[]}));
+    assert_eq!(
+        board["document"],
+        json!({"version":0,"name":"Empty","appearance":{"background":"none","density":"comfortable","surface":"solid"},"sections":[]})
+    );
     assert_eq!(board["resolved"], json!([]));
     let suggestions = owner
         .json("GET", &format!("{path}/suggestions"), Value::Null, 200)
@@ -101,10 +104,10 @@ async fn board_save_is_atomic_and_drafts_are_private_and_pruned() {
     ));
 
     let doc = json!({"version":0,"sections":[{"title":"Services","position":0,"items":[{
-        "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+        "x":0,"y":0,"w":6,"h":2,
         "payload":{"kind":"container","target":{"by":"compose","project":"gone","service":"web"}}
     },{
-        "position":1,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+        "x":6,"y":0,"w":6,"h":2,
         "payload":{"kind":"container","target":{"by":"compose","project":"shop","service":"web"},"title":"Web service"}
     }]}]});
     let stored = owner.json("PUT", &draft, doc.clone(), 200).await;
@@ -122,9 +125,9 @@ async fn board_save_is_atomic_and_drafts_are_private_and_pruned() {
     admin.json("PUT", &draft, doc.clone(), 200).await;
 
     let mut invalid = doc.clone();
-    invalid["sections"][0]["items"][0]["spans"]["mobile"] = json!(5);
+    invalid["sections"][0]["items"][0]["x"] = json!(3);
     let r = owner.call("PUT", &path, invalid).await;
-    assert_api_error(&r, 400, "bad_request", "invalid spans");
+    assert_api_error(&r, 400, "bad_request", "overlapping items");
     assert_eq!(owner.json("GET", &path, Value::Null, 200).await, board);
 
     let mut secret_in_draft = doc.clone();
@@ -162,6 +165,33 @@ async fn board_save_is_atomic_and_drafts_are_private_and_pruned() {
         admin.json("GET", &draft, Value::Null, 200).await["document"]["version"],
         0
     );
+
+    // One Save carries name, icon, appearance, collapse and layout: one revision.
+    let mut styled = saved["document"].clone();
+    styled["name"] = json!("Renamed");
+    styled["icon"] = json!("home");
+    styled["appearance"] =
+        json!({"background":"aurora","density":"compact","surface":"glass","accent":"teal"});
+    styled["sections"][0]["collapsed"] = json!(true);
+    styled["sections"][0]["items"][1]["y"] = json!(7);
+    styled["sections"][0]["items"][1]["look"] =
+        json!({"accent":"rose","hide_status":true,"hide_metrics":false});
+    let restyled = owner.json("PUT", &path, styled, 200).await;
+    assert_eq!(restyled["board"]["version"], 2);
+    assert_eq!(restyled["board"]["name"], "Renamed");
+    assert_eq!(restyled["board"]["icon"], "home");
+    assert_eq!(restyled["document"]["appearance"]["surface"], "glass");
+    assert_eq!(restyled["document"]["sections"][0]["collapsed"], true);
+    // Compacted back to the top row, look kept.
+    let moved = &restyled["document"]["sections"][0]["items"][1];
+    assert_eq!(
+        (moved["x"].clone(), moved["y"].clone()),
+        (json!(6), json!(0))
+    );
+    assert_eq!(moved["look"]["accent"], "rose");
+    let mut unknown = restyled["document"].clone();
+    unknown["appearance"]["background"] = json!("url(https://evil.test/x.png)");
+    assert_eq!(owner.call("PUT", &path, unknown).await.status, 400);
 
     let now = crate::auth::now_s();
     st.db
@@ -451,14 +481,14 @@ async fn scoped_board_edits_cannot_introduce_targets_or_reuse_foreign_ids() {
     }), 201).await;
     let item = |payload| {
         json!({
-            "position":0, "spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1}, "payload":payload
+            "x":0, "y":0, "w":6, "h":2, "payload":payload
         })
     };
     let integration = item(json!({"kind":"integration","integration_id":integration["id"]}));
     let mut on_board = item(
         json!({"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}),
     );
-    on_board["position"] = json!(1);
+    on_board["x"] = json!(6);
     let foreign_container =
         item(json!({"kind":"container","target":{"by":"compose","project":"shop","service":"db"}}));
     let doc = |items: Vec<Value>| json!({"version":0,"sections":[{"title":"Services","position":0,"items":items}]});
@@ -543,7 +573,7 @@ async fn scoped_widget_subscriptions_only_count_when_a_widget_is_visible() {
             &path,
             json!({"version": 0, "sections": [{
                 "title": "Widgets", "position": 0, "items": [{
-                    "position": 0, "spans": {"mobile": 4, "tablet": 4, "desktop": 6, "rows": 1},
+                    "x": 0, "y": 0, "w": 6, "h": 2,
                     "payload": {"kind": "widget", "widget_id": "board-only"}
                 }]
             }]}),
@@ -572,7 +602,7 @@ async fn scoped_viewers_only_read_containers_on_their_boards() {
     let path = format!("/api/v1/boards/{board}");
     let mut document = json!({"version":0,"sections":[{
         "title":"Services","position":0,"items":[{
-            "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+            "x":0,"y":0,"w":6,"h":2,
             "payload":{"kind":"container","target":{"by":"compose","project":"shop","service":"web"}}
         }]
     }]});
@@ -1075,7 +1105,7 @@ async fn deleting_targets_revokes_pending_invites_and_refreshes_boards() {
             &path,
             json!({"version":0,"sections":[{
                 "title":"Services","position":0,"items":[{
-                    "position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+                    "x":0,"y":0,"w":6,"h":2,
                     "payload":{"kind":"integration","integration_id":id}
                 }]
             }]}),
@@ -1748,8 +1778,7 @@ async fn setup_deduplicates_links_by_canonical_identity() {
     let items = document["sections"][0]["items"].as_array_mut().unwrap();
     assert_eq!(items.len(), links.len() - 1);
     items.push(json!({
-        "position":items.len(),
-        "spans":{"mobile":4,"tablet":8,"desktop":12,"rows":1},
+        "x":0,"y":200,"w":12,"h":1,
         "payload":{"kind":"link","title":"Duplicate","url":links[1]}
     }));
     let error = owner.json("PUT", &path, document, 400).await;
@@ -2218,7 +2247,7 @@ async fn integration_tiles_are_masked_without_the_grant_and_round_trip() {
     let integration = integration["id"].as_str().unwrap().to_owned();
     let path = format!("/api/v1/boards/{board}");
     let tile = |title: &str| {
-        json!({"position":0,"spans":{"mobile":4,"tablet":4,"desktop":6,"rows":1},
+        json!({"x":0,"y":0,"w":6,"h":2,
             "payload":{"kind":"integration","integration_id":integration,"title":title}})
     };
     let doc = json!({"version":0,"sections":[{"title":"Tiles","position":0,"items":[tile("Custom private title")]}]});
@@ -2293,6 +2322,7 @@ async fn provider_widgets_require_board_and_integration_grants() {
     let mut copied = doc["sections"][0]["items"][0].clone();
     let widget = copied["payload"]["widget_id"].as_str().unwrap().to_owned();
     copied.as_object_mut().unwrap().remove("id");
+    copied["y"] = json!(100);
     doc["sections"][0]["items"]
         .as_array_mut()
         .unwrap()

@@ -312,7 +312,17 @@ UPDATE boards AS board SET sections=json((
     FROM json_each(board.sections) section
 )) WHERE sections != '[]';
 ",
+    // Followed by `board_layout::upgrade` (see `migrate`).
+    "
+ALTER TABLE boards ADD COLUMN appearance TEXT NOT NULL DEFAULT '{}'
+  CHECK (json_valid(appearance) AND json_type(appearance) = 'object');
+",
 ];
+
+/// The migration after which saved board layouts move from responsive spans
+/// to canvas rectangles (v16); the JSON rewrite needs the grid's flow, in Rust.
+const BOARD_CANVAS: usize = 15;
+const _: () = assert!(BOARD_CANVAS < MIGRATIONS.len());
 
 /// Pragmas for every connection. `file` is false for `:memory:`.
 pub(super) fn configure(conn: &Connection, file: bool) -> rusqlite::Result<()> {
@@ -371,6 +381,9 @@ pub(super) fn migrate(conn: &mut Connection) -> Result<(), String> {
     let v = version(&tx)?;
     for (n, sql) in MIGRATIONS.iter().enumerate().skip(v) {
         tx.execute_batch(sql).map_err(e)?;
+        if n == BOARD_CANVAS {
+            super::board_layout::upgrade(&tx).map_err(e)?;
+        }
         tx.pragma_update(None, "user_version", (n + 1) as i64)
             .map_err(e)?;
     }
@@ -602,7 +615,7 @@ mod tests {
     fn legacy_provider_title_migration_marks_only_candidate_sections() {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn, false).unwrap();
-        let previous = MIGRATIONS.len() - 1;
+        let previous = BOARD_CANVAS - 1;
         for migration in &MIGRATIONS[..previous] {
             conn.execute_batch(migration).unwrap();
         }
@@ -647,5 +660,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(markers, (String::new(), "provider".into(), None));
+    }
+
+    #[test]
+    fn board_canvas_migration_flows_saved_spans_into_rectangles() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn, false).unwrap();
+        for migration in &MIGRATIONS[..BOARD_CANVAS] {
+            conn.execute_batch(migration).unwrap();
+        }
+        conn.pragma_update(None, "user_version", BOARD_CANVAS as i64)
+            .unwrap();
+        let span = |desktop: u8, rows: u8| {
+            format!(r#""spans":{{"mobile":4,"tablet":4,"desktop":{desktop},"rows":{rows}}}"#)
+        };
+        conn.execute_batch(&format!(
+            r#"
+            INSERT INTO users(id,name,password_hash,role,created,updated) VALUES (1,'owner','x','owner',1,1);
+            INSERT INTO boards(id,name,icon,created,updated,sections)
+                VALUES ('board','Home','home',1,1,'[
+                    {{"id":"a","title":"Apps","position":0}},
+                    {{"id":"b","title":"Links","position":1}}
+                ]');
+            INSERT INTO board_items(id,board_id,kind,config,layout) VALUES
+                ('i1','board','container','{{}}','{{"section":"a","position":1,{wide}}}'),
+                ('i2','board','container','{{}}','{{"section":"a","position":0,{small}}}'),
+                ('i3','board','widget','{{}}','{{"section":"a","position":2,{tall}}}'),
+                ('i4','board','link','{{}}','{{"section":"b","position":0,{small}}}'),
+                ('i5','board','link','{{}}','{{"section":"b","position":1,{small}}}');
+            INSERT INTO drafts(user_id,key,value,updated) VALUES
+                (1,'board:board','{{"version":0,"sections":[{{"title":"Apps","position":0,"items":[
+                    {{"position":0,{wide},"payload":{{"kind":"link","title":"A","url":"https://a.test"}}}},
+                    {{"position":1,{small},"payload":{{"kind":"widget","widget_id":"w"}}}}
+                ]}}]}}',1),
+                (1,'board:gone','{{"version":0,"sections":[]}}',1);
+            "#,
+            wide = span(8, 1),
+            small = span(4, 1),
+            tall = span(4, 2),
+        ))
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let layout = |id: &str| -> serde_json::Value {
+            let raw: String = conn
+                .query_row("SELECT layout FROM board_items WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            serde_json::from_str(&raw).unwrap()
+        };
+        let rect = |x: u16, y: u16, w: u16, h: u16, section: &str| serde_json::json!({"section": section, "x": x, "y": y, "w": w, "h": h});
+        // Saved order: i2 (4 wide), i1 (8 wide) beside it, then i3 below.
+        assert_eq!(layout("i2"), rect(0, 0, 4, 2, "a"));
+        assert_eq!(layout("i1"), rect(4, 0, 8, 2, "a"));
+        assert_eq!(layout("i3"), rect(0, 2, 4, 5, "a"));
+        assert_eq!(layout("i4"), rect(0, 0, 4, 1, "b"));
+        assert_eq!(layout("i5"), rect(4, 0, 4, 1, "b"));
+        let draft: String = conn
+            .query_row(
+                "SELECT value FROM drafts WHERE key='board:board'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let draft: serde_json::Value = serde_json::from_str(&draft).unwrap();
+        assert_eq!(draft["name"], "Home");
+        assert_eq!(draft["icon"], "home");
+        let items = &draft["sections"][0]["items"];
+        assert_eq!(items[0]["w"], 8);
+        assert_eq!(items[0]["h"], 1);
+        assert_eq!(
+            (items[1]["x"].as_u64(), items[1]["w"].as_u64()),
+            (Some(8), Some(4))
+        );
+        assert!(items[0].get("spans").is_none() && items[0].get("position").is_none());
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM drafts WHERE key='board:gone'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+        let appearance: String = conn
+            .query_row("SELECT appearance FROM boards", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(appearance, "{}");
     }
 }

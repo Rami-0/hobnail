@@ -5,7 +5,7 @@ import type { ContainerRow } from "../../api/gen/ContainerRow.ts";
 import type { IntegrationView } from "../../api/gen/IntegrationView.ts";
 import type { ResolvedItem } from "../../api/gen/ResolvedItem.ts";
 import { containerHref } from "../../app/router.ts";
-import { tileCols, tileRows } from "../../boards/document.ts";
+import { ACCENTS } from "./look.ts";
 import { bytes, duration, imageLabel, pct, rowLink, viewerHost } from "../../format/index.ts";
 import { useBootstrap, useContainers, useNow, useStat, useStrips } from "../../live/index.ts";
 import { RelativeTime } from "../../ui/RelativeTime.tsx";
@@ -55,15 +55,16 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
   const b = useBootstrap();
   const live = useContainers();
   const p = item.payload;
+  const look = item.look;
   const matched = resolved?.container;
   const container = matched ? live.data ? live.data.groups.flatMap((g) => g.containers).find((c) => c.name === matched.name) ?? null : matched : null;
   const targetMissing = resolved?.missing || (p.kind === "container" && !!matched && !!live.data && !container);
   const integration = resolved?.integration;
   const widget = resolved?.widget;
   const title = p.kind === "link" ? p.title : p.kind === "container" ? p.title ?? container?.title ?? (p.target.by === "name" ? p.target.name : `${p.target.project}/${p.target.service}`) : p.kind === "widget" ? p.title ?? widget?.title ?? p.widget_id : p.title ?? integration?.name ?? "Integration";
-  const icon = p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : p.kind === "widget" ? widget?.icon : integration?.admin?.icon;
+  const icon = look?.icon ?? (p.kind === "link" ? p.icon : p.kind === "container" ? p.icon ?? container?.icon : p.kind === "widget" ? widget?.icon : integration?.admin?.icon);
   const service = container ? rowLink(container, viewerHost(window.location.hostname)) : null;
-  const href = p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? service ?? (container ? containerHref(container.name) : null) : p.kind === "widget" ? widget?.link : (integration?.admin?.base_url ?? integration?.origin);
+  const href = look?.link ?? (p.kind === "link" ? p.url : p.kind === "container" ? p.link ?? service ?? (container ? containerHref(container.name) : null) : p.kind === "widget" ? widget?.link : (integration?.admin?.base_url ?? integration?.origin));
   const details = p.kind === "container" && container && href !== containerHref(container.name) ? containerHref(container.name) : null;
 
   let subtitle: ReactNode = null;
@@ -102,7 +103,10 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
     }
   }
 
-  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined}>
+  if (look?.hide_status && !targetMissing && p.kind !== "link") pill = null;
+  if (look?.hide_metrics && !targetMissing && (p.kind === "container" || p.kind === "integration")) body = null;
+  const accent = look?.accent ? { "--tile-accent": ACCENTS[look.accent].color } as CSSProperties : undefined;
+  return <article className="board-tile" data-testid="board-tile" data-kind={p.kind} data-missing={targetMissing || undefined} data-linked={href ? "" : undefined} data-accent={look?.accent} style={accent}>
     <header className="board-tile-head">
       <ServiceIcon className="board-avatar" tint name={icon} title={title} enabled={b?.remote_icons ?? false} />
       <div className="board-tile-id">
@@ -114,9 +118,4 @@ export function Tile({ item, resolved }: { item: BoardItem; resolved?: ResolvedI
     {body}
     {details && <a className="tile-details" href={details} aria-label={`${title}: container details`} title="Container details"><BoxIcon aria-hidden="true" /></a>}
   </article>;
-}
-
-/** The grid cell: the tile's size from its saved spans. */
-export function cellStyle(item: BoardItem): CSSProperties {
-  return { "--cols": tileCols(item.spans), "--rows": tileRows(item.spans) } as CSSProperties;
 }

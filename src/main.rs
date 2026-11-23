@@ -14,6 +14,7 @@
 mod alerts;
 mod api;
 mod auth;
+mod board_grid;
 mod config;
 mod db;
 mod docker;

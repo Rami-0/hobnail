@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     access::{Handler, Principal},
-    boards::{self, BoardDocument, BoardItem, BoardPayload, BoardSection, BoardSuggestion},
+    boards::{self, BoardDocument, BoardPayload, BoardSection, BoardSuggestion},
     dashboard_settings,
     error::ApiError,
     integrations::{self, IntegrationInput},
@@ -771,12 +771,7 @@ fn commit(
             Some(index) => index,
             None if sections.len() < 64 => {
                 let index = sections.len();
-                sections.push(BoardSection {
-                    id: None,
-                    title: title.to_owned(),
-                    position: index as u32,
-                    items: Vec::new(),
-                });
+                sections.push(BoardSection::new(title, index as u32));
                 index
             }
             None => {
@@ -794,16 +789,13 @@ fn commit(
             None => payload(conn, user.id, item).map_err(local)?,
         };
         validator.validate(&payload, None).map_err(local)?;
-        let section = &mut sections[index];
-        section.items.push(BoardItem {
-            id: None,
-            position: section.items.len() as u32,
-            spans: Default::default(),
-            payload,
-        });
+        sections[index].append(payload);
     }
     let doc = BoardDocument {
         version: 0,
+        name: None,
+        icon: None,
+        appearance: Default::default(),
         sections,
     };
     let board = boards::create(conn, "Home", None, now)?;

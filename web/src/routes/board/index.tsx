@@ -1,7 +1,9 @@
 import { PageHeader } from "../../ui/PageHeader.tsx";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { LayoutGridIcon, PencilIcon, PlugIcon, PlusIcon } from "lucide-react";
-import { reduceDocument } from "../../boards/document.ts";
+import { ChevronDownIcon, LayoutGridIcon, PencilIcon, PlugIcon, PlusIcon } from "lucide-react";
+import { itemCount as countItems, rectOf, reduceDocument } from "../../boards/document.ts";
+import { readingOrder, rows as rowCount } from "../../boards/grid.ts";
+import type { BoardSection } from "../../api/gen/BoardSection.ts";
 import { tourBoard } from "../../boards/tour.ts";
 import { api, useSession } from "../../api/session.ts";
 import type { BoardDocument } from "../../api/gen/BoardDocument.ts";
@@ -16,7 +18,8 @@ import { Button } from "../../ui/Button.tsx";
 import { EmptyState, Note } from "../../ui/Note.tsx";
 import { LoadBoundary } from "../../ui/LoadBoundary.tsx";
 import { NotFound } from "../NotFound.tsx";
-import { Tile, cellStyle } from "./Tile.tsx";
+import { Tile } from "./Tile.tsx";
+import { boardLook, canvasVars, cellVars } from "./look.ts";
 import type { Provider } from "../../api/gen/Provider.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import "./board.css";
@@ -31,6 +34,32 @@ function sectionSummary(view: BoardView, ids: (string | null | undefined)[]): st
   if (!rows.length) return "";
   const up = rows.filter((c) => c.state === "running").length;
   return up === rows.length ? `${up} running` : `${up} running · ${rows.length - up} stopped`;
+}
+
+/** A section on the read page: a heading that folds it and its canvas,
+ * tiles in reading order (the phone layout is that order, one column). */
+function BoardGroup({ section, view, updates }: { section: BoardSection; view: BoardView; updates: Record<string, WidgetView> }) {
+  const [open, setOpen] = useState(!section.collapsed);
+  const rects = section.items.map(rectOf);
+  const id = `section-${section.id}`;
+  return <section className="board-section" data-collapsed={open ? undefined : ""} aria-labelledby={`${id}-title`}>
+    <header className="board-section-head">
+      <Button variant="ghost" size="sm" className="section-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+        <ChevronDownIcon aria-hidden="true" className="section-chevron" /><h2 id={`${id}-title`}>{section.title}</h2>
+      </Button>
+      <span className="section-count" aria-label={`${section.items.length} items`}>{section.items.length}</span>
+      <span className="section-summary">{sectionSummary(view, section.items.map((item) => item.id))}</span>
+    </header>
+    {open && <div className="canvas" id={id} style={canvasVars(rowCount(rects))}>{readingOrder(rects).map((index) => {
+      const item = section.items[index];
+      if (!item) return null;
+      const resolved = view.resolved.find((r) => r.id === item.id);
+      const update = resolved?.widget ? updates[resolved.widget.id] : null;
+      return <div key={item.id} className="canvas-item" style={cellVars(rectOf(item))}>
+        <Tile item={item} resolved={resolved && update ? { ...resolved, widget: update } : resolved} />
+      </div>;
+    })}</div>}
+  </section>;
 }
 
 export { Tile } from "./Tile.tsx";
@@ -99,11 +128,11 @@ export default function BoardPage() {
       setChanged(false);
     }
   }
-  const itemCount = view?.document.sections.reduce((n, section) => n + section.items.length, 0) ?? 0;
+  const itemCount = view ? countItems(view.document) : 0;
   if (missing) return <NotFound path={`/app/boards/${id}`} />;
   if (!view) return <div className="page">{error || "Loading board…"}</div>;
-  if (editing) return <div className="page board-page"><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
-  return <div className="page board-page" data-testid="board">
+  if (editing) return <div className="page board-page board-editing" {...boardLook(editing.appearance)}><Suspense fallback={<p>Opening editor…</p>}><Editor view={view} initial={editing} initialPicker={picker} scoped={!!b?.scoped} changed={changed} onRebase={() => setChanged(false)} onSave={(next) => { setView(next); setEditing(null); setChanged(false); setDraft(null); }} onCancel={() => { setEditing(null); setChanged(false); setDraft(null); void load(); }} /></Suspense></div>;
+  return <div className="page board-page" data-testid="board" {...boardLook(view.document.appearance)}>
     <PageHeader title={view.board.name} icon={<ServiceIcon tint name={view.board.icon} title={view.board.name} enabled={b?.remote_icons ?? false} />}
       description={itemCount > 0 && <p className="muted">{itemCount} {itemCount === 1 ? "tile" : "tiles"} in {view.document.sections.length} {view.document.sections.length === 1 ? "section" : "sections"}</p>}
       actions={admin && <div className="page-actions board-actions">
@@ -127,15 +156,6 @@ export default function BoardPage() {
         {!b?.scoped && <Button variant="ghost" icon={<PlugIcon aria-hidden="true" />} onClick={() => void openCatalog()}>Connect an integration</Button>}
       </>}>
       {admin ? "Pin containers, links and live widgets here. Pick from what Hobnail already found, or connect a service like Pi-hole." : "No sections or items have been added to this board yet."}
-    </EmptyState></div> : view.document.sections.map((section) => <section key={section.id} className="board-section">
-      <header className="board-section-head"><h2>{section.title}</h2><span className="section-count" aria-label={`${section.items.length} items`}>{section.items.length}</span>
-        <span className="section-summary">{sectionSummary(view, section.items.map((item) => item.id))}</span></header>
-      <div className="board-grid">{section.items.map((item) => {
-        const resolved = view.resolved.find((r) => r.id === item.id);
-        const update = resolved?.widget ? widgetUpdates[resolved.widget.id] : null;
-        return <div key={item.id} className="board-cell" style={cellStyle(item)}>
-        <Tile item={item} resolved={resolved && update ? { ...resolved, widget: update } : resolved} />
-      </div>; })}</div>
-    </section>)}
+    </EmptyState></div> : view.document.sections.map((section) => <BoardGroup key={section.id} section={section} view={view} updates={widgetUpdates} />)}
   </div>;
 }

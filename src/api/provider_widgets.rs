@@ -256,12 +256,7 @@ fn install(
                 !gone
             });
         }
-        let mut section = boards::BoardSection {
-            id: None,
-            title: "Widgets".into(),
-            position: doc.sections.len() as u32,
-            items: Vec::new(),
-        };
+        let mut section = boards::BoardSection::new("Widgets", doc.sections.len() as u32);
         let mut placements = Vec::new();
         let mut updated = HashSet::new();
         for (widget, placement, options) in options {
@@ -303,14 +298,9 @@ fn install(
                 (&widget_id, &integration.id, &id, widget, options_to_json(&options)),
             )?;
             placements.push(item_id);
-            section.items.push(boards::BoardItem {
-                id: None,
-                position: section.items.len() as u32,
-                spans: Default::default(),
-                payload: boards::BoardPayload::Widget {
-                    widget_id,
-                    title: None,
-                },
+            section.append(boards::BoardPayload::Widget {
+                widget_id,
+                title: None,
             });
         }
         if section.items.is_empty() && !removed {
