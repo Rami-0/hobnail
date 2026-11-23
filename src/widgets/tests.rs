@@ -910,7 +910,8 @@ fn invalidating_an_integration_keeps_stale_data_and_refetches_unless_public() {
     assert_eq!(cache.deadline(other, refresh), Some(now + refresh));
     assert!(!cache.record(local, in_flight, now, WidgetOutput::default()));
     assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
-    // The refetch replaces the stale data; a failed one keeps it.
+    // The first fetch for the new inputs replaces the old data even when it
+    // fails: the old origin's rows are not last good for the new one.
     let later = now + Duration::from_secs(1);
     let attempt = cache.begin_provider(local, later, false);
     let failed = WidgetOutput {
@@ -919,14 +920,47 @@ fn invalidating_an_integration_keeps_stale_data_and_refetches_unless_public() {
         ..Default::default()
     };
     assert!(cache.record(local, attempt, later, failed));
-    assert_eq!(cache.get(local).unwrap().stale_since, Some(1_000));
+    let after = cache.get(local).unwrap();
+    assert_eq!(after.stale_since, None, "nothing retained");
+    assert_eq!(after.error.as_deref(), Some("down"));
+    // A success, then a failure on the same inputs, keeps the good data.
     let attempt = cache.begin_provider(local, later, false);
     let fresh = WidgetOutput {
         fetched_at: 1_002,
+        display: WidgetBody {
+            headline: Some("new".into()),
+            ..Default::default()
+        },
         ..Default::default()
     };
     assert!(cache.record(local, attempt, later, fresh));
     assert_eq!(cache.get(local).unwrap().stale_since, None);
+    let attempt = cache.begin_provider(local, later, false);
+    let failed = WidgetOutput {
+        error: Some("down".into()),
+        fetched_at: 1_003,
+        ..Default::default()
+    };
+    assert!(cache.record(local, attempt, later, failed));
+    let kept = cache.get(local).unwrap();
+    assert_eq!(kept.stale_since, Some(1_002));
+    assert_eq!(kept.display.headline.as_deref(), Some("new"));
+    // A successful first fetch replaces the old data too.
+    let attempt = cache.begin_provider(other, later, false);
+    cache.invalidate_providers("provider-fetch:other:");
+    let attempt_after = cache.begin_provider(other, later, false);
+    assert!(!cache.record(other, attempt, later, WidgetOutput::default()));
+    assert!(cache.record(
+        other,
+        attempt_after,
+        later,
+        WidgetOutput {
+            fetched_at: 1_004,
+            ..Default::default()
+        }
+    ));
+    assert_eq!(cache.get(other).unwrap().stale_since, None);
+    assert_eq!(cache.get(other).unwrap().fetched_at, 1_004);
     // Deleting the integration drops its data and deadline.
     cache.remove_providers("provider-fetch:lan:");
     assert!(cache.get(local).is_none());

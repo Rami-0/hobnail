@@ -98,6 +98,10 @@ pub(super) fn view(state: &AppState, config: &WidgetConfig) -> WidgetView {
     }
 }
 
+/// The `error` of a provider widget kept stale while it refetches after its
+/// integration's inputs changed.
+pub(crate) const REFRESHING: &str = "Refreshing";
+
 pub(super) fn provider_view(
     state: &AppState,
     id: &str,
@@ -108,8 +112,12 @@ pub(super) fn provider_view(
 ) -> WidgetView {
     let cache = state.widgets.lock().unwrap();
     let output = cache.get(cache_key).filter(|_| enabled);
-    let error = output.and_then(|out| out.error.clone());
     let last_good_at = output.and_then(|out| out.stale_since);
+    // Stale with no error: the inputs changed and the refetch is pending.
+    // The client shows `error` beside the stale badge; nothing failed.
+    let error = output
+        .and_then(|out| out.error.clone())
+        .or_else(|| last_good_at.map(|_| REFRESHING.to_owned()));
     let status = if !enabled {
         "disabled"
     } else if last_good_at.is_some() {
@@ -169,5 +177,44 @@ mod tests {
             let bounded = bounded_value(&value);
             assert!(bounded.as_str().unwrap().chars().count() <= 300);
         }
+    }
+
+    #[test]
+    fn a_rebound_provider_widget_says_refreshing_then_shows_only_the_new_result() {
+        let state = crate::testutil::state_with(vec![], "");
+        let key = "provider-fetch:lan:key";
+        let view = || provider_view(&state, "w", key, "W".into(), None, true);
+        let now = std::time::Instant::now();
+        let record = |output: crate::widgets::WidgetOutput| {
+            let mut cache = state.widgets.lock().unwrap();
+            let attempt = cache.begin_provider(key, now, false);
+            assert!(cache.record(key, attempt, now, output));
+        };
+        record(crate::widgets::WidgetOutput {
+            fetched_at: 1_000,
+            structured: Some(std::sync::Arc::new(crate::widgets::StructuredBody::Stat {
+                value: "old origin".into(),
+            })),
+            ..Default::default()
+        });
+        state
+            .widgets
+            .lock()
+            .unwrap()
+            .invalidate_providers("provider-fetch:lan:");
+        let pending = view();
+        assert_eq!(pending.status, "stale");
+        assert_eq!(pending.error.as_deref(), Some(REFRESHING), "not a failure");
+        assert!(pending.structured.is_some());
+        record(crate::widgets::WidgetOutput {
+            fetched_at: 1_001,
+            error: Some("HTTP 503".into()),
+            ..Default::default()
+        });
+        let failed = view();
+        assert_eq!(failed.status, "error");
+        assert_eq!(failed.error.as_deref(), Some("HTTP 503"));
+        assert!(failed.structured.is_none(), "the old origin's data is gone");
+        assert_eq!(failed.last_good_at, None);
     }
 }

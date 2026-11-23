@@ -446,6 +446,10 @@ struct WidgetSlot {
     completed: Option<(u64, Instant)>,
     output: Option<Box<WidgetOutput>>,
     bytes: usize,
+    /// `output` came from the inputs before the last invalidation (another
+    /// origin, credential or pin). The next completed fetch replaces it,
+    /// failed or not, so old data never stands in for the new binding.
+    rebound: bool,
 }
 
 impl WidgetCache {
@@ -466,7 +470,9 @@ impl WidgetCache {
     /// The inputs of the provider fetch keys under `prefix` changed (an
     /// integration's credential, URL or pin, the internet switch or the
     /// allowed hosts). Each keeps its last output, marked stale, until the
-    /// next fetch; fetches already in flight cannot record. Keys of
+    /// next fetch completes; that result replaces it even when it fails, so
+    /// data from the old inputs is never kept as last good for the new ones.
+    /// Fetches already in flight cannot record. Keys of
     /// non-public providers become due at once; public ones keep their
     /// deadline, whose floor protects the public service's quota.
     pub(crate) fn invalidate_providers(&mut self, prefix: &str) {
@@ -479,6 +485,7 @@ impl WidgetCache {
             slot.first_attempt = first;
             if let Some(output) = slot.output.as_deref_mut() {
                 output.mark_stale();
+                slot.rebound = true;
             }
             if !attempts.get(id).is_some_and(|attempt| attempt.public) {
                 slot.completed = None;
@@ -600,9 +607,10 @@ impl WidgetCache {
         out.bound();
         self.retained_bytes -= slot.bytes;
         match &mut slot.output {
-            Some(current) => current.record(out),
-            None => slot.output = Some(Box::new(out)),
+            Some(current) if !slot.rebound => current.record(out),
+            _ => slot.output = Some(Box::new(out)),
         }
+        slot.rebound = false;
         slot.bytes = slot
             .output
             .as_deref()

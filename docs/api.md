@@ -163,7 +163,10 @@ Widget reads, including board resolution and widget stream events, return
 `status: "stale"` when the latest refresh fails after a successful result.
 `body` and `values` retain that result, `last_good_at` gives its Unix timestamp,
 `fetched_at` gives the latest attempt, and `error` explains the failure. An
-initial failure has `status: "error"`, a null body and empty values.
+initial failure has `status: "error"`, a null body and empty values. After an
+integration's connection, Provider internet access or `[http] allow_hosts`
+changes, its provider widgets stay `stale` with `error: "Refreshing"` until
+the next fetch completes; that result replaces the old one, failed or not.
 
 Integration reads, including board resolution, expose `enabled` and a nullable
 `check`. The check contains the latest manual verdict and the timestamp and
