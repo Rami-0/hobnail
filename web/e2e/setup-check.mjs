@@ -116,10 +116,6 @@ try {
   }
   await click('form[data-testid="onboarding"] button[type="submit"]');
   await step("Appearance");
-  await click('button[aria-label="Default theme"]');
-  await click(`[role="option"][data-value="${theme}"]`);
-  await require("theme applied", `document.documentElement.dataset.theme === ${q(theme)}`);
-  await shot("appearance");
   if (failures) {
     // A failed draft load offers Retry, which loads it again.
     await failOnce("/api/v1/onboarding/draft", "GET", 503, { code: "unavailable", message: "Fixture load failure." });
@@ -127,6 +123,12 @@ try {
     await require("a failed draft load offers Retry", `[...document.querySelectorAll(".note")].some((n) => n.textContent.includes("Fixture load failure.") && [...n.querySelectorAll("button")].some((b) => b.textContent === "Retry"))`);
     await clickNoteButton("Retry");
     await step("Appearance");
+  }
+  await click('button[aria-label="Default theme"]');
+  await click(`[role="option"][data-value="${theme}"]`);
+  await require("theme applied", `document.documentElement.dataset.theme === ${q(theme)}`);
+  await shot("appearance");
+  if (failures) {
     // A step change whose save fails on an item this step does not show:
     // the general note names it and "Retry save" makes the step change.
     await require("theme autosaved", 'document.querySelector(".setup-actions [role=status]")?.textContent === "Draft saved"');
