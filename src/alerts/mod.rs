@@ -288,7 +288,7 @@ impl Core {
 
     fn load(path: PathBuf) -> Self {
         let saved = match std::fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str::<Saved>(&text) {
+            Ok(text) => match serde_json::from_slice::<Saved>(text.as_bytes()) {
                 Ok(s) => s,
                 Err(e) => {
                     crate::warn!(

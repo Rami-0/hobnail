@@ -330,7 +330,7 @@ pub(super) fn get(conn: &Connection, id: &str) -> Result<BoardSummary, ApiError>
 }
 
 pub(super) fn decode<T: DeserializeOwned>(s: &str) -> Result<T, ApiError> {
-    serde_json::from_str(s).map_err(|_| rusqlite::Error::InvalidQuery.into())
+    serde_json::from_slice(s.as_bytes()).map_err(|_| rusqlite::Error::InvalidQuery.into())
 }
 
 fn encode(value: &impl Serialize) -> Result<String, ApiError> {

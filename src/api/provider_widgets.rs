@@ -111,7 +111,7 @@ pub(super) async fn route(
             let mut options = HashMap::<_, Vec<_>>::new();
             for row in rows {
                 let (widget, id, value, kind) = row?;
-                if let Ok(mut value) = serde_json::from_str::<Values>(&value) {
+                if let Ok(mut value) = serde_json::from_slice::<Values>(value.as_bytes()) {
                     if let Some((provider, spec)) = providers::get(&kind)
                         .and_then(|provider| {
                             provider
@@ -437,7 +437,7 @@ pub(super) fn placements_changed(state: &AppState) {
         let mut live = HashSet::new();
         while let Some(row) = rows.next()? {
             let raw: String = row.get(3)?;
-            if let Ok(options) = serde_json::from_str::<Values>(&raw) {
+            if let Ok(options) = serde_json::from_slice::<Values>(raw.as_bytes()) {
                 let key = cache_key(
                     &row.get::<_, String>(0)?,
                     &row.get::<_, String>(1)?,
@@ -523,7 +523,7 @@ pub(super) fn view(
             };
             let enabled =
                 enabled && (!provider.public_internet || dashboard_settings::internet(conn)?);
-            let options = serde_json::from_str::<Values>(&options)
+            let options = serde_json::from_slice::<Values>(options.as_bytes())
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
             let key = cache_key(provider.id, &integration, spec.id, &options);
             Ok::<_, rusqlite::Error>(Some(widgets::provider_view(
@@ -759,7 +759,7 @@ fn due(state: &AppState, id: &str, now: Instant) -> Option<Poll> {
             let Some(widget) = provider.widgets.iter().find(|w| w.id == widget) else {
                 return Ok(None);
             };
-            let Ok(mut options) = serde_json::from_str::<Values>(&options) else {
+            let Ok(mut options) = serde_json::from_slice::<Values>(options.as_bytes()) else {
                 return Ok(None);
             };
             let key = cache_key(provider.id, &integration, widget.id, &options);
@@ -812,7 +812,7 @@ fn matching_placements(conn: &Connection, poll: &Poll) -> rusqlite::Result<Vec<S
     let mut ids = Vec::new();
     for row in rows {
         let (id, options) = row?;
-        if serde_json::from_str(&options).is_ok_and(|options| {
+        if serde_json::from_slice(options.as_bytes()).is_ok_and(|options| {
             cache_key(poll.provider, &poll.integration, poll.widget.id, &options) == poll.key
         }) {
             ids.push(id);

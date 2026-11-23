@@ -185,7 +185,7 @@ pub fn validate(name: &str, c: &ChannelConfig) -> Result<(), String> {
             if let Some(b) = &c.body {
                 template::check(b, template::VARS).or_else(|e| err(format!("body: {e}")))?;
                 let rendered = template::render(b, &sample_vars(), true);
-                if let Err(e) = serde_json::from_str::<Value>(&rendered) {
+                if let Err(e) = serde_json::from_slice::<Value>(rendered.as_bytes()) {
                     return err(format!("body is not valid JSON once filled in: {e}"));
                 }
             }

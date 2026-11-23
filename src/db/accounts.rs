@@ -110,7 +110,9 @@ impl Invite {
             id: row.get(0)?,
             role: Role::read(row, 1)?,
             scopes: scopes
-                .map(|s| serde_json::from_str(&s).map_err(|_| rusqlite::Error::InvalidQuery))
+                .map(|s| {
+                    serde_json::from_slice(s.as_bytes()).map_err(|_| rusqlite::Error::InvalidQuery)
+                })
                 .transpose()?,
             created: row.get(3)?,
             expires: row.get(4)?,

@@ -151,7 +151,7 @@ const SELECT: &str = "SELECT id, name, kind, origin, config,
 fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationView> {
     let origin: String = row.get(3)?;
     let config: String = row.get(4)?;
-    let config = serde_json::from_str::<Config>(&config).unwrap_or(Config {
+    let config = serde_json::from_slice::<Config>(config.as_bytes()).unwrap_or(Config {
         base_url: origin.clone(),
         icon: None,
         enabled: true,
@@ -160,7 +160,7 @@ fn read(row: &rusqlite::Row<'_>, admin: bool) -> rusqlite::Result<IntegrationVie
     });
     let bindings: String = row.get(5)?;
     let credentials: BTreeMap<String, String> =
-        serde_json::from_str(&bindings).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        serde_json::from_slice(bindings.as_bytes()).map_err(|_| rusqlite::Error::InvalidQuery)?;
     let secret_origin = credentials.get("secret").cloned();
     Ok(IntegrationView {
         id: row.get(0)?,

@@ -293,7 +293,7 @@ pub fn validate(schema: &[Field], values: &mut Values) -> Result<(), String> {
         } else if let Some(default) = field.default {
             let value = match field.kind {
                 Kind::Bool | Kind::Number | Kind::List => {
-                    serde_json::from_str(default).expect("valid schema default")
+                    serde_json::from_slice(default.as_bytes()).expect("valid schema default")
                 }
                 _ => Value::from(default),
             };
