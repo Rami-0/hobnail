@@ -113,12 +113,14 @@ export function metricValue(metric: string, value: number | null | undefined): s
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   if (metric === "net_rx" || metric === "net_tx") return rate(value);
   if (metric === "load1") return value.toFixed(2);
+  if (metric === "mem" || metric === "swap") return bytes(value);
   if (metric === "temp") return `${Math.round(value)} °C`;
   return pct(value);
 }
 
-/** Percent series have a fixed 0–100 scale; the rest scale to their peak. */
-export const percentMetric = (metric: string) => ["cpu", "mem", "disk", "swap"].includes(metric);
+/** Percent series have a fixed 0–100 scale; the rest (memory and swap are
+ * bytes) scale to their peak. */
+export const percentMetric = (metric: string) => ["cpu", "disk"].includes(metric);
 
 /** Points thinned to at most `max` values (every n-th, keeping the newest). */
 export function thin(points: readonly (readonly [number, number])[], max = 120): number[] {

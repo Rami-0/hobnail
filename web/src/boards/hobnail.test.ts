@@ -46,6 +46,7 @@ test("events, logs and history values", () => {
   assert.deepEqual(logLines("2026-11-23T12:04:01.123Z GET /\n\nplain line\n2026-11-23T12:04:02Z done\n", 2), ["plain line", "12:04:02 done"]);
   assert.equal(metricValue("net_rx", 1024), "1.0 KiB/s");
   assert.equal(metricValue("temp", 41.6), "42 °C");
+  assert.equal(metricValue("mem", 2 * GiB), "2.0 GiB", "memory history is in bytes");
   assert.equal(metricValue("cpu", null), "—");
   assert.deepEqual(thin([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]], 3), [1, 3, 5]);
   assert.deepEqual(thin([[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]], 2), [2, 5]);
