@@ -217,7 +217,9 @@ export const onboarding = {
     // Nothing selected: Home opens with its Hobnail widgets only.
     await page.locator(HOME).waitFor();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="board-tile"] .hobnail-widget').length === 7);
-    assert.equal(await page.locator(tid("board-tile")).count(), 7, "only the seven seeded Hobnail widgets");
+    // The seeded sections, plus the config file's widgets when it has any.
+    const sections = await page.$$eval(".board-section", (all) => all.map((s) => `${s.querySelector("h2")?.textContent}:${s.querySelectorAll('[data-testid="board-tile"]').length}`));
+    assert.deepEqual(sections.filter((s) => !s.startsWith("Widgets:")), ["This host:2", "Containers:3", "Last 24 hours:2"], "Home holds only what was seeded");
     await h.state("home board (skip)");
     f.board = new URL(page.url()).pathname;
   },
