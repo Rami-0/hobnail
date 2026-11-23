@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type KeyboardEvent } from "react";
-import { ArrowDownIcon, ArrowUpIcon, BoxIcon, ChevronDownIcon, GripVerticalIcon, LayoutDashboardIcon, Link2Icon, PaletteIcon, PlugIcon, PlusIcon, Redo2Icon, SlidersHorizontalIcon, Trash2Icon, Undo2Icon } from "lucide-react";
+import { AppWindowIcon, ArrowDownIcon, ArrowUpIcon, BoxIcon, ChevronDownIcon, GripVerticalIcon, LayoutDashboardIcon, Link2Icon, PaletteIcon, PlugIcon, PlusIcon, Redo2Icon, SlidersHorizontalIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import type { Provider } from "../../api/gen/Provider.ts";
 import type { DashboardSettings } from "../../api/gen/DashboardSettings.ts";
 import { DetectedCards, useDetected } from "../../integrations/Detected.tsx";
@@ -28,17 +28,21 @@ import { canvasVars, cellVars } from "./look.ts";
 
 const ProviderDialog = lazy(() => import("../settings/ProviderDialog.tsx"));
 
-/** The Add picker's tabs: integrations (API connections) first, then plain
- * container status tiles, links, and local widgets. */
-type PickerTab = "integrations" | "containers" | "links" | "widgets";
+/** The Add picker's tabs: web apps detected on this host (branded links),
+ * integrations (API connections), plain container status tiles, links, and
+ * local widgets. */
+type PickerTab = "apps" | "integrations" | "containers" | "links" | "widgets";
 const TABS: { id: PickerTab; label: string; icon: typeof PlugIcon }[] = [
+  { id: "apps", label: "Apps", icon: AppWindowIcon },
   { id: "integrations", label: "Integrations", icon: PlugIcon },
   { id: "containers", label: "Containers", icon: BoxIcon },
   { id: "links", label: "Links", icon: Link2Icon },
   { id: "widgets", label: "Widgets", icon: LayoutDashboardIcon },
 ];
 const TAB_OF: Record<BoardPayload["kind"], PickerTab> = { integration: "integrations", container: "containers", link: "links", widget: "widgets" };
-const SEARCH_HINT: Record<PickerTab, string> = { integrations: "Sonarr, Pi-hole…", containers: "Container name…", links: "Bookmark…", widgets: "Clock, weather, notes…" };
+/** A detected web app is a link, but it belongs on the Apps tab. */
+const tabOf = (suggestion: BoardSuggestion): PickerTab => suggestion.detected ? "apps" : TAB_OF[suggestion.payload.kind];
+const SEARCH_HINT: Record<PickerTab, string> = { apps: "Dozzle, Beszel…", integrations: "Sonarr, Pi-hole…", containers: "Container name…", links: "Bookmark…", widgets: "Clock, weather, notes…" };
 /** A provider with a service URL is an integration; one without is a local widget. */
 const hasUrl = (provider: Provider) => provider.fields.some((field) => field.id === "base_url");
 type Connect = { prefill?: Prefill; widgets?: boolean; tab: PickerTab };
@@ -98,7 +102,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const root = useRef<HTMLDivElement>(null);
   const linkTitle = useRef<HTMLInputElement>(null);
   const search = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<PickerTab>(initialPicker === "discover" ? "containers" : "integrations");
+  const [tab, setTab] = useState<PickerTab>(initialPicker === "discover" ? "containers" : "apps");
   const [catalog, setCatalog] = useState<{ providers: Provider[]; internet: boolean } | null>(null);
   const [connect, setConnect] = useState<Connect | null>(null);
   const [lastPicker, setLastPicker] = useState(0);
@@ -316,7 +320,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   };
 
   // ---- picker ----
-  const openPicker = (section: number, start: PickerTab = "integrations") => { setPicker(section); setQuery(""); setLink(""); setTab(start); };
+  const openPicker = (section: number, start: PickerTab = "apps") => { setPicker(section); setQuery(""); setLink(""); setTab(start); };
   const addWhere = () => panel?.kind === "tile" ? panel.s : 0;
   const addFromBar = () => { if (!doc.sections.length) change({ type: "section", title: "Services" }, "Section added"); openPicker(doc.sections.length ? addWhere() : 0); };
   useEffect(() => {
@@ -356,8 +360,9 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
   const fresh = freshSuggestions(suggestions, selectedTargets);
   const needle = query.trim().toLowerCase();
   const matching = fresh.filter((suggestion) => suggestion.title.toLowerCase().includes(needle));
-  const shown = matching.filter((suggestion) => TAB_OF[suggestion.payload.kind] === tab);
-  const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => TAB_OF[x.payload.kind] === id).length])) as Record<PickerTab, number>;
+  const shown = matching.filter((suggestion) => tabOf(suggestion) === tab);
+  const counts = Object.fromEntries(TABS.map(({ id }) => [id, matching.filter((x) => tabOf(x) === id).length])) as Record<PickerTab, number>;
+  const apps = fresh.filter((suggestion) => suggestion.detected);
   const localWidgets = (catalog?.providers ?? []).filter((provider) => !hasUrl(provider) && provider.widgets.length > 0 && `${provider.name} ${provider.description}`.toLowerCase().includes(needle));
   const integrationProviders = (catalog?.providers ?? []).filter(hasUrl);
   const liveRows = new Map(live.data?.groups.flatMap((group) => group.containers).map((row) => [row.name, row]) ?? []);
@@ -368,6 +373,22 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
     change({ type: "add", section: picker, payload }, message);
     setAdded(`${picker}:${at}`); focusItem(picker, at); setPicker(null);
   };
+  /** Every detected app at once, as one undo step. */
+  const addAll = (list: BoardSuggestion[]) => {
+    if (picker === null || !list.length) return;
+    const at = doc.sections[picker]?.items.length ?? 0;
+    const merge = `add-all-${Date.now()}`;
+    for (const suggestion of list) change({ type: "add", section: picker, payload: suggestion.payload }, `${list.length} apps added`, merge);
+    setAdded(`${picker}:${at}`); focusItem(picker, at); setPicker(null);
+  };
+  // The picker opens on Apps; with none detected, Integrations comes first.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (picker === null) { opened.current = false; return; }
+    if (opened.current || !suggestions.length) return;
+    opened.current = true;
+    if (tab === "apps" && !suggestions.some((suggestion) => suggestion.detected)) setTab("integrations");
+  }, [picker, suggestions, tab]);
   useEffect(() => { if (!added) return; const t = setTimeout(() => setAdded(null), 900); return () => clearTimeout(t); }, [added]);
 
   const tilePanel = panel?.kind === "tile" ? panel : null;
@@ -476,7 +497,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
       onClose={closePanel} />}
     </div>
 
-    <Dialog open={picker !== null} wide title={`Add to ${doc.sections[picker ?? 0]?.title || "section"}`} description="Integrations show live data from a service's API; containers show their status. New tiles go in the first free spot; drag them from there."
+    <Dialog open={picker !== null} wide title={`Add to ${name || "board"}`} description={`New tiles go in the first free spot of ${doc.sections[picker ?? 0]?.title ? `“${doc.sections[picker ?? 0]?.title}”` : "this section"}; drag them from there. Apps open a service; integrations show live data from its API; containers show their status.`}
       initialFocus={tab === "links" ? linkTitle : search} onClose={() => setPicker(null)} testId="board-picker">
       <div className="picker" data-tab={tab}>
         <div className="picker-tabs" role="group" aria-label="What to add">
@@ -485,6 +506,10 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
         </div>
         {tab !== "links" && <Field id="suggestion-search" label="Search"><TextInput ref={search} type="search" value={query} placeholder={SEARCH_HINT[tab]} onChange={(e) => setQuery(e.target.value)} /></Field>}
         {tab === "integrations" && !scoped && catalog && <DetectedCards compact detection={detection} providers={integrationProviders} onConnect={(prefill) => startConnect({ prefill, tab })} />}
+        {tab === "apps" && <div className="picker-apps-head">
+          <p className="picker-note"><AppWindowIcon aria-hidden="true" />Web apps running on this host, as link tiles with their logos. Addresses are the ones your browser reached Hobnail on.</p>
+          {apps.length > 1 && !query && <Button size="sm" data-testid="picker-add-all" icon={<PlusIcon aria-hidden="true" />} onClick={() => addAll(apps)}>Add all {apps.length}</Button>}
+        </div>}
         {tab === "containers" && <p className="picker-note"><BoxIcon aria-hidden="true" />Status tiles for your Docker containers. To show a service's data, connect it under Integrations.</p>}
         {tab !== "links" && (shown.length > 0 || tab === "integrations" && !scoped || tab === "widgets" && localWidgets.length > 0) && <div className="suggestions" data-testid="picker-list">
           {shown.map((suggestion) => {
@@ -494,7 +519,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
             return <CardButton className="suggestion" data-testid="board-suggestion" data-kind={suggestion.payload.kind} key={payloadIdentity(suggestion.payload)} onClick={() => add(suggestion.payload, `${suggestion.title} added`)}>
               <ServiceIcon className="board-avatar" tint name={icon} title={suggestion.title} enabled={boot?.remote_icons ?? false} />
               <span className="suggestion-copy"><strong>{suggestion.title}</strong>
-                <span>{row ? <><span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</> : <><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}</>}</span></span>
+                <span>{suggestion.detected && suggestion.payload.kind === "link" ? <><Link2Icon aria-hidden="true" />{suggestion.payload.url.replace(/^https?:\/\//, "")}</> : row ? <><span className={`dot ${row.dot}`} aria-hidden="true" />{row.label}</> : <><Icon aria-hidden="true" />{KIND_LABEL[suggestion.payload.kind]}</>}</span></span>
               <PlusIcon aria-hidden="true" />
             </CardButton>; })}
           {tab === "widgets" && localWidgets.map((provider) => <CardButton key={provider.id} className="suggestion suggestion-brand" data-testid="picker-widget-provider" style={{ "--brand": brandColor(provider.color) } as CSSProperties}
@@ -512,6 +537,7 @@ export default function Editor({ view, initial, initialPicker, scoped, changed, 
         {!shown.length && tab !== "links" && !(tab === "widgets" && localWidgets.length) && <p className="picker-empty">{
           !suggestions.length ? "Looking for what Hobnail knows about…"
             : query ? `Nothing matches “${query}”.`
+              : tab === "apps" ? "No other web apps found: containers need a published port your browser can reach. Add one under Links."
               : tab === "integrations" ? (scoped ? "No integrations are shared with you." : "No connected integrations yet. Connect a service to add its widgets.")
                 : tab === "containers" ? "Every container Hobnail found is already on this board."
                   : "No widgets to add."}</p>}

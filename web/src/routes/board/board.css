@@ -226,6 +226,8 @@ main:has(>.board-page[data-bg="graphite"]){background-image:radial-gradient(colo
 .picker-tabs .picker-count{min-width:1.4em;padding:0 5px;border-radius:999px;background:color-mix(in srgb,var(--foreground) 9%,transparent);opacity:1;font-variant-numeric:tabular-nums}
 .picker-note{display:flex;align-items:center;gap:var(--s-2);font-size:var(--fs-xs);color:var(--muted-foreground)}
 .picker-note svg{width:14px;height:14px;flex:none}
+.picker-apps-head{display:flex;align-items:center;justify-content:space-between;gap:var(--s-2);flex-wrap:wrap}
+.picker-apps-head .picker-note{flex:1 1 240px}
 .suggestion-brand{--brand-c:var(--brand,var(--border));border-color:color-mix(in oklab,var(--brand-c) 26%,var(--border));background:linear-gradient(150deg,color-mix(in oklab,var(--brand-c) 9%,var(--card)),var(--card) 60%)}
 .suggestion-new{border-style:dashed;background:transparent}
 .suggestion-new:disabled{opacity:.6;cursor:progress}
