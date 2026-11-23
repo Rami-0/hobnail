@@ -194,6 +194,35 @@ OS, the ◐ button overrides it per browser.
 `page.columns` and per-group `columns` from v1 no longer have an effect (there is
 no card grid); `layout = "list"` makes the flat table the default view.
 
+## Setup, tour and catalog
+
+- **Guided setup:** after the owner account is created, five steps
+  (Appearance, Discover services, Select what to include, Configure
+  connections, Review dashboard) build the Home board. The draft is saved in
+  SQLite and resumes in another browser; Review lists incomplete items; one
+  commit creates the board. If setup cannot load or save, it offers Retry and
+  Sign in. Details: [login.md](login.md#guided-setup).
+- **Board tour:** a short, skippable tour of the controls the account can use,
+  offered on the first board; Replay board tour in Settings or Keyboard
+  shortcuts runs it again ([boards.md](boards.md#first-board-and-tour)).
+- **Integration catalog:** Settings → Integrations → Add integration lists
+  every provider; a new integration's form links to the provider's
+  documentation (new tab). One schema-driven form per provider, a
+  connection test, optional certificate pin confirmation, and "Choose
+  widgets" to place its widgets on a board ([integrations.md](integrations.md)).
+
+## Sizes, engines and touch targets
+
+- Tested from **360 px** phone width up to 2560 px, at tablet portrait and
+  landscape and at 200% zoom (emulated as 720 × 450 at device pixel ratio 2),
+  in Chromium, Firefox and WebKit, light and dark, with and without reduced
+  motion (`scripts/e2e-matrix.sh`). No page scrolls sideways at any of these
+  sizes. Real phones, tablets and screen readers have not been checked yet.
+- Touch targets are at least **44 px** on coarse pointers (touch) and below
+  700 px, and at least **24 px** on a fine pointer (mouse) at 700 px and up;
+  small controls get the larger hit area without changing their look. This
+  rule is accepted pending owner sign-off (DESIGN.md §11.3).
+
 ## v3 design system (Wave 1)
 
 Strict type scale with tabular numbers and calm zeros; primary / secondary /
