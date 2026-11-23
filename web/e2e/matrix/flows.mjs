@@ -612,9 +612,11 @@ export const flows = {
 export async function sweep(h, f, routes) {
   for (const [route, ready] of routes) {
     const t0 = Date.now();
-    await go(h, f, route, ready);
-    // Once: a load the host's network change cut is loaded again.
-    if (await h.setAsideCutLoad(t0)) await go(h, f, route, ready);
+    // Once: a navigation or load the host's network change cut is loaded
+    // again (lib.mjs navigationCut, setAsideCutLoad).
+    let cut = false;
+    try { await go(h, f, route, ready); } catch (e) { if (!h.navigationCut(e)) throw e; cut = true; }
+    if (await h.setAsideCutLoad(t0, cut)) await go(h, f, route, ready);
     await h.state(route);
   }
 }

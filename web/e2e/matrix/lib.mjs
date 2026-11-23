@@ -221,13 +221,26 @@ export async function harness(page, { engine, profileName, profile, out, unit, m
      * true is returned, so the caller loads the page again: a stylesheet
      * the host cut leaves an unstyled page whose checks say nothing about
      * Hobnail. */
-    async setAsideCutLoad(t0) {
+    async setAsideCutLoad(t0, cut = false) {
       await page.waitForTimeout(300);
       await Promise.allSettled([...pending]);
       const fresh = events.slice(seen).filter((e) => e.at >= t0);
-      if (!fresh.some((e) => netChange(engine, e))) return false;
+      if (!cut && !fresh.some((e) => netChange(engine, e))) return false;
       for (const e of fresh) results.excluded.push({ reason: "load cut by a host network change, page loaded again (Chromium)", flow: e.flow, text: e.text.slice(0, 200) });
       events.splice(seen, events.length - seen, ...events.slice(seen).filter((e) => e.at < t0));
+      return true;
+    },
+    /** Whether `error`, thrown by a navigation, is Chromium aborting it
+     * with ERR_NETWORK_CHANGED while a host container or network event
+     * happened (3 s before to 1 s after). If so it is set aside and true is
+     * returned, so the caller can navigate again. */
+    navigationCut(error) {
+      const text = String(error?.message || error).split("\n")[0];
+      if (engine !== "chromium" || !/net::ERR_NETWORK_CHANGED/.test(text)) return false;
+      const at = Date.now();
+      const near = hostEvents().filter((x) => x.at - at >= -3000 && x.at - at <= 1000);
+      if (!near.length) return false;
+      results.excluded.push({ reason: "navigation cut by a host network change, page loaded again (Chromium)", flow: ctx.flow, text: `${text.slice(0, 140)} [${near.slice(0, 3).map((x) => `${x.what} ${x.at - at} ms`).join(", ")}]` });
       return true;
     },
     /** Problems recorded after the flow's last state (run.mjs adds them to the flow). */

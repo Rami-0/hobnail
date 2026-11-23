@@ -210,6 +210,10 @@ media queries and container queries see exactly what they would at 200 %.
     stylesheet, so every check measured an unstyled page), the sweep sets
     aside every event of that load ("load cut by a host network change,
     page loaded again") and loads the page once more before its checks.
+    The same holds when the cut aborts the navigation itself (`page.goto:
+    net::ERR_NETWORK_CHANGED`, seen in the run of image 928f0fc on the
+    Chromium 360 sweep), set aside as "navigation cut by a host network
+    change".
 - **Transient overlays.** Toasts are measured as a scope of their own; the
   board tour, an open dialog, menu or listbox limits the target check and
   the focus check to its own controls; the focused skip link covers the
